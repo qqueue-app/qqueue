@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.turbo
+.env
+.env.local
+*.log
+*.tsbuildinfo
+.DS_Store
+apps/api/prisma/migrations

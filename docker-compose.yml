@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: qqueue-postgres
+    environment:
+      POSTGRES_USER: qqueue
+      POSTGRES_PASSWORD: qqueue
+      POSTGRES_DB: qqueue
+    ports:
+      - "5432:5432"
+    volumes:
+      - qqueue-postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: qqueue-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - qqueue-redis-data:/data
+
+volumes:
+  qqueue-postgres-data:
+  qqueue-redis-data:

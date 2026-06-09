@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ContactStatus {
+  ACTIVE
+  UNSUBSCRIBED
+  BOUNCED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  PAUSED
+  SENT
+  CANCELLED
+}
+
+enum EmailJobStatus {
+  PENDING
+  QUEUED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum EmailEventType {
+  QUEUED
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  BOUNCED
+  COMPLAINED
+  FAILED
+}
+
+model User {
+  id           String               @id @default(cuid())
+  email        String               @unique
+  name         String?
+  passwordHash String?
+  members      OrganizationMember[]
+  apiKeys      ApiKey[]
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+}
+
+model Organization {
+  id              String               @id @default(cuid())
+  name            String
+  members         OrganizationMember[]
+  smtpConnections SMTPConnection[]
+  contacts        Contact[]
+  contactLists    ContactList[]
+  templates       Template[]
+  campaigns       Campaign[]
+  emailJobs       EmailJob[]
+  emailEvents     EmailEvent[]
+  apiKeys         ApiKey[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           UserRole     @default(MEMBER)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, userId])
+}
+
+model SMTPConnection {
+  id                String       @id @default(cuid())
+  organizationId    String
+  name              String
+  host              String
+  port              Int
+  secure            Boolean      @default(true)
+  usernameEncrypted String
+  passwordEncrypted String
+  fromEmail         String
+  fromName          String?
+  isDefault         Boolean      @default(false)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  emailJobs         EmailJob[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+model Contact {
+  id             String        @id @default(cuid())
+  organizationId String
+  email          String
+  firstName      String?
+  lastName       String?
+  status         ContactStatus @default(ACTIVE)
+  metadata       Json?
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lists          ContactList[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([organizationId, email])
+}
+
+model ContactList {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts       Contact[]
+  campaigns      Campaign[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Template {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  subject        String
+  html           String
+  text           String?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaigns      Campaign[]
+  emailJobs      EmailJob[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Campaign {
+  id             String         @id @default(cuid())
+  organizationId String
+  templateId     String?
+  contactListId  String?
+  name           String
+  subject        String
+  status         CampaignStatus @default(DRAFT)
+  scheduledAt    DateTime?
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  template       Template?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  contactList    ContactList?   @relation(fields: [contactListId], references: [id], onDelete: SetNull)
+  emailJobs      EmailJob[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model EmailJob {
+  id               String          @id @default(cuid())
+  organizationId   String
+  smtpConnectionId String?
+  templateId       String?
+  campaignId       String?
+  toEmail          String
+  subject          String
+  html             String?
+  text             String?
+  variables        Json?
+  status           EmailJobStatus  @default(PENDING)
+  scheduledAt      DateTime?
+  sentAt           DateTime?
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  smtpConnection   SMTPConnection? @relation(fields: [smtpConnectionId], references: [id], onDelete: SetNull)
+  template         Template?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  campaign         Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  events           EmailEvent[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model EmailEvent {
+  id             String         @id @default(cuid())
+  organizationId String
+  emailJobId     String
+  type           EmailEventType
+  metadata       Json?
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  emailJob       EmailJob       @relation(fields: [emailJobId], references: [id], onDelete: Cascade)
+  occurredAt     DateTime       @default(now())
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String?
+  name           String
+  keyHash        String       @unique
+  lastUsedAt     DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+  revokedAt      DateTime?
+}
