@@ -3,4 +3,4 @@ import { transactionalEmailController } from "./controller.js";
 
 export const transactionalEmailRouter = Router();
 
-transactionalEmailRouter.get("/", transactionalEmailController.placeholder);
+transactionalEmailRouter.post("/send", transactionalEmailController.send);

@@ -22,6 +22,10 @@ export class SMTPProvider implements EmailProvider {
     this.transporter = nodemailer.createTransport(options);
   }
 
+  async verify(): Promise<void> {
+    await this.transporter.verify();
+  }
+
   async send(payload: SendEmailPayload): Promise<SendEmailResult> {
     const info = await this.transporter.sendMail(payload);
 

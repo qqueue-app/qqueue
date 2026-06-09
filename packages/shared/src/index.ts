@@ -76,6 +76,7 @@ export interface SMTPConnection {
   secure: boolean;
   fromEmail: string;
   fromName?: string | null;
+  isDefault: boolean;
 }
 
 export interface EmailJob {
@@ -100,8 +101,52 @@ export interface EmailEvent {
 
 export const emailAddressSchema = z.string().email();
 
+export const registerSchema = z.object({
+  email: emailAddressSchema,
+  password: z.string().min(8),
+  name: z.string().optional(),
+  organizationName: z.string().min(1).optional()
+});
+
+export type RegisterInput = z.infer<typeof registerSchema>;
+
+export const loginSchema = z.object({
+  email: emailAddressSchema,
+  password: z.string().min(1)
+});
+
+export type LoginInput = z.infer<typeof loginSchema>;
+
+export const organizationSchema = z.object({
+  name: z.string().min(1)
+});
+
+export type OrganizationInput = z.infer<typeof organizationSchema>;
+
+export const contactSchema = z.object({
+  organizationId: z.string().min(1),
+  email: emailAddressSchema,
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  metadata: z.record(z.unknown()).optional()
+});
+
+export type ContactInput = z.infer<typeof contactSchema>;
+
+export const templateSchema = z.object({
+  organizationId: z.string().min(1),
+  name: z.string().min(1),
+  subject: z.string().min(1),
+  html: z.string().min(1),
+  text: z.string().optional()
+});
+
+export type TemplateInput = z.infer<typeof templateSchema>;
+
 export const sendEmailSchema = z.object({
+  organizationId: z.string().min(1),
   to: emailAddressSchema,
+  smtpConnectionId: z.string().min(1).optional(),
   templateId: z.string().min(1).optional(),
   subject: z.string().min(1).optional(),
   html: z.string().optional(),
@@ -112,6 +157,7 @@ export const sendEmailSchema = z.object({
 export type SendEmailInput = z.infer<typeof sendEmailSchema>;
 
 export const smtpConnectionSchema = z.object({
+  organizationId: z.string().min(1),
   name: z.string().min(1),
   host: z.string().min(1),
   port: z.number().int().positive(),
@@ -119,7 +165,14 @@ export const smtpConnectionSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
   fromEmail: emailAddressSchema,
-  fromName: z.string().optional()
+  fromName: z.string().optional(),
+  isDefault: z.boolean().optional()
 });
 
 export type SMTPConnectionInput = z.infer<typeof smtpConnectionSchema>;
+
+export const smtpConnectionUpdateSchema = smtpConnectionSchema.partial();
+
+export type SMTPConnectionUpdateInput = z.infer<
+  typeof smtpConnectionUpdateSchema
+>;

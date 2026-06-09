@@ -1,6 +1,36 @@
+import type { TemplateInput } from "@qqueue/shared";
+import { prisma } from "../../lib/prisma.js";
+
 export const templateService = {
-  async placeholder() {
-    // TODO: Implement reusable email templates and variable validation.
-    return { module: "templates", status: "not implemented" };
+  list(organizationId?: string) {
+    return prisma.template.findMany({
+      where: organizationId ? { organizationId } : undefined,
+      orderBy: { createdAt: "desc" }
+    });
+  },
+
+  get(id: string) {
+    return prisma.template.findUnique({
+      where: { id }
+    });
+  },
+
+  create(input: TemplateInput) {
+    return prisma.template.create({
+      data: input
+    });
+  },
+
+  update(id: string, input: TemplateInput) {
+    return prisma.template.update({
+      where: { id },
+      data: input
+    });
+  },
+
+  delete(id: string) {
+    return prisma.template.delete({
+      where: { id }
+    });
   }
 };

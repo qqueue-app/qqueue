@@ -12,13 +12,13 @@
 
 ## Phase 1: Core Sending
 
-- [ ] Auth
-- [ ] Organizations
-- [ ] SMTP connections
-- [ ] Test SMTP connection
-- [ ] Templates
-- [ ] Contacts
-- [ ] Send single email
+- [x] Auth
+- [x] Organizations
+- [x] SMTP connections
+- [x] Test SMTP connection
+- [x] Templates
+- [x] Contacts
+- [x] Send single email
 
 ## Phase 2: Campaigns
 

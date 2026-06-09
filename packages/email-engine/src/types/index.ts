@@ -16,4 +16,5 @@ export interface SendEmailResult {
 
 export interface EmailProvider {
   send(payload: SendEmailPayload): Promise<SendEmailResult>;
+  verify?(): Promise<void>;
 }

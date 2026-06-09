@@ -1,4 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
+import { Prisma } from "@prisma/client";
+import { ZodError } from "zod";
+import { HttpError } from "../lib/http-error.js";
 
 export function errorHandler(
   error: unknown,
@@ -6,6 +9,49 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ) {
+  if (error instanceof HttpError) {
+    res.status(error.statusCode).json({
+      error: {
+        message: error.message
+      }
+    });
+    return;
+  }
+
+  if (error instanceof ZodError) {
+    res.status(400).json({
+      error: {
+        message: "Invalid request body",
+        issues: error.issues
+      }
+    });
+    return;
+  }
+
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2025"
+  ) {
+    res.status(404).json({
+      error: {
+        message: "Resource not found"
+      }
+    });
+    return;
+  }
+
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  ) {
+    res.status(409).json({
+      error: {
+        message: "Resource already exists"
+      }
+    });
+    return;
+  }
+
   console.error(error);
 
   res.status(500).json({
