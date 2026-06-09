@@ -23,6 +23,14 @@ export interface Contact {
   status: string;
 }
 
+export interface ContactList {
+  id: string;
+  organizationId: string;
+  name: string;
+  contacts?: Contact[];
+  _count?: { contacts: number; campaigns: number };
+}
+
 export interface Template {
   id: string;
   organizationId: string;
@@ -42,6 +50,24 @@ export interface SMTPConnection {
   fromEmail: string;
   fromName?: string | null;
   isDefault: boolean;
+}
+
+export interface Campaign {
+  id: string;
+  organizationId: string;
+  name: string;
+  subject: string;
+  status: string;
+  scheduledAt?: string | null;
+  templateId?: string | null;
+  contactListId?: string | null;
+  template?: { id: string; name: string; subject: string } | null;
+  contactList?: {
+    id: string;
+    name: string;
+    _count?: { contacts: number };
+  } | null;
+  _count?: { emailJobs: number };
 }
 
 export interface DashboardSummary {
@@ -324,6 +350,30 @@ export const api = {
     return request<void>(`/api/v1/contacts/${id}`, { method: "DELETE" });
   },
 
+  listContactLists(organizationId: string) {
+    return request<ContactList[]>(
+      `/api/v1/contact-lists?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createContactList(input: Record<string, unknown>) {
+    return request<ContactList>("/api/v1/contact-lists", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  updateContactList(id: string, input: Record<string, unknown>) {
+    return request<ContactList>(`/api/v1/contact-lists/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
+  deleteContactList(id: string) {
+    return request<void>(`/api/v1/contact-lists/${id}`, { method: "DELETE" });
+  },
+
   listTemplates(organizationId: string) {
     return request<Template[]>(
       `/api/v1/templates?organizationId=${encodeURIComponent(organizationId)}`
@@ -346,6 +396,43 @@ export const api = {
 
   deleteTemplate(id: string) {
     return request<void>(`/api/v1/templates/${id}`, { method: "DELETE" });
+  },
+
+  listCampaigns(organizationId: string) {
+    return request<Campaign[]>(
+      `/api/v1/campaigns?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createCampaign(input: Record<string, unknown>) {
+    return request<Campaign>("/api/v1/campaigns", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  updateCampaign(id: string, input: Record<string, unknown>) {
+    return request<Campaign>(`/api/v1/campaigns/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
+  deleteCampaign(id: string) {
+    return request<void>(`/api/v1/campaigns/${id}`, { method: "DELETE" });
+  },
+
+  sendCampaignNow(id: string) {
+    return request<Campaign>(`/api/v1/campaigns/${id}/send`, {
+      method: "POST"
+    });
+  },
+
+  scheduleCampaign(id: string, scheduledAt: string) {
+    return request<Campaign>(`/api/v1/campaigns/${id}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ scheduledAt })
+    });
   },
 
   sendEmail(input: Record<string, unknown>) {

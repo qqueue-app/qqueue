@@ -16,6 +16,7 @@
     "@prisma/client": "^6.1.0",
     "@qqueue/email-engine": "workspace:*",
     "@qqueue/shared": "workspace:*",
+    "bullmq": "^5.34.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",

@@ -36,12 +36,12 @@
 
 ## Phase 3: Campaigns
 
-- [ ] Contact lists
-- [ ] Campaign drafts
-- [ ] Send now
-- [ ] Schedule campaign
-- [ ] Queue campaign recipients
-- [ ] Worker sends campaign emails
+- [x] Contact lists
+- [x] Campaign drafts
+- [x] Send now
+- [x] Schedule campaign
+- [x] Queue campaign recipients
+- [x] Worker sends campaign emails
 
 ## Phase 4: Scheduling and Recurring
 

@@ -49,6 +49,13 @@ export interface Contact {
   metadata?: Record<string, unknown>;
 }
 
+export interface ContactList {
+  id: string;
+  organizationId: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface Template {
   id: string;
   organizationId: string;
@@ -139,6 +146,21 @@ export const contactSchema = z.object({
 
 export type ContactInput = z.infer<typeof contactSchema>;
 
+export const contactListSchema = z.object({
+  organizationId: z.string().min(1),
+  name: z.string().min(1),
+  contactIds: z.array(z.string().min(1)).optional()
+});
+
+export type ContactListInput = z.infer<typeof contactListSchema>;
+
+export const contactListUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  contactIds: z.array(z.string().min(1)).optional()
+});
+
+export type ContactListUpdateInput = z.infer<typeof contactListUpdateSchema>;
+
 export const templateSchema = z.object({
   organizationId: z.string().min(1),
   name: z.string().min(1),
@@ -148,6 +170,29 @@ export const templateSchema = z.object({
 });
 
 export type TemplateInput = z.infer<typeof templateSchema>;
+
+export const campaignSchema = z.object({
+  organizationId: z.string().min(1),
+  name: z.string().min(1),
+  subject: z.string().min(1),
+  templateId: z.string().min(1).optional(),
+  contactListId: z.string().min(1).optional(),
+  scheduledAt: z.string().datetime().optional()
+});
+
+export type CampaignInput = z.infer<typeof campaignSchema>;
+
+export const campaignUpdateSchema = campaignSchema
+  .omit({ organizationId: true })
+  .partial();
+
+export type CampaignUpdateInput = z.infer<typeof campaignUpdateSchema>;
+
+export const campaignScheduleSchema = z.object({
+  scheduledAt: z.string().datetime()
+});
+
+export type CampaignScheduleInput = z.infer<typeof campaignScheduleSchema>;
 
 export const sendEmailSchema = z.object({
   organizationId: z.string().min(1),
