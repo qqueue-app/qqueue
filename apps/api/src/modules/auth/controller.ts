@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { loginSchema, registerSchema } from "@qqueue/shared";
+import { loginSchema, refreshSchema, registerSchema } from "@qqueue/shared";
 import { authService } from "./service.js";
 
 export const authController = {
@@ -12,6 +12,12 @@ export const authController = {
   async login(req: Request, res: Response) {
     const input = loginSchema.parse(req.body);
     const result = await authService.login(input);
+    res.json({ data: result });
+  },
+
+  async refresh(req: Request, res: Response) {
+    const input = refreshSchema.parse(req.body);
+    const result = await authService.refresh(input.refreshToken);
     res.json({ data: result });
   }
 };

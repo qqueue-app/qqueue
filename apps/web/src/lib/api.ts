@@ -1,3 +1,5 @@
+import { clearSession, getSession, updateTokens } from "./session.js";
+
 const apiBaseUrl =
   import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
 
@@ -41,14 +43,130 @@ export interface SMTPConnection {
   isDefault: boolean;
 }
 
-async function request<T>(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers
+interface ApiErrorIssue {
+  path?: (string | number)[];
+  message?: string;
+}
+
+interface ApiErrorBody {
+  error?: { message?: string; issues?: ApiErrorIssue[] };
+}
+
+export class ApiError extends Error {
+  status: number;
+  issues?: ApiErrorIssue[];
+
+  constructor(message: string, status: number, issues?: ApiErrorIssue[]) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.issues = issues;
+  }
+}
+
+function buildErrorMessage(status: number, body: ApiErrorBody | null) {
+  const error = body?.error;
+
+  // Zod validation errors come back generic; surface the field-level issues.
+  if (error?.issues?.length) {
+    const detail = error.issues
+      .map((issue) => {
+        const field = issue.path?.filter((part) => part !== "").join(".");
+        return field ? `${field}: ${issue.message}` : issue.message;
+      })
+      .filter(Boolean)
+      .join("; ");
+    if (detail) {
+      return detail;
     }
-  });
+  }
+
+  if (error?.message) {
+    return error.message;
+  }
+
+  if (status === 0) {
+    return "Cannot reach the API. Is the server running?";
+  }
+
+  return `Request failed (${status})`;
+}
+
+const AUTH_PREFIX = "/api/v1/auth/";
+
+// Exchange the stored refresh token for a fresh pair. Returns true on success.
+async function refreshTokens(): Promise<boolean> {
+  const { refreshToken } = getSession();
+  if (!refreshToken) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken })
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const body = (await response.json().catch(() => null)) as {
+      data?: { tokens?: { accessToken: string; refreshToken: string } };
+    } | null;
+    const tokens = body?.data?.tokens;
+    if (!tokens?.accessToken) {
+      return false;
+    }
+    updateTokens(tokens);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function redirectToLogin() {
+  clearSession();
+  if (
+    typeof window !== "undefined" &&
+    window.location.pathname !== "/login" &&
+    window.location.pathname !== "/register"
+  ) {
+    window.location.href = "/login";
+  }
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  retryOnUnauthorized = true
+): Promise<T> {
+  const { accessToken } = getSession();
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...options.headers
+      }
+    });
+  } catch {
+    throw new ApiError("Cannot reach the API. Is the server running?", 0);
+  }
+
+  // Access tokens are short-lived: on a 401, try a one-time refresh + retry
+  // before giving up and bouncing the user to the login screen.
+  if (
+    response.status === 401 &&
+    retryOnUnauthorized &&
+    !path.startsWith(AUTH_PREFIX)
+  ) {
+    if (await refreshTokens()) {
+      return request<T>(path, options, false);
+    }
+    redirectToLogin();
+  }
 
   if (response.status === 204) {
     return undefined as T;
@@ -56,14 +174,15 @@ async function request<T>(path: string, options: RequestInit = {}) {
 
   const body = (await response.json().catch(() => null)) as
     | ApiEnvelope<T>
-    | { error?: { message?: string } }
+    | ApiErrorBody
     | null;
 
   if (!response.ok) {
-    throw new Error(
-      body && "error" in body && body.error?.message
-        ? body.error.message
-        : "Request failed"
+    const errorBody = body as ApiErrorBody | null;
+    throw new ApiError(
+      buildErrorMessage(response.status, errorBody),
+      response.status,
+      errorBody?.error?.issues
     );
   }
 
@@ -122,6 +241,13 @@ export const api = {
     });
   },
 
+  updateSMTPConnection(id: string, input: Record<string, unknown>) {
+    return request<SMTPConnection>(`/api/v1/smtp-connections/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
   deleteSMTPConnection(id: string) {
     return request<void>(`/api/v1/smtp-connections/${id}`, { method: "DELETE" });
   },
@@ -146,6 +272,13 @@ export const api = {
     });
   },
 
+  updateContact(id: string, input: Record<string, unknown>) {
+    return request<Contact>(`/api/v1/contacts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
   deleteContact(id: string) {
     return request<void>(`/api/v1/contacts/${id}`, { method: "DELETE" });
   },
@@ -159,6 +292,13 @@ export const api = {
   createTemplate(input: Record<string, unknown>) {
     return request<Template>("/api/v1/templates", {
       method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  updateTemplate(id: string, input: Record<string, unknown>) {
+    return request<Template>(`/api/v1/templates/${id}`, {
+      method: "PUT",
       body: JSON.stringify(input)
     });
   },

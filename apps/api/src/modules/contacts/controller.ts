@@ -4,16 +4,16 @@ import { contactService } from "./service.js";
 
 export const contactController = {
   async list(req: Request, res: Response) {
-    const organizationId =
-      typeof req.query.organizationId === "string"
-        ? req.query.organizationId
-        : undefined;
-    const contacts = await contactService.list(organizationId);
+    // organizationId is verified and pinned by requireOrgMembership.
+    const contacts = await contactService.list(req.organizationId!);
     res.json({ data: contacts });
   },
 
   async get(req: Request, res: Response) {
-    const contact = await contactService.get(String(req.params.id));
+    const contact = await contactService.get(
+      String(req.params.id),
+      req.userId!
+    );
 
     if (!contact) {
       res.status(404).json({ error: { message: "Contact not found" } });
@@ -31,12 +31,16 @@ export const contactController = {
 
   async update(req: Request, res: Response) {
     const input = contactSchema.parse(req.body);
-    const contact = await contactService.update(String(req.params.id), input);
+    const contact = await contactService.update(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
     res.json({ data: contact });
   },
 
   async delete(req: Request, res: Response) {
-    await contactService.delete(String(req.params.id));
+    await contactService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
   }
 };

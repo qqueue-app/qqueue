@@ -1,18 +1,20 @@
 import { Prisma } from "@prisma/client";
 import type { ContactInput } from "@qqueue/shared";
+import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 
 export const contactService = {
-  list(organizationId?: string) {
+  list(organizationId: string) {
     return prisma.contact.findMany({
-      where: organizationId ? { organizationId } : undefined,
+      where: { organizationId },
       orderBy: { createdAt: "desc" }
     });
   },
 
-  get(id: string) {
-    return prisma.contact.findUnique({
-      where: { id }
+  // Scoped by membership: only resolves contacts in an org the user belongs to.
+  get(id: string, userId: string) {
+    return prisma.contact.findFirst({
+      where: { id, organization: { members: { some: { userId } } } }
     });
   },
 
@@ -25,19 +27,32 @@ export const contactService = {
     });
   },
 
-  update(id: string, input: ContactInput) {
+  async update(id: string, userId: string, input: ContactInput) {
+    const existing = await prisma.contact.findFirst({
+      where: { id, organization: { members: { some: { userId } } } },
+      select: { id: true }
+    });
+    if (!existing) {
+      throw new HttpError(404, "Contact not found");
+    }
+
     return prisma.contact.update({
       where: { id },
       data: {
-        ...input,
+        email: input.email,
+        firstName: input.firstName,
+        lastName: input.lastName,
         metadata: input.metadata as Prisma.InputJsonValue | undefined
       }
     });
   },
 
-  delete(id: string) {
-    return prisma.contact.delete({
-      where: { id }
+  async delete(id: string, userId: string) {
+    const { count } = await prisma.contact.deleteMany({
+      where: { id, organization: { members: { some: { userId } } } }
     });
+    if (count === 0) {
+      throw new HttpError(404, "Contact not found");
+    }
   }
 };

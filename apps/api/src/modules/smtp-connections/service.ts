@@ -58,16 +58,29 @@ function toProvider(connection: {
   });
 }
 
+// Resolve a connection the user is allowed to touch, or throw 404. Returns the
+// full record (including encrypted secrets) for internal use.
+async function findOwned(id: string, userId: string) {
+  const connection = await prisma.sMTPConnection.findFirst({
+    where: { id, organization: { members: { some: { userId } } } }
+  });
+  if (!connection) {
+    throw new HttpError(404, "SMTP connection not found");
+  }
+  return connection;
+}
+
 export const smtpConnectionService = {
-  list(organizationId?: string) {
+  list(organizationId: string) {
     return prisma.sMTPConnection.findMany({
-      where: organizationId ? { organizationId } : undefined,
+      where: { organizationId },
       select: smtpConnectionSelect,
       orderBy: { createdAt: "desc" }
     });
   },
 
-  get(id: string) {
+  async get(id: string, userId: string) {
+    await findOwned(id, userId);
     return prisma.sMTPConnection.findUnique({
       where: { id },
       select: smtpConnectionSelect
@@ -97,11 +110,10 @@ export const smtpConnectionService = {
     });
   },
 
-  async update(id: string, input: SMTPConnectionUpdateInput) {
-    const existing = await prisma.sMTPConnection.findUniqueOrThrow({
-      where: { id }
-    });
-    const organizationId = input.organizationId ?? existing.organizationId;
+  async update(id: string, userId: string, input: SMTPConnectionUpdateInput) {
+    const existing = await findOwned(id, userId);
+    // Connections stay in their original org; we never move them across tenants.
+    const organizationId = existing.organizationId;
     const isDefault =
       input.isDefault === undefined
         ? existing.isDefault
@@ -110,7 +122,6 @@ export const smtpConnectionService = {
     return prisma.sMTPConnection.update({
       where: { id },
       data: {
-        organizationId: input.organizationId,
         name: input.name,
         host: input.host,
         port: input.port,
@@ -129,21 +140,13 @@ export const smtpConnectionService = {
     });
   },
 
-  delete(id: string) {
-    return prisma.sMTPConnection.delete({
-      where: { id },
-      select: smtpConnectionSelect
-    });
+  async delete(id: string, userId: string) {
+    await findOwned(id, userId);
+    await prisma.sMTPConnection.delete({ where: { id } });
   },
 
-  async test(id: string) {
-    const connection = await prisma.sMTPConnection.findUnique({
-      where: { id }
-    });
-
-    if (!connection) {
-      throw new HttpError(404, "SMTP connection not found");
-    }
+  async test(id: string, userId: string) {
+    const connection = await findOwned(id, userId);
 
     try {
       await toProvider(connection).verify();

@@ -7,16 +7,15 @@ import { smtpConnectionService } from "./service.js";
 
 export const smtpConnectionController = {
   async list(req: Request, res: Response) {
-    const organizationId =
-      typeof req.query.organizationId === "string"
-        ? req.query.organizationId
-        : undefined;
-    const connections = await smtpConnectionService.list(organizationId);
+    const connections = await smtpConnectionService.list(req.organizationId!);
     res.json({ data: connections });
   },
 
   async get(req: Request, res: Response) {
-    const connection = await smtpConnectionService.get(String(req.params.id));
+    const connection = await smtpConnectionService.get(
+      String(req.params.id),
+      req.userId!
+    );
 
     if (!connection) {
       res.status(404).json({ error: { message: "SMTP connection not found" } });
@@ -36,18 +35,22 @@ export const smtpConnectionController = {
     const input = smtpConnectionUpdateSchema.parse(req.body);
     const connection = await smtpConnectionService.update(
       String(req.params.id),
+      req.userId!,
       input
     );
     res.json({ data: connection });
   },
 
   async delete(req: Request, res: Response) {
-    await smtpConnectionService.delete(String(req.params.id));
+    await smtpConnectionService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
   },
 
   async test(req: Request, res: Response) {
-    const result = await smtpConnectionService.test(String(req.params.id));
+    const result = await smtpConnectionService.test(
+      String(req.params.id),
+      req.userId!
+    );
     res.json({ data: result });
   }
 };

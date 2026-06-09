@@ -43,3 +43,15 @@ export function clearSession() {
 export function getCurrentOrganizationId() {
   return getSession().currentOrganizationId;
 }
+
+export function updateTokens(tokens: {
+  accessToken: string;
+  refreshToken: string;
+}) {
+  const session = getSession();
+  saveSession({
+    ...session,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken
+  });
+}

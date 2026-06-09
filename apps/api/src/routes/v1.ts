@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireAuth } from "../middleware/require-auth.js";
 import { authRouter } from "../modules/auth/routes.js";
 import { campaignRouter } from "../modules/campaigns/routes.js";
 import { contactRouter } from "../modules/contacts/routes.js";
@@ -9,7 +10,11 @@ import { transactionalEmailRouter } from "../modules/transactional-email/routes.
 
 export const v1Router = Router();
 
+// Public auth endpoints (register/login/refresh).
 v1Router.use("/auth", authRouter);
+
+// Everything below requires a valid access token.
+v1Router.use(requireAuth);
 v1Router.use("/organizations", organizationRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
 v1Router.use("/contacts", contactRouter);

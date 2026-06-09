@@ -3,13 +3,16 @@ import { organizationSchema } from "@qqueue/shared";
 import { organizationService } from "./service.js";
 
 export const organizationController = {
-  async list(_req: Request, res: Response) {
-    const organizations = await organizationService.list();
+  async list(req: Request, res: Response) {
+    const organizations = await organizationService.list(req.userId!);
     res.json({ data: organizations });
   },
 
   async get(req: Request, res: Response) {
-    const organization = await organizationService.get(String(req.params.id));
+    const organization = await organizationService.get(
+      String(req.params.id),
+      req.userId!
+    );
 
     if (!organization) {
       res.status(404).json({ error: { message: "Organization not found" } });
@@ -21,7 +24,7 @@ export const organizationController = {
 
   async create(req: Request, res: Response) {
     const input = organizationSchema.parse(req.body);
-    const organization = await organizationService.create(input);
+    const organization = await organizationService.create(input, req.userId!);
     res.status(201).json({ data: organization });
   },
 
@@ -29,13 +32,14 @@ export const organizationController = {
     const input = organizationSchema.parse(req.body);
     const organization = await organizationService.update(
       String(req.params.id),
+      req.userId!,
       input
     );
     res.json({ data: organization });
   },
 
   async delete(req: Request, res: Response) {
-    await organizationService.delete(String(req.params.id));
+    await organizationService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
   }
 };

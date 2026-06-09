@@ -1,5 +1,6 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "../config/env.js";
+import { HttpError } from "./http-error.js";
 
 interface TokenPayload {
   sub: string;
@@ -47,4 +48,57 @@ export function createAuthTokens(user: { id: string; email: string }) {
       env.JWT_REFRESH_SECRET
     )
   };
+}
+
+function safeEqual(a: string, b: string) {
+  const bufferA = Buffer.from(a);
+  const bufferB = Buffer.from(b);
+  // timingSafeEqual throws on length mismatch; guard first.
+  return bufferA.length === bufferB.length && timingSafeEqual(bufferA, bufferB);
+}
+
+function verifyToken(
+  token: string,
+  secret: string,
+  expectedType: TokenPayload["type"]
+): TokenPayload {
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    throw new HttpError(401, "Malformed token");
+  }
+
+  const [header, body, signature] = parts;
+  if (!safeEqual(signature, sign(`${header}.${body}`, secret))) {
+    throw new HttpError(401, "Invalid token signature");
+  }
+
+  let payload: TokenPayload;
+  try {
+    payload = JSON.parse(
+      Buffer.from(body, "base64url").toString()
+    ) as TokenPayload;
+  } catch {
+    throw new HttpError(401, "Malformed token payload");
+  }
+
+  if (payload.type !== expectedType) {
+    throw new HttpError(401, "Unexpected token type");
+  }
+
+  if (
+    typeof payload.exp !== "number" ||
+    payload.exp < Math.floor(Date.now() / 1000)
+  ) {
+    throw new HttpError(401, "Token expired");
+  }
+
+  return payload;
+}
+
+export function verifyAccessToken(token: string) {
+  return verifyToken(token, env.JWT_ACCESS_SECRET, "access");
+}
+
+export function verifyRefreshToken(token: string) {
+  return verifyToken(token, env.JWT_REFRESH_SECRET, "refresh");
 }

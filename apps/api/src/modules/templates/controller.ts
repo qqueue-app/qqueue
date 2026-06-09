@@ -4,16 +4,15 @@ import { templateService } from "./service.js";
 
 export const templateController = {
   async list(req: Request, res: Response) {
-    const organizationId =
-      typeof req.query.organizationId === "string"
-        ? req.query.organizationId
-        : undefined;
-    const templates = await templateService.list(organizationId);
+    const templates = await templateService.list(req.organizationId!);
     res.json({ data: templates });
   },
 
   async get(req: Request, res: Response) {
-    const template = await templateService.get(String(req.params.id));
+    const template = await templateService.get(
+      String(req.params.id),
+      req.userId!
+    );
 
     if (!template) {
       res.status(404).json({ error: { message: "Template not found" } });
@@ -31,12 +30,16 @@ export const templateController = {
 
   async update(req: Request, res: Response) {
     const input = templateSchema.parse(req.body);
-    const template = await templateService.update(String(req.params.id), input);
+    const template = await templateService.update(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
     res.json({ data: template });
   },
 
   async delete(req: Request, res: Response) {
-    await templateService.delete(String(req.params.id));
+    await templateService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
   }
 };

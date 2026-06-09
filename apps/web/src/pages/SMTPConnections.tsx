@@ -1,70 +1,179 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Pencil, Plus, Server, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
+import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { api, type SMTPConnection } from "../lib/api.js";
-import { getCurrentOrganizationId } from "../lib/session.js";
+import { useSession } from "../lib/session-context.js";
+import { Button } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
+import { Label } from "../components/ui/label.js";
+import { Badge } from "../components/ui/badge.js";
+import { Spinner } from "../components/ui/spinner.js";
+import { Skeleton } from "../components/ui/skeleton.js";
+import { Card, CardContent } from "../components/ui/card.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "../components/ui/dialog.js";
+
+interface ConnectionForm {
+  name: string;
+  host: string;
+  port: string;
+  secure: boolean;
+  username: string;
+  password: string;
+  fromEmail: string;
+  fromName: string;
+  isDefault: boolean;
+}
+
+const emptyForm: ConnectionForm = {
+  name: "",
+  host: "",
+  port: "587",
+  secure: false,
+  username: "",
+  password: "",
+  fromEmail: "",
+  fromName: "",
+  isDefault: false
+};
 
 export function SMTPConnections() {
-  const organizationId = getCurrentOrganizationId();
+  const { currentOrganizationId: organizationId } = useSession();
   const [connections, setConnections] = useState<SMTPConnection[]>([]);
-  const [form, setForm] = useState({
-    name: "Default SMTP",
-    host: "",
-    port: "587",
-    secure: false,
-    username: "",
-    password: "",
-    fromEmail: "",
-    fromName: "",
-    isDefault: true
-  });
-  const [status, setStatus] = useState<string>();
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<SMTPConnection | null>(null);
+  const [form, setForm] = useState<ConnectionForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [testingId, setTestingId] = useState<string>();
+  const [deleteTarget, setDeleteTarget] = useState<SMTPConnection | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     if (!organizationId) {
+      setLoading(false);
       return;
     }
-    setConnections(await api.listSMTPConnections(organizationId));
+    setLoading(true);
+    try {
+      setConnections(await api.listSMTPConnections(organizationId));
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to load SMTP connections"
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    load().catch((error: unknown) =>
-      setStatus(
-        error instanceof Error ? error.message : "Unable to load SMTP connections"
-      )
-    );
+    void load();
   }, [organizationId]);
 
-  async function createConnection(event: FormEvent) {
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...emptyForm, name: "Default SMTP", isDefault: connections.length === 0 });
+    setDialogOpen(true);
+  }
+
+  function openEdit(connection: SMTPConnection) {
+    setEditing(connection);
+    setForm({
+      name: connection.name,
+      host: connection.host,
+      port: String(connection.port),
+      secure: connection.secure,
+      username: "",
+      password: "",
+      fromEmail: connection.fromEmail,
+      fromName: connection.fromName ?? "",
+      isDefault: connection.isDefault
+    });
+    setDialogOpen(true);
+  }
+
+  async function submit(event: FormEvent) {
     event.preventDefault();
     if (!organizationId) {
+      toast.error("Select an organization in Settings first.");
       return;
     }
+
+    setSaving(true);
     try {
-      await api.createSMTPConnection({
-        ...form,
-        organizationId,
-        port: Number(form.port)
-      });
-      setStatus("SMTP connection saved.");
+      if (editing) {
+        // Partial update — only send credentials if the user re-entered them.
+        const payload: Record<string, unknown> = {
+          organizationId,
+          name: form.name,
+          host: form.host,
+          port: Number(form.port),
+          secure: form.secure,
+          fromEmail: form.fromEmail,
+          fromName: form.fromName || undefined,
+          isDefault: form.isDefault
+        };
+        if (form.username) payload.username = form.username;
+        if (form.password) payload.password = form.password;
+        await api.updateSMTPConnection(editing.id, payload);
+        toast.success("SMTP connection updated.");
+      } else {
+        await api.createSMTPConnection({
+          organizationId,
+          name: form.name,
+          host: form.host,
+          port: Number(form.port),
+          secure: form.secure,
+          username: form.username,
+          password: form.password,
+          fromEmail: form.fromEmail,
+          fromName: form.fromName || undefined,
+          isDefault: form.isDefault
+        });
+        toast.success("SMTP connection saved.");
+      }
+      setDialogOpen(false);
       await load();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to save SMTP.");
+      toast.error(error instanceof Error ? error.message : "Unable to save SMTP.");
+    } finally {
+      setSaving(false);
     }
   }
 
   async function testConnection(id: string) {
-    setStatus("Testing SMTP connection...");
+    setTestingId(id);
     try {
       await api.testSMTPConnection(id);
-      setStatus("SMTP connection verified.");
+      toast.success("SMTP connection verified.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "SMTP test failed.");
+      toast.error(error instanceof Error ? error.message : "SMTP test failed.");
+    } finally {
+      setTestingId(undefined);
     }
   }
 
-  async function deleteConnection(id: string) {
-    await api.deleteSMTPConnection(id);
-    await load();
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.deleteSMTPConnection(deleteTarget.id);
+      toast.success("SMTP connection deleted.");
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -72,102 +181,238 @@ export function SMTPConnections() {
       <PageHeader
         title="SMTP Connections"
         description="Manage SMTP credentials for Mailcow-compatible and generic SMTP sending."
+        actions={
+          <Button onClick={openCreate} disabled={!organizationId}>
+            <Plus className="h-4 w-4" />
+            New connection
+          </Button>
+        }
       />
-      <section className="grid gap-6 p-6 lg:grid-cols-[420px_1fr]">
-        <form
-          onSubmit={createConnection}
-          className="rounded-lg border border-slate-200 bg-white p-5"
-        >
-          <h2 className="text-base font-semibold text-ink">Add SMTP connection</h2>
-          {(["name", "host", "username", "password", "fromEmail", "fromName"] as const).map(
-            (field) => (
-              <label key={field} className="mt-4 block">
-                <span className="text-sm font-medium text-slate-700">{field}</span>
-                <input
-                  type={field === "password" ? "password" : "text"}
-                  value={String(form[field])}
-                  onChange={(event) =>
-                    setForm({ ...form, [field]: event.target.value })
-                  }
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-                />
-              </label>
-            )
-          )}
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-sm font-medium text-slate-700">port</span>
-              <input
-                value={form.port}
-                onChange={(event) => setForm({ ...form, port: event.target.value })}
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-              />
-            </label>
-            <label className="flex items-end gap-2 pb-2 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={form.secure}
-                onChange={(event) =>
-                  setForm({ ...form, secure: event.target.checked })
-                }
-              />
-              Secure TLS
-            </label>
-          </div>
-          <label className="mt-3 flex gap-2 text-sm font-medium text-slate-700">
-            <input
-              type="checkbox"
-              checked={form.isDefault}
-              onChange={(event) =>
-                setForm({ ...form, isDefault: event.target.checked })
-              }
-            />
-            Use as default sender
-          </label>
-          <button className="mt-4 rounded-md bg-moss px-4 py-2 text-sm font-medium text-white">
-            Save SMTP
-          </button>
-          {status ? <p className="mt-3 text-sm text-slate-600">{status}</p> : null}
-        </form>
 
-        <div className="space-y-3">
-          {connections.map((connection) => (
-            <article
-              key={connection.id}
-              className="rounded-lg border border-slate-200 bg-white p-5"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="font-semibold text-ink">{connection.name}</h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {connection.host}:{connection.port} from {connection.fromEmail}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {connection.secure ? "TLS" : "STARTTLS/plain"}{" "}
-                    {connection.isDefault ? "Default" : ""}
+      <section className="space-y-3 p-6">
+        {loading ? (
+          [0, 1].map((index) => (
+            <Card key={index}>
+              <CardContent className="p-5">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="mt-2 h-4 w-64" />
+              </CardContent>
+            </Card>
+          ))
+        ) : connections.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                <Server className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="font-medium">No SMTP connections yet</div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Add your first connection to start sending email.
+                </p>
+              </div>
+              <Button onClick={openCreate} disabled={!organizationId} variant="outline">
+                <Plus className="h-4 w-4" />
+                New connection
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          connections.map((connection) => (
+            <Card key={connection.id}>
+              <CardContent className="flex flex-wrap items-start justify-between gap-3 p-5">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-semibold">{connection.name}</h2>
+                    {connection.isDefault ? <Badge>Default</Badge> : null}
+                    <Badge variant="secondary">
+                      {connection.secure ? "TLS" : "STARTTLS"}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {connection.host}:{connection.port} · from{" "}
+                    {connection.fromEmail}
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => testConnection(connection.id)}
-                    className="rounded-md bg-moss px-3 py-1 text-xs font-medium text-white"
+                    disabled={testingId === connection.id}
                   >
+                    {testingId === connection.id ? <Spinner /> : null}
                     Test
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    onClick={() => deleteConnection(connection.id)}
-                    className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openEdit(connection)}
+                    aria-label="Edit connection"
                   >
-                    Delete
-                  </button>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setDeleteTarget(connection)}
+                    aria-label="Delete connection"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
-              </div>
-            </article>
-          ))}
-        </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
       </section>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? "Edit SMTP connection" : "New SMTP connection"}
+            </DialogTitle>
+            <DialogDescription>
+              {editing
+                ? "Update the connection. Leave username/password blank to keep the saved credentials."
+                : "Add SMTP credentials so QQueue can send email on your behalf."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+              />
+            </div>
+            <div className="grid grid-cols-[1fr_120px] gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="host">Host</Label>
+                <Input
+                  id="host"
+                  placeholder="smtp.example.com"
+                  value={form.host}
+                  onChange={(e) => setForm({ ...form, host: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="port">Port</Label>
+                <Input
+                  id="port"
+                  inputMode="numeric"
+                  value={form.port}
+                  onChange={(e) => setForm({ ...form, port: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="username">
+                  Username{editing ? " (optional)" : ""}
+                </Label>
+                <Input
+                  id="username"
+                  autoComplete="off"
+                  placeholder={editing ? "Keep current" : ""}
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  required={!editing}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">
+                  Password{editing ? " (optional)" : ""}
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={editing ? "Keep current" : ""}
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  required={!editing}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="fromEmail">From email</Label>
+                <Input
+                  id="fromEmail"
+                  type="email"
+                  placeholder="hello@example.com"
+                  value={form.fromEmail}
+                  onChange={(e) => setForm({ ...form, fromEmail: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="fromName">From name</Label>
+                <Input
+                  id="fromName"
+                  value={form.fromName}
+                  onChange={(e) => setForm({ ...form, fromName: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-5">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-input accent-primary"
+                  checked={form.secure}
+                  onChange={(e) => setForm({ ...form, secure: e.target.checked })}
+                />
+                Secure TLS
+              </label>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-input accent-primary"
+                  checked={form.isDefault}
+                  onChange={(e) =>
+                    setForm({ ...form, isDefault: e.target.checked })
+                  }
+                />
+                Use as default sender
+              </label>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <Spinner /> : null}
+                {editing ? "Save changes" : "Create connection"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Delete SMTP connection?"
+        description={`"${deleteTarget?.name}" will be permanently removed. Emails using it as default will need another connection.`}
+        confirmLabel="Delete"
+        loading={deleting}
+        onConfirm={confirmDelete}
+      />
     </>
   );
 }

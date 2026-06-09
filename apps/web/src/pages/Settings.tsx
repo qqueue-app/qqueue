@@ -1,50 +1,72 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
+import { LogOut } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
-import { api, type Organization } from "../lib/api.js";
-import { clearSession, getSession, saveSession } from "../lib/session.js";
+import { api } from "../lib/api.js";
+import { useSession } from "../lib/session-context.js";
+import { Button } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
+import { Label } from "../components/ui/label.js";
+import { Separator } from "../components/ui/separator.js";
+import { Spinner } from "../components/ui/spinner.js";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle
+} from "../components/ui/card.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../components/ui/select.js";
+
+const apiBaseUrl =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
 
 export function Settings() {
-  const [session, setSession] = useState(getSession);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const {
+    user,
+    organizations,
+    currentOrganizationId,
+    setCurrentOrganizationId,
+    addOrganization,
+    signOut: clearSessionState
+  } = useSession();
   const [name, setName] = useState("");
-  const [status, setStatus] = useState<string>();
-
-  async function load() {
-    const data = await api.listOrganizations();
-    setOrganizations(data);
-  }
-
-  useEffect(() => {
-    load().catch((error: unknown) =>
-      setStatus(error instanceof Error ? error.message : "Unable to load settings")
-    );
-  }, []);
+  const [saving, setSaving] = useState(false);
 
   async function createOrganization(event: FormEvent) {
     event.preventDefault();
-    const organization = await api.createOrganization({ name });
-    const nextSession = {
-      ...session,
-      currentOrganizationId: organization.id,
-      organizations: [
-        ...session.organizations,
-        { id: organization.id, name: organization.name }
-      ]
-    };
-    saveSession(nextSession);
-    setSession(nextSession);
-    setName("");
-    await load();
+    setSaving(true);
+    try {
+      const organization = await api.createOrganization({ name });
+      // Creator is always the OWNER; make the new org active immediately.
+      addOrganization(
+        { id: organization.id, name: organization.name, role: "OWNER" },
+        true
+      );
+      setName("");
+      toast.success(`Organization "${organization.name}" created.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to create organization"
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function selectOrganization(organizationId: string) {
-    const nextSession = { ...session, currentOrganizationId: organizationId };
-    saveSession(nextSession);
-    setSession(nextSession);
+    setCurrentOrganizationId(organizationId);
+    const selected = organizations.find((org) => org.id === organizationId);
+    toast.success(`Switched to ${selected?.name ?? "organization"}.`);
   }
 
   function signOut() {
-    clearSession();
+    clearSessionState();
     window.location.href = "/login";
   }
 
@@ -52,62 +74,74 @@ export function Settings() {
     <>
       <PageHeader title="Settings" description="Organization and developer settings." />
       <section className="grid gap-6 p-6 lg:grid-cols-2">
-        <form
-          onSubmit={createOrganization}
-          className="rounded-lg border border-slate-200 bg-white p-5"
-        >
-          <h2 className="text-base font-semibold text-ink">Current organization</h2>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Organization</span>
-            <select
-              value={session.currentOrganizationId ?? ""}
-              onChange={(event) => selectOrganization(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            >
-              <option value="">Select organization</option>
-              {organizations.map((organization) => (
-                <option key={organization.id} value={organization.id}>
-                  {organization.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">
-              New organization
-            </span>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <button className="mt-4 rounded-md bg-moss px-4 py-2 text-sm font-medium text-white">
-            Create organization
-          </button>
-          {status ? <p className="mt-3 text-sm text-coral">{status}</p> : null}
-        </form>
+        <Card className="h-fit">
+          <CardHeader>
+            <CardTitle>Organization</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={createOrganization} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Active organization</Label>
+                <Select
+                  value={currentOrganizationId ?? undefined}
+                  onValueChange={selectOrganization}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select organization" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {organizations.map((organization) => (
+                      <SelectItem key={organization.id} value={organization.id}>
+                        {organization.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Separator />
+              <div className="space-y-2">
+                <Label htmlFor="new-org">New organization</Label>
+                <Input
+                  id="new-org"
+                  placeholder="Acme Inc."
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
+              <Button type="submit" disabled={saving || !name.trim()}>
+                {saving ? <Spinner /> : null}
+                {saving ? "Creating…" : "Create organization"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-5">
-          <h2 className="text-base font-semibold text-ink">Account</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div>
-              <dt className="font-medium text-slate-700">Email</dt>
-              <dd className="mt-1 text-slate-600">{session.user?.email ?? "Not signed in"}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-slate-700">API base URL</dt>
-              <dd className="mt-1 text-slate-600">http://localhost:4000</dd>
-            </div>
-          </dl>
-          <button
-            type="button"
-            onClick={signOut}
-            className="mt-5 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-          >
-            Sign out
-          </button>
-        </section>
+        <Card className="h-fit">
+          <CardHeader>
+            <CardTitle>Account</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="space-y-4 text-sm">
+              <div>
+                <dt className="font-medium">Email</dt>
+                <dd className="mt-1 text-muted-foreground">
+                  {user?.email ?? "Not signed in"}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">API base URL</dt>
+                <dd className="mt-1 font-mono text-xs text-muted-foreground">
+                  {apiBaseUrl}
+                </dd>
+              </div>
+            </dl>
+            <Separator className="my-5" />
+            <Button type="button" variant="outline" onClick={signOut}>
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </Button>
+          </CardContent>
+        </Card>
       </section>
     </>
   );

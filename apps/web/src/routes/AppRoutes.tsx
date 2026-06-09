@@ -12,7 +12,8 @@ import { Templates } from "../pages/Templates.js";
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
+      <Route path="/login" element={<Login mode="login" />} />
+      <Route path="/register" element={<Login mode="register" />} />
       <Route element={<DashboardLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="/send-email" element={<SendEmail />} />

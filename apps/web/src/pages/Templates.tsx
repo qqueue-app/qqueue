@@ -1,123 +1,311 @@
 import { FormEvent, useEffect, useState } from "react";
+import { FileText, Pencil, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
+import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { RichTextEditor } from "../components/editor/RichTextEditor.js";
 import { api, type Template } from "../lib/api.js";
-import { getCurrentOrganizationId } from "../lib/session.js";
+import { useSession } from "../lib/session-context.js";
+import { Button } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
+import { Textarea } from "../components/ui/textarea.js";
+import { Label } from "../components/ui/label.js";
+import { Spinner } from "../components/ui/spinner.js";
+import { Skeleton } from "../components/ui/skeleton.js";
+import { Card, CardContent } from "../components/ui/card.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "../components/ui/dialog.js";
+
+interface TemplateForm {
+  name: string;
+  subject: string;
+  html: string;
+  text: string;
+}
+
+const emptyForm: TemplateForm = {
+  name: "",
+  subject: "",
+  html: "",
+  text: ""
+};
+
+function htmlIsEmpty(html: string) {
+  const stripped = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+  return stripped === "" && !/<(img|hr|br)/i.test(html);
+}
 
 export function Templates() {
-  const organizationId = getCurrentOrganizationId();
+  const { currentOrganizationId: organizationId } = useSession();
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [name, setName] = useState("");
-  const [subject, setSubject] = useState("");
-  const [html, setHtml] = useState("");
-  const [text, setText] = useState("");
-  const [status, setStatus] = useState<string>();
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Template | null>(null);
+  const [form, setForm] = useState<TemplateForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     if (!organizationId) {
+      setLoading(false);
       return;
     }
-    setTemplates(await api.listTemplates(organizationId));
+    setLoading(true);
+    try {
+      setTemplates(await api.listTemplates(organizationId));
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to load templates"
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    load().catch((error: unknown) =>
-      setStatus(error instanceof Error ? error.message : "Unable to load templates")
-    );
+    void load();
   }, [organizationId]);
 
-  async function createTemplate(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId) {
-      return;
-    }
-    await api.createTemplate({ organizationId, name, subject, html, text });
-    setName("");
-    setSubject("");
-    setHtml("");
-    setText("");
-    await load();
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyForm);
+    setDialogOpen(true);
   }
 
-  async function deleteTemplate(id: string) {
-    await api.deleteTemplate(id);
-    await load();
+  function openEdit(template: Template) {
+    setEditing(template);
+    setForm({
+      name: template.name,
+      subject: template.subject,
+      html: template.html,
+      text: template.text ?? ""
+    });
+    setDialogOpen(true);
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!organizationId) {
+      toast.error("Select an organization in Settings first.");
+      return;
+    }
+    if (htmlIsEmpty(form.html)) {
+      toast.error("The email body cannot be empty.");
+      return;
+    }
+
+    const payload = {
+      organizationId,
+      name: form.name,
+      subject: form.subject,
+      html: form.html,
+      text: form.text || undefined
+    };
+
+    setSaving(true);
+    try {
+      if (editing) {
+        await api.updateTemplate(editing.id, payload);
+        toast.success("Template updated.");
+      } else {
+        await api.createTemplate(payload);
+        toast.success("Template saved.");
+      }
+      setDialogOpen(false);
+      await load();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to save template"
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.deleteTemplate(deleteTarget.id);
+      toast.success("Template deleted.");
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
     <>
-      <PageHeader title="Templates" description="Create reusable email templates." />
-      <section className="grid gap-6 p-6 lg:grid-cols-[420px_1fr]">
-        <form
-          onSubmit={createTemplate}
-          className="rounded-lg border border-slate-200 bg-white p-5"
-        >
-          <h2 className="text-base font-semibold text-ink">New template</h2>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Name</span>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Subject</span>
-            <input
-              value={subject}
-              onChange={(event) => setSubject(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">HTML</span>
-            <textarea
-              value={html}
-              onChange={(event) => setHtml(event.target.value)}
-              rows={7}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
-            />
-          </label>
-          <label className="mt-4 block">
-            <span className="text-sm font-medium text-slate-700">Text</span>
-            <textarea
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              rows={4}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <button className="mt-4 rounded-md bg-moss px-4 py-2 text-sm font-medium text-white">
-            Save template
-          </button>
-          {status ? <p className="mt-3 text-sm text-coral">{status}</p> : null}
-        </form>
+      <PageHeader
+        title="Templates"
+        description="Create reusable email templates with variables like {{firstName}}."
+        actions={
+          <Button onClick={openCreate} disabled={!organizationId}>
+            <Plus className="h-4 w-4" />
+            New template
+          </Button>
+        }
+      />
 
-        <div className="space-y-3">
-          {templates.map((template) => (
-            <article
-              key={template.id}
-              className="rounded-lg border border-slate-200 bg-white p-5"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="font-semibold text-ink">{template.name}</h2>
-                  <p className="mt-1 text-sm text-slate-600">{template.subject}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => deleteTemplate(template.id)}
-                  className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700"
-                >
-                  Delete
-                </button>
+      <section className="space-y-3 p-6">
+        {loading ? (
+          [0, 1].map((index) => (
+            <Card key={index}>
+              <CardContent className="p-5">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="mt-2 h-4 w-56" />
+                <Skeleton className="mt-4 h-20 w-full" />
+              </CardContent>
+            </Card>
+          ))
+        ) : templates.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                <FileText className="h-6 w-6" />
               </div>
-              <pre className="mt-4 max-h-48 overflow-auto rounded-md bg-slate-50 p-3 text-xs text-slate-700">
-                {template.html}
-              </pre>
-            </article>
-          ))}
-        </div>
+              <div>
+                <div className="font-medium">No templates yet</div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Create a reusable template to speed up sending.
+                </p>
+              </div>
+              <Button onClick={openCreate} disabled={!organizationId} variant="outline">
+                <Plus className="h-4 w-4" />
+                New template
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          templates.map((template) => (
+            <Card key={template.id}>
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h2 className="font-semibold">{template.name}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {template.subject}
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openEdit(template)}
+                      aria-label="Edit template"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => setDeleteTarget(template)}
+                      aria-label="Delete template"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div
+                  className="prose prose-sm mt-4 max-h-48 max-w-none overflow-auto rounded-md border bg-muted/30 p-3"
+                  dangerouslySetInnerHTML={{ __html: template.html }}
+                />
+              </CardContent>
+            </Card>
+          ))
+        )}
       </section>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? "Edit template" : "New template"}
+            </DialogTitle>
+            <DialogDescription>
+              Use the toolbar to insert variables like{" "}
+              <code className="text-xs">{"{{firstName}}"}</code>. They are
+              replaced when you send.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submit} className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="name">Name</Label>
+                <Input
+                  id="name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="subject">Subject</Label>
+                <Input
+                  id="subject"
+                  placeholder="Welcome, {{firstName}}"
+                  value={form.subject}
+                  onChange={(e) => setForm({ ...form, subject: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Email body</Label>
+              <RichTextEditor
+                value={form.html}
+                onChange={(html) => setForm((prev) => ({ ...prev, html }))}
+                placeholder="Write your email…"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="text">Plain text fallback (optional)</Label>
+              <Textarea
+                id="text"
+                rows={3}
+                value={form.text}
+                onChange={(e) => setForm({ ...form, text: e.target.value })}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <Spinner /> : null}
+                {editing ? "Save changes" : "Create template"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Delete template?"
+        description={`"${deleteTarget?.name}" will be permanently removed.`}
+        confirmLabel="Delete"
+        loading={deleting}
+        onConfirm={confirmDelete}
+      />
     </>
   );
 }

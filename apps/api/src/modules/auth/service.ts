@@ -2,7 +2,7 @@ import type { LoginInput, RegisterInput } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { hashPassword, verifyPassword } from "../../lib/crypto.js";
 import { prisma } from "../../lib/prisma.js";
-import { createAuthTokens } from "../../lib/tokens.js";
+import { createAuthTokens, verifyRefreshToken } from "../../lib/tokens.js";
 
 function serializeUser(user: {
   id: string;
@@ -78,5 +78,19 @@ export const authService = {
       })),
       tokens: createAuthTokens(user)
     };
+  },
+
+  async refresh(refreshToken: string) {
+    const payload = verifyRefreshToken(refreshToken);
+
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub }
+    });
+
+    if (!user) {
+      throw new HttpError(401, "Invalid refresh token");
+    }
+
+    return { tokens: createAuthTokens(user) };
   }
 };
