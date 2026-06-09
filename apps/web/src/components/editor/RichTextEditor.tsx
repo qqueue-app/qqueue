@@ -36,6 +36,7 @@ interface RichTextEditorProps {
   onChange: (html: string) => void;
   placeholder?: string;
   variables?: string[];
+  showVariables?: boolean;
   className?: string;
 }
 
@@ -120,6 +121,7 @@ export function RichTextEditor({
   onChange,
   placeholder,
   variables = DEFAULT_VARIABLES,
+  showVariables = true,
   className
 }: RichTextEditorProps) {
   const editor = useEditor({
@@ -275,9 +277,11 @@ export function RichTextEditor({
           <Redo />
         </ToolbarButton>
 
-        <div className="ml-auto">
-          <VariableMenu editor={editor} variables={variables} />
-        </div>
+        {showVariables ? (
+          <div className="ml-auto">
+            <VariableMenu editor={editor} variables={variables} />
+          </div>
+        ) : null}
       </div>
 
       <EditorContent editor={editor} />

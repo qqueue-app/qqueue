@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import type { InputJsonValue } from "@prisma/client/runtime/library";
 import type { ContactInput } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -22,7 +22,7 @@ export const contactService = {
     return prisma.contact.create({
       data: {
         ...input,
-        metadata: input.metadata as Prisma.InputJsonValue | undefined
+        metadata: input.metadata as InputJsonValue | undefined
       }
     });
   },
@@ -42,7 +42,7 @@ export const contactService = {
         email: input.email,
         firstName: input.firstName,
         lastName: input.lastName,
-        metadata: input.metadata as Prisma.InputJsonValue | undefined
+        metadata: input.metadata as InputJsonValue | undefined
       }
     });
   },

@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/require-auth.js";
 import { authRouter } from "../modules/auth/routes.js";
 import { campaignRouter } from "../modules/campaigns/routes.js";
 import { contactRouter } from "../modules/contacts/routes.js";
+import { dashboardRouter } from "../modules/dashboard/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
 import { templateRouter } from "../modules/templates/routes.js";
@@ -15,6 +16,7 @@ v1Router.use("/auth", authRouter);
 
 // Everything below requires a valid access token.
 v1Router.use(requireAuth);
+v1Router.use("/dashboard", dashboardRouter);
 v1Router.use("/organizations", organizationRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
 v1Router.use("/contacts", contactRouter);

@@ -9,4 +9,3 @@ smtpConnectionRouter.post("/", requireOrgMembership, smtpConnectionController.cr
 smtpConnectionRouter.get("/:id", smtpConnectionController.get);
 smtpConnectionRouter.put("/:id", smtpConnectionController.update);
 smtpConnectionRouter.delete("/:id", smtpConnectionController.delete);
-smtpConnectionRouter.post("/:id/test", smtpConnectionController.test);

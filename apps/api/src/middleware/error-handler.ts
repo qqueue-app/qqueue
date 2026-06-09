@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { Prisma } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { ZodError } from "zod";
 import { HttpError } from "../lib/http-error.js";
 
@@ -29,7 +29,7 @@ export function errorHandler(
   }
 
   if (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error instanceof PrismaClientKnownRequestError &&
     error.code === "P2025"
   ) {
     res.status(404).json({
@@ -41,7 +41,7 @@ export function errorHandler(
   }
 
   if (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error instanceof PrismaClientKnownRequestError &&
     error.code === "P2002"
   ) {
     res.status(409).json({

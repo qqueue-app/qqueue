@@ -1,7 +1,8 @@
 import { clearSession, getSession, updateTokens } from "./session.js";
 
 const apiBaseUrl =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
+  (import.meta.env.PROD ? "" : "http://localhost:4000");
 
 export interface ApiEnvelope<T> {
   data: T;
@@ -41,6 +42,47 @@ export interface SMTPConnection {
   fromEmail: string;
   fromName?: string | null;
   isDefault: boolean;
+}
+
+export interface DashboardSummary {
+  counts: {
+    smtpConnections: number;
+    contacts: number;
+    templates: number;
+    emailsToday: number;
+    failedToday: number;
+    processingEmails: number;
+  };
+  setup: {
+    hasSmtpConnection: boolean;
+    hasDefaultSmtp: boolean;
+    hasContacts: boolean;
+    hasTemplates: boolean;
+  };
+  defaultSmtpConnection?: {
+    id: string;
+    name: string;
+    host: string;
+    fromEmail: string;
+  } | null;
+  recentEmailJobs: Array<{
+    id: string;
+    toEmail: string;
+    subject: string;
+    status: string;
+    smtpConnectionName?: string | null;
+    createdAt: string;
+    sentAt?: string | null;
+  }>;
+  recentEvents: Array<{
+    id: string;
+    type: string;
+    occurredAt: string;
+    emailJob: {
+      toEmail: string;
+      subject: string;
+    };
+  }>;
 }
 
 interface ApiErrorIssue {
@@ -190,6 +232,12 @@ async function request<T>(
 }
 
 export const api = {
+  dashboardSummary(organizationId: string) {
+    return request<DashboardSummary>(
+      `/api/v1/dashboard/summary?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
   register(input: {
     email: string;
     password: string;
@@ -250,13 +298,6 @@ export const api = {
 
   deleteSMTPConnection(id: string) {
     return request<void>(`/api/v1/smtp-connections/${id}`, { method: "DELETE" });
-  },
-
-  testSMTPConnection(id: string) {
-    return request<{ id: string; ok: boolean }>(
-      `/api/v1/smtp-connections/${id}/test`,
-      { method: "POST" }
-    );
   },
 
   listContacts(organizationId: string) {

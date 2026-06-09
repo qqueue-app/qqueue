@@ -44,13 +44,5 @@ export const smtpConnectionController = {
   async delete(req: Request, res: Response) {
     await smtpConnectionService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
-  },
-
-  async test(req: Request, res: Response) {
-    const result = await smtpConnectionService.test(
-      String(req.params.id),
-      req.userId!
-    );
-    res.json({ data: result });
   }
 };

@@ -9,8 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:generate": "node --env-file=../../.env ./node_modules/prisma/build/index.js generate",
+    "prisma:migrate": "node --env-file=../../.env ./node_modules/prisma/build/index.js migrate dev"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import type { InputJsonValue } from "@prisma/client/runtime/library";
 import type { SendEmailInput } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -76,7 +76,7 @@ export const transactionalEmailService = {
         subject,
         html,
         text,
-        variables: input.variables as Prisma.InputJsonValue | undefined,
+        variables: input.variables as InputJsonValue | undefined,
         status: "PROCESSING",
         events: {
           create: {

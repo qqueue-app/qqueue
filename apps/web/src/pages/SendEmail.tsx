@@ -26,18 +26,47 @@ import {
 const DEFAULT_SMTP = "__default__";
 const NO_TEMPLATE = "__none__";
 
+function extractVariables(...values: Array<string | null | undefined>) {
+  const names = new Set<string>();
+  const pattern = /\{\{\s*([\w.-]+)\s*\}\}/g;
+
+  for (const value of values) {
+    if (!value) continue;
+    for (const match of value.matchAll(pattern)) {
+      names.add(match[1]);
+    }
+  }
+
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
+}
+
 export function SendEmail() {
   const { currentOrganizationId: organizationId } = useSession();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [smtpConnections, setSMTPConnections] = useState<SMTPConnection[]>([]);
   const [to, setTo] = useState("");
+  const [useTemplate, setUseTemplate] = useState(false);
   const [templateId, setTemplateId] = useState(NO_TEMPLATE);
   const [smtpConnectionId, setSMTPConnectionId] = useState(DEFAULT_SMTP);
   const [subject, setSubject] = useState("");
   const [html, setHtml] = useState("");
   const [text, setText] = useState("");
-  const [variables, setVariables] = useState('{\n  "firstName": "Riley"\n}');
+  const [variableValues, setVariableValues] = useState<Record<string, string>>(
+    {}
+  );
   const [sending, setSending] = useState(false);
+
+  const selectedTemplate =
+    templateId === NO_TEMPLATE
+      ? null
+      : templates.find((item) => item.id === templateId) ?? null;
+  const templateVariableNames = selectedTemplate
+    ? extractVariables(
+        selectedTemplate.subject,
+        selectedTemplate.html,
+        selectedTemplate.text
+      )
+    : [];
 
   useEffect(() => {
     if (!organizationId) {
@@ -60,13 +89,30 @@ export function SendEmail() {
   function selectTemplate(value: string) {
     setTemplateId(value);
     if (value === NO_TEMPLATE) {
+      setVariableValues({});
       return;
     }
+
     const template = templates.find((item) => item.id === value);
-    if (template) {
-      setSubject(template.subject);
-      setHtml(template.html);
-      setText(template.text ?? "");
+    if (!template) {
+      return;
+    }
+
+    setSubject(template.subject);
+    setHtml(template.html);
+    setText(template.text ?? "");
+
+    const names = extractVariables(template.subject, template.html, template.text);
+    setVariableValues((current) =>
+      Object.fromEntries(names.map((name) => [name, current[name] ?? ""]))
+    );
+  }
+
+  function toggleTemplateMode(enabled: boolean) {
+    setUseTemplate(enabled);
+    if (!enabled) {
+      setTemplateId(NO_TEMPLATE);
+      setVariableValues({});
     }
   }
 
@@ -78,31 +124,32 @@ export function SendEmail() {
       return;
     }
 
-    let parsedVariables: Record<string, unknown> | undefined;
-    try {
-      parsedVariables = variables.trim()
-        ? (JSON.parse(variables) as Record<string, unknown>)
+    const variables =
+      useTemplate && templateVariableNames.length > 0
+        ? Object.fromEntries(
+            templateVariableNames.map((name) => [
+              name,
+              variableValues[name] ?? ""
+            ])
+          )
         : undefined;
-    } catch {
-      toast.error("Variables must be valid JSON.");
-      return;
-    }
 
     setSending(true);
     try {
       const result = await api.sendEmail({
         organizationId,
         to,
-        templateId: templateId === NO_TEMPLATE ? undefined : templateId,
+        templateId:
+          useTemplate && templateId !== NO_TEMPLATE ? templateId : undefined,
         smtpConnectionId:
           smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
         subject: subject || undefined,
         html: html || undefined,
         text: text || undefined,
-        variables: parsedVariables
+        variables
       });
       toast.success(
-        `Email queued — job ${result.emailJob.id} is ${result.emailJob.status}.`
+        `Email queued - job ${result.emailJob.id} is ${result.emailJob.status}.`
       );
     } catch (error) {
       toast.error(
@@ -159,36 +206,89 @@ export function SendEmail() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label>Template</Label>
-                  <Select value={templateId} onValueChange={selectTemplate}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
-                      {templates.map((template) => (
-                        <SelectItem key={template.id} value={template.id}>
-                          {template.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Selecting a template fills the subject and body below, which
-                    you can still edit.
-                  </p>
+
+                <div className="space-y-3 rounded-md border p-3">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-input accent-primary"
+                      checked={useTemplate}
+                      onChange={(event) =>
+                        toggleTemplateMode(event.target.checked)
+                      }
+                    />
+                    Use a saved template
+                  </label>
+
+                  {useTemplate ? (
+                    <div className="space-y-2">
+                      <Label>Template</Label>
+                      <Select value={templateId} onValueChange={selectTemplate}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NO_TEMPLATE}>
+                            Select a template
+                          </SelectItem>
+                          {templates.map((template) => (
+                            <SelectItem key={template.id} value={template.id}>
+                              {template.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        The selected template fills the subject and body.
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="variables">Variables JSON</Label>
-                  <Textarea
-                    id="variables"
-                    rows={6}
-                    className="font-mono text-xs"
-                    value={variables}
-                    onChange={(event) => setVariables(event.target.value)}
-                  />
-                </div>
+
+                {useTemplate && selectedTemplate ? (
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Template variables</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Fill in the values this template needs before sending.
+                      </p>
+                    </div>
+                    {templateVariableNames.length > 0 ? (
+                      <div className="space-y-3">
+                        {templateVariableNames.map((name) => (
+                          <div key={name} className="space-y-2">
+                            <Label htmlFor={`variable-${name}`}>{name}</Label>
+                            <Input
+                              id={`variable-${name}`}
+                              value={variableValues[name] ?? ""}
+                              onChange={(event) =>
+                                setVariableValues({
+                                  ...variableValues,
+                                  [name]: event.target.value
+                                })
+                              }
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                        This template does not define any variables.
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+                {useTemplate && !selectedTemplate ? (
+                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    Select a template to see its variables.
+                  </div>
+                ) : null}
+                {!useTemplate ? (
+                  <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                    Write a one-off subject and body, or enable template mode to
+                    load a saved template.
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
 
@@ -201,7 +301,11 @@ export function SendEmail() {
                   <Label htmlFor="subject">Subject</Label>
                   <Input
                     id="subject"
-                    placeholder="Welcome, {{firstName}}"
+                    placeholder={
+                      useTemplate
+                        ? "Template subject appears here"
+                        : "Welcome to QQueue"
+                    }
                     value={subject}
                     onChange={(event) => setSubject(event.target.value)}
                   />
@@ -211,7 +315,8 @@ export function SendEmail() {
                   <RichTextEditor
                     value={html}
                     onChange={setHtml}
-                    placeholder="Write your email…"
+                    placeholder="Write your email..."
+                    showVariables={useTemplate}
                   />
                 </div>
                 <div className="space-y-2">
@@ -230,7 +335,7 @@ export function SendEmail() {
           <div className="mt-6 flex justify-end">
             <Button type="submit" disabled={sending}>
               {sending ? <Spinner /> : null}
-              {sending ? "Sending…" : "Send email"}
+              {sending ? "Sending..." : "Send email"}
             </Button>
           </div>
         </form>

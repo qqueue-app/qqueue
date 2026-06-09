@@ -1,4 +1,5 @@
 import type { LoginInput, RegisterInput } from "@qqueue/shared";
+import type { Prisma } from "@prisma/client";
 import { HttpError } from "../../lib/http-error.js";
 import { hashPassword, verifyPassword } from "../../lib/crypto.js";
 import { prisma } from "../../lib/prisma.js";
@@ -18,11 +19,19 @@ function serializeUser(user: {
   };
 }
 
+type UserOrganizationMember = {
+  organization: {
+    id: string;
+    name: string;
+  };
+  role: string;
+};
+
 export const authService = {
   async register(input: RegisterInput) {
     const passwordHash = await hashPassword(input.password);
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const user = await tx.user.create({
         data: {
           email: input.email,
@@ -71,7 +80,7 @@ export const authService = {
 
     return {
       user: serializeUser(user),
-      organizations: user.members.map((member) => ({
+      organizations: user.members.map((member: UserOrganizationMember) => ({
         id: member.organization.id,
         name: member.organization.name,
         role: member.role

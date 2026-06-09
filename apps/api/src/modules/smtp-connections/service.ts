@@ -58,6 +58,25 @@ function toProvider(connection: {
   });
 }
 
+async function verifyConnection(connection: {
+  host: string;
+  port: number;
+  secure: boolean;
+  usernameEncrypted: string;
+  passwordEncrypted: string;
+}) {
+  try {
+    await toProvider(connection).verify();
+  } catch (error) {
+    throw new HttpError(
+      400,
+      error instanceof Error
+        ? `SMTP verification failed: ${error.message}`
+        : "SMTP verification failed"
+    );
+  }
+}
+
 // Resolve a connection the user is allowed to touch, or throw 404. Returns the
 // full record (including encrypted secrets) for internal use.
 async function findOwned(id: string, userId: string) {
@@ -88,6 +107,17 @@ export const smtpConnectionService = {
   },
 
   async create(input: SMTPConnectionInput) {
+    const usernameEncrypted = encryptSecret(input.username);
+    const passwordEncrypted = encryptSecret(input.password);
+
+    await verifyConnection({
+      host: input.host,
+      port: input.port,
+      secure: input.secure,
+      usernameEncrypted,
+      passwordEncrypted
+    });
+
     const isDefault = await normalizeDefault(
       input.organizationId,
       input.isDefault
@@ -100,8 +130,8 @@ export const smtpConnectionService = {
         host: input.host,
         port: input.port,
         secure: input.secure,
-        usernameEncrypted: encryptSecret(input.username),
-        passwordEncrypted: encryptSecret(input.password),
+        usernameEncrypted,
+        passwordEncrypted,
         fromEmail: input.fromEmail,
         fromName: input.fromName,
         isDefault
@@ -114,6 +144,21 @@ export const smtpConnectionService = {
     const existing = await findOwned(id, userId);
     // Connections stay in their original org; we never move them across tenants.
     const organizationId = existing.organizationId;
+    const usernameEncrypted = input.username
+      ? encryptSecret(input.username)
+      : existing.usernameEncrypted;
+    const passwordEncrypted = input.password
+      ? encryptSecret(input.password)
+      : existing.passwordEncrypted;
+
+    await verifyConnection({
+      host: input.host ?? existing.host,
+      port: input.port ?? existing.port,
+      secure: input.secure ?? existing.secure,
+      usernameEncrypted,
+      passwordEncrypted
+    });
+
     const isDefault =
       input.isDefault === undefined
         ? existing.isDefault
@@ -126,12 +171,8 @@ export const smtpConnectionService = {
         host: input.host,
         port: input.port,
         secure: input.secure,
-        usernameEncrypted: input.username
-          ? encryptSecret(input.username)
-          : undefined,
-        passwordEncrypted: input.password
-          ? encryptSecret(input.password)
-          : undefined,
+        usernameEncrypted,
+        passwordEncrypted,
         fromEmail: input.fromEmail,
         fromName: input.fromName,
         isDefault
@@ -143,26 +184,6 @@ export const smtpConnectionService = {
   async delete(id: string, userId: string) {
     await findOwned(id, userId);
     await prisma.sMTPConnection.delete({ where: { id } });
-  },
-
-  async test(id: string, userId: string) {
-    const connection = await findOwned(id, userId);
-
-    try {
-      await toProvider(connection).verify();
-    } catch (error) {
-      throw new HttpError(
-        400,
-        error instanceof Error
-          ? `SMTP verification failed: ${error.message}`
-          : "SMTP verification failed"
-      );
-    }
-
-    return {
-      id: connection.id,
-      ok: true
-    };
   },
 
   getProviderForConnection(connection: {

@@ -53,7 +53,6 @@ export function SMTPConnections() {
   const [editing, setEditing] = useState<SMTPConnection | null>(null);
   const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [testingId, setTestingId] = useState<string>();
   const [deleteTarget, setDeleteTarget] = useState<SMTPConnection | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -124,7 +123,7 @@ export function SMTPConnections() {
         if (form.username) payload.username = form.username;
         if (form.password) payload.password = form.password;
         await api.updateSMTPConnection(editing.id, payload);
-        toast.success("SMTP connection updated.");
+        toast.success("SMTP connection verified and updated.");
       } else {
         await api.createSMTPConnection({
           organizationId,
@@ -138,7 +137,7 @@ export function SMTPConnections() {
           fromName: form.fromName || undefined,
           isDefault: form.isDefault
         });
-        toast.success("SMTP connection saved.");
+        toast.success("SMTP connection verified and saved.");
       }
       setDialogOpen(false);
       await load();
@@ -146,18 +145,6 @@ export function SMTPConnections() {
       toast.error(error instanceof Error ? error.message : "Unable to save SMTP.");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function testConnection(id: string) {
-    setTestingId(id);
-    try {
-      await api.testSMTPConnection(id);
-      toast.success("SMTP connection verified.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "SMTP test failed.");
-    } finally {
-      setTestingId(undefined);
     }
   }
 
@@ -235,16 +222,6 @@ export function SMTPConnections() {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => testConnection(connection.id)}
-                    disabled={testingId === connection.id}
-                  >
-                    {testingId === connection.id ? <Spinner /> : null}
-                    Test
-                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -397,7 +374,7 @@ export function SMTPConnections() {
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? <Spinner /> : null}
-                {editing ? "Save changes" : "Create connection"}
+                {editing ? "Test and save" : "Test and create"}
               </Button>
             </DialogFooter>
           </form>

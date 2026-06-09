@@ -2,6 +2,15 @@ import type { OrganizationInput } from "@qqueue/shared";
 import { assertOrgAccess, assertOrgRole } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 
+type OrganizationMemberWithOrganization = {
+  organization: {
+    id: string;
+    name: string;
+    createdAt: Date;
+  };
+  role: string;
+};
+
 export const organizationService = {
   // Only the organizations the user is a member of, with their role.
   async list(userId: string) {
@@ -11,7 +20,7 @@ export const organizationService = {
       orderBy: { organization: { createdAt: "desc" } }
     });
 
-    return members.map((member) => ({
+    return members.map((member: OrganizationMemberWithOrganization) => ({
       id: member.organization.id,
       name: member.organization.name,
       createdAt: member.organization.createdAt,
