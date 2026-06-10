@@ -56,9 +56,12 @@ export interface Campaign {
   id: string;
   organizationId: string;
   name: string;
-  subject: string;
   status: string;
   scheduledAt?: string | null;
+  cronExpression?: string | null;
+  timezone?: string | null;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
   templateId?: string | null;
   contactListId?: string | null;
   template?: { id: string; name: string; subject: string } | null;
@@ -418,6 +421,12 @@ export const api = {
     });
   },
 
+  duplicateCampaign(id: string) {
+    return request<Campaign>(`/api/v1/campaigns/${id}/duplicate`, {
+      method: "POST"
+    });
+  },
+
   deleteCampaign(id: string) {
     return request<void>(`/api/v1/campaigns/${id}`, { method: "DELETE" });
   },
@@ -432,6 +441,28 @@ export const api = {
     return request<Campaign>(`/api/v1/campaigns/${id}/schedule`, {
       method: "POST",
       body: JSON.stringify({ scheduledAt })
+    });
+  },
+
+  setCampaignRecurrence(
+    id: string,
+    input: { cronExpression: string; timezone: string }
+  ) {
+    return request<Campaign>(`/api/v1/campaigns/${id}/recurrence`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  pauseCampaign(id: string) {
+    return request<Campaign>(`/api/v1/campaigns/${id}/pause`, {
+      method: "POST"
+    });
+  },
+
+  resumeCampaign(id: string) {
+    return request<Campaign>(`/api/v1/campaigns/${id}/resume`, {
+      method: "POST"
     });
   },
 

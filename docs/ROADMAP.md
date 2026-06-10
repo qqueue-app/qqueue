@@ -45,10 +45,10 @@
 
 ## Phase 4: Scheduling and Recurring
 
-- [ ] Send later
-- [ ] Recurring campaigns
-- [ ] Cron expressions
-- [ ] Pause/resume campaigns
+- [x] Send later
+- [x] Recurring campaigns
+- [x] Cron expressions
+- [x] Pause/resume campaigns
 
 ## Phase 5: Analytics
 
@@ -65,6 +65,49 @@
 - [ ] Template variables
 - [ ] SDK
 - [ ] Webhooks
+
+## Licensing & Open-Core Model
+
+QQueue is **open core**, all in this one repository:
+
+- The core platform (everything in Phases 0–6) is licensed under **AGPL-3.0**
+  (`LICENSE`). Anyone can self-host, modify, and redistribute it; running a
+  modified version as a network service triggers the AGPL's source-disclosure
+  obligation.
+- The managed-cloud features (Phase 7) will live in a **fenced directory**
+  (e.g. `apps/cloud/` or `packages/ee/`) under a **separate commercial license**,
+  with its own `LICENSE` file. The license boundary — not a repo boundary — is
+  what protects the cloud business.
+- All contributions are covered by a **Contributor License Agreement**
+  (`CLA.md`), so the project can use contributed code in both the AGPL core and
+  the commercial offering. See `CONTRIBUTING.md`.
+
+### Before starting Phase 7
+
+These should be in place before any cloud-only code lands:
+
+- [ ] Create the fenced proprietary directory (`apps/cloud/` or `packages/ee/`)
+      with its own commercial `LICENSE` and a README note marking the boundary.
+- [ ] Decide the commercial license terms (pricing-tier features, what stays in
+      the AGPL core vs. what is cloud-only).
+- [ ] Keep all multi-tenant/billing/usage-metering code on the proprietary side;
+      keep reusable primitives (auth, queue, sending) in the AGPL core.
+- [ ] Confirm dependency licenses are AGPL-compatible (audit before release).
+- [ ] Wire up CLA enforcement (CLA-assistant bot or `Signed-off-by` checks in CI).
+
+### Phase 7 design notes (planning)
+
+- **Billing:** integrate a payment provider (e.g. Stripe); model plans, seats,
+  and metered usage; handle webhooks for subscription lifecycle events.
+- **Workspaces:** multi-tenant boundary on top of existing organizations;
+  per-workspace isolation of contacts, templates, campaigns, and SMTP configs.
+- **Usage limits:** enforce per-plan quotas (emails/month, contacts, API calls)
+  at the queue/worker layer; surface usage in the dashboard.
+- **Hosted onboarding:** guided signup, managed shared/pooled sending infra,
+  domain + DKIM/SPF verification flows.
+- **Multi-tenant hardening:** row-level tenant scoping audit, rate limiting,
+  noisy-neighbor isolation, per-tenant secrets handling, abuse/deliverability
+  controls.
 
 ## Phase 7: Managed Cloud
 

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  campaignRecurrenceSchema,
   campaignScheduleSchema,
   campaignSchema,
   campaignUpdateSchema
@@ -42,6 +43,14 @@ export const campaignController = {
     res.json({ data: campaign });
   },
 
+  async duplicate(req: Request, res: Response) {
+    const campaign = await campaignService.duplicate(
+      String(req.params.id),
+      req.userId!
+    );
+    res.status(201).json({ data: campaign });
+  },
+
   async delete(req: Request, res: Response) {
     await campaignService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
@@ -61,6 +70,32 @@ export const campaignController = {
       String(req.params.id),
       req.userId!,
       input
+    );
+    res.json({ data: campaign });
+  },
+
+  async setRecurrence(req: Request, res: Response) {
+    const input = campaignRecurrenceSchema.parse(req.body);
+    const campaign = await campaignService.setRecurrence(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.json({ data: campaign });
+  },
+
+  async pause(req: Request, res: Response) {
+    const campaign = await campaignService.pause(
+      String(req.params.id),
+      req.userId!
+    );
+    res.json({ data: campaign });
+  },
+
+  async resume(req: Request, res: Response) {
+    const campaign = await campaignService.resume(
+      String(req.params.id),
+      req.userId!
     );
     res.json({ data: campaign });
   }

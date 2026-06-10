@@ -1,4 +1,25 @@
+import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
+
+/** True when `value` is a parseable 5/6-field cron expression. */
+export function isValidCron(value: string): boolean {
+  try {
+    CronExpressionParser.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when `value` is an IANA timezone the runtime recognises. */
+export function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type UserRole = "OWNER" | "ADMIN" | "MEMBER";
 export type ContactStatus = "ACTIVE" | "UNSUBSCRIBED" | "BOUNCED";
@@ -69,9 +90,12 @@ export interface Campaign {
   id: string;
   organizationId: string;
   name: string;
-  subject: string;
   status: CampaignStatus;
   scheduledAt?: string | null;
+  cronExpression?: string | null;
+  timezone?: string | null;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
 }
 
 export interface SMTPConnection {
@@ -174,7 +198,6 @@ export type TemplateInput = z.infer<typeof templateSchema>;
 export const campaignSchema = z.object({
   organizationId: z.string().min(1),
   name: z.string().min(1),
-  subject: z.string().min(1),
   templateId: z.string().min(1).optional(),
   contactListId: z.string().min(1).optional(),
   scheduledAt: z.string().datetime().optional()
@@ -194,6 +217,23 @@ export const campaignScheduleSchema = z.object({
 
 export type CampaignScheduleInput = z.infer<typeof campaignScheduleSchema>;
 
+export const cronExpressionSchema = z
+  .string()
+  .min(1)
+  .refine(isValidCron, { message: "Invalid cron expression" });
+
+export const timezoneSchema = z
+  .string()
+  .min(1)
+  .refine(isValidTimezone, { message: "Invalid timezone" });
+
+export const campaignRecurrenceSchema = z.object({
+  cronExpression: cronExpressionSchema,
+  timezone: timezoneSchema
+});
+
+export type CampaignRecurrenceInput = z.infer<typeof campaignRecurrenceSchema>;
+
 export const sendEmailSchema = z.object({
   organizationId: z.string().min(1),
   to: emailAddressSchema,
@@ -202,7 +242,8 @@ export const sendEmailSchema = z.object({
   subject: z.string().min(1).optional(),
   html: z.string().optional(),
   text: z.string().optional(),
-  variables: z.record(z.unknown()).optional()
+  variables: z.record(z.unknown()).optional(),
+  scheduledAt: z.string().datetime().optional()
 });
 
 export type SendEmailInput = z.infer<typeof sendEmailSchema>;

@@ -1,6 +1,7 @@
 {
   "name": "@qqueue/worker",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -14,6 +15,7 @@
     "@prisma/client": "^6.1.0",
     "@qqueue/email-engine": "workspace:*",
     "bullmq": "^5.34.5",
+    "cron-parser": "^5.5.0",
     "dotenv": "^16.4.7",
     "zod": "^3.24.1"
   },

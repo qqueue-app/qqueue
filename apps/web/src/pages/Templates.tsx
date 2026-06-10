@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { FileText, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
+import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { RichTextEditor } from "../components/editor/RichTextEditor.js";
 import { api, type Template } from "../lib/api.js";
@@ -170,21 +171,17 @@ export function Templates() {
           ))
         ) : templates.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <FileText className="h-6 w-6" />
-              </div>
-              <div>
-                <div className="font-medium">No templates yet</div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Create a reusable template to speed up sending.
-                </p>
-              </div>
-              <Button onClick={openCreate} disabled={!organizationId} variant="outline">
-                <Plus className="h-4 w-4" />
-                New template
-              </Button>
-            </CardContent>
+            <EmptyState
+              icon={FileText}
+              title="No templates yet"
+              description="Create a reusable template to speed up sending."
+              action={
+                <Button onClick={openCreate} disabled={!organizationId} variant="outline">
+                  <Plus className="h-4 w-4" />
+                  New template
+                </Button>
+              }
+            />
           </Card>
         ) : (
           templates.map((template) => (
@@ -220,7 +217,7 @@ export function Templates() {
                   </div>
                 </div>
                 <div
-                  className="prose prose-sm mt-4 max-h-48 max-w-none overflow-auto rounded-md border bg-muted/30 p-3"
+                  className="prose prose-sm mt-4 max-h-48 max-w-none overflow-auto rounded-md border bg-muted/30 p-3 dark:prose-invert"
                   dangerouslySetInnerHTML={{ __html: template.html }}
                 />
               </CardContent>

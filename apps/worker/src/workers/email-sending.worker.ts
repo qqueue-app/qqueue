@@ -1,9 +1,12 @@
-import { Worker } from "bullmq";
+import { DelayedError, Worker } from "bullmq";
 import { SMTPProvider } from "@qqueue/email-engine";
 import { redisConnection } from "../config/redis.js";
+import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { decryptSecret } from "../lib/crypto.js";
 import { prisma } from "../lib/prisma.js";
 import type { EmailSendingJob } from "../queues/email-sending.queue.js";
+
+const PAUSE_RETRY_DELAY_MS = 30_000;
 
 function formatFrom(connection: { fromEmail: string; fromName: string | null }) {
   if (!connection.fromName) {
@@ -13,39 +16,24 @@ function formatFrom(connection: { fromEmail: string; fromName: string | null }) 
   return `${connection.fromName} <${connection.fromEmail}>`;
 }
 
-async function settleCampaignIfComplete(campaignId: string | null) {
-  if (!campaignId) {
-    return;
-  }
-
-  const activeJobs = await prisma.emailJob.count({
-    where: {
-      campaignId,
-      status: { in: ["PENDING", "QUEUED", "PROCESSING"] }
-    }
-  });
-
-  if (activeJobs !== 0) {
-    return;
-  }
-
-  await prisma.campaign.update({
-    where: { id: campaignId },
-    data: { status: "SENT" }
-  });
-}
-
 export function startEmailSendingWorker() {
   return new Worker<EmailSendingJob>(
     "email-sending",
-    async (job) => {
+    async (job, token) => {
       const emailJob = await prisma.emailJob.findUnique({
         where: { id: job.data.emailJobId },
-        include: { smtpConnection: true }
+        include: { smtpConnection: true, campaign: { select: { status: true } } }
       });
 
       if (!emailJob || emailJob.status === "CANCELLED") {
         return;
+      }
+
+      // Hold sends for paused campaigns: re-check shortly without consuming an
+      // attempt, so resuming the campaign lets the job continue automatically.
+      if (emailJob.campaign?.status === "PAUSED") {
+        await job.moveToDelayed(Date.now() + PAUSE_RETRY_DELAY_MS, token);
+        throw new DelayedError();
       }
 
       if (!emailJob.smtpConnection) {
@@ -96,7 +84,7 @@ export function startEmailSendingWorker() {
           }
         });
 
-        await settleCampaignIfComplete(emailJob.campaignId);
+        await settleRunIfComplete(emailJob.campaignRunId);
       } catch (error) {
         const isFinalAttempt =
           job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
@@ -119,12 +107,11 @@ export function startEmailSendingWorker() {
         });
 
         if (isFinalAttempt) {
-          await settleCampaignIfComplete(emailJob.campaignId);
+          await settleRunIfComplete(emailJob.campaignRunId);
         }
 
         throw error;
       }
-      // TODO: Add retry policy, backoff, rate limiting, and event recording.
     },
     {
       connection: redisConnection,

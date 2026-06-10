@@ -13,6 +13,11 @@ const Contacts = lazy(() =>
     default: module.Contacts
   }))
 );
+const ContactLists = lazy(() =>
+  import("../pages/ContactLists.js").then((module) => ({
+    default: module.ContactLists
+  }))
+);
 const Dashboard = lazy(() =>
   import("../pages/Dashboard.js").then((module) => ({
     default: module.Dashboard
@@ -67,6 +72,7 @@ export function AppRoutes() {
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/campaigns" element={<Campaigns />} />
+          <Route path="/campaigns/lists" element={<ContactLists />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

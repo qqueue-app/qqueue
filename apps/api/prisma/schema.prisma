@@ -152,15 +152,32 @@ model Campaign {
   templateId     String?
   contactListId  String?
   name           String
-  subject        String
   status         CampaignStatus @default(DRAFT)
   scheduledAt    DateTime?
+  cronExpression String?
+  timezone       String?
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   template       Template?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
   contactList    ContactList?   @relation(fields: [contactListId], references: [id], onDelete: SetNull)
   emailJobs      EmailJob[]
+  runs           CampaignRun[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+}
+
+model CampaignRun {
+  id            String     @id @default(cuid())
+  campaignId    String
+  occurrenceKey String
+  status        String     @default("SENDING")
+  startedAt     DateTime   @default(now())
+  completedAt   DateTime?
+  campaign      Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  emailJobs     EmailJob[]
+
+  @@unique([campaignId, occurrenceKey])
 }
 
 model EmailJob {
@@ -169,6 +186,7 @@ model EmailJob {
   smtpConnectionId String?
   templateId       String?
   campaignId       String?
+  campaignRunId    String?
   toEmail          String
   subject          String
   html             String?
@@ -181,6 +199,7 @@ model EmailJob {
   smtpConnection   SMTPConnection? @relation(fields: [smtpConnectionId], references: [id], onDelete: SetNull)
   template         Template?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
   campaign         Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignRun      CampaignRun?    @relation(fields: [campaignRunId], references: [id], onDelete: SetNull)
   events           EmailEvent[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt

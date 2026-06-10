@@ -5,6 +5,7 @@ import {
   campaignProcessingQueue,
   type CampaignProcessingJob
 } from "../queues/campaign-processing.queue.js";
+import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { prisma } from "../lib/prisma.js";
 
 function renderVariables(
@@ -19,6 +20,20 @@ function renderVariables(
     const variable = variables[key];
     return variable === undefined || variable === null ? "" : String(variable);
   });
+}
+
+function enqueueEmailJobs(emailJobIds: string[]) {
+  return emailSendingQueue.addBulk(
+    emailJobIds.map((emailJobId) => ({
+      name: "send-email",
+      data: { emailJobId },
+      opts: {
+        jobId: `email-${emailJobId}`,
+        attempts: 3,
+        backoff: { type: "exponential", delay: 30_000 }
+      }
+    }))
+  );
 }
 
 export function startCampaignProcessingWorker() {
@@ -36,23 +51,30 @@ export function startCampaignProcessingWorker() {
                 orderBy: { createdAt: "asc" }
               }
             }
-          },
-          emailJobs: { select: { id: true } }
+          }
         }
       });
 
-      if (!campaign || campaign.status === "CANCELLED") {
+      // Cancelled or paused campaigns must not produce sends. (For recurring
+      // campaigns, pausing also removes the job scheduler, so no future fires.)
+      if (
+        !campaign ||
+        campaign.status === "CANCELLED" ||
+        campaign.status === "PAUSED"
+      ) {
         return;
       }
 
+      // Defensive guard for one-shot scheduled jobs that somehow run early.
       if (
         campaign.status === "SCHEDULED" &&
+        !campaign.cronExpression &&
         campaign.scheduledAt &&
         campaign.scheduledAt.getTime() > Date.now()
       ) {
         await campaignProcessingQueue.add(
           "process-campaign",
-          { campaignId: campaign.id },
+          { campaignId: campaign.id, occurrenceKey: job.data.occurrenceKey },
           {
             delay: campaign.scheduledAt.getTime() - Date.now(),
             jobId: `campaign-${campaign.id}-${campaign.scheduledAt.toISOString()}`
@@ -66,24 +88,32 @@ export function startCampaignProcessingWorker() {
           where: { id: campaign.id },
           data: { status: "SENDING" }
         });
-      }
-
-      if (campaign.status !== "SENDING" && campaign.status !== "SCHEDULED") {
+      } else if (campaign.status !== "SENDING") {
         return;
       }
 
-      if (campaign.emailJobs.length > 0) {
-        await emailSendingQueue.addBulk(
-          campaign.emailJobs.map((emailJob) => ({
-            name: "send-email",
-            data: { emailJobId: emailJob.id },
-            opts: {
-              jobId: `email-${emailJob.id}`,
-              attempts: 3,
-              backoff: { type: "exponential", delay: 30_000 }
-            }
-          }))
-        );
+      // Each execution is scoped to a CampaignRun keyed by occurrenceKey, so a
+      // recurring campaign creates fresh email jobs every fire while retries and
+      // crash recovery stay idempotent.
+      const occurrenceKey =
+        job.data.occurrenceKey ?? job.id ?? String(job.timestamp);
+
+      const run = await prisma.campaignRun.upsert({
+        where: {
+          campaignId_occurrenceKey: { campaignId: campaign.id, occurrenceKey }
+        },
+        create: { campaignId: campaign.id, occurrenceKey },
+        update: {}
+      });
+
+      const existingJobs = await prisma.emailJob.findMany({
+        where: { campaignRunId: run.id },
+        select: { id: true }
+      });
+
+      // Retry/recovery of a fire that already created its jobs: just re-enqueue.
+      if (existingJobs.length > 0) {
+        await enqueueEmailJobs(existingJobs.map((emailJob) => emailJob.id));
         return;
       }
 
@@ -94,6 +124,8 @@ export function startCampaignProcessingWorker() {
         });
         throw new Error("Campaign requires a template and contact list");
       }
+
+      const template = campaign.template;
 
       const smtpConnection = await prisma.sMTPConnection.findFirst({
         where: { organizationId: campaign.organizationId, isDefault: true },
@@ -106,10 +138,9 @@ export function startCampaignProcessingWorker() {
 
       const contacts = campaign.contactList.contacts;
       if (contacts.length === 0) {
-        await prisma.campaign.update({
-          where: { id: campaign.id },
-          data: { status: "SENT" }
-        });
+        // No recipients this run: settle it so a recurring campaign returns to
+        // SCHEDULED (and a one-shot is marked SENT).
+        await settleRunIfComplete(run.id);
         return;
       }
 
@@ -127,10 +158,13 @@ export function startCampaignProcessingWorker() {
               smtpConnectionId: smtpConnection.id,
               templateId: campaign.templateId,
               campaignId: campaign.id,
+              campaignRunId: run.id,
               toEmail: contact.email,
-              subject: renderVariables(campaign.subject, variables) ?? campaign.subject,
-              html: renderVariables(campaign.template?.html, variables),
-              text: renderVariables(campaign.template?.text, variables),
+              subject:
+                renderVariables(template.subject, variables) ??
+                template.subject,
+              html: renderVariables(template.html, variables),
+              text: renderVariables(template.text, variables),
               variables,
               status: "QUEUED" as const
             };
@@ -138,23 +172,12 @@ export function startCampaignProcessingWorker() {
         });
 
         return tx.emailJob.findMany({
-          where: { campaignId: campaign.id },
+          where: { campaignRunId: run.id },
           select: { id: true }
         });
       });
 
-      await emailSendingQueue.addBulk(
-        emailJobs.map((emailJob) => ({
-          name: "send-email",
-          data: { emailJobId: emailJob.id },
-          opts: {
-            jobId: `email-${emailJob.id}`,
-            attempts: 3,
-            backoff: { type: "exponential", delay: 30_000 }
-          }
-        }))
-      );
-      // TODO: Respect campaign pause/resume state and organization limits.
+      await enqueueEmailJobs(emailJobs.map((emailJob) => emailJob.id));
     },
     {
       connection: redisConnection,

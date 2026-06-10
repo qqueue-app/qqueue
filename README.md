@@ -147,3 +147,23 @@ qqueue/
 ## Roadmap
 
 See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## License
+
+QQueue is open source under the [GNU Affero General Public License v3.0](LICENSE)
+(AGPL-3.0-only). You are free to self-host, modify, and redistribute it. If you
+run a modified version as a network service, the AGPL requires you to make the
+corresponding source available to that service's users.
+
+QQueue follows an **open-core** model: the core platform in this repository is
+AGPL-licensed, while certain managed-cloud features (planned for Phase 7) will
+be developed under a separate commercial license. A commercial license that
+removes the AGPL's source-disclosure obligations is also available for
+organizations that need it — open an issue or get in touch to discuss.
+
+## Contributing
+
+Contributions are welcome. Because QQueue offers both an AGPL build and a
+commercial offering, all contributors must sign the
+[Contributor License Agreement](CLA.md). See [CONTRIBUTING.md](CONTRIBUTING.md)
+for details.

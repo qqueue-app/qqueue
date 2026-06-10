@@ -2,10 +2,12 @@ import { FormEvent, useEffect, useState } from "react";
 import { Pencil, Plus, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
+import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { api, type SMTPConnection } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Button } from "../components/ui/button.js";
+import { Checkbox } from "../components/ui/checkbox.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
 import { Badge } from "../components/ui/badge.js";
@@ -188,21 +190,17 @@ export function SMTPConnections() {
           ))
         ) : connections.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <Server className="h-6 w-6" />
-              </div>
-              <div>
-                <div className="font-medium">No SMTP connections yet</div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Add your first connection to start sending email.
-                </p>
-              </div>
-              <Button onClick={openCreate} disabled={!organizationId} variant="outline">
-                <Plus className="h-4 w-4" />
-                New connection
-              </Button>
-            </CardContent>
+            <EmptyState
+              icon={Server}
+              title="No SMTP connections yet"
+              description="Add your first connection to start sending email."
+              action={
+                <Button onClick={openCreate} disabled={!organizationId} variant="outline">
+                  <Plus className="h-4 w-4" />
+                  New connection
+                </Button>
+              }
+            />
           </Card>
         ) : (
           connections.map((connection) => (
@@ -343,22 +341,28 @@ export function SMTPConnections() {
               </div>
             </div>
             <div className="flex flex-wrap gap-5">
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-input accent-primary"
+              <label
+                htmlFor="smtp-secure"
+                className="flex items-center gap-2.5 text-sm font-medium"
+              >
+                <Checkbox
+                  id="smtp-secure"
                   checked={form.secure}
-                  onChange={(e) => setForm({ ...form, secure: e.target.checked })}
+                  onCheckedChange={(checked) =>
+                    setForm({ ...form, secure: checked })
+                  }
                 />
                 Secure TLS
               </label>
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-input accent-primary"
+              <label
+                htmlFor="smtp-default"
+                className="flex items-center gap-2.5 text-sm font-medium"
+              >
+                <Checkbox
+                  id="smtp-default"
                   checked={form.isDefault}
-                  onChange={(e) =>
-                    setForm({ ...form, isDefault: e.target.checked })
+                  onCheckedChange={(checked) =>
+                    setForm({ ...form, isDefault: checked })
                   }
                 />
                 Use as default sender

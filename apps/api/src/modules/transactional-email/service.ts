@@ -2,6 +2,7 @@ import type { InputJsonValue } from "@prisma/client/runtime/library";
 import type { SendEmailInput } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 import { smtpConnectionService } from "../smtp-connections/service.js";
 
 function renderVariables(
@@ -65,6 +66,45 @@ export const transactionalEmailService = {
         400,
         "Provide a subject and html/text body, or a templateId"
       );
+    }
+
+    const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
+
+    // Send later: queue the email for a future time instead of sending inline.
+    if (scheduledAt && scheduledAt.getTime() > Date.now()) {
+      const queuedJob = await prisma.emailJob.create({
+        data: {
+          organizationId: input.organizationId,
+          smtpConnectionId: smtpConnection.id,
+          templateId: template?.id,
+          toEmail: input.to,
+          subject,
+          html,
+          text,
+          variables: input.variables as InputJsonValue | undefined,
+          status: "QUEUED",
+          scheduledAt,
+          events: {
+            create: {
+              organizationId: input.organizationId,
+              type: "QUEUED"
+            }
+          }
+        }
+      });
+
+      await emailSendingQueue.add(
+        "send-email",
+        { emailJobId: queuedJob.id },
+        {
+          delay: Math.max(0, scheduledAt.getTime() - Date.now()),
+          jobId: `email-${queuedJob.id}`,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 30_000 }
+        }
+      );
+
+      return { emailJob: queuedJob, providerResult: null };
     }
 
     const emailJob = await prisma.emailJob.create({

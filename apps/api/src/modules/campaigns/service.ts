@@ -1,11 +1,17 @@
 import type {
   CampaignInput,
+  CampaignRecurrenceInput,
   CampaignScheduleInput,
   CampaignUpdateInput
 } from "@qqueue/shared";
+import { nextCronRun } from "../../lib/cron.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { campaignProcessingQueue } from "../../queues/campaign-processing.queue.js";
+
+function recurringSchedulerId(campaignId: string) {
+  return `campaign-recurring-${campaignId}`;
+}
 
 const campaignInclude = {
   template: {
@@ -53,17 +59,21 @@ async function findOwned(id: string, userId: string) {
   return campaign;
 }
 
-async function enqueueCampaign(campaignId: string, scheduledAt?: Date | null) {
+async function enqueueCampaign(
+  campaignId: string,
+  occurrenceKey: string,
+  scheduledAt?: Date | null
+) {
   const delay = scheduledAt
     ? Math.max(0, scheduledAt.getTime() - Date.now())
     : undefined;
 
   await campaignProcessingQueue.add(
     "process-campaign",
-    { campaignId },
+    { campaignId, occurrenceKey },
     {
       delay,
-      jobId: `campaign-${campaignId}-${scheduledAt?.toISOString() ?? "now"}`,
+      jobId: `campaign-${campaignId}-${occurrenceKey}`,
       attempts: 3,
       backoff: { type: "exponential", delay: 30_000 }
     }
@@ -93,7 +103,6 @@ export const campaignService = {
       data: {
         organizationId: input.organizationId,
         name: input.name,
-        subject: input.subject,
         templateId: input.templateId,
         contactListId: input.contactListId,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
@@ -119,10 +128,23 @@ export const campaignService = {
       where: { id },
       data: {
         name: input.name,
-        subject: input.subject,
         templateId: input.templateId,
         contactListId: input.contactListId,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
+      },
+      include: campaignInclude
+    });
+  },
+
+  async duplicate(id: string, userId: string) {
+    const existing = await findOwned(id, userId);
+
+    return prisma.campaign.create({
+      data: {
+        organizationId: existing.organizationId,
+        name: `Copy of ${existing.name}`,
+        templateId: existing.templateId,
+        contactListId: existing.contactListId
       },
       include: campaignInclude
     });
@@ -155,7 +177,7 @@ export const campaignService = {
       include: campaignInclude
     });
 
-    await enqueueCampaign(id);
+    await enqueueCampaign(id, `manual-${Date.now()}`);
     return updated;
   },
 
@@ -177,11 +199,140 @@ export const campaignService = {
 
     const updated = await prisma.campaign.update({
       where: { id },
-      data: { status: "SCHEDULED", scheduledAt },
+      data: {
+        status: "SCHEDULED",
+        scheduledAt,
+        cronExpression: null,
+        timezone: null,
+        nextRunAt: scheduledAt
+      },
       include: campaignInclude
     });
 
-    await enqueueCampaign(id, scheduledAt);
+    await enqueueCampaign(
+      id,
+      `scheduled-${scheduledAt.toISOString()}`,
+      scheduledAt
+    );
     return updated;
+  },
+
+  async setRecurrence(
+    id: string,
+    userId: string,
+    input: CampaignRecurrenceInput
+  ) {
+    const campaign = await findOwned(id, userId);
+
+    if (!["DRAFT", "SCHEDULED", "PAUSED"].includes(campaign.status)) {
+      throw new HttpError(
+        400,
+        "Recurrence can only be set on draft, scheduled, or paused campaigns"
+      );
+    }
+
+    if (!campaign.templateId || !campaign.contactListId) {
+      throw new HttpError(400, "Campaign requires a template and contact list");
+    }
+
+    const nextRunAt = nextCronRun(input.cronExpression, input.timezone);
+    if (!nextRunAt) {
+      throw new HttpError(400, "Invalid cron expression or timezone");
+    }
+
+    const updated = await prisma.campaign.update({
+      where: { id },
+      data: {
+        status: "SCHEDULED",
+        scheduledAt: null,
+        cronExpression: input.cronExpression,
+        timezone: input.timezone,
+        nextRunAt
+      },
+      include: campaignInclude
+    });
+
+    await campaignProcessingQueue.upsertJobScheduler(
+      recurringSchedulerId(id),
+      { pattern: input.cronExpression, tz: input.timezone },
+      {
+        name: "process-campaign",
+        data: { campaignId: id },
+        opts: { attempts: 3, backoff: { type: "exponential", delay: 30_000 } }
+      }
+    );
+
+    return updated;
+  },
+
+  async pause(id: string, userId: string) {
+    const campaign = await findOwned(id, userId);
+
+    if (!["SCHEDULED", "SENDING"].includes(campaign.status)) {
+      throw new HttpError(
+        400,
+        "Only scheduled or sending campaigns can be paused"
+      );
+    }
+
+    if (campaign.cronExpression) {
+      await campaignProcessingQueue.removeJobScheduler(
+        recurringSchedulerId(id)
+      );
+    }
+
+    return prisma.campaign.update({
+      where: { id },
+      data: { status: "PAUSED", nextRunAt: null },
+      include: campaignInclude
+    });
+  },
+
+  async resume(id: string, userId: string) {
+    const campaign = await findOwned(id, userId);
+
+    if (campaign.status !== "PAUSED") {
+      throw new HttpError(400, "Only paused campaigns can be resumed");
+    }
+
+    if (campaign.cronExpression) {
+      const nextRunAt = nextCronRun(
+        campaign.cronExpression,
+        campaign.timezone
+      );
+
+      await campaignProcessingQueue.upsertJobScheduler(
+        recurringSchedulerId(id),
+        { pattern: campaign.cronExpression, tz: campaign.timezone ?? "UTC" },
+        {
+          name: "process-campaign",
+          data: { campaignId: id },
+          opts: {
+            attempts: 3,
+            backoff: { type: "exponential", delay: 30_000 }
+          }
+        }
+      );
+
+      return prisma.campaign.update({
+        where: { id },
+        data: { status: "SCHEDULED", nextRunAt },
+        include: campaignInclude
+      });
+    }
+
+    // One-shot campaign: resume into its prior phase so deferred email jobs
+    // (held by the email worker while paused) continue automatically.
+    const stillScheduled =
+      campaign.scheduledAt && campaign.scheduledAt.getTime() > Date.now();
+
+    return prisma.campaign.update({
+      where: { id },
+      data: {
+        status: stillScheduled ? "SCHEDULED" : "SENDING",
+        nextRunAt: stillScheduled ? campaign.scheduledAt : null
+      },
+      include: campaignInclude
+    });
   }
 };

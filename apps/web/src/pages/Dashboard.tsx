@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
+import { EmptyState } from "../components/EmptyState.js";
 import { api, type DashboardSummary } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
@@ -125,7 +126,7 @@ export function Dashboard() {
       {
         label: "Emails today",
         value: summary?.counts.emailsToday ?? 0,
-        detail: "Created email jobs",
+        detail: "Queued or sent today",
         icon: Send
       },
       {
@@ -236,7 +237,7 @@ export function Dashboard() {
           })}
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+        <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
           <Card>
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-3">
@@ -261,12 +262,12 @@ export function Dashboard() {
                     {loading ? (
                       <Skeleton className="h-5 w-16" />
                     ) : item.ready ? (
-                      <span className="flex items-center gap-1.5 text-emerald-700">
+                      <span className="flex items-center gap-1.5 text-success">
                         <CheckCircle2 className="h-4 w-4" />
                         Ready
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1.5 text-amber-700">
+                      <span className="flex items-center gap-1.5 text-warning">
                         <XCircle className="h-4 w-4" />
                         Missing
                       </span>
@@ -277,52 +278,6 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="font-semibold">Quick actions</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Common workflows for a sending workspace.
-                  </p>
-                </div>
-                {summary?.defaultSmtpConnection ? (
-                  <Badge variant="secondary">
-                    {summary.defaultSmtpConnection.fromEmail}
-                  </Badge>
-                ) : null}
-              </div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Button asChild variant="outline" className="justify-start">
-                  <Link to="/send-email">
-                    <Send className="h-4 w-4" />
-                    Send email
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" className="justify-start">
-                  <Link to="/smtp-connections">
-                    <Server className="h-4 w-4" />
-                    Add SMTP
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" className="justify-start">
-                  <Link to="/contacts">
-                    <Users className="h-4 w-4" />
-                    Add contact
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" className="justify-start">
-                  <Link to="/templates">
-                    <FileText className="h-4 w-4" />
-                    Create template
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
           <Card>
             <CardContent className="p-0">
               <div className="border-b p-5">
@@ -367,13 +322,17 @@ export function Dashboard() {
                   </TableBody>
                 </Table>
               ) : (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  No email jobs yet.
-                </div>
+                <EmptyState
+                  icon={Send}
+                  title="No email jobs yet"
+                  description="Send your first email to see it here."
+                />
               )}
             </CardContent>
           </Card>
+        </div>
 
+        <div className="grid gap-4">
           <Card>
             <CardContent className="p-0">
               <div className="border-b p-5">
@@ -415,9 +374,11 @@ export function Dashboard() {
                   ))}
                 </div>
               ) : (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  No events recorded yet.
-                </div>
+                <EmptyState
+                  icon={Mail}
+                  title="No events recorded yet"
+                  description="Queue and delivery events will appear here."
+                />
               )}
             </CardContent>
           </Card>

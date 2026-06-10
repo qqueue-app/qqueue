@@ -28,11 +28,49 @@
     --destructive: 14 68% 54%;
     --destructive-foreground: 0 0% 100%;
 
+    /* Status tones (shared by badges, setup health, etc.) */
+    --success: 158 64% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 80% 38%;
+    --warning-foreground: 0 0% 100%;
+
     --border: 214 24% 90%;
     --input: 214 24% 90%;
     --ring: 164 40% 31%;
 
     --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 222 28% 9%;
+    --foreground: 210 20% 92%;
+    --card: 222 24% 12%;
+    --card-foreground: 210 20% 92%;
+    --popover: 222 24% 12%;
+    --popover-foreground: 210 20% 92%;
+
+    /* Lighter moss reads better on dark surfaces */
+    --primary: 164 44% 48%;
+    --primary-foreground: 222 47% 9%;
+
+    --secondary: 217 20% 18%;
+    --secondary-foreground: 210 20% 92%;
+    --muted: 217 20% 17%;
+    --muted-foreground: 215 16% 62%;
+    --accent: 217 20% 20%;
+    --accent-foreground: 210 20% 92%;
+
+    --destructive: 14 70% 57%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 158 55% 52%;
+    --success-foreground: 222 47% 9%;
+    --warning: 36 90% 60%;
+    --warning-foreground: 222 47% 9%;
+
+    --border: 217 20% 20%;
+    --input: 217 20% 23%;
+    --ring: 164 44% 48%;
   }
 }
 

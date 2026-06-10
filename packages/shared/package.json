@@ -1,6 +1,7 @@
 {
   "name": "@qqueue/shared",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -11,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "cron-parser": "^5.5.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
