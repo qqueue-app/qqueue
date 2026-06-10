@@ -1,5 +1,6 @@
 import { DelayedError, Worker } from "bullmq";
-import { SMTPProvider } from "@qqueue/email-engine";
+import { SMTPProvider, injectTracking } from "@qqueue/email-engine";
+import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
 import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { decryptSecret } from "../lib/crypto.js";
@@ -56,19 +57,61 @@ export function startEmailSendingWorker() {
           }
         });
 
+        const html = injectTracking(emailJob.html, {
+          emailJobId: emailJob.id,
+          baseUrl: env.APP_URL,
+          secret: env.TRACKING_SECRET
+        });
+
         const result = await provider.send({
           from: formatFrom(emailJob.smtpConnection),
           to: emailJob.toEmail,
           subject: emailJob.subject,
-          html: emailJob.html ?? undefined,
+          html,
           text: emailJob.text ?? undefined
         });
+
+        // The SMTP server rejected the recipient outright: treat as a bounce
+        // rather than a successful send.
+        if (result.rejected.length > 0) {
+          await prisma.$transaction([
+            prisma.emailJob.update({
+              where: { id: emailJob.id },
+              data: {
+                status: "FAILED",
+                messageId: result.messageId,
+                events: {
+                  create: {
+                    organizationId: emailJob.organizationId,
+                    type: "BOUNCED",
+                    metadata: {
+                      provider: result.provider,
+                      messageId: result.messageId,
+                      rejected: result.rejected
+                    }
+                  }
+                }
+              }
+            }),
+            prisma.contact.updateMany({
+              where: {
+                organizationId: emailJob.organizationId,
+                email: emailJob.toEmail
+              },
+              data: { status: "BOUNCED" }
+            })
+          ]);
+
+          await settleRunIfComplete(emailJob.campaignRunId);
+          return;
+        }
 
         await prisma.emailJob.update({
           where: { id: emailJob.id },
           data: {
             status: "SENT",
             sentAt: new Date(),
+            messageId: result.messageId,
             events: {
               create: {
                 organizationId: emailJob.organizationId,

@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
+  BarChart3,
   CalendarClock,
   Copy,
   Megaphone,
@@ -562,6 +564,16 @@ export function Campaigns() {
                     <TableCell>{campaign._count?.emailJobs ?? 0}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
+                        <Button
+                          asChild
+                          variant="ghost"
+                          size="icon"
+                          aria-label="View analytics"
+                        >
+                          <Link to={`/campaigns/${campaign.id}/analytics`}>
+                            <BarChart3 className="h-4 w-4" />
+                          </Link>
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"

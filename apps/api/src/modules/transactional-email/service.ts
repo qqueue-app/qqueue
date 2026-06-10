@@ -1,5 +1,7 @@
 import type { InputJsonValue } from "@prisma/client/runtime/library";
+import { injectTracking } from "@qqueue/email-engine";
 import type { SendEmailInput } from "@qqueue/shared";
+import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
@@ -134,7 +136,11 @@ export const transactionalEmailService = {
         from: formatFrom(smtpConnection),
         to: input.to,
         subject,
-        html,
+        html: injectTracking(html, {
+          emailJobId: emailJob.id,
+          baseUrl: env.APP_URL,
+          secret: env.TRACKING_SECRET
+        }),
         text
       });
 
@@ -143,6 +149,7 @@ export const transactionalEmailService = {
         data: {
           status: "SENT",
           sentAt: new Date(),
+          messageId: result.messageId,
           events: {
             create: {
               organizationId: input.organizationId,

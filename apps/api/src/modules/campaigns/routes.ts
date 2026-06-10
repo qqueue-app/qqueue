@@ -7,6 +7,7 @@ export const campaignRouter = Router();
 campaignRouter.get("/", requireOrgMembership, campaignController.list);
 campaignRouter.post("/", requireOrgMembership, campaignController.create);
 campaignRouter.get("/:id", campaignController.get);
+campaignRouter.get("/:id/analytics", campaignController.analytics);
 campaignRouter.put("/:id", campaignController.update);
 campaignRouter.delete("/:id", campaignController.delete);
 campaignRouter.post("/:id/duplicate", campaignController.duplicate);

@@ -288,6 +288,101 @@ export const campaignService = {
     });
   },
 
+  async analytics(id: string, userId: string) {
+    const campaign = await findOwned(id, userId);
+    const where = { emailJob: { campaignId: id } };
+
+    const [
+      recipients,
+      sent,
+      failed,
+      byType,
+      uniqueOpens,
+      uniqueClicks,
+      clickEvents,
+      recentEvents
+    ] = await Promise.all([
+      prisma.emailJob.count({ where: { campaignId: id } }),
+      prisma.emailJob.count({ where: { campaignId: id, status: "SENT" } }),
+      prisma.emailJob.count({ where: { campaignId: id, status: "FAILED" } }),
+      prisma.emailEvent.groupBy({
+        by: ["type"],
+        where,
+        _count: { _all: true }
+      }),
+      prisma.emailEvent.groupBy({ by: ["emailJobId"], where: { ...where, type: "OPENED" } }),
+      prisma.emailEvent.groupBy({ by: ["emailJobId"], where: { ...where, type: "CLICKED" } }),
+      prisma.emailEvent.findMany({
+        where: { ...where, type: "CLICKED" },
+        select: { metadata: true }
+      }),
+      prisma.emailEvent.findMany({
+        where,
+        select: {
+          id: true,
+          type: true,
+          occurredAt: true,
+          emailJob: { select: { toEmail: true } }
+        },
+        orderBy: { occurredAt: "desc" },
+        take: 15
+      })
+    ]);
+
+    const counts = Object.fromEntries(
+      byType.map((row) => [row.type, row._count._all])
+    ) as Partial<Record<string, number>>;
+
+    const opened = counts.OPENED ?? 0;
+    const clicked = counts.CLICKED ?? 0;
+    const bounced = counts.BOUNCED ?? 0;
+    const uniqueOpened = uniqueOpens.length;
+    const uniqueClicked = uniqueClicks.length;
+
+    // Per-link click breakdown from CLICKED event metadata.
+    const linkCounts = new Map<string, number>();
+    for (const event of clickEvents) {
+      const url = (event.metadata as { url?: string } | null)?.url;
+      if (url) {
+        linkCounts.set(url, (linkCounts.get(url) ?? 0) + 1);
+      }
+    }
+    const links = [...linkCounts.entries()]
+      .map(([url, clicks]) => ({ url, clicks }))
+      .sort((a, b) => b.clicks - a.clicks);
+
+    const rate = (value: number, total: number) =>
+      total > 0 ? value / total : 0;
+
+    return {
+      campaign: { id: campaign.id, name: campaign.name, status: campaign.status },
+      totals: {
+        recipients,
+        sent,
+        failed,
+        delivered: counts.DELIVERED ?? 0,
+        opened,
+        uniqueOpened,
+        clicked,
+        uniqueClicked,
+        bounced,
+        complained: counts.COMPLAINED ?? 0
+      },
+      rates: {
+        open: rate(uniqueOpened, sent),
+        click: rate(uniqueClicked, sent),
+        bounce: rate(bounced, recipients)
+      },
+      links,
+      recentEvents: recentEvents.map((event) => ({
+        id: event.id,
+        type: event.type,
+        occurredAt: event.occurredAt.toISOString(),
+        toEmail: event.emailJob.toEmail
+      }))
+    };
+  },
+
   async resume(id: string, userId: string) {
     const campaign = await findOwned(id, userId);
 

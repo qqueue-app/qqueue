@@ -52,11 +52,11 @@
 
 ## Phase 5: Analytics
 
-- [ ] Email events
-- [ ] Open tracking
-- [ ] Click tracking
-- [ ] Bounce tracking
-- [ ] Campaign dashboard
+- [x] Email events
+- [x] Open tracking
+- [x] Click tracking
+- [x] Bounce tracking (synchronous SMTP rejections + generic ESP webhook)
+- [x] Campaign dashboard
 
 ## Phase 6: Transactional API
 

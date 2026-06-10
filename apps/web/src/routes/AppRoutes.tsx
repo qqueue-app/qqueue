@@ -8,6 +8,11 @@ const Campaigns = lazy(() =>
     default: module.Campaigns
   }))
 );
+const CampaignAnalytics = lazy(() =>
+  import("../pages/CampaignAnalytics.js").then((module) => ({
+    default: module.CampaignAnalytics
+  }))
+);
 const Contacts = lazy(() =>
   import("../pages/Contacts.js").then((module) => ({
     default: module.Contacts
@@ -73,6 +78,7 @@ export function AppRoutes() {
           <Route path="/templates" element={<Templates />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/lists" element={<ContactLists />} />
+          <Route path="/campaigns/:id/analytics" element={<CampaignAnalytics />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

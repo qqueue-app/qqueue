@@ -33,6 +33,9 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      APP_URL: https://${DOMAIN}
+      TRACKING_SECRET: ${TRACKING_SECRET}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -47,8 +50,12 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      DATABASE_URL: ${PROD_DATABASE_URL:-postgresql://qqueue:${POSTGRES_PASSWORD}@postgres:5432/qqueue}
       REDIS_HOST: ${PROD_REDIS_HOST:-redis}
       REDIS_PORT: ${PROD_REDIS_PORT:-6379}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      APP_URL: https://${DOMAIN}
+      TRACKING_SECRET: ${TRACKING_SECRET}
     depends_on:
       migrate:
         condition: service_completed_successfully

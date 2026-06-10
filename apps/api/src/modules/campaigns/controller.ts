@@ -27,6 +27,14 @@ export const campaignController = {
     res.json({ data: campaign });
   },
 
+  async analytics(req: Request, res: Response) {
+    const analytics = await campaignService.analytics(
+      String(req.params.id),
+      req.userId!
+    );
+    res.json({ data: analytics });
+  },
+
   async create(req: Request, res: Response) {
     const input = campaignSchema.parse(req.body);
     const campaign = await campaignService.create(input);

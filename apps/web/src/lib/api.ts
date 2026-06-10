@@ -114,6 +114,30 @@ export interface DashboardSummary {
   }>;
 }
 
+export interface CampaignAnalytics {
+  campaign: { id: string; name: string; status: string };
+  totals: {
+    recipients: number;
+    sent: number;
+    failed: number;
+    delivered: number;
+    opened: number;
+    uniqueOpened: number;
+    clicked: number;
+    uniqueClicked: number;
+    bounced: number;
+    complained: number;
+  };
+  rates: { open: number; click: number; bounce: number };
+  links: Array<{ url: string; clicks: number }>;
+  recentEvents: Array<{
+    id: string;
+    type: string;
+    occurredAt: string;
+    toEmail: string;
+  }>;
+}
+
 interface ApiErrorIssue {
   path?: (string | number)[];
   message?: string;
@@ -405,6 +429,10 @@ export const api = {
     return request<Campaign[]>(
       `/api/v1/campaigns?organizationId=${encodeURIComponent(organizationId)}`
     );
+  },
+
+  campaignAnalytics(id: string) {
+    return request<CampaignAnalytics>(`/api/v1/campaigns/${id}/analytics`);
   },
 
   createCampaign(input: Record<string, unknown>) {

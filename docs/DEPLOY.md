@@ -39,6 +39,11 @@ PROD_REDIS_PORT=
 JWT_ACCESS_SECRET=replace-with-openssl-rand-hex-32
 JWT_REFRESH_SECRET=replace-with-openssl-rand-hex-32
 ENCRYPTION_KEY=replace-with-openssl-rand-hex-32
+
+# Analytics (Phase 5). APP_URL is derived from DOMAIN by compose, so you only
+# need to set the secrets here.
+TRACKING_SECRET=replace-with-openssl-rand-hex-32
+WEBHOOK_SECRET=replace-with-openssl-rand-hex-32
 ```
 
 Generate each secret with:
@@ -48,6 +53,33 @@ openssl rand -hex 32
 ```
 
 Keep `ENCRYPTION_KEY` stable. It is used to encrypt stored SMTP credentials.
+Keep `TRACKING_SECRET` stable too — rotating it invalidates open/click links in
+already-sent emails.
+
+## Email analytics
+
+Open and click tracking work out of the box: the worker injects a tracking
+pixel and rewrites links to `https://<DOMAIN>/api/v1/track/...` at send time,
+and the public endpoints record `OPENED`/`CLICKED` events. Per-campaign stats
+are on each campaign's analytics page in the web app.
+
+Bounces are captured two ways:
+
+- **Synchronous rejections** — if your SMTP server rejects a recipient at send
+  time, it is recorded as a `BOUNCED` event and the contact is marked bounced.
+- **Asynchronous bounces/complaints** — point your email provider's webhook at
+  `POST https://<DOMAIN>/api/v1/webhooks/email-events` with the header
+  `X-Webhook-Secret: <WEBHOOK_SECRET>` and a JSON body:
+
+  ```json
+  { "type": "BOUNCED", "messageId": "<provider-message-id>", "reason": "..." }
+  ```
+
+  `type` is one of `DELIVERED`, `BOUNCED`, `COMPLAINED`. The event is correlated
+  to the original send by `messageId` (the SMTP message id QQueue stores), or by
+  `emailJobId`. Map your provider's payload (SES/SNS, SendGrid, Mailgun,
+  Postmark, …) to this shape with a small relay or function. Leave
+  `WEBHOOK_SECRET` blank to disable the endpoint.
 
 To use external Postgres or Redis, set `PROD_DATABASE_URL`,
 `PROD_REDIS_HOST`, and `PROD_REDIS_PORT`. Otherwise the production stack uses

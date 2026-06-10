@@ -8,12 +8,17 @@ import { dashboardRouter } from "../modules/dashboard/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
 import { templateRouter } from "../modules/templates/routes.js";
+import { trackingRouter } from "../modules/tracking/routes.js";
 import { transactionalEmailRouter } from "../modules/transactional-email/routes.js";
 
 export const v1Router = Router();
 
 // Public auth endpoints (register/login/refresh).
 v1Router.use("/auth", authRouter);
+
+// Public analytics endpoints: open/click pixels hit by mail clients and ESP
+// bounce webhooks, none of which carry an access token.
+v1Router.use(trackingRouter);
 
 // Everything below requires a valid access token.
 v1Router.use(requireAuth);
