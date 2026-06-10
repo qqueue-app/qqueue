@@ -60,11 +60,38 @@
 
 ## Phase 6: Transactional API
 
-- [ ] API keys
-- [ ] Send email endpoint
-- [ ] Template variables
-- [ ] SDK
-- [ ] Webhooks
+- [x] API keys
+- [x] Send email endpoint
+- [x] Template variables
+- [x] SDK
+- [x] Webhooks
+
+### Phase 6 follow-up notes
+
+These are polish/hardening items to pick up after the main Phase 6 surface:
+
+- [ ] Transactional API docs:
+      API key setup, SDK install/use, curl examples, self-hosted `baseUrl`,
+      template variables, webhook signing, and retry semantics.
+- [ ] Stabilize the public send response shape:
+      prefer a compact `{ id, status }` response over exposing nested internal
+      `{ emailJob, providerResult }` details.
+- [ ] Add stable API error codes:
+      machine-readable codes for invalid API key, missing SMTP connection,
+      invalid template, SMTP failure, invalid schedule, and validation errors.
+- [ ] Improve SMTP/secret UX:
+      clearer error when encrypted SMTP credentials cannot be decrypted, plus
+      docs explaining that changing `ENCRYPTION_KEY` invalidates stored SMTP
+      secrets.
+- [ ] Add webhook delivery detail UI:
+      recent attempts per endpoint, response status, error message, delivered
+      time, retry state, and a manual retry action.
+- [ ] Add webhook verification docs/examples:
+      sample HMAC verification code for Node/Express and notes about timestamp
+      tolerance/replay protection.
+- [ ] Add SDK release hygiene:
+      changelog, package publishing checklist, install smoke test, and version
+      bump flow for `qqueue-sdk`.
 
 ## Licensing & Open-Core Model
 

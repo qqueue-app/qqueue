@@ -71,6 +71,8 @@ model Organization {
   emailJobs       EmailJob[]
   emailEvents     EmailEvent[]
   apiKeys         ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  webhookDeliveries WebhookDelivery[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 }
@@ -216,6 +218,7 @@ model EmailEvent {
   metadata       Json?
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   emailJob       EmailJob       @relation(fields: [emailJobId], references: [id], onDelete: Cascade)
+  webhookDeliveries WebhookDelivery[]
   occurredAt     DateTime       @default(now())
 }
 
@@ -230,4 +233,43 @@ model ApiKey {
   user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt      DateTime     @default(now())
   revokedAt      DateTime?
+}
+
+model WebhookEndpoint {
+  id              String            @id @default(cuid())
+  organizationId  String
+  name            String
+  url             String
+  events          String[]
+  secretEncrypted String
+  enabled         Boolean           @default(true)
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries      WebhookDelivery[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+}
+
+model WebhookDelivery {
+  id              String           @id @default(cuid())
+  organizationId  String
+  endpointId      String
+  emailEventId    String
+  eventName       String
+  payload         Json
+  status          String           @default("PENDING")
+  attempts        Int              @default(0)
+  responseStatus  Int?
+  error           String?
+  nextAttemptAt   DateTime?
+  deliveredAt     DateTime?
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  endpoint        WebhookEndpoint  @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  emailEvent      EmailEvent       @relation(fields: [emailEventId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([endpointId])
+  @@index([emailEventId])
+  @@index([status, nextAttemptAt])
 }

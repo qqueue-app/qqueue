@@ -1,13 +1,16 @@
 import { prisma } from "./lib/prisma.js";
 import { campaignProcessingQueue } from "./queues/campaign-processing.queue.js";
 import { emailSendingQueue } from "./queues/email-sending.queue.js";
+import { webhookDeliveryQueue } from "./queues/webhook-delivery.queue.js";
 import { startCampaignProcessingWorker } from "./workers/campaign-processing.worker.js";
 import { startEmailSendingWorker } from "./workers/email-sending.worker.js";
+import { startWebhookDeliveryWorker } from "./workers/webhook-delivery.worker.js";
 
 async function recoverQueuedWork() {
   const now = new Date();
 
-  const [scheduledOneShots, recurring, emailJobs] = await Promise.all([
+  const [scheduledOneShots, recurring, emailJobs, webhookDeliveries] =
+    await Promise.all([
     // One-shot scheduled campaigns: their delayed job may have been lost (e.g.
     // Redis flush). Re-enqueue with the same occurrenceKey so we never create a
     // second run. SENDING campaigns recover via their QUEUED email jobs below.
@@ -20,11 +23,15 @@ async function recoverQueuedWork() {
       where: { status: "SCHEDULED", cronExpression: { not: null } },
       select: { id: true, cronExpression: true, timezone: true }
     }),
-    prisma.emailJob.findMany({
-      where: { status: "QUEUED" },
-      select: { id: true, scheduledAt: true }
-    })
-  ]);
+      prisma.emailJob.findMany({
+        where: { status: "QUEUED" },
+        select: { id: true, scheduledAt: true }
+      }),
+      prisma.webhookDelivery.findMany({
+        where: { status: { in: ["PENDING", "FAILED"] } },
+        select: { id: true, nextAttemptAt: true }
+      })
+    ]);
 
   if (scheduledOneShots.length > 0) {
     await campaignProcessingQueue.addBulk(
@@ -80,9 +87,32 @@ async function recoverQueuedWork() {
       }))
     );
   }
+
+  if (webhookDeliveries.length > 0) {
+    await webhookDeliveryQueue.addBulk(
+      webhookDeliveries.map((delivery) => ({
+        name: "deliver-webhook",
+        data: { deliveryId: delivery.id },
+        opts: {
+          delay:
+            delivery.nextAttemptAt &&
+            delivery.nextAttemptAt.getTime() > now.getTime()
+              ? delivery.nextAttemptAt.getTime() - now.getTime()
+              : undefined,
+          jobId: `webhook-${delivery.id}`,
+          attempts: 5,
+          backoff: { type: "exponential", delay: 30_000 }
+        }
+      }))
+    );
+  }
 }
 
-const workers = [startEmailSendingWorker(), startCampaignProcessingWorker()];
+const workers = [
+  startEmailSendingWorker(),
+  startCampaignProcessingWorker(),
+  startWebhookDeliveryWorker()
+];
 
 await recoverQueuedWork();
 

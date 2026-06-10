@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
 import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { decryptSecret } from "../lib/crypto.js";
+import { enqueueLatestWebhookDeliveries } from "../lib/outbound-webhooks.js";
 import { prisma } from "../lib/prisma.js";
 import type { EmailSendingJob } from "../queues/email-sending.queue.js";
 
@@ -102,6 +103,12 @@ export function startEmailSendingWorker() {
             })
           ]);
 
+          await enqueueLatestWebhookDeliveries({
+            organizationId: emailJob.organizationId,
+            emailJobId: emailJob.id,
+            type: "BOUNCED"
+          });
+
           await settleRunIfComplete(emailJob.campaignRunId);
           return;
         }
@@ -127,6 +134,12 @@ export function startEmailSendingWorker() {
           }
         });
 
+        await enqueueLatestWebhookDeliveries({
+          organizationId: emailJob.organizationId,
+          emailJobId: emailJob.id,
+          type: "SENT"
+        });
+
         await settleRunIfComplete(emailJob.campaignRunId);
       } catch (error) {
         const isFinalAttempt =
@@ -147,6 +160,12 @@ export function startEmailSendingWorker() {
               }
             }
           }
+        });
+
+        await enqueueLatestWebhookDeliveries({
+          organizationId: emailJob.organizationId,
+          emailJobId: emailJob.id,
+          type: "FAILED"
         });
 
         if (isFinalAttempt) {

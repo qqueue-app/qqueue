@@ -130,6 +130,53 @@ export interface EmailEvent {
   metadata?: Record<string, unknown>;
 }
 
+export interface ApiKey {
+  id: string;
+  organizationId: string;
+  userId?: string | null;
+  name: string;
+  lastUsedAt?: string | null;
+  createdAt: string;
+  revokedAt?: string | null;
+}
+
+export type OutboundWebhookEventName =
+  | "email.queued"
+  | "email.sent"
+  | "email.delivered"
+  | "email.opened"
+  | "email.clicked"
+  | "email.bounced"
+  | "email.complained"
+  | "email.failed";
+
+export interface WebhookEndpoint {
+  id: string;
+  organizationId: string;
+  name: string;
+  url: string;
+  events: OutboundWebhookEventName[];
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  organizationId: string;
+  endpointId: string;
+  emailEventId: string;
+  eventName: OutboundWebhookEventName;
+  status: string;
+  attempts: number;
+  responseStatus?: number | null;
+  error?: string | null;
+  nextAttemptAt?: string | null;
+  deliveredAt?: string | null;
+  createdAt: string;
+}
+
 export const emailAddressSchema = z.string().email();
 
 export const registerSchema = z.object({
@@ -247,6 +294,55 @@ export const sendEmailSchema = z.object({
 });
 
 export type SendEmailInput = z.infer<typeof sendEmailSchema>;
+
+export const publicSendEmailSchema = sendEmailSchema.omit({
+  organizationId: true
+});
+
+export type PublicSendEmailInput = z.infer<typeof publicSendEmailSchema>;
+
+export const apiKeyCreateSchema = z.object({
+  organizationId: z.string().min(1),
+  name: z.string().min(1)
+});
+
+export type ApiKeyCreateInput = z.infer<typeof apiKeyCreateSchema>;
+
+export const outboundWebhookEventNames = [
+  "email.queued",
+  "email.sent",
+  "email.delivered",
+  "email.opened",
+  "email.clicked",
+  "email.bounced",
+  "email.complained",
+  "email.failed"
+] as const;
+
+export const outboundWebhookEventNameSchema = z.enum(
+  outboundWebhookEventNames
+);
+
+export const webhookEndpointSchema = z.object({
+  organizationId: z.string().min(1),
+  name: z.string().min(1),
+  url: z.string().url(),
+  events: z.array(outboundWebhookEventNameSchema).min(1),
+  enabled: z.boolean().optional()
+});
+
+export type WebhookEndpointInput = z.infer<typeof webhookEndpointSchema>;
+
+export const webhookEndpointUpdateSchema = webhookEndpointSchema
+  .omit({ organizationId: true })
+  .partial()
+  .refine((input) => Object.keys(input).length > 0, {
+    message: "At least one field is required"
+  });
+
+export type WebhookEndpointUpdateInput = z.infer<
+  typeof webhookEndpointUpdateSchema
+>;
 
 export const smtpConnectionSchema = z.object({
   organizationId: z.string().min(1),

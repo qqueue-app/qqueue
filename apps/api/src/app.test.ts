@@ -657,8 +657,87 @@ describe("transactional-email send", () => {
         subject: "Hi",
         text: "Body",
         scheduledAt: "2999-01-01T00:00:00.000Z"
-      });
+    });
     expect(res.status).toBe(202);
+  });
+
+  it("accepts an API key without organizationId in the request body", async () => {
+    prismaMock.apiKey.findFirst.mockResolvedValue({
+      id: "api_key_1",
+      organizationId: "org_1"
+    } as never);
+    prismaMock.apiKey.update.mockResolvedValue({ id: "api_key_1" } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp_1",
+      organizationId: "org_1",
+      fromEmail: "from@b.com",
+      fromName: null
+    } as never);
+    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+
+    const res = await request(app)
+      .post("/api/v1/transactional-email/send")
+      .set("Authorization", "Bearer qq_live_test")
+      .send({
+        to: "x@y.com",
+        subject: "Hi",
+        text: "Body",
+        scheduledAt: "2999-01-01T00:00:00.000Z"
+      });
+
+    expect(res.status).toBe(202);
+    expect(prismaMock.emailJob.create.mock.calls[0][0].data.organizationId).toBe(
+      "org_1"
+    );
+  });
+});
+
+describe("api key routes", () => {
+  it("creates an API key and returns the plaintext key once", async () => {
+    prismaMock.apiKey.create.mockResolvedValue({
+      id: "api_key_1",
+      organizationId: "org_1",
+      userId: "user_1",
+      name: "Production"
+    } as never);
+
+    const res = await request(app)
+      .post("/api/v1/api-keys")
+      .set("Authorization", auth)
+      .send({ organizationId: "org_1", name: "Production" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.key).toMatch(/^qq_live_/);
+    expect(res.body.data.apiKey).toMatchObject({ id: "api_key_1" });
+  });
+
+  it("lists API keys for an organization", async () => {
+    prismaMock.apiKey.findMany.mockResolvedValue([] as never);
+
+    const res = await request(app)
+      .get("/api/v1/api-keys?organizationId=org_1")
+      .set("Authorization", auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ data: [] });
+  });
+
+  it("revokes an API key", async () => {
+    prismaMock.apiKey.findFirst.mockResolvedValue({
+      id: "api_key_1",
+      organizationId: "org_1"
+    } as never);
+    prismaMock.apiKey.update.mockResolvedValue({
+      id: "api_key_1",
+      revokedAt: new Date(0)
+    } as never);
+
+    const res = await request(app)
+      .post("/api/v1/api-keys/api_key_1/revoke")
+      .set("Authorization", auth);
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.apiKey.update).toHaveBeenCalled();
   });
 });
 

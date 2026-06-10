@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { emailAddressSchema } from "@qqueue/shared";
 import { prisma } from "../../lib/prisma.js";
+import { webhookEndpointService } from "../webhooks/service.js";
 
 // A 1x1 fully transparent GIF, served as the open-tracking pixel.
 export const TRACKING_PIXEL = Buffer.from(
@@ -58,6 +59,19 @@ export const trackingService = {
         }
       ]
     });
+
+    if (!delivered) {
+      await webhookEndpointService.enqueueLatestForEmailEvent({
+        organizationId: job.organizationId,
+        emailJobId,
+        type: "DELIVERED"
+      });
+    }
+    await webhookEndpointService.enqueueLatestForEmailEvent({
+      organizationId: job.organizationId,
+      emailJobId,
+      type: "OPENED"
+    });
   },
 
   /** Record a link click. `url` is the verified original destination. */
@@ -67,7 +81,7 @@ export const trackingService = {
       return;
     }
 
-    await prisma.emailEvent.create({
+    const event = await prisma.emailEvent.create({
       data: {
         organizationId: job.organizationId,
         emailJobId,
@@ -75,6 +89,8 @@ export const trackingService = {
         metadata: { url }
       }
     });
+
+    await webhookEndpointService.enqueueForEmailEvent(event.id);
   },
 
   /**
@@ -98,7 +114,7 @@ export const trackingService = {
       return false;
     }
 
-    await prisma.emailEvent.create({
+    const event = await prisma.emailEvent.create({
       data: {
         organizationId: job.organizationId,
         emailJobId: job.id,
@@ -110,6 +126,8 @@ export const trackingService = {
         }
       }
     });
+
+    await webhookEndpointService.enqueueForEmailEvent(event.id);
 
     if (input.type === "BOUNCED" || input.type === "COMPLAINED") {
       await prisma.contact.updateMany({

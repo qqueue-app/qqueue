@@ -9,6 +9,8 @@ declare global {
       // Set by requireOrgMembership once the caller is confirmed a member.
       organizationId?: string;
       orgRole?: UserRole;
+      // Set by API-key auth for public developer API calls.
+      apiKeyId?: string;
     }
   }
 }

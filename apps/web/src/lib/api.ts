@@ -52,6 +52,41 @@ export interface SMTPConnection {
   isDefault: boolean;
 }
 
+export interface ApiKey {
+  id: string;
+  organizationId: string;
+  userId?: string | null;
+  name: string;
+  lastUsedAt?: string | null;
+  createdAt: string;
+  revokedAt?: string | null;
+}
+
+export const outboundWebhookEvents = [
+  "email.queued",
+  "email.sent",
+  "email.delivered",
+  "email.opened",
+  "email.clicked",
+  "email.bounced",
+  "email.complained",
+  "email.failed"
+] as const;
+
+export type OutboundWebhookEvent = (typeof outboundWebhookEvents)[number];
+
+export interface WebhookEndpoint {
+  id: string;
+  organizationId: string;
+  name: string;
+  url: string;
+  events: OutboundWebhookEvent[];
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+}
+
 export interface Campaign {
   id: string;
   organizationId: string;
@@ -502,5 +537,52 @@ export const api = {
         body: JSON.stringify(input)
       }
     );
+  },
+
+  listApiKeys(organizationId: string) {
+    return request<ApiKey[]>(
+      `/api/v1/api-keys?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createApiKey(input: { organizationId: string; name: string }) {
+    return request<{ apiKey: ApiKey; key: string }>("/api/v1/api-keys", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  revokeApiKey(id: string) {
+    return request<ApiKey>(`/api/v1/api-keys/${id}/revoke`, {
+      method: "POST"
+    });
+  },
+
+  listWebhookEndpoints(organizationId: string) {
+    return request<WebhookEndpoint[]>(
+      `/api/v1/webhook-endpoints?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createWebhookEndpoint(input: {
+    organizationId: string;
+    name: string;
+    url: string;
+    events: OutboundWebhookEvent[];
+    enabled?: boolean;
+  }) {
+    return request<{ endpoint: WebhookEndpoint; secret: string }>(
+      "/api/v1/webhook-endpoints",
+      {
+        method: "POST",
+        body: JSON.stringify(input)
+      }
+    );
+  },
+
+  deleteWebhookEndpoint(id: string) {
+    return request<void>(`/api/v1/webhook-endpoints/${id}`, {
+      method: "DELETE"
+    });
   }
 };

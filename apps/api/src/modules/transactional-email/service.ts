@@ -6,6 +6,7 @@ import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 import { smtpConnectionService } from "../smtp-connections/service.js";
+import { webhookEndpointService } from "../webhooks/service.js";
 
 function renderVariables(
   value: string | null | undefined,
@@ -27,6 +28,23 @@ function formatFrom(connection: { fromEmail: string; fromName: string | null }) 
   }
 
   return `${connection.fromName} <${connection.fromEmail}>`;
+}
+
+function parseScheduledAt(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const scheduledAt = new Date(value);
+  if (Number.isNaN(scheduledAt.getTime())) {
+    throw new HttpError(400, "scheduledAt must be a valid ISO date");
+  }
+
+  if (scheduledAt.getTime() <= Date.now()) {
+    throw new HttpError(400, "scheduledAt must be in the future");
+  }
+
+  return scheduledAt;
 }
 
 export const transactionalEmailService = {
@@ -70,10 +88,10 @@ export const transactionalEmailService = {
       );
     }
 
-    const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
+    const scheduledAt = parseScheduledAt(input.scheduledAt);
 
     // Send later: queue the email for a future time instead of sending inline.
-    if (scheduledAt && scheduledAt.getTime() > Date.now()) {
+    if (scheduledAt) {
       const queuedJob = await prisma.emailJob.create({
         data: {
           organizationId: input.organizationId,
@@ -106,6 +124,12 @@ export const transactionalEmailService = {
         }
       );
 
+      await webhookEndpointService.enqueueLatestForEmailEvent({
+        organizationId: input.organizationId,
+        emailJobId: queuedJob.id,
+        type: "QUEUED"
+      });
+
       return { emailJob: queuedJob, providerResult: null };
     }
 
@@ -127,6 +151,12 @@ export const transactionalEmailService = {
           }
         }
       }
+    });
+
+    await webhookEndpointService.enqueueLatestForEmailEvent({
+      organizationId: input.organizationId,
+      emailJobId: emailJob.id,
+      type: "QUEUED"
     });
 
     try {
@@ -165,6 +195,12 @@ export const transactionalEmailService = {
         }
       });
 
+      await webhookEndpointService.enqueueLatestForEmailEvent({
+        organizationId: input.organizationId,
+        emailJobId: emailJob.id,
+        type: "SENT"
+      });
+
       return {
         emailJob: sentJob,
         providerResult: result
@@ -187,7 +223,20 @@ export const transactionalEmailService = {
         }
       });
 
-      throw new HttpError(502, "SMTP send failed");
+      await webhookEndpointService.enqueueLatestForEmailEvent({
+        organizationId: input.organizationId,
+        emailJobId: emailJob.id,
+        type: "FAILED"
+      });
+
+      const message =
+        error instanceof Error ? error.message : "Unknown send error";
+      throw new HttpError(
+        502,
+        env.NODE_ENV === "production"
+          ? "SMTP send failed"
+          : `SMTP send failed: ${message}`
+      );
     }
   }
 };

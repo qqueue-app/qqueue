@@ -87,6 +87,42 @@ describe("transactionalEmailService.send", () => {
     expect(providerSend).not.toHaveBeenCalled();
   });
 
+  it("rejects scheduledAt values that are not in the future", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+
+    await expect(
+      transactionalEmailService.send({
+        organizationId: "org_1",
+        to: "x@y.com",
+        subject: "Hi",
+        text: "Body",
+        scheduledAt: "2025-01-01T00:00:00.000Z"
+      })
+    ).rejects.toThrow("scheduledAt must be in the future");
+
+    expect(providerSend).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid scheduledAt values", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+
+    await expect(
+      transactionalEmailService.send({
+        organizationId: "org_1",
+        to: "x@y.com",
+        subject: "Hi",
+        text: "Body",
+        scheduledAt: "not-a-date"
+      })
+    ).rejects.toThrow("scheduledAt must be a valid ISO date");
+
+    expect(providerSend).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
   it("renders template variables and sends immediately, marking the job SENT", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
     prismaMock.template.findFirst.mockResolvedValue({

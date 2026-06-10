@@ -290,6 +290,17 @@ describe("api lib", () => {
     await api.pauseCampaign("cmp1");
     await api.resumeCampaign("cmp1");
     await api.sendEmail({ to: "a@b.com" });
+    await api.listApiKeys("org_1");
+    await api.createApiKey({ organizationId: "org_1", name: "SDK" });
+    await api.revokeApiKey("key_1");
+    await api.listWebhookEndpoints("org_1");
+    await api.createWebhookEndpoint({
+      organizationId: "org_1",
+      name: "App",
+      url: "https://example.com/webhooks/qqueue",
+      events: ["email.sent"]
+    });
+    await api.deleteWebhookEndpoint("wh_1");
 
     const urls = fetchMock.mock.calls.map((c) => c[0]);
     expect(urls.some((u: string) => u.includes("/dashboard/summary"))).toBe(true);
@@ -299,5 +310,7 @@ describe("api lib", () => {
     expect(
       urls.some((u: string) => u.includes("/transactional-email/send"))
     ).toBe(true);
+    expect(urls.some((u: string) => u.includes("/api-keys"))).toBe(true);
+    expect(urls.some((u: string) => u.includes("/webhook-endpoints"))).toBe(true);
   });
 });
