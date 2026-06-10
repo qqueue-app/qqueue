@@ -10,6 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "prisma:generate": "node --env-file=../../.env ./node_modules/prisma/build/index.js generate",
     "prisma:migrate": "node --env-file=../../.env ./node_modules/prisma/build/index.js migrate dev"
   },

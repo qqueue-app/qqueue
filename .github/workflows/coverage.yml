@@ -1,0 +1,67 @@
+name: Coverage
+
+# Runs the full test suite with coverage on every PR targeting main (as a gate)
+# and on every push/merge to main. On main it regenerates the coverage badges
+# and commits them back so the README always reflects the latest numbers.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Prisma client is imported (types + runtime error classes) by the API,
+      # so it must be generated before building/testing. `generate` does not
+      # need a database connection.
+      - name: Generate Prisma client
+        run: pnpm --filter @qqueue/api exec prisma generate
+
+      # `turbo test:coverage` builds upstream workspace packages first (so
+      # @qqueue/shared etc. resolve) and enforces the per-package thresholds.
+      - name: Run tests with coverage
+        run: pnpm test:coverage
+
+      - name: Generate coverage badges
+        run: pnpm coverage:badges
+
+      # Only commit badges on main (i.e. push / merged PR), never on PR runs.
+      - name: Commit coverage badges
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add badges/
+          if git diff --staged --quiet; then
+            echo "Coverage badges unchanged."
+          else
+            git commit -m "chore(ci): update coverage badges [skip ci]"
+            git push
+          fi
