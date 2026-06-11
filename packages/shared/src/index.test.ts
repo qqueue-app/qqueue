@@ -13,13 +13,16 @@ import {
   isValidTimezone,
   loginSchema,
   organizationSchema,
+  outboundWebhookEventNameSchema,
   refreshSchema,
   registerSchema,
   sendEmailSchema,
   smtpConnectionSchema,
   smtpConnectionUpdateSchema,
   templateSchema,
-  timezoneSchema
+  timezoneSchema,
+  webhookEndpointSchema,
+  webhookEndpointUpdateSchema
 } from "./index.js";
 
 describe("isValidCron", () => {
@@ -221,6 +224,41 @@ describe("sendEmailSchema", () => {
     expect(
       sendEmailSchema.safeParse({ organizationId: "org_1", to: "nope" }).success
     ).toBe(false);
+  });
+});
+
+describe("webhook endpoint schemas", () => {
+  it("accepts supported outbound webhook events", () => {
+    expect(outboundWebhookEventNameSchema.parse("email.delivered")).toBe(
+      "email.delivered"
+    );
+    expect(outboundWebhookEventNameSchema.safeParse("email.unknown").success).toBe(
+      false
+    );
+  });
+
+  it("accepts a valid webhook endpoint", () => {
+    expect(
+      webhookEndpointSchema.safeParse({
+        organizationId: "org_1",
+        name: "Production webhook",
+        url: "https://example.com/webhooks/qqueue",
+        events: ["email.sent", "email.failed"],
+        enabled: true
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects empty webhook endpoint updates", () => {
+    expect(webhookEndpointUpdateSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("accepts partial webhook endpoint updates", () => {
+    expect(
+      webhookEndpointUpdateSchema.safeParse({
+        events: ["email.opened"]
+      }).success
+    ).toBe(true);
   });
 });
 
