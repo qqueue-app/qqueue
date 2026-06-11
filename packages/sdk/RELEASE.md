@@ -36,25 +36,22 @@ node --input-type=module -e "import { QQueueClient } from 'qqueue-sdk'; new QQue
 
 The import should print `ok` without module resolution errors.
 
-## 4. Publish
+## 4. Tag and Publish
 
-```sh
-cd packages/sdk
-npm publish --access public
-```
-
-After publishing, verify the package page and install metadata:
-
-```sh
-npm view qqueue-sdk version
-npm view qqueue-sdk dist.tarball
-```
-
-## 5. Tag
-
-Tag the repo with the SDK version after publish succeeds:
+Create and push a release tag that matches `packages/sdk/package.json`.
+GitHub Actions will run the SDK preflight checks and publish the package to npm.
 
 ```sh
 git tag qqueue-sdk-v<version>
 git push origin qqueue-sdk-v<version>
+```
+
+The workflow requires an npm automation token stored as the repository secret
+`NPM_TOKEN`.
+
+After the workflow succeeds, verify the package page and install metadata:
+
+```sh
+npm view qqueue-sdk version
+npm view qqueue-sdk dist.tarball
 ```

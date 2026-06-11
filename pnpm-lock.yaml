@@ -257,10 +257,6 @@ importers:
         version: 5.9.3
 
   packages/sdk:
-    dependencies:
-      '@qqueue/shared':
-        specifier: workspace:*
-        version: link:../shared
     devDependencies:
       typescript:
         specifier: ^5.7.2
