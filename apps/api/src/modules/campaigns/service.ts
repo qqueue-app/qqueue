@@ -330,7 +330,10 @@ export const campaignService = {
     ]);
 
     const counts = Object.fromEntries(
-      byType.map((row) => [row.type, row._count._all])
+      byType.map((row: { type: string; _count: { _all: number } }) => [
+        row.type,
+        row._count._all
+      ])
     ) as Partial<Record<string, number>>;
 
     const opened = counts.OPENED ?? 0;
@@ -374,12 +377,19 @@ export const campaignService = {
         bounce: rate(bounced, recipients)
       },
       links,
-      recentEvents: recentEvents.map((event) => ({
-        id: event.id,
-        type: event.type,
-        occurredAt: event.occurredAt.toISOString(),
-        toEmail: event.emailJob.toEmail
-      }))
+      recentEvents: recentEvents.map(
+        (event: {
+          id: string;
+          type: string;
+          occurredAt: Date;
+          emailJob: { toEmail: string };
+        }) => ({
+          id: event.id,
+          type: event.type,
+          occurredAt: event.occurredAt.toISOString(),
+          toEmail: event.emailJob.toEmail
+        })
+      )
     };
   },
 

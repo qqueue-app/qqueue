@@ -215,6 +215,23 @@ export const refreshSchema = z.object({
 
 export type RefreshInput = z.infer<typeof refreshSchema>;
 
+export const passwordResetRequestSchema = z.object({
+  email: emailAddressSchema
+});
+
+export type PasswordResetRequestInput = z.infer<
+  typeof passwordResetRequestSchema
+>;
+
+export const passwordResetConfirmSchema = z.object({
+  token: z.string().min(32),
+  password: z.string().min(8)
+});
+
+export type PasswordResetConfirmInput = z.infer<
+  typeof passwordResetConfirmSchema
+>;
+
 export const organizationSchema = z.object({
   name: z.string().min(1)
 });

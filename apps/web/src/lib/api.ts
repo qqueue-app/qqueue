@@ -102,6 +102,32 @@ export interface WebhookDelivery {
   createdAt: string;
 }
 
+export interface QueueJob {
+  id: string;
+  name: string;
+  queueName: string;
+  data: Record<string, unknown>;
+  attemptsMade: number;
+  attempts: number;
+  timestamp: string;
+  processedOn?: string | null;
+  finishedOn?: string | null;
+  failedReason?: string | null;
+}
+
+export interface QueueOperationsSummary {
+  name: string;
+  counts: {
+    queued: number;
+    processing: number;
+    failed: number;
+    completed: number;
+  };
+  queuedJobs: QueueJob[];
+  processingJobs: QueueJob[];
+  failedJobs: QueueJob[];
+}
+
 export interface Campaign {
   id: string;
   organizationId: string;
@@ -368,6 +394,26 @@ export const api = {
     });
   },
 
+  requestPasswordReset(input: { email: string }) {
+    return request<{ message: string; resetToken?: string }>(
+      "/api/v1/auth/password-reset/request",
+      {
+        method: "POST",
+        body: JSON.stringify(input)
+      }
+    );
+  },
+
+  resetPassword(input: { token: string; password: string }) {
+    return request<{ message: string }>(
+      "/api/v1/auth/password-reset/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify(input)
+      }
+    );
+  },
+
   listOrganizations() {
     return request<Organization[]>("/api/v1/organizations");
   },
@@ -612,6 +658,22 @@ export const api = {
       `/api/v1/webhook-endpoints/deliveries/${deliveryId}/retry`,
       {
         method: "POST"
+      }
+    );
+  },
+
+  queueOperations(organizationId: string) {
+    return request<QueueOperationsSummary[]>(
+      `/api/v1/queue-operations?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  retryQueueJob(queueName: string, jobId: string, organizationId: string) {
+    return request<QueueJob>(
+      `/api/v1/queue-operations/${encodeURIComponent(queueName)}/jobs/${encodeURIComponent(jobId)}/retry`,
+      {
+        method: "POST",
+        body: JSON.stringify({ organizationId })
       }
     );
   }

@@ -2,7 +2,7 @@
   "name": "qqueue-sdk",
   "version": "0.1.2",
   "description": "TypeScript SDK for the self-hosted QQueue email API.",
-  "license": "AGPL-3.0-only",
+  "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,6 +15,7 @@
   "files": [
     "dist",
     "CHANGELOG.md",
+    "LICENSE",
     "RELEASE.md",
     "README.md",
     "package.json"

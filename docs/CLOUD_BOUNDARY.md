@@ -6,20 +6,24 @@ QQueue uses an open-core model in a single repository:
 - Managed-cloud Phase 7 code lives under `apps/cloud/`.
 - `apps/cloud/` has its own commercial license.
 
-The goal is to keep the self-hosted product complete while placing hosted
-operations and commercial-only capabilities behind a clear license boundary.
+The open-source core should remain genuinely useful for self-hosters. The
+proprietary cloud layer should focus on managed convenience, billing,
+deliverability, abuse prevention, and hosted operations.
 
 ## AGPL Core
 
 Keep these in the AGPL core:
 
 - Authentication primitives
-- Organization membership and role basics
-- SMTP connection management
-- Contacts, templates, campaigns, transactional send APIs, and webhooks
-- Queue primitives and worker send flow
-- Shared Zod schemas and TypeScript contracts needed by self-hosted users
-- Generic provider abstractions
+- Organizations
+- SMTP connections
+- Contacts
+- Templates
+- Campaigns
+- Transactional API
+- Queues
+- Workers
+- Shared schemas/types
 
 ## Proprietary Cloud
 
@@ -27,12 +31,22 @@ Keep these in `apps/cloud/`:
 
 - Billing provider integrations
 - Plans, subscriptions, seats, billing customer IDs, and invoices
-- Usage metering and per-plan quota enforcement policy
-- Hosted signup and onboarding flows
+- Usage limits and per-plan quota enforcement policy
+- Hosted onboarding flows
 - Managed shared or pooled sending infrastructure
+- Abuse controls
+- Deliverability controls
+- Cloud admin dashboards
+- Advanced deliverability features
+- Reputation scoring
+- Warmup automation
+- Bounce intelligence
+- ISP-specific recommendations
+- Inbox placement analytics
+- Shared IP pool management
+- Multi-tenant hosted operations
 - Domain verification automation for the hosted service
-- Per-tenant operational controls, throttling policy, and abuse tooling
-- Cloud-only dashboards for usage, billing, and tenant operations
+- Per-tenant operational controls and throttling policy
 
 ## Dependency Direction
 
@@ -45,17 +59,17 @@ only the cloud policy or integration in `apps/cloud`.
 
 ## Tenant Boundary
 
-Treat `Organization` as the initial tenant and billing boundary unless a future
-product requirement proves a separate `Workspace` model is necessary. Before
-adding a separate workspace layer, document the user story that cannot be served
-by organizations alone.
+Treat `Organization` as the initial tenant, workspace, and billing boundary
+unless a future product requirement proves a separate `Workspace` model is
+necessary. Before adding a separate workspace layer, document the user story that
+cannot be served by organizations alone.
 
 ## Phase 7 Gates
 
 Before production cloud code ships:
 
-- Replace the placeholder commercial license with final legal terms.
+- Have the commercial license draft reviewed by qualified legal counsel.
 - Enforce contributor sign-off or CLA checks in CI.
-- Run a dependency license audit.
+- Run `pnpm license:audit`.
 - Audit all API and worker database access for tenant scoping.
 - Add cross-organization access tests for any touched module.

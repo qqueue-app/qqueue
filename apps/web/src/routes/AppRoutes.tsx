@@ -5,52 +5,62 @@ import { Skeleton } from "../components/ui/skeleton.js";
 
 const Campaigns = lazy(() =>
   import("../pages/Campaigns.js").then((module) => ({
-    default: module.Campaigns
+    default: module.Campaigns,
   }))
 );
 const CampaignAnalytics = lazy(() =>
   import("../pages/CampaignAnalytics.js").then((module) => ({
-    default: module.CampaignAnalytics
+    default: module.CampaignAnalytics,
   }))
 );
 const Contacts = lazy(() =>
   import("../pages/Contacts.js").then((module) => ({
-    default: module.Contacts
+    default: module.Contacts,
   }))
 );
 const ContactLists = lazy(() =>
   import("../pages/ContactLists.js").then((module) => ({
-    default: module.ContactLists
+    default: module.ContactLists,
   }))
 );
 const Dashboard = lazy(() =>
   import("../pages/Dashboard.js").then((module) => ({
-    default: module.Dashboard
+    default: module.Dashboard,
   }))
 );
 const Login = lazy(() =>
   import("../pages/Login.js").then((module) => ({
-    default: module.Login
+    default: module.Login,
+  }))
+);
+const LegalPage = lazy(() =>
+  import("../pages/Legal.js").then((module) => ({
+    default: module.LegalPage,
   }))
 );
 const Settings = lazy(() =>
   import("../pages/Settings.js").then((module) => ({
-    default: module.Settings
+    default: module.Settings,
+  }))
+);
+const QueueOperations = lazy(() =>
+  import("../pages/QueueOperations.js").then((module) => ({
+    default: module.QueueOperations,
   }))
 );
 const SendEmail = lazy(() =>
   import("../pages/SendEmail.js").then((module) => ({
-    default: module.SendEmail
+    default: module.SendEmail,
   }))
 );
 const SMTPConnections = lazy(() =>
   import("../pages/SMTPConnections.js").then((module) => ({
-    default: module.SMTPConnections
+    default: module.SMTPConnections,
   }))
 );
 const Templates = lazy(() =>
   import("../pages/Templates.js").then((module) => ({
-    default: module.Templates
+    default: module.Templates,
   }))
 );
 
@@ -70,6 +80,12 @@ export function AppRoutes() {
       <Routes>
         <Route path="/login" element={<Login mode="login" />} />
         <Route path="/register" element={<Login mode="register" />} />
+        <Route path="/forgot-password" element={<Login mode="forgot" />} />
+        <Route path="/reset-password" element={<Login mode="reset" />} />
+        <Route path="/terms" element={<LegalPage kind="terms" />} />
+        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+        <Route path="/licensing" element={<LegalPage kind="licensing" />} />
+        <Route path="/trademark" element={<LegalPage kind="trademark" />} />
         <Route element={<DashboardLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="/send-email" element={<SendEmail />} />
@@ -78,7 +94,11 @@ export function AppRoutes() {
           <Route path="/templates" element={<Templates />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/lists" element={<ContactLists />} />
-          <Route path="/campaigns/:id/analytics" element={<CampaignAnalytics />} />
+          <Route
+            path="/campaigns/:id/analytics"
+            element={<CampaignAnalytics />}
+          />
+          <Route path="/queue-operations" element={<QueueOperations />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

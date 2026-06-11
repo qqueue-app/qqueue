@@ -2,6 +2,6 @@
   "name": "@qqueue/cloud",
   "version": "0.1.0",
   "private": true,
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "UNLICENSED",
   "description": "Proprietary managed-cloud boundary for QQueue Phase 7."
 }

@@ -15,7 +15,12 @@ const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
-  api: { login: vi.fn(), register: vi.fn() }
+  api: {
+    login: vi.fn(),
+    register: vi.fn(),
+    requestPasswordReset: vi.fn(),
+    resetPassword: vi.fn()
+  }
 }));
 
 import { Login } from "./Login.js";
@@ -25,6 +30,8 @@ import { SessionProvider } from "../lib/session-context.js";
 const mockedApi = api as unknown as {
   login: ReturnType<typeof vi.fn>;
   register: ReturnType<typeof vi.fn>;
+  requestPasswordReset: ReturnType<typeof vi.fn>;
+  resetPassword: ReturnType<typeof vi.fn>;
 };
 
 function renderLogin(mode: "login" | "register" = "login") {
@@ -140,5 +147,35 @@ describe("Login", () => {
       screen.getByRole("button", { name: "Create an account" })
     );
     expect(navigate).toHaveBeenCalledWith("/register");
+  });
+
+  it("requests a password reset and shows the development token", async () => {
+    const user = userEvent.setup();
+    mockedApi.requestPasswordReset.mockResolvedValue({
+      message: "Reset prepared",
+      resetToken: "reset_token_123456789012345678901234567890"
+    });
+
+    renderLogin("forgot");
+    await user.type(screen.getByLabelText("Email"), "a@b.com");
+    await user.click(screen.getByRole("button", { name: "Prepare reset" }));
+
+    expect(await screen.findByText("Development reset token")).toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith("Reset prepared");
+  });
+
+  it("resets a password and returns to sign in", async () => {
+    const user = userEvent.setup();
+    mockedApi.resetPassword.mockResolvedValue({ message: "ok" });
+
+    renderLogin("reset");
+    await user.type(
+      screen.getByLabelText("Reset token"),
+      "reset_token_123456789012345678901234567890"
+    );
+    await user.type(screen.getByLabelText("Password"), "newpassword");
+    await user.click(screen.getByRole("button", { name: "Reset password" }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/login"));
   });
 });

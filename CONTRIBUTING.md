@@ -70,14 +70,14 @@ Add this to the top of new source files:
 
 ```ts
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright (C) QQueue contributors
+// Copyright (C) 2026 Nana Aboagye Boateng
 ```
 
 For proprietary managed-cloud files under `apps/cloud/`, use:
 
 ```ts
 // SPDX-License-Identifier: LicenseRef-QQueue-Commercial
-// Copyright (C) QQueue contributors
+// Copyright (C) 2026 Nana Aboagye Boateng
 ```
 
 ## Reporting bugs and requesting features

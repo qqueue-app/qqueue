@@ -1,5 +1,10 @@
 # Roadmap
 
+## Current Status Reference
+
+See [docs/STATUS.md](STATUS.md) for the current repository audit, completed
+work, known gaps, beta checklist, and recommended next sprint.
+
 ## Phase 0: Project Scaffold
 
 - [x] Monorepo setup
@@ -117,14 +122,27 @@ These should be in place before any cloud-only code lands:
       with its own commercial `LICENSE` and a README note marking the boundary.
 - [x] Decide the initial commercial feature boundary (what stays in the AGPL
       core vs. what is cloud-only).
-- [ ] Replace the placeholder commercial license with final legal terms,
+- [x] Replace the placeholder commercial license with a commercial license
+      draft.
+- [ ] Have the commercial license draft reviewed by qualified legal counsel,
       including pricing-tier feature rights and restrictions.
 - [x] Keep all multi-tenant/billing/usage-metering code on the proprietary side;
       keep reusable primitives (auth, queue, sending) in the AGPL core.
-- [ ] Confirm dependency licenses are AGPL-compatible (audit before release).
+- [x] Add repeatable dependency license audit (`pnpm license:audit`) and CI
+      enforcement.
+- [ ] Have final dependency license output reviewed before release.
 - [x] Wire up CLA enforcement (CLA-assistant bot or `Signed-off-by` checks in CI).
 
 See `docs/CLOUD_BOUNDARY.md` for the current Phase 7 boundary rules.
+
+### Public legal docs
+
+- [x] Add public QQueue Cloud Terms of Service and Privacy Policy drafts under
+      `docs/legal/`.
+- [ ] Have the SaaS Terms of Service and Privacy Policy reviewed by qualified
+      legal counsel before serious commercial launch.
+- [ ] Add a data processing agreement, subprocessor list, cookie policy, SLA,
+      and enterprise terms before larger customer or enterprise sales.
 
 ### Phase 7 design notes (planning)
 

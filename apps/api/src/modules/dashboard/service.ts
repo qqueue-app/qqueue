@@ -103,7 +103,16 @@ export const dashboardService = {
         hasTemplates: templates > 0
       },
       defaultSmtpConnection,
-      recentEmailJobs: recentEmailJobs.map((job) => ({
+      recentEmailJobs: recentEmailJobs.map(
+        (job: {
+          id: string;
+          toEmail: string;
+          subject: string;
+          status: string;
+          createdAt: Date;
+          sentAt: Date | null;
+          smtpConnection: { name: string } | null;
+        }) => ({
         id: job.id,
         toEmail: job.toEmail,
         subject: job.subject,
@@ -111,8 +120,15 @@ export const dashboardService = {
         smtpConnectionName: job.smtpConnection?.name ?? null,
         createdAt: job.createdAt.toISOString(),
         sentAt: job.sentAt?.toISOString() ?? null
-      })),
-      recentEvents: recentEvents.map((event) => ({
+      })
+      ),
+      recentEvents: recentEvents.map(
+        (event: {
+          id: string;
+          type: string;
+          occurredAt: Date;
+          emailJob: { toEmail: string; subject: string };
+        }) => ({
         id: event.id,
         type: event.type,
         occurredAt: event.occurredAt.toISOString(),
@@ -120,7 +136,8 @@ export const dashboardService = {
           toEmail: event.emailJob.toEmail,
           subject: event.emailJob.subject
         }
-      }))
+      })
+      )
     };
   }
 };

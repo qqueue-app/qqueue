@@ -32,6 +32,7 @@ pnpm typecheck
 pnpm lint
 pnpm build
 pnpm cloud:boundary
+pnpm license:audit
 ```
 
 ## Documentation

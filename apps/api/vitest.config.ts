@@ -18,6 +18,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.{test,spec}.ts"],
+    setupFiles: ["./src/test/setup.ts"],
     env: TEST_ENV,
     coverage: {
       provider: "v8",

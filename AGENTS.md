@@ -54,6 +54,12 @@ QQueue is a TypeScript monorepo for a self-hosted email platform. It is intentio
 - `packages/sdk`: placeholder TypeScript SDK.
   - Client scaffold: `packages/sdk/src/index.ts`
 
+## Related Repositories
+
+- `../qqueue-landing-page`: sibling repository for the QQueue marketing/landing page.
+  - It is not part of this pnpm workspace.
+  - Check this repo when tasks mention the landing page, marketing site, public homepage, product copy, or visual changes outside the dashboard app.
+
 ## Docs
 
 - `README.md`: product overview and local setup.

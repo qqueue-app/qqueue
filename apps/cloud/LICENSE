@@ -1,14 +1,91 @@
-QQueue Managed Cloud Commercial License
+QQueue Cloud Commercial License Draft
 
-Copyright (C) QQueue contributors.
+Copyright (C) 2026 Nana Aboagye Boateng. All rights reserved.
 
-This directory contains proprietary managed-cloud code and is not licensed
-under the GNU Affero General Public License v3.0 that applies to the QQueue
-core platform.
+IMPORTANT: This is a draft commercial license and should be reviewed by a
+qualified lawyer before commercial launch.
 
-No permission is granted to use, copy, modify, merge, publish, distribute,
-sublicense, or sell this software except under a separate written commercial
-license from the QQueue project owner.
+1. License Scope
 
-This placeholder must be replaced with final commercial license terms reviewed
-by qualified legal counsel before any managed-cloud release.
+QQueue Cloud is proprietary commercial software. It is not licensed under the
+GNU Affero General Public License version 3.0 that applies to QQueue Core.
+
+Subject to this license, Nana Aboagye Boateng grants the customer a limited,
+non-exclusive, non-transferable, revocable license to use QQueue Cloud only if
+the customer has an active paid commercial or self-hosted license, or explicit
+written permission from Nana Aboagye Boateng.
+
+2. Permitted Use
+
+The customer may use QQueue Cloud internally for the customer's own business
+operations during the active license term.
+
+Authorized employees and contractors may access QQueue Cloud only as needed to
+support the customer's internal use. The customer is responsible for those
+employees' and contractors' compliance with this license.
+
+Trial or evaluation use is allowed for up to 30 days unless Nana Aboagye Boateng extends
+the trial or evaluation period in writing.
+
+3. Restrictions
+
+Unless explicitly allowed in writing by Nana Aboagye Boateng, the customer may not:
+
+- redistribute, sublicense, resell, publish, share, lease, rent, lend, or
+  provide QQueue Cloud to any third party;
+- modify, adapt, translate, or create derivative works of QQueue Cloud;
+- reverse engineer, decompile, disassemble, or otherwise attempt to derive
+  source code, underlying ideas, algorithms, or implementation details;
+- remove, alter, or obscure copyright, license, trademark, or proprietary
+  notices;
+- bypass, disable, or interfere with license checks, usage limits, metering, or
+  access restrictions;
+- use QQueue Cloud to offer a competing hosted service or managed service to
+  third parties.
+
+4. Payment, Expiration, and Termination
+
+If payment stops, a subscription expires, or the customer's commercial or
+self-hosted license terminates, this license terminates automatically.
+
+When this license terminates:
+
+- the customer must stop using QQueue Cloud unless the customer renews or
+  receives written permission from Nana Aboagye Boateng;
+- access to updates and support ends;
+- the customer must delete or stop using proprietary QQueue Cloud code except as
+  otherwise required by law or explicitly allowed in writing.
+
+5. Ownership
+
+QQueue Cloud is owned by Nana Aboagye Boateng. This license does not transfer ownership,
+copyright, trademark rights, or any other intellectual property rights to the
+customer.
+
+6. No Warranties
+
+QQueue Cloud is provided "as is" and "as available" without warranties of any
+kind, whether express, implied, statutory, or otherwise. Nana Aboagye Boateng disclaims
+all warranties, including implied warranties of merchantability, fitness for a
+particular purpose, title, and non-infringement.
+
+Nana Aboagye Boateng does not guarantee that QQueue Cloud will be uninterrupted, secure,
+error-free, or free from data loss, delivery failures, abuse, blocking,
+blacklisting, or deliverability issues.
+
+7. Limitation of Liability
+
+To the maximum extent permitted by law, Nana Aboagye Boateng will not be liable for any
+indirect, consequential, special, incidental, exemplary, or punitive damages, or
+for lost profits, lost revenue, lost data, business interruption, loss of
+goodwill, or email delivery or deliverability losses, even if advised of the
+possibility of those damages.
+
+Nana Aboagye Boateng's total liability for all claims related to QQueue Cloud is capped
+at the fees paid by the customer for QQueue Cloud during the 12 months before
+the event giving rise to the claim.
+
+8. Written Permission
+
+Any exception to this license must be in writing and signed or otherwise
+explicitly approved by Nana Aboagye Boateng.

@@ -1,5 +1,11 @@
 import type { Request, Response } from "express";
-import { loginSchema, refreshSchema, registerSchema } from "@qqueue/shared";
+import {
+  loginSchema,
+  passwordResetConfirmSchema,
+  passwordResetRequestSchema,
+  refreshSchema,
+  registerSchema
+} from "@qqueue/shared";
 import { authService } from "./service.js";
 
 export const authController = {
@@ -18,6 +24,18 @@ export const authController = {
   async refresh(req: Request, res: Response) {
     const input = refreshSchema.parse(req.body);
     const result = await authService.refresh(input.refreshToken);
+    res.json({ data: result });
+  },
+
+  async requestPasswordReset(req: Request, res: Response) {
+    const input = passwordResetRequestSchema.parse(req.body);
+    const result = await authService.requestPasswordReset(input.email);
+    res.json({ data: result });
+  },
+
+  async resetPassword(req: Request, res: Response) {
+    const input = passwordResetConfirmSchema.parse(req.body);
+    const result = await authService.resetPassword(input.token, input.password);
     res.json({ data: result });
   }
 };

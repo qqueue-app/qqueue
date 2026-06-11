@@ -5,29 +5,42 @@ import { describe, expect, it, vi } from "vitest";
 // Stub the lazy-loaded pages and layout so we can assert routing without
 // pulling in their full dependency trees.
 vi.mock("../layouts/DashboardLayout.js", async () => {
-  const { Outlet } = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom"
-  );
-  return { DashboardLayout: () => <div data-testid="layout"><Outlet /></div> };
+  const { Outlet } =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom"
+    );
+  return {
+    DashboardLayout: () => (
+      <div data-testid="layout">
+        <Outlet />
+      </div>
+    ),
+  };
 });
 vi.mock("../pages/Dashboard.js", () => ({
-  Dashboard: () => <div>Dashboard page</div>
+  Dashboard: () => <div>Dashboard page</div>,
 }));
 vi.mock("../pages/Login.js", () => ({
-  Login: ({ mode }: { mode: string }) => <div>Login {mode}</div>
+  Login: ({ mode }: { mode: string }) => <div>Login {mode}</div>,
+}));
+vi.mock("../pages/Legal.js", () => ({
+  LegalPage: ({ kind }: { kind: string }) => <div>Legal {kind}</div>,
 }));
 vi.mock("../pages/SendEmail.js", () => ({ SendEmail: () => <div /> }));
 vi.mock("../pages/SMTPConnections.js", () => ({
-  SMTPConnections: () => <div />
+  SMTPConnections: () => <div />,
 }));
 vi.mock("../pages/Contacts.js", () => ({ Contacts: () => <div /> }));
 vi.mock("../pages/Templates.js", () => ({ Templates: () => <div /> }));
 vi.mock("../pages/Campaigns.js", () => ({ Campaigns: () => <div /> }));
 vi.mock("../pages/ContactLists.js", () => ({ ContactLists: () => <div /> }));
 vi.mock("../pages/CampaignAnalytics.js", () => ({
-  CampaignAnalytics: () => <div />
+  CampaignAnalytics: () => <div />,
 }));
 vi.mock("../pages/Settings.js", () => ({ Settings: () => <div /> }));
+vi.mock("../pages/QueueOperations.js", () => ({
+  QueueOperations: () => <div>Queue operations</div>,
+}));
 
 import { AppRoutes } from "./AppRoutes.js";
 
@@ -58,5 +71,25 @@ describe("AppRoutes", () => {
       </MemoryRouter>
     );
     expect(await screen.findByText("Login register")).toBeInTheDocument();
+  });
+
+  it("renders password reset routes outside the layout", async () => {
+    render(
+      <MemoryRouter initialEntries={["/forgot-password"]}>
+        <AppRoutes />
+      </MemoryRouter>
+    );
+    expect(await screen.findByText("Login forgot")).toBeInTheDocument();
+    expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
+  });
+
+  it("renders public legal routes outside the dashboard layout", async () => {
+    render(
+      <MemoryRouter initialEntries={["/terms"]}>
+        <AppRoutes />
+      </MemoryRouter>
+    );
+    expect(await screen.findByText("Legal terms")).toBeInTheDocument();
+    expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
   });
 });

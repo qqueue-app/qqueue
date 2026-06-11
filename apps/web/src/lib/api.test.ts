@@ -262,6 +262,11 @@ describe("api lib", () => {
 
     await api.dashboardSummary("org_1");
     await api.register({ email: "a@b.com", password: "p" });
+    await api.requestPasswordReset({ email: "a@b.com" });
+    await api.resetPassword({
+      token: "reset_token_123456789012345678901234567890",
+      password: "password123"
+    });
     await api.createOrganization({ name: "A" });
     await api.listSMTPConnections("org_1");
     await api.createSMTPConnection({ name: "s" });
@@ -301,6 +306,8 @@ describe("api lib", () => {
       events: ["email.sent"]
     });
     await api.deleteWebhookEndpoint("wh_1");
+    await api.queueOperations();
+    await api.retryQueueJob("email-sending", "job_1");
 
     const urls = fetchMock.mock.calls.map((c) => c[0]);
     expect(urls.some((u: string) => u.includes("/dashboard/summary"))).toBe(true);
@@ -312,5 +319,6 @@ describe("api lib", () => {
     ).toBe(true);
     expect(urls.some((u: string) => u.includes("/api-keys"))).toBe(true);
     expect(urls.some((u: string) => u.includes("/webhook-endpoints"))).toBe(true);
+    expect(urls.some((u: string) => u.includes("/queue-operations"))).toBe(true);
   });
 });

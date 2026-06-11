@@ -17,6 +17,9 @@ const envSchema = z.object({
   // Absolute public base URL used to build open/click tracking links that land
   // back on this API. In production this is `https://<DOMAIN>`.
   APP_URL: z.string().url().default("http://localhost:4000"),
+  // Public base URL of the web dashboard, used to build user-facing links such
+  // as password reset links. Defaults to the hosted dashboard domain.
+  PUBLIC_APP_URL: z.string().url().default("https://qqueue.app"),
   // HMAC secret for signing/verifying tracking tokens. Must match in the worker.
   TRACKING_SECRET: z.string().min(1),
   // Shared secret authenticating inbound ESP bounce/complaint webhooks. When

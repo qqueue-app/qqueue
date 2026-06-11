@@ -2,6 +2,10 @@
 
 TypeScript SDK for the self-hosted QQueue email API.
 
+## License
+
+The QQueue SDK is licensed under the MIT License. See [LICENSE](./LICENSE).
+
 ## Install
 
 ```sh

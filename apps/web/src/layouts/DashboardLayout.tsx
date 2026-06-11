@@ -1,10 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  NavLink,
-  Outlet,
-  useLocation,
-  useNavigate
-} from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   LayoutDashboard,
@@ -13,6 +8,7 @@ import {
   Users,
   FileText,
   Megaphone,
+  ListRestart,
   Settings as SettingsIcon,
   LogOut,
   Check,
@@ -21,7 +17,7 @@ import {
   ChevronRight,
   Menu,
   X,
-  type LucideIcon
+  type LucideIcon,
 } from "lucide-react";
 import { useSession } from "../lib/session-context.js";
 import { cn } from "../lib/utils.js";
@@ -32,7 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu.js";
 
 interface NavChild {
@@ -59,10 +55,11 @@ const navItems: NavItem[] = [
     icon: Megaphone,
     children: [
       { to: "/campaigns", label: "All campaigns" },
-      { to: "/campaigns/lists", label: "Contact lists" }
-    ]
+      { to: "/campaigns/lists", label: "Contact lists" },
+    ],
   },
-  { to: "/settings", label: "Settings", icon: SettingsIcon }
+  { to: "/queue-operations", label: "Queue Operations", icon: ListRestart },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export function DashboardLayout() {
@@ -76,7 +73,7 @@ export function DashboardLayout() {
     currentOrganizationId,
     currentOrganization,
     setCurrentOrganizationId,
-    signOut: clearSessionState
+    signOut: clearSessionState,
   } = useSession();
   const userEmail = user?.email;
   const initial = userEmail?.[0]?.toUpperCase() ?? "?";
@@ -189,7 +186,7 @@ export function DashboardLayout() {
                     onClick={() =>
                       setOpenGroups((current) => ({
                         ...current,
-                        [item.label]: !open
+                        [item.label]: !open,
                       }))
                     }
                     className={cn(
@@ -255,6 +252,26 @@ export function DashboardLayout() {
         </nav>
 
         <div className="border-t p-3">
+          <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 px-2 text-xs text-muted-foreground">
+            <NavLink
+              to="/terms"
+              className="hover:text-foreground hover:underline"
+            >
+              Terms
+            </NavLink>
+            <NavLink
+              to="/privacy"
+              className="hover:text-foreground hover:underline"
+            >
+              Privacy
+            </NavLink>
+            <NavLink
+              to="/licensing"
+              className="hover:text-foreground hover:underline"
+            >
+              Licensing
+            </NavLink>
+          </div>
           {user ? (
             <div className="flex items-center gap-1">
               <DropdownMenu>
@@ -347,7 +364,9 @@ export function DashboardLayout() {
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary font-semibold text-primary-foreground">
                   Q
                 </div>
-                <div className="text-sm font-semibold leading-tight">QQueue</div>
+                <div className="text-sm font-semibold leading-tight">
+                  QQueue
+                </div>
               </div>
               <button
                 type="button"

@@ -4,16 +4,26 @@ import { prismaMock } from "./test/prisma-mock.js";
 import { createAuthTokens } from "./lib/tokens.js";
 import { signTrackingToken } from "@qqueue/email-engine";
 
-// Heavy/external modules pulled in transitively by the v1 router.
-vi.mock("./queues/campaign-processing.queue.js", () => ({
-  campaignProcessingQueue: {
-    add: vi.fn().mockResolvedValue(undefined),
-    upsertJobScheduler: vi.fn().mockResolvedValue(undefined),
-    removeJobScheduler: vi.fn().mockResolvedValue(undefined)
-  }
+// The BullMQ queue singletons are stubbed globally in src/test/setup.ts to keep
+// Redis out of unit tests. This file pins explicit stubs too because its
+// top-level dynamic import of app.js (which wires every queue-backed route)
+// must resolve against fully-featured queue mocks.
+const queueStub = vi.hoisted(() => () => ({
+  add: vi.fn().mockResolvedValue(undefined),
+  getJob: vi.fn().mockResolvedValue(undefined),
+  getJobs: vi.fn().mockResolvedValue([]),
+  getJobCounts: vi.fn().mockResolvedValue({}),
+  upsertJobScheduler: vi.fn().mockResolvedValue(undefined),
+  removeJobScheduler: vi.fn().mockResolvedValue(undefined)
 }));
 vi.mock("./queues/email-sending.queue.js", () => ({
-  emailSendingQueue: { add: vi.fn().mockResolvedValue(undefined) }
+  emailSendingQueue: queueStub()
+}));
+vi.mock("./queues/campaign-processing.queue.js", () => ({
+  campaignProcessingQueue: queueStub()
+}));
+vi.mock("./queues/webhook-delivery.queue.js", () => ({
+  webhookDeliveryQueue: queueStub()
 }));
 
 const { createApp } = await import("./app.js");
@@ -30,7 +40,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  // clearAllMocks (not restoreAllMocks) so module-mock implementations such as
+  // the queue stubs survive between tests; we only reset call history here.
+  vi.clearAllMocks();
 });
 
 describe("health + cors + json", () => {
@@ -746,6 +758,68 @@ describe("api key routes", () => {
 
     expect(res.status).toBe(200);
     expect(prismaMock.apiKey.update).toHaveBeenCalled();
+  });
+});
+
+describe("queue-operations RBAC", () => {
+  it("returns 400 when organizationId is missing", async () => {
+    const res = await request(app)
+      .get("/api/v1/queue-operations")
+      .set("Authorization", auth);
+    expect(res.status).toBe(400);
+  });
+
+  it("allows an owner to view the queue summary", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "OWNER"
+    } as never);
+    const res = await request(app)
+      .get("/api/v1/queue-operations?organizationId=org_1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+  });
+
+  it("allows an admin to view the queue summary", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN"
+    } as never);
+    const res = await request(app)
+      .get("/api/v1/queue-operations?organizationId=org_1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(200);
+  });
+
+  it("denies a normal member (403) on the summary", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    const res = await request(app)
+      .get("/api/v1/queue-operations?organizationId=org_1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(403);
+  });
+
+  it("denies a normal member (403) on retry", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    const res = await request(app)
+      .post("/api/v1/queue-operations/email-sending/jobs/job_1/retry")
+      .set("Authorization", auth)
+      .send({ organizationId: "org_1" });
+    expect(res.status).toBe(403);
+  });
+
+  it("lets an owner reach the retry handler (404 for an unknown job)", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "OWNER"
+    } as never);
+    const res = await request(app)
+      .post("/api/v1/queue-operations/email-sending/jobs/job_1/retry")
+      .set("Authorization", auth)
+      .send({ organizationId: "org_1" });
+    expect(res.status).toBe(404);
   });
 });
 

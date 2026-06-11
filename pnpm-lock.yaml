@@ -47,6 +47,9 @@ importers:
       supertest:
         specifier: ^7.0.0
         version: 7.2.2
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
       turbo:
         specifier: ^2.3.3
         version: 2.9.16
@@ -89,6 +92,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      ioredis:
+        specifier: ^5.10.1
+        version: 5.10.1
       zod:
         specifier: ^3.24.1
         version: 3.25.76

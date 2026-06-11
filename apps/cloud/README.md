@@ -3,6 +3,8 @@
 This directory is the proprietary Phase 7 boundary for QQueue managed-cloud
 features.
 
+Copyright (C) 2026 Nana Aboagye Boateng. All rights reserved.
+
 Code in this directory is governed by [LICENSE](LICENSE), not the root
 AGPL-3.0-only license. Keep all cloud-only billing, metering, hosted
 onboarding, managed infrastructure, tenant operations, and abuse/deliverability
@@ -22,7 +24,7 @@ controls here unless a piece is intentionally reusable AGPL core infrastructure.
 
 ```ts
 // SPDX-License-Identifier: LicenseRef-QQueue-Commercial
-// Copyright (C) QQueue contributors
+// Copyright (C) 2026 Nana Aboagye Boateng
 ```
 
 ## Current Status
