@@ -26,7 +26,7 @@ pnpm --filter qqueue-sdk build
 Create a tarball and install it into a temporary project:
 
 ```sh
-pnpm --filter qqueue-sdk pack
+pnpm --dir packages/sdk pack
 mkdir -p /tmp/qqueue-sdk-smoke
 cd /tmp/qqueue-sdk-smoke
 npm init -y

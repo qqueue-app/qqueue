@@ -2,6 +2,13 @@
 
 All notable changes to `qqueue-sdk` are documented here.
 
+## 0.1.2 - 2026-06-11
+
+- Add package release checklist with version bump, publish, tag, and install
+  smoke test steps.
+- Include `CHANGELOG.md` and `RELEASE.md` in the published package.
+- Document the SDK release workflow from the README.
+
 ## 0.1.1 - 2026-06-11
 
 - Return stable transactional send responses as `{ id, status }`.
