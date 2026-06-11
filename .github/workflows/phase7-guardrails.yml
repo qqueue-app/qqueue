@@ -1,0 +1,63 @@
+name: Phase 7 Guardrails
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: phase7-guardrails-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Check cloud boundary
+        run: pnpm cloud:boundary
+
+  signed-off-by:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pull request history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Signed-off-by lines
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          missing=0
+
+          while read -r commit; do
+            if ! git log -1 --format=%B "$commit" | grep -qi '^Signed-off-by:'; then
+              echo "Commit $commit is missing a Signed-off-by line."
+              missing=1
+            fi
+          done < <(git rev-list "origin/${{ github.base_ref }}..HEAD")
+
+          if [ "$missing" -ne 0 ]; then
+            echo "Add sign-offs with: git commit -s"
+            exit 1
+          fi

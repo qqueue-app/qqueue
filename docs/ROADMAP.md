@@ -113,14 +113,18 @@ QQueue is **open core**, all in this one repository:
 
 These should be in place before any cloud-only code lands:
 
-- [ ] Create the fenced proprietary directory (`apps/cloud/` or `packages/ee/`)
+- [x] Create the fenced proprietary directory (`apps/cloud/` or `packages/ee/`)
       with its own commercial `LICENSE` and a README note marking the boundary.
-- [ ] Decide the commercial license terms (pricing-tier features, what stays in
-      the AGPL core vs. what is cloud-only).
-- [ ] Keep all multi-tenant/billing/usage-metering code on the proprietary side;
+- [x] Decide the initial commercial feature boundary (what stays in the AGPL
+      core vs. what is cloud-only).
+- [ ] Replace the placeholder commercial license with final legal terms,
+      including pricing-tier feature rights and restrictions.
+- [x] Keep all multi-tenant/billing/usage-metering code on the proprietary side;
       keep reusable primitives (auth, queue, sending) in the AGPL core.
 - [ ] Confirm dependency licenses are AGPL-compatible (audit before release).
-- [ ] Wire up CLA enforcement (CLA-assistant bot or `Signed-off-by` checks in CI).
+- [x] Wire up CLA enforcement (CLA-assistant bot or `Signed-off-by` checks in CI).
+
+See `docs/CLOUD_BOUNDARY.md` for the current Phase 7 boundary rules.
 
 ### Phase 7 design notes (planning)
 

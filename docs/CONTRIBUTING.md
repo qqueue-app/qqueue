@@ -19,6 +19,9 @@ pnpm dev
 - Keep API route, controller, and service responsibilities separate.
 - Avoid implementing analytics, visual editors, or managed-cloud concerns before the core sending path is ready.
 - Prefer provider abstractions over hardcoded vendor behavior.
+- Keep managed-cloud code under `apps/cloud/`; core apps and packages must not
+  depend on `@qqueue/cloud`.
+- Add `Signed-off-by` to commits with `git commit -s` so the CLA check passes.
 
 ## Checks
 
@@ -28,6 +31,7 @@ Run these before opening a pull request:
 pnpm typecheck
 pnpm lint
 pnpm build
+pnpm cloud:boundary
 ```
 
 ## Documentation

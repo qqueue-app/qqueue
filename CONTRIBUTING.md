@@ -17,8 +17,8 @@ your work.
 
 ### How to sign
 
-Until automated CLA tooling is in place, sign by adding a `Signed-off-by` line
-to every commit, certifying that you have read and agree to `CLA.md`:
+Sign by adding a `Signed-off-by` line to every commit, certifying that you have
+read and agree to `CLA.md`:
 
 ```sh
 git commit -s -m "your message"
@@ -31,7 +31,8 @@ Signed-off-by: Your Name <your.email@example.com>
 ```
 
 By signing off, you certify that you have read and accept the terms in
-[CLA.md](CLA.md) for that contribution.
+[CLA.md](CLA.md) for that contribution. Pull requests targeting `main` are
+checked in CI and cannot be merged while commits are missing sign-offs.
 
 ## Development setup
 
@@ -60,6 +61,8 @@ pnpm dev
 - Validate inputs with Zod at the boundaries.
 - Match the style and structure of the surrounding code.
 - New source files should carry the SPDX header (see below).
+- Managed-cloud code belongs under `apps/cloud/`; core packages and apps must
+  not depend on `@qqueue/cloud`.
 
 ### SPDX header
 
@@ -67,6 +70,13 @@ Add this to the top of new source files:
 
 ```ts
 // SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) QQueue contributors
+```
+
+For proprietary managed-cloud files under `apps/cloud/`, use:
+
+```ts
+// SPDX-License-Identifier: LicenseRef-QQueue-Commercial
 // Copyright (C) QQueue contributors
 ```
 
