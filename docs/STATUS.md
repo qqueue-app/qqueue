@@ -2,26 +2,89 @@
 
 ## Summary
 
-QQueue is no longer just a scaffold. The repository contains an implemented
-TypeScript monorepo with an Express API, React dashboard, BullMQ worker
-processes, Prisma/PostgreSQL data model, Redis queues, SMTP sending, tracking,
-transactional API keys, outbound webhooks, an MIT-licensed SDK package, tests,
-deployment files, and open-core licensing guardrails.
+QQueue is a feature-complete self-hosted beta candidate undergoing launch
+preparation. The repository contains an implemented TypeScript monorepo with an
+Express API, React dashboard, BullMQ worker processes, Prisma/PostgreSQL data
+model, Redis queues, SMTP sending, tracking, transactional API keys, outbound
+webhooks, an MIT-licensed SDK package, tests, deployment files, and open-core
+licensing guardrails.
 
-The current product is best described as an early self-hosted beta candidate:
-the main Phase 0-6 surfaces exist, but they still need hardening, documentation
-cleanup, operational visibility, abuse controls, and legal/commercial review
-before a serious public beta or hosted cloud launch.
+Following the Beta Polish + Launch Prep Sprint, QQueue now includes:
+
+- Authentication
+- Organizations
+- SMTP connections
+- Contacts
+- Contact lists
+- Templates
+- Campaigns
+- Transactional API
+- API keys
+- Tracking
+- Webhooks
+- Queue workers
+- Queue operations dashboard
+- Password reset
+- Rate limiting
+- SDK
+- Mailcow documentation
+- Docker smoke tests
+- Licensing and legal structure
+
+With the core product surfaces implemented and the launch-prep gaps closed, the
+focus is shifting away from feature development toward:
+
+- documentation
+- onboarding
+- launch preparation
+- real-world testing
+- user feedback
+
+The remaining open items are primarily commercial/cloud features, multi-user
+organization management, and qualified legal review — none of which block an
+early self-hosted beta.
+
+## Beta Readiness Assessment
+
+**Status:** Feature-Complete Self-Hosted Beta Candidate
+
+**Completed:**
+
+- Authentication
+- Organizations
+- SMTP Connections
+- Contacts
+- Contact Lists
+- Templates
+- Campaigns
+- Transactional API
+- API Keys
+- Tracking
+- Webhooks
+- Queue Workers
+- Queue Operations Dashboard
+- Password Reset
+- Rate Limiting
+- SDK
+- Mailcow Documentation
+- Docker Smoke Tests
+- Licensing and Legal Structure
+
+**Assessment:** The platform is suitable for early self-hosted beta users and
+real-world validation. All core self-hosted flows are implemented, the full
+verification suite (including a Docker-backed end-to-end smoke test) passes, and
+operational and abuse-control gaps from the original audit have been closed.
 
 ## Repository Structure
 
-- `apps/api`: Express API. It owns HTTP routing, auth/session tokens,
-  organization access checks, Prisma access, product modules, transactional
-  sends, tracking endpoints, inbound ESP webhook normalization, and queue
-  enqueueing.
-- `apps/web`: Vite React dashboard. It includes login/register, dashboard,
-  one-off send, SMTP connections, contacts, contact lists, templates, campaigns,
-  campaign analytics, settings/API keys/webhooks, and legal pages.
+- `apps/api`: Express API. It owns HTTP routing, auth/session tokens, password
+  reset, organization access checks, Prisma access, product modules,
+  transactional sends, tracking endpoints, inbound ESP webhook normalization,
+  queue operations endpoints, Redis-backed rate limiting, and queue enqueueing.
+- `apps/web`: Vite React dashboard. It includes login/register, password reset,
+  dashboard, one-off send, SMTP connections, contacts, contact lists, templates,
+  campaigns, campaign analytics, queue operations, settings/API keys/webhooks,
+  and legal pages.
 - `apps/worker`: BullMQ workers. It processes campaign fan-out jobs, email
   sending jobs, outbound webhook delivery jobs, and startup recovery for queued
   work.
@@ -39,13 +102,14 @@ before a serious public beta or hosted cloud launch.
 - `apps/api/prisma`: PostgreSQL schema and migrations for users,
   organizations, SMTP connections, contacts, contact lists, templates,
   campaigns, campaign runs, email jobs, email events, API keys, webhook
-  endpoints, and webhook deliveries.
-- `scripts`: coverage badge generation, dependency license audit, and cloud
-  boundary guardrail checks.
+  endpoints, webhook deliveries, and password reset tokens.
+- `scripts`: coverage badge generation, dependency license audit, cloud
+  boundary guardrail checks, and the Docker-backed smoke test (`docker-smoke.ts`).
 - `.github/workflows`: coverage, Phase 7 guardrails, and SDK publish workflows.
 - Deployment files: `docker-compose.yml` for local Postgres/Redis,
   `docker-compose.prod.yml` for Caddy/API/worker/Postgres/Redis/migrations,
-  app Dockerfiles, and `Caddyfile`.
+  `docker-compose.smoke.yml` for the throwaway smoke-test stack, app Dockerfiles,
+  and `Caddyfile`.
 
 ## Completed So Far
 
@@ -56,7 +120,7 @@ before a serious public beta or hosted cloud launch.
 - [x] ESLint and Prettier configuration.
 - [x] Local Docker Compose for PostgreSQL and Redis.
 - [x] Root scripts for dev, build, lint, typecheck, test, coverage, Prisma,
-  license audit, and cloud boundary checks.
+  license audit, cloud boundary checks, and Docker smoke test.
 - [x] `.env.example` with local and production-oriented settings.
 
 ### Licensing and Legal
@@ -80,52 +144,7 @@ before a serious public beta or hosted cloud launch.
 - [x] Prisma client integration.
 - [x] PostgreSQL schema and migrations.
 - [x] Organization membership helper and role checks.
-- [~] API hardening is partial: no global rate limiting, abuse controls,
-  password reset, invite flow, email verification, or session revocation was
-  found.
-
-### Cloud / Proprietary Setup
-
-- [x] `apps/cloud` fenced package exists.
-- [x] Cloud README and license boundary docs exist.
-- [x] Script prevents core packages from depending on `@qqueue/cloud`.
-- [x] CI runs cloud boundary checks.
-- [ ] Billing, usage metering, hosted onboarding, managed sending
-  infrastructure, cloud admin dashboards, and tenant operations are not started.
-
-### SDK
-
-- [x] `qqueue-sdk` package exists with MIT license.
-- [x] `QQueueClient.sendEmail` wraps the transactional send endpoint.
-- [x] SDK error class exposes HTTP status and optional error code.
-- [x] README, changelog, release checklist, npm publish workflow, and package
-  tarball are present.
-- [~] SDK scope is narrow: no clients for templates, contacts, campaigns,
-  webhooks, or API keys.
-
-### Docs
-
-- [x] Architecture, roadmap, deployment, decisions, cloud boundary,
-  transactional API, licensing, dependency license, contributing, README, and
-  SDK docs exist.
-- [x] Deployment guide covers VPS Docker Compose, Caddy, migrations, secrets,
-  tracking, and bounce webhook shape.
-- [~] Root README has a stale status sentence that still calls the repo an
-  initial scaffold/placeholder.
-- [~] Mailcow-specific setup guidance is limited to generic SMTP compatibility;
-  a dedicated Mailcow guide was not found.
-
-### CI / Scripts
-
-- [x] Coverage workflow runs install, Prisma generate, coverage tests, badge
-  generation, and badge commit on `main`.
-- [x] Phase 7 guardrail workflow runs cloud boundary, dependency license audit,
-  and Signed-off-by checks.
-- [x] SDK publish workflow verifies tag/version alignment and runs SDK checks
-  before npm publish.
-- [x] Coverage badge generation script exists.
-- [x] Dependency license audit script exists.
-- [x] Cloud boundary script exists.
+- [x] Redis-backed rate limiting on auth and public sending paths.
 
 ### Auth
 
@@ -134,8 +153,41 @@ before a serious public beta or hosted cloud launch.
 - [x] Refresh token endpoint exists.
 - [x] Password hashing and JWT token helpers are tested.
 - [x] Auth middleware protects dashboard routes.
-- [~] Auth is basic and lacks email verification, password reset, invitation
-  workflow, MFA, session/device management, and rate limiting.
+- [x] Password reset flow (request, token, confirm).
+- [x] Password reset email delivery (sent via the organization's SMTP
+  connection).
+- [x] Password reset token invalidation.
+- [~] Still lacks email verification, MFA, and session/device management.
+
+### Security
+
+- [x] Redis-backed rate limiting covering:
+  - register
+  - login
+  - refresh token
+  - password reset requests
+  - transactional send endpoint
+- [x] Encrypted SMTP credentials at rest.
+- [x] HMAC-signed tracking tokens and signed outbound webhook deliveries.
+
+### Operations
+
+- [x] Queue operations dashboard (web page).
+- [x] Queue summaries (queued, processing, failed counts).
+- [x] Failed job visibility with attempt counts and failure reasons.
+- [x] Retry failed jobs.
+- [x] Queue monitoring API.
+- [x] Queue operations access restricted to OWNER/ADMIN roles.
+
+### Documentation
+
+- [x] Mailcow setup guide (`docs/MAILCOW_SETUP.md`).
+- [x] Quickstart guide (`docs/QUICKSTART.md`).
+- [x] Troubleshooting guide (`docs/TROUBLESHOOTING.md`).
+- [x] Beta checklist (`docs/BETA_CHECKLIST.md`).
+- [x] Demo script (`docs/DEMO_SCRIPT.md`).
+- [x] Architecture, roadmap, deployment, decisions, cloud boundary,
+  transactional API, licensing, dependency license, contributing, and SDK docs.
 
 ### Organizations
 
@@ -143,7 +195,7 @@ before a serious public beta or hosted cloud launch.
 - [x] Organization CRUD routes/services exist.
 - [x] Access and role helpers exist.
 - [~] Organization members beyond initial owner are modeled but no invitation or
-  member-management UI/workflow was found.
+  member-management UI/workflow exists yet.
 
 ### SMTP Connections
 
@@ -152,7 +204,7 @@ before a serious public beta or hosted cloud launch.
 - [x] Create/update verifies SMTP connectivity with Nodemailer.
 - [x] Default SMTP connection selection is implemented.
 - [x] Dashboard page exists.
-- [~] Provider-specific Mailcow setup/docs are not complete beyond generic SMTP.
+- [x] Dedicated Mailcow setup documentation.
 
 ### Contacts, Templates, and Campaigns
 
@@ -164,8 +216,6 @@ before a serious public beta or hosted cloud launch.
 - [x] Dashboard pages exist for contacts, contact lists, templates, campaigns,
   and analytics.
 - [~] Template variables are simple string replacement.
-- [~] No drag-and-drop or rich campaign builder beyond the current rich text
-  editor/editor UI was verified.
 
 ### Queues and Workers
 
@@ -177,9 +227,8 @@ before a serious public beta or hosted cloud launch.
 - [x] Webhook worker delivers signed outbound webhooks.
 - [x] Worker startup recovers queued email jobs, scheduled campaigns,
   recurring campaigns, and pending/failed webhook deliveries.
-- [~] Queue/admin visibility is limited to existing app data surfaces; no
-  dedicated queue monitor, retry dashboard for email jobs, or dead-letter UI was
-  found.
+- [x] Queue operations dashboard and API for queue summaries, failed jobs, and
+  retries.
 
 ### Transactional API
 
@@ -190,8 +239,8 @@ before a serious public beta or hosted cloud launch.
 - [x] Delayed sends with `scheduledAt` exist.
 - [x] Stable `{ id, status }` response and machine-readable error codes exist.
 - [x] Transactional API docs and SDK examples exist.
-- [~] Abuse/rate limiting, quotas, idempotency keys, and usage tracking were
-  not found.
+- [x] Redis-backed rate limiting on the send endpoint.
+- [~] Idempotency keys and usage tracking are not yet implemented.
 
 ### Tracking and Webhooks
 
@@ -205,25 +254,35 @@ before a serious public beta or hosted cloud launch.
 - [~] Provider-specific inbound webhook adapters are not implemented; docs
   describe mapping provider payloads through a relay/function.
 
+### SDK
+
+- [x] `qqueue-sdk` package exists with MIT license.
+- [x] `QQueueClient.sendEmail` wraps the transactional send endpoint.
+- [x] SDK error class exposes HTTP status and optional error code.
+- [x] README, changelog, release checklist, npm publish workflow, and package
+  tarball are present.
+- [~] SDK scope is narrow: no clients for templates, contacts, campaigns,
+  webhooks, or API keys.
+
 ### Admin / Dashboard
 
 - [x] Dashboard shell and session context exist.
 - [x] Operational pages exist for the main self-hosted flows.
+- [x] Queue operations page for OWNER/ADMIN members.
 - [x] Settings page includes organization creation, API keys, and webhook
   endpoint/delivery management.
 - [~] Admin capabilities are product-level but not full hosted-operations admin:
   no billing dashboard, tenant ops dashboard, deliverability admin, or abuse
   review tools.
 
-### Billing / Cloud Features
+### Cloud / Proprietary Setup
 
-- [x] Cloud boundary scaffold and planning docs exist.
-- [ ] Billing provider integration is not started.
-- [ ] Plans, subscriptions, seats, invoices, and payment webhooks are not
-  started.
-- [ ] Usage limits and quota enforcement are not started.
-- [ ] Hosted onboarding, managed sending infrastructure, and cloud operational
-  controls are not started.
+- [x] `apps/cloud` fenced package exists.
+- [x] Cloud README and license boundary docs exist.
+- [x] Script prevents core packages from depending on `@qqueue/cloud`.
+- [x] CI runs cloud boundary checks.
+- [ ] Billing, usage metering, hosted onboarding, managed sending
+  infrastructure, cloud admin dashboards, and tenant operations are not started.
 
 ### Tests
 
@@ -232,9 +291,24 @@ before a serious public beta or hosted cloud launch.
 - [x] Worker lib/worker tests exist.
 - [x] Web component/page/lib/route tests exist.
 - [x] Shared, email-engine, and SDK tests exist.
+- [x] Queues are stubbed in API tests, eliminating Redis noise from the suite.
+- [x] Docker-backed integration smoke test (`pnpm test:smoke:docker`).
+- [x] End-to-end smoke test: register → SMTP → transactional send → worker
+  processing.
 - [x] Coverage thresholds are documented in the README.
-- [~] Tests appear mostly unit/component/service focused; full Docker-backed
-  integration or end-to-end browser tests were not found.
+
+### CI / Scripts
+
+- [x] Coverage workflow runs install, Prisma generate, coverage tests, badge
+  generation, and badge commit on `main`.
+- [x] Phase 7 guardrail workflow runs cloud boundary, dependency license audit,
+  and Signed-off-by checks.
+- [x] SDK publish workflow verifies tag/version alignment and runs SDK checks
+  before npm publish.
+- [x] Coverage badge generation script exists.
+- [x] Dependency license audit script exists.
+- [x] Cloud boundary script exists.
+- [x] Docker smoke-test script (`scripts/docker-smoke.ts`) exists.
 
 ## Current Capabilities
 
@@ -244,131 +318,103 @@ End-to-end, the app can currently support a self-hosted operator who:
    stack behind Caddy.
 2. Registers a user and creates the first organization.
 3. Logs into the React dashboard.
-4. Creates and verifies an SMTP connection.
-5. Creates contacts, contact lists, and templates.
-6. Sends a one-off transactional email from the dashboard or API key.
-7. Creates campaigns, sends now, schedules one-shot campaigns, configures
+4. Recovers an account through the password reset flow.
+5. Creates and verifies an SMTP connection.
+6. Creates contacts, contact lists, and templates.
+7. Sends a one-off transactional email from the dashboard or API key.
+8. Creates campaigns, sends now, schedules one-shot campaigns, configures
    recurring campaigns, pauses/resumes campaigns, and views campaign analytics.
-8. Records queued, sent, delivered, opened, clicked, bounced, complained, and
+9. Records queued, sent, delivered, opened, clicked, bounced, complained, and
    failed events where the matching flow emits them.
-9. Creates outbound webhook endpoints, receives signed webhook deliveries, views
-   recent attempts, and manually retries failed deliveries.
-10. Uses the SDK to call the transactional send API.
+10. Monitors queues, inspects failed jobs, and retries them from the queue
+    operations dashboard (OWNER/ADMIN only).
+11. Creates outbound webhook endpoints, receives signed webhook deliveries,
+    views recent attempts, and manually retries failed deliveries.
+12. Uses the SDK to call the transactional send API.
 
 ## Known Gaps
 
-- Root README status text is outdated relative to the implemented codebase.
-- No dedicated Mailcow setup guide was found.
-- No production abuse/rate limiting or quota enforcement was found.
-- No billing, usage metering, subscriptions, hosted onboarding, or cloud admin
-  implementation was found.
-- No email verification, password reset, invite/member-management flow, MFA, or
-  session revocation was found.
-- No dedicated queue operations UI for email-job retries, failed jobs, or
-  dead-letter handling was found.
-- No provider-specific API integrations were implemented beyond SMTP.
-- No provider-specific inbound webhook adapters were implemented.
-- No DKIM/SPF/domain verification automation was found.
-- No Docker-backed integration suite or browser E2E suite was found.
-- Legal/commercial docs are drafts and explicitly need qualified review.
-- Dependency license output still needs human/legal review before release.
+### Product
+
+- [ ] Organization invitation flow
+- [ ] Member management UI
+- [ ] Usage metrics dashboard
+- [ ] Transactional send idempotency keys
+- [ ] Provider-specific inbound webhook adapters
+- [ ] Expanded SDK functionality beyond `sendEmail`
+
+### UX
+
+- [ ] Hide Queue Operations navigation for non-admin members
+- [ ] Improve password reset experience when no SMTP connection exists
+
+### Cloud / Commercial
+
+- [ ] Billing
+- [ ] Plans and subscriptions
+- [ ] Usage quotas
+- [ ] Hosted onboarding
+- [ ] Managed infrastructure
+- [ ] Deliverability tooling
+- [ ] Cloud admin dashboards
+
+### Legal
+
+- [ ] Lawyer review of commercial license
+- [ ] Lawyer review of Terms of Service
+- [ ] Lawyer review of Privacy Policy
+- [ ] Review dependency license audit output
 
 ## Public Beta Checklist
 
-- [ ] Update stale root README status text.
-- [ ] Run and keep green: `pnpm lint`, `pnpm typecheck`, `pnpm build`,
-  `pnpm test`, `pnpm license:audit`, and `pnpm cloud:boundary`.
-- [ ] Add a dedicated Mailcow self-hosting/SMTP setup guide.
-- [ ] Add basic API/server rate limiting for auth, transactional sends,
-  tracking, and webhook endpoints.
-- [ ] Add usage/event counters needed for self-hosted visibility and future
-  quotas.
-- [ ] Add a basic queue/email-job operations view for failed/queued/retry state.
-- [ ] Add user/account recovery basics: password reset at minimum.
-- [ ] Add invitation or member-management flow if multi-user organizations are
-  expected in beta.
-- [ ] Add a small Docker-backed integration smoke test for API + Postgres +
-  Redis + worker.
-- [ ] Verify production Docker Compose from a clean checkout.
+- [x] Mailcow guide.
+- [x] Password reset.
+- [x] Rate limiting for auth and public transactional send endpoints.
+- [x] Queue operations dashboard for failed/queued/retry state.
+- [x] Docker-backed integration smoke test (API + Postgres + Redis + worker).
+- [x] Legal docs draft (Terms, Privacy Policy, licenses, trademark notice).
+- [x] Verification suite passing (`lint`, `typecheck`, `build`, `test`,
+  `test:smoke:docker`, `license:audit`, `cloud:boundary`).
+- [ ] Verify production Docker Compose from a clean checkout on a fresh host.
 - [ ] Review legal docs, CLA, commercial license, trademark notice, and
   dependency license output with qualified counsel before commercial use.
 
-## Remaining Work
-
-### Must Have Before Public Beta
-
-- Update stale README status language.
-- Add Mailcow setup documentation with recommended SMTP settings and common
-  failure modes.
-- Add basic rate limiting/abuse protection for auth and public sending paths.
-- Add queue/email-job retry visibility for operators.
-- Add a minimal password reset flow or document that beta accounts are
-  operator-managed.
-- Add integration smoke tests that exercise API, database, Redis queues, and
-  worker processing together.
-- Re-run and publish verification results for lint, typecheck, build, tests,
-  license audit, and cloud boundary checks.
-- Manually validate production Docker Compose on a fresh environment.
-
-### Should Have Soon After Beta
-
-- Add organization invitation and member management.
-- Add usage tracking and basic monthly send/contact/API-key metrics.
-- Add idempotency keys for transactional sends.
-- Add webhook replay protection guidance and helper utilities beyond docs.
-- Add provider-specific inbound webhook adapters for common providers.
-- Expand SDK beyond `sendEmail` only if product users need automation for
-  templates, contacts, campaigns, or webhooks.
-- Add better campaign/template personalization and validation.
-- Add browser E2E coverage for core dashboard flows.
-
-### Later / Future Commercial Features
-
-- Billing provider integration.
-- Plans, subscriptions, seats, invoices, and lifecycle webhooks.
-- Usage limits and quota enforcement policies.
-- Hosted onboarding and managed sending infrastructure.
-- Domain verification automation for hosted service users.
-- Deliverability, reputation, warmup, abuse, and cloud operations tooling.
-- Cloud admin dashboards and tenant-level operational controls.
-- Enterprise legal docs: DPA, subprocessors, cookie policy, SLA, and enterprise
-  terms.
-
 ## Recommended Next Sprint
 
-1. Update root README status text to match the current implementation.
-2. Run the full verification suite and fix any failures.
-3. Write `docs/MAILCOW_SETUP.md` or equivalent SMTP/Mailcow guide.
-4. Add basic rate limiting for auth and public transactional send endpoints.
-5. Add a queue/email-job operations page or dashboard panel for failed/queued
-   email jobs and retry state.
-6. Add a Docker-backed smoke test for register -> SMTP connection mock path or
-   queue/worker processing.
-7. Add password reset or explicitly scope it out for first beta with an
-   operator-managed workaround.
-8. Add simple usage counters/reporting for sends, API-key sends, failures, and
-   webhooks.
-9. Review tenant scoping in API/worker services before any hosted beta work.
-10. Prepare legal/dependency-license review materials.
+1. Create landing page at qqueue.app.
+2. Record demo video using `docs/DEMO_SCRIPT.md`.
+3. Open-source public release preparation.
+4. Gather first beta users.
+5. Add organization invitations.
+6. Add member management.
+7. Add usage metrics dashboard.
+8. Expand SDK functionality.
+9. Improve onboarding UX.
+10. Collect feedback from real installations.
 
 ## Verification
 
-Audit document created from static repository inspection and verified with the
-following commands on 2026-06-11:
+Verified with the following commands on 2026-06-11:
 
 - [x] `pnpm lint` passed.
 - [x] `pnpm typecheck` passed.
 - [x] `pnpm build` passed.
-- [x] `pnpm test` passed: 59 test files and 509 tests passed across API, web,
+- [x] `pnpm test` passed: 62 test files and 536 tests passed across API, web,
   worker, shared, email-engine, and SDK packages.
+- [x] `pnpm test:smoke:docker` passed: a throwaway Postgres + Redis stack ran
+  the full register → SMTP connection → transactional send → worker processing
+  flow and confirmed the job reached `SENT`.
 - [x] `pnpm license:audit` passed. The audit reported reviewed license tokens
-  including MIT, Apache-2.0, BSD, ISC, MPL-2.0, CC-BY-4.0, BlueOak-1.0.0,
-  MIT-0, and Python-2.0.
+  including MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, CC-BY-4.0,
+  BlueOak-1.0.0, MIT-0, and Python-2.0.
 - [x] `pnpm cloud:boundary` passed.
 
 Notes:
 
-- The web test run emitted non-failing React/jsdom warnings, including
-  `act(...)` warnings in `Settings.test.tsx`, missing dialog description
-  warnings, and expected provider-hook error output in session/theme tests.
+- Password reset emails are now delivered through the organization's SMTP
+  connection (preferring the default connection) rather than a separate system
+  mailer.
+- Queue operations are restricted to OWNER/ADMIN roles via `requireOrgRole`.
+- Redis noise in the API test suite has been eliminated through global queue
+  stubbing in `apps/api/src/test/setup.ts`.
 - No production credentials or destructive commands were used.

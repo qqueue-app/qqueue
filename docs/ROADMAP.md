@@ -2,8 +2,10 @@
 
 ## Current Status Reference
 
-See [docs/STATUS.md](STATUS.md) for the current repository audit, completed
-work, known gaps, beta checklist, and recommended next sprint.
+See [docs/STATUS.md](STATUS.md) for the current state, completed work, known
+gaps, beta checklist, and recommended next sprint. As of the Beta Polish +
+Launch Prep Sprint, QQueue is a **feature-complete self-hosted beta candidate
+undergoing launch preparation** — see the Beta Readiness Assessment in STATUS.md.
 
 ## Phase 0: Project Scaffold
 
