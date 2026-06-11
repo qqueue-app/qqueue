@@ -39,6 +39,7 @@ const { send, SMTPProvider, injectTracking, decryptSecret, settleRunIfComplete }
   h;
 
 vi.mock("bullmq", () => ({
+  Queue: vi.fn(() => ({ add: vi.fn() })),
   Worker: vi.fn((_name: string, processor: never) => {
     h.setProcessor(processor);
     return { name: _name };
@@ -92,6 +93,9 @@ const smtpConnection = {
   usernameEncrypted: "u-enc",
   passwordEncrypted: "p-enc"
 };
+
+const secretDecryptionMessage =
+  "Stored SMTP credentials cannot be decrypted. Check ENCRYPTION_KEY; changing it invalidates existing SMTP credentials.";
 
 const baseEmailJob = {
   id: "ej1",
@@ -254,6 +258,25 @@ describe("email-sending worker", () => {
     );
     expect(failCall).toBeDefined();
     expect(settleRunIfComplete).not.toHaveBeenCalled();
+  });
+
+  it("records a clear message when stored SMTP credentials cannot be decrypted", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    decryptSecret.mockImplementationOnce(() => {
+      throw new Error(secretDecryptionMessage);
+    });
+
+    await expect(run(makeJob({ attemptsMade: 2, attempts: 3 }))).rejects.toThrow(
+      "Stored SMTP credentials cannot be decrypted"
+    );
+
+    const failCall = prismaMock.emailJob.update.mock.calls.find(
+      (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"
+    );
+    expect(
+      (failCall![0] as { data: { events: { create: { metadata: { message: string } } } } })
+        .data.events.create.metadata.message
+    ).toContain("changing it invalidates existing SMTP credentials");
   });
 
   it("marks FAILED and settles on the final failed attempt", async () => {

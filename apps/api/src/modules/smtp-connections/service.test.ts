@@ -14,7 +14,9 @@ vi.mock("@qqueue/email-engine", () => ({
 }));
 
 const { smtpConnectionService } = await import("./service.js");
-const { decryptSecret, encryptSecret } = await import("../../lib/crypto.js");
+const { SECRET_DECRYPTION_MESSAGE, decryptSecret, encryptSecret } = await import(
+  "../../lib/crypto.js"
+);
 
 const createInput = {
   organizationId: "org_1",
@@ -149,6 +151,20 @@ describe("smtpConnectionService.update", () => {
       smtpConnectionService.update("s1", "user_1", { name: "x" })
     ).rejects.toThrow(HttpError);
   });
+
+  it("returns a clear error when existing secrets cannot be decrypted", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      ...existing,
+      usernameEncrypted: "not-a-valid-secret"
+    } as never);
+
+    await expect(
+      smtpConnectionService.update("s1", "user_1", { name: "Renamed" })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: SECRET_DECRYPTION_MESSAGE
+    });
+  });
 });
 
 describe("smtpConnectionService.delete", () => {
@@ -179,5 +195,17 @@ describe("smtpConnectionService.getProviderForConnection", () => {
       passwordEncrypted: encryptSecret("p")
     });
     expect(provider).toBeDefined();
+  });
+
+  it("throws a clear HttpError when credentials cannot be decrypted", () => {
+    expect(() =>
+      smtpConnectionService.getProviderForConnection({
+        host: "h",
+        port: 1,
+        secure: true,
+        usernameEncrypted: "not-a-valid-secret",
+        passwordEncrypted: encryptSecret("p")
+      })
+    ).toThrow(SECRET_DECRYPTION_MESSAGE);
   });
 });

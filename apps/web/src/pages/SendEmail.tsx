@@ -191,7 +191,7 @@ export function SendEmail() {
       toast.success(
         scheduledAtIso
           ? `Email scheduled for ${new Date(scheduledAtIso).toLocaleString()}.`
-          : `Email queued - job ${result.emailJob.id} is ${result.emailJob.status}.`
+          : `Email queued - job ${result.id} is ${result.status}.`
       );
     } catch (error) {
       toast.error(

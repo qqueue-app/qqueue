@@ -27,7 +27,7 @@ export async function requireTransactionalAuth(
   if (token.startsWith("qq_live_")) {
     const apiKey = await apiKeyService.authenticate(token);
     if (!apiKey) {
-      throw new HttpError(401, "Invalid API key");
+      throw new HttpError(401, "Invalid API key", "invalid_api_key");
     }
 
     req.apiKeyId = apiKey.id;

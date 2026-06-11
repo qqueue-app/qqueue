@@ -12,6 +12,7 @@ export function errorHandler(
   if (error instanceof HttpError) {
     res.status(error.statusCode).json({
       error: {
+        ...(error.code ? { code: error.code } : {}),
         message: error.message
       }
     });
@@ -21,6 +22,7 @@ export function errorHandler(
   if (error instanceof ZodError) {
     res.status(400).json({
       error: {
+        code: "validation_error",
         message: "Invalid request body",
         issues: error.issues
       }
@@ -34,6 +36,7 @@ export function errorHandler(
   ) {
     res.status(404).json({
       error: {
+        code: "not_found",
         message: "Resource not found"
       }
     });
@@ -46,6 +49,7 @@ export function errorHandler(
   ) {
     res.status(409).json({
       error: {
+        code: "conflict",
         message: "Resource already exists"
       }
     });

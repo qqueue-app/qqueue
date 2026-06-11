@@ -647,7 +647,10 @@ describe("transactional-email send", () => {
       fromEmail: "from@b.com",
       fromName: null
     } as never);
-    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
     const res = await request(app)
       .post("/api/v1/transactional-email/send")
       .set("Authorization", auth)
@@ -659,6 +662,7 @@ describe("transactional-email send", () => {
         scheduledAt: "2999-01-01T00:00:00.000Z"
     });
     expect(res.status).toBe(202);
+    expect(res.body).toEqual({ data: { id: "job_1", status: "QUEUED" } });
   });
 
   it("accepts an API key without organizationId in the request body", async () => {
@@ -673,7 +677,10 @@ describe("transactional-email send", () => {
       fromEmail: "from@b.com",
       fromName: null
     } as never);
-    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
 
     const res = await request(app)
       .post("/api/v1/transactional-email/send")
@@ -686,6 +693,7 @@ describe("transactional-email send", () => {
       });
 
     expect(res.status).toBe(202);
+    expect(res.body).toEqual({ data: { id: "job_1", status: "QUEUED" } });
     expect(prismaMock.emailJob.create.mock.calls[0][0].data.organizationId).toBe(
       "org_1"
     );

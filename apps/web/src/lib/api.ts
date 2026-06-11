@@ -87,6 +87,21 @@ export interface WebhookEndpoint {
   deletedAt?: string | null;
 }
 
+export interface WebhookDelivery {
+  id: string;
+  organizationId: string;
+  endpointId: string;
+  emailEventId: string;
+  eventName: string;
+  status: string;
+  attempts: number;
+  responseStatus?: number | null;
+  error?: string | null;
+  nextAttemptAt?: string | null;
+  deliveredAt?: string | null;
+  createdAt: string;
+}
+
 export interface Campaign {
   id: string;
   organizationId: string;
@@ -530,7 +545,7 @@ export const api = {
   },
 
   sendEmail(input: Record<string, unknown>) {
-    return request<{ emailJob: { id: string; status: string } }>(
+    return request<{ id: string; status: string }>(
       "/api/v1/transactional-email/send",
       {
         method: "POST",
@@ -584,5 +599,20 @@ export const api = {
     return request<void>(`/api/v1/webhook-endpoints/${id}`, {
       method: "DELETE"
     });
+  },
+
+  listWebhookDeliveries(endpointId: string) {
+    return request<WebhookDelivery[]>(
+      `/api/v1/webhook-endpoints/${endpointId}/deliveries`
+    );
+  },
+
+  retryWebhookDelivery(deliveryId: string) {
+    return request<WebhookDelivery>(
+      `/api/v1/webhook-endpoints/deliveries/${deliveryId}/retry`,
+      {
+        method: "POST"
+      }
+    );
   }
 };

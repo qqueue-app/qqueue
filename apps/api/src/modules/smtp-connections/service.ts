@@ -3,7 +3,12 @@ import type {
   SMTPConnectionInput,
   SMTPConnectionUpdateInput
 } from "@qqueue/shared";
-import { decryptSecret, encryptSecret } from "../../lib/crypto.js";
+import {
+  SECRET_DECRYPTION_MESSAGE,
+  SecretDecryptionError,
+  decryptSecret,
+  encryptSecret
+} from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 
@@ -68,6 +73,10 @@ async function verifyConnection(connection: {
   try {
     await toProvider(connection).verify();
   } catch (error) {
+    if (error instanceof SecretDecryptionError) {
+      throw new HttpError(400, SECRET_DECRYPTION_MESSAGE);
+    }
+
     throw new HttpError(
       400,
       error instanceof Error
@@ -193,6 +202,13 @@ export const smtpConnectionService = {
     usernameEncrypted: string;
     passwordEncrypted: string;
   }) {
-    return toProvider(connection);
+    try {
+      return toProvider(connection);
+    } catch (error) {
+      if (error instanceof SecretDecryptionError) {
+        throw new HttpError(500, SECRET_DECRYPTION_MESSAGE, "smtp_failure");
+      }
+      throw error;
+    }
   }
 };

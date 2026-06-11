@@ -72,7 +72,10 @@ describe("transactionalEmailService.send", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
-    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
 
     const result = await transactionalEmailService.send({
       organizationId: "org_1",
@@ -82,7 +85,7 @@ describe("transactionalEmailService.send", () => {
       scheduledAt: "2026-01-01T01:00:00.000Z"
     });
 
-    expect(result.providerResult).toBeNull();
+    expect(result).toEqual({ id: "job_1", status: "QUEUED" });
     expect(queueAdd).toHaveBeenCalledOnce();
     expect(providerSend).not.toHaveBeenCalled();
   });
@@ -151,7 +154,7 @@ describe("transactionalEmailService.send", () => {
     const sendArgs = providerSend.mock.calls[0][0];
     expect(sendArgs.subject).toBe("Hi World");
     expect(sendArgs.from).toBe("Sender <from@b.com>");
-    expect(result.providerResult).toMatchObject({ messageId: "msg_1" });
+    expect(result).toEqual({ id: "job_1", status: "SENT" });
     // last update marks SENT
     const lastUpdate = prismaMock.emailJob.update.mock.calls.at(-1)?.[0];
     expect(lastUpdate?.data.status).toBe("SENT");

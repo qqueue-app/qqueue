@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Copy, KeyRound, LogOut, Trash2 } from "lucide-react";
+import { Copy, KeyRound, LogOut, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import {
@@ -7,6 +7,7 @@ import {
   outboundWebhookEvents,
   type ApiKey,
   type OutboundWebhookEvent,
+  type WebhookDelivery,
   type WebhookEndpoint
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
@@ -87,11 +88,23 @@ export function Settings() {
   const [deleteWebhookTarget, setDeleteWebhookTarget] =
     useState<WebhookEndpoint | null>(null);
   const [deletingWebhook, setDeletingWebhook] = useState(false);
+  const [selectedWebhookEndpoint, setSelectedWebhookEndpoint] =
+    useState<WebhookEndpoint | null>(null);
+  const [webhookDeliveries, setWebhookDeliveries] = useState<WebhookDelivery[]>(
+    []
+  );
+  const [webhookDeliveriesLoading, setWebhookDeliveriesLoading] =
+    useState(false);
+  const [retryingDeliveryId, setRetryingDeliveryId] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     if (!currentOrganizationId) {
       setApiKeys([]);
       setWebhookEndpoints([]);
+      setSelectedWebhookEndpoint(null);
+      setWebhookDeliveries([]);
       return;
     }
 
@@ -292,6 +305,10 @@ export function Settings() {
       setWebhookEndpoints((current) =>
         current.filter((item) => item.id !== deleteWebhookTarget.id)
       );
+      if (selectedWebhookEndpoint?.id === deleteWebhookTarget.id) {
+        setSelectedWebhookEndpoint(null);
+        setWebhookDeliveries([]);
+      }
       setDeleteWebhookTarget(null);
       toast.success("Webhook endpoint deleted.");
     } catch (error) {
@@ -311,6 +328,42 @@ export function Settings() {
         ? Array.from(new Set([...current, event]))
         : current.filter((item) => item !== event)
     );
+  }
+
+  async function loadWebhookDeliveries(endpoint: WebhookEndpoint) {
+    setSelectedWebhookEndpoint(endpoint);
+    setWebhookDeliveriesLoading(true);
+    try {
+      const deliveries = await api.listWebhookDeliveries(endpoint.id);
+      setWebhookDeliveries(deliveries);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to load webhook deliveries"
+      );
+    } finally {
+      setWebhookDeliveriesLoading(false);
+    }
+  }
+
+  async function retryWebhookDelivery(delivery: WebhookDelivery) {
+    setRetryingDeliveryId(delivery.id);
+    try {
+      const retried = await api.retryWebhookDelivery(delivery.id);
+      setWebhookDeliveries((current) =>
+        current.map((item) => (item.id === retried.id ? retried : item))
+      );
+      toast.success("Webhook delivery retry queued.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Unable to retry webhook delivery"
+      );
+    } finally {
+      setRetryingDeliveryId(null);
+    }
   }
 
   function selectOrganization(organizationId: string) {
@@ -335,6 +388,19 @@ export function Settings() {
       dateStyle: "medium",
       timeStyle: "short"
     }).format(new Date(value));
+  }
+
+  function webhookStatusVariant(status: string) {
+    if (status === "DELIVERED") {
+      return "success" as const;
+    }
+    if (status === "FAILED") {
+      return "destructive" as const;
+    }
+    if (status === "PENDING") {
+      return "warning" as const;
+    }
+    return "secondary" as const;
   }
 
   return (
@@ -515,6 +581,7 @@ export function Settings() {
                 </TableBody>
               </Table>
             )}
+
           </CardContent>
         </Card>
 
@@ -619,7 +686,7 @@ export function Settings() {
                     <TableHead>Name</TableHead>
                     <TableHead>URL</TableHead>
                     <TableHead>Events</TableHead>
-                    <TableHead className="w-16" />
+                    <TableHead className="w-32" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -648,6 +715,15 @@ export function Settings() {
                           type="button"
                           variant="ghost"
                           size="icon"
+                          onClick={() => void loadWebhookDeliveries(endpoint)}
+                          aria-label={`View deliveries for ${endpoint.name}`}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
                           onClick={() => setDeleteWebhookTarget(endpoint)}
                           aria-label={`Delete ${endpoint.name}`}
                         >
@@ -659,6 +735,124 @@ export function Settings() {
                 </TableBody>
               </Table>
             )}
+
+            {selectedWebhookEndpoint ? (
+              <div className="space-y-3 rounded-md border p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium">
+                      Recent deliveries for {selectedWebhookEndpoint.name}
+                    </h3>
+                    <p className="mt-1 break-all text-xs text-muted-foreground">
+                      {selectedWebhookEndpoint.url}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={webhookDeliveriesLoading}
+                    onClick={() =>
+                      void loadWebhookDeliveries(selectedWebhookEndpoint)
+                    }
+                  >
+                    {webhookDeliveriesLoading ? (
+                      <Spinner />
+                    ) : (
+                      <RotateCcw className="h-4 w-4" />
+                    )}
+                    Refresh
+                  </Button>
+                </div>
+
+                {webhookDeliveriesLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Spinner />
+                    Loading webhook deliveries
+                  </div>
+                ) : webhookDeliveries.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No delivery attempts for this endpoint yet.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Event</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Response</TableHead>
+                        <TableHead>Retry state</TableHead>
+                        <TableHead className="w-16" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {webhookDeliveries.map((delivery) => (
+                        <TableRow key={delivery.id}>
+                          <TableCell>
+                            <div className="font-medium">
+                              {delivery.eventName}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Created {formatDate(delivery.createdAt)}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={webhookStatusVariant(delivery.status)}
+                            >
+                              {delivery.status}
+                            </Badge>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {delivery.deliveredAt
+                                ? `Delivered ${formatDate(delivery.deliveredAt)}`
+                                : `${delivery.attempts} attempt${
+                                    delivery.attempts === 1 ? "" : "s"
+                                  }`}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {delivery.responseStatus ?? "No response"}
+                            </div>
+                            {delivery.error ? (
+                              <div className="mt-1 max-w-sm break-words text-xs text-destructive">
+                                {delivery.error}
+                              </div>
+                            ) : null}
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {delivery.nextAttemptAt
+                                ? `Next ${formatDate(delivery.nextAttemptAt)}`
+                                : "No retry scheduled"}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              disabled={
+                                delivery.status === "DELIVERED" ||
+                                retryingDeliveryId === delivery.id
+                              }
+                              onClick={() => void retryWebhookDelivery(delivery)}
+                              aria-label={`Retry ${delivery.eventName} delivery`}
+                            >
+                              {retryingDeliveryId === delivery.id ? (
+                                <Spinner />
+                              ) : (
+                                <RotateCcw className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </section>

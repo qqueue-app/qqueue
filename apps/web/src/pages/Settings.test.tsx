@@ -40,7 +40,9 @@ vi.mock("../lib/api.js", () => ({
     revokeApiKey: vi.fn(),
     listWebhookEndpoints: vi.fn(),
     createWebhookEndpoint: vi.fn(),
-    deleteWebhookEndpoint: vi.fn()
+    deleteWebhookEndpoint: vi.fn(),
+    listWebhookDeliveries: vi.fn(),
+    retryWebhookDelivery: vi.fn()
   }
 }));
 
@@ -55,6 +57,8 @@ const mockedApi = api as unknown as {
   listWebhookEndpoints: ReturnType<typeof vi.fn>;
   createWebhookEndpoint: ReturnType<typeof vi.fn>;
   deleteWebhookEndpoint: ReturnType<typeof vi.fn>;
+  listWebhookDeliveries: ReturnType<typeof vi.fn>;
+  retryWebhookDelivery: ReturnType<typeof vi.fn>;
 };
 
 describe("Settings", () => {
@@ -65,6 +69,7 @@ describe("Settings", () => {
     sessionValue.current.signOut = vi.fn();
     mockedApi.listApiKeys.mockResolvedValue([]);
     mockedApi.listWebhookEndpoints.mockResolvedValue([]);
+    mockedApi.listWebhookDeliveries.mockResolvedValue([]);
   });
 
   it("renders account details", () => {
@@ -248,6 +253,65 @@ describe("Settings", () => {
     await waitFor(() =>
       expect(mockedApi.deleteWebhookEndpoint).toHaveBeenCalledWith("wh_1")
     );
+  });
+
+  it("shows webhook delivery details and retries a failed delivery", async () => {
+    const user = userEvent.setup();
+    mockedApi.listWebhookEndpoints.mockResolvedValue([
+      {
+        id: "wh_1",
+        organizationId: "o1",
+        name: "Production webhook",
+        url: "https://example.com/webhooks/qqueue",
+        events: ["email.sent"],
+        enabled: true,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      }
+    ]);
+    mockedApi.listWebhookDeliveries.mockResolvedValue([
+      {
+        id: "del_1",
+        organizationId: "o1",
+        endpointId: "wh_1",
+        emailEventId: "evt_1",
+        eventName: "email.sent",
+        status: "FAILED",
+        attempts: 2,
+        responseStatus: 500,
+        error: "Webhook endpoint returned 500",
+        nextAttemptAt: "2026-01-01T00:01:00.000Z",
+        deliveredAt: null,
+        createdAt: "2026-01-01T00:00:00.000Z"
+      }
+    ]);
+    mockedApi.retryWebhookDelivery.mockResolvedValue({
+      id: "del_1",
+      organizationId: "o1",
+      endpointId: "wh_1",
+      emailEventId: "evt_1",
+      eventName: "email.sent",
+      status: "PENDING",
+      attempts: 2,
+      responseStatus: null,
+      error: null,
+      nextAttemptAt: "2026-01-01T00:02:00.000Z",
+      deliveredAt: null,
+      createdAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    render(<Settings />);
+    await screen.findByText("Production webhook");
+    await user.click(screen.getByLabelText("View deliveries for Production webhook"));
+
+    expect(await screen.findByText("Webhook endpoint returned 500")).toBeInTheDocument();
+    expect(mockedApi.listWebhookDeliveries).toHaveBeenCalledWith("wh_1");
+
+    await user.click(screen.getByLabelText("Retry email.sent delivery"));
+    await waitFor(() =>
+      expect(mockedApi.retryWebhookDelivery).toHaveBeenCalledWith("del_1")
+    );
+    expect(await screen.findByText("PENDING")).toBeInTheDocument();
   });
 
   it("signs out and redirects", async () => {

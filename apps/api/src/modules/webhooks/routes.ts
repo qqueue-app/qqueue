@@ -18,5 +18,9 @@ webhookEndpointRouter.get(
   "/:id/deliveries",
   webhookEndpointController.listDeliveries
 );
+webhookEndpointRouter.post(
+  "/deliveries/:deliveryId/retry",
+  webhookEndpointController.retryDelivery
+);
 webhookEndpointRouter.put("/:id", webhookEndpointController.update);
 webhookEndpointRouter.delete("/:id", webhookEndpointController.delete);

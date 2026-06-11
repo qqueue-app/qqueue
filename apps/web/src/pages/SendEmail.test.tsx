@@ -88,9 +88,7 @@ describe("SendEmail", () => {
     const user = userEvent.setup();
     mockedApi.listTemplates.mockResolvedValue(templates);
     mockedApi.listSMTPConnections.mockResolvedValue(smtp);
-    mockedApi.sendEmail.mockResolvedValue({
-      emailJob: { id: "job1", status: "QUEUED" }
-    });
+    mockedApi.sendEmail.mockResolvedValue({ id: "job1", status: "QUEUED" });
     renderSendEmail();
     await waitFor(() =>
       expect(mockedApi.listSMTPConnections).toHaveBeenCalled()

@@ -39,6 +39,14 @@ describe("errorHandler", () => {
     expect(res.body).toEqual({ error: { message: "Forbidden" } });
   });
 
+  it("includes a stable code when an HttpError has one", () => {
+    const res = run(new HttpError(401, "Invalid API key", "invalid_api_key"));
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual({
+      error: { code: "invalid_api_key", message: "Invalid API key" }
+    });
+  });
+
   it("maps a ZodError to 400 with issues", () => {
     let zodError: z.ZodError;
     try {
@@ -64,7 +72,9 @@ describe("errorHandler", () => {
     });
     const res = run(error);
     expect(res.statusCode).toBe(404);
-    expect(res.body).toEqual({ error: { message: "Resource not found" } });
+    expect(res.body).toEqual({
+      error: { code: "not_found", message: "Resource not found" }
+    });
   });
 
   it("maps Prisma P2002 to 409", () => {
@@ -74,7 +84,9 @@ describe("errorHandler", () => {
     });
     const res = run(error);
     expect(res.statusCode).toBe(409);
-    expect(res.body).toEqual({ error: { message: "Resource already exists" } });
+    expect(res.body).toEqual({
+      error: { code: "conflict", message: "Resource already exists" }
+    });
   });
 
   it("maps an unknown error to 500 and logs it", () => {

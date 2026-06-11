@@ -16,11 +16,13 @@ export interface PublicSendEmailInput {
 
 export class QQueueError extends Error {
   readonly status: number;
+  readonly code?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = "QQueueError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -36,7 +38,9 @@ export class QQueueClient {
     );
   }
 
-  async sendEmail(payload: PublicSendEmailInput): Promise<{ id: string }> {
+  async sendEmail(
+    payload: PublicSendEmailInput
+  ): Promise<{ id: string; status: string }> {
     const response = await fetch(`${this.baseUrl}/transactional-email/send`, {
       method: "POST",
       headers: {
@@ -48,23 +52,28 @@ export class QQueueClient {
 
     const body = (await response.json().catch(() => null)) as
       | {
-          data?: { emailJob?: { id?: string } };
-          error?: { message?: string };
+          data?: { id?: string; status?: string; emailJob?: { id?: string; status?: string } };
+          error?: { code?: string; message?: string };
         }
       | null;
 
     if (!response.ok) {
       throw new QQueueError(
         response.status,
-        body?.error?.message ?? "QQueue request failed"
+        body?.error?.message ?? "QQueue request failed",
+        body?.error?.code
       );
     }
 
-    const id = body?.data?.emailJob?.id;
-    if (!id) {
-      throw new QQueueError(response.status, "QQueue response missing email id");
+    const id = body?.data?.id ?? body?.data?.emailJob?.id;
+    const status = body?.data?.status ?? body?.data?.emailJob?.status;
+    if (!id || !status) {
+      throw new QQueueError(
+        response.status,
+        "QQueue response missing email id or status"
+      );
     }
 
-    return { id };
+    return { id, status };
   }
 }

@@ -1,6 +1,10 @@
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptSecret } from "./crypto.js";
+import {
+  SECRET_DECRYPTION_MESSAGE,
+  SecretDecryptionError,
+  decryptSecret
+} from "./crypto.js";
 
 // Mirror the worker's key derivation: sha256 of the test ENCRYPTION_KEY
 // (injected via vitest.config.ts), aes-256-gcm, with the blob encoded as
@@ -31,20 +35,19 @@ describe("decryptSecret", () => {
   });
 
   it("throws on a value missing the iv/tag/encrypted parts", () => {
+    expect(() => decryptSecret("only-one-part")).toThrow(SecretDecryptionError);
     expect(() => decryptSecret("only-one-part")).toThrow(
-      "Invalid encrypted secret format"
+      SECRET_DECRYPTION_MESSAGE
     );
   });
 
   it("throws when one of the three segments is empty", () => {
-    expect(() => decryptSecret("abc..def")).toThrow(
-      "Invalid encrypted secret format"
-    );
+    expect(() => decryptSecret("abc..def")).toThrow(SECRET_DECRYPTION_MESSAGE);
   });
 
   it("throws when the auth tag does not match (tampered ciphertext)", () => {
     const [iv, tag] = encryptSecret("hello").split(".");
     const tampered = [iv, tag, "ZGVhZGJlZWY"].join(".");
-    expect(() => decryptSecret(tampered)).toThrow();
+    expect(() => decryptSecret(tampered)).toThrow(SECRET_DECRYPTION_MESSAGE);
   });
 });

@@ -127,6 +127,54 @@ export const webhookEndpointService = {
     });
   },
 
+  async retryDelivery(deliveryId: string, userId: string) {
+    const delivery = await prisma.webhookDelivery.findUnique({
+      where: { id: deliveryId },
+      select: {
+        id: true,
+        endpointId: true,
+        status: true
+      }
+    });
+
+    if (!delivery) {
+      throw new HttpError(404, "Webhook delivery not found", "not_found");
+    }
+
+    await findOwnedEndpoint(delivery.endpointId, userId);
+
+    if (delivery.status === "DELIVERED") {
+      throw new HttpError(
+        409,
+        "Delivered webhook deliveries cannot be retried",
+        "conflict"
+      );
+    }
+
+    const retried = await prisma.webhookDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "PENDING",
+        responseStatus: null,
+        error: null,
+        nextAttemptAt: new Date()
+      },
+      select: deliverySelect
+    });
+
+    await webhookDeliveryQueue.add(
+      "deliver-webhook",
+      { deliveryId: delivery.id },
+      {
+        jobId: `webhook-retry-${delivery.id}-${Date.now()}`,
+        attempts: 5,
+        backoff: { type: "exponential", delay: 30_000 }
+      }
+    );
+
+    return retried;
+  },
+
   async enqueueForEmailEvent(emailEventId: string) {
     const event = await prisma.emailEvent.findUnique({
       where: { id: emailEventId },

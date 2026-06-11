@@ -1,6 +1,6 @@
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { injectTracking } from "@qqueue/email-engine";
-import type { SendEmailInput } from "@qqueue/shared";
+import type { SendEmailInput, TransactionalSendResponse } from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -37,18 +37,26 @@ function parseScheduledAt(value: string | undefined) {
 
   const scheduledAt = new Date(value);
   if (Number.isNaN(scheduledAt.getTime())) {
-    throw new HttpError(400, "scheduledAt must be a valid ISO date");
+    throw new HttpError(
+      400,
+      "scheduledAt must be a valid ISO date",
+      "invalid_schedule"
+    );
   }
 
   if (scheduledAt.getTime() <= Date.now()) {
-    throw new HttpError(400, "scheduledAt must be in the future");
+    throw new HttpError(
+      400,
+      "scheduledAt must be in the future",
+      "invalid_schedule"
+    );
   }
 
   return scheduledAt;
 }
 
 export const transactionalEmailService = {
-  async send(input: SendEmailInput) {
+  async send(input: SendEmailInput): Promise<TransactionalSendResponse> {
     const smtpConnection = await prisma.sMTPConnection.findFirst({
       where: {
         organizationId: input.organizationId,
@@ -58,7 +66,11 @@ export const transactionalEmailService = {
     });
 
     if (!smtpConnection) {
-      throw new HttpError(404, "SMTP connection not found");
+      throw new HttpError(
+        404,
+        "SMTP connection not found",
+        "missing_smtp_connection"
+      );
     }
 
     const template = input.templateId
@@ -71,7 +83,7 @@ export const transactionalEmailService = {
       : null;
 
     if (input.templateId && !template) {
-      throw new HttpError(404, "Template not found");
+      throw new HttpError(404, "Template not found", "invalid_template");
     }
 
     const subject = renderVariables(
@@ -84,7 +96,8 @@ export const transactionalEmailService = {
     if (!subject || (!html && !text)) {
       throw new HttpError(
         400,
-        "Provide a subject and html/text body, or a templateId"
+        "Provide a subject and html/text body, or a templateId",
+        "validation_error"
       );
     }
 
@@ -130,7 +143,7 @@ export const transactionalEmailService = {
         type: "QUEUED"
       });
 
-      return { emailJob: queuedJob, providerResult: null };
+      return { id: queuedJob.id, status: queuedJob.status };
     }
 
     const emailJob = await prisma.emailJob.create({
@@ -201,10 +214,7 @@ export const transactionalEmailService = {
         type: "SENT"
       });
 
-      return {
-        emailJob: sentJob,
-        providerResult: result
-      };
+      return { id: sentJob.id, status: sentJob.status };
     } catch (error) {
       await prisma.emailJob.update({
         where: { id: emailJob.id },
@@ -235,7 +245,8 @@ export const transactionalEmailService = {
         502,
         env.NODE_ENV === "production"
           ? "SMTP send failed"
-          : `SMTP send failed: ${message}`
+          : `SMTP send failed: ${message}`,
+        "smtp_failure"
       );
     }
   }

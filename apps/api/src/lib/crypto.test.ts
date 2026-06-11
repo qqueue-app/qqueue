@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  SECRET_DECRYPTION_MESSAGE,
+  SecretDecryptionError,
   decryptSecret,
   encryptSecret,
   hashPassword,
@@ -48,8 +50,16 @@ describe("encryptSecret / decryptSecret", () => {
   });
 
   it("throws on an invalid encrypted format", () => {
+    expect(() => decryptSecret("only-one-part")).toThrow(SecretDecryptionError);
     expect(() => decryptSecret("only-one-part")).toThrow(
-      "Invalid encrypted secret format"
+      SECRET_DECRYPTION_MESSAGE
+    );
+  });
+
+  it("throws the same operational error for tampered ciphertext", () => {
+    const [iv, tag] = encryptSecret("x").split(".");
+    expect(() => decryptSecret([iv, tag, "tampered"].join("."))).toThrow(
+      SECRET_DECRYPTION_MESSAGE
     );
   });
 });

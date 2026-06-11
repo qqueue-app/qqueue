@@ -38,7 +38,9 @@ describe("QQueueClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 202,
-      json: vi.fn().mockResolvedValue({ data: { emailJob: { id: "job_1" } } })
+      json: vi.fn().mockResolvedValue({
+        data: { id: "job_1", status: "QUEUED" }
+      })
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -49,7 +51,7 @@ describe("QQueueClient", () => {
       variables: { firstName: "Ada" }
     });
 
-    expect(result).toEqual({ id: "job_1" });
+    expect(result).toEqual({ id: "job_1", status: "QUEUED" });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:4000/api/v1/transactional-email/send",
       expect.objectContaining({
@@ -65,6 +67,24 @@ describe("QQueueClient", () => {
         })
       })
     );
+  });
+
+  it("accepts the legacy nested send response while self-hosted APIs upgrade", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 202,
+        json: vi.fn().mockResolvedValue({
+          data: { emailJob: { id: "job_1", status: "SENT" } }
+        })
+      })
+    );
+
+    const client = new QQueueClient({ apiKey: "key_3" });
+    await expect(
+      client.sendEmail({ to: "a@b.com", subject: "Hi", text: "Body" })
+    ).resolves.toEqual({ id: "job_1", status: "SENT" });
   });
 
   it("throws QQueueError for failed API responses", async () => {
@@ -86,7 +106,34 @@ describe("QQueueClient", () => {
     ).rejects.toMatchObject({
       name: "QQueueError",
       status: 401,
+      code: undefined,
       message: "Invalid API key"
+    } satisfies Partial<QQueueError>);
+  });
+
+  it("preserves API error codes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: vi.fn().mockResolvedValue({
+          error: {
+            code: "validation_error",
+            message: "Invalid request body"
+          }
+        })
+      })
+    );
+
+    const client = new QQueueClient({ apiKey: "key_3" });
+
+    await expect(
+      client.sendEmail({ to: "not-an-email", subject: "Hi", text: "Body" })
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "validation_error",
+      message: "Invalid request body"
     } satisfies Partial<QQueueError>);
   });
 });

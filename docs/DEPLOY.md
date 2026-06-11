@@ -52,7 +52,10 @@ Generate each secret with:
 openssl rand -hex 32
 ```
 
-Keep `ENCRYPTION_KEY` stable. It is used to encrypt stored SMTP credentials.
+Keep `ENCRYPTION_KEY` stable and backed up. It is used to encrypt stored SMTP
+credentials. If it changes after SMTP connections have been saved, QQueue cannot
+decrypt those saved usernames/passwords; affected SMTP connections must be
+edited and their credentials re-entered.
 Keep `TRACKING_SECRET` stable too — rotating it invalidates open/click links in
 already-sent emails.
 

@@ -41,5 +41,13 @@ export const webhookEndpointController = {
       req.userId!
     );
     res.json({ data: deliveries });
+  },
+
+  async retryDelivery(req: Request, res: Response) {
+    const delivery = await webhookEndpointService.retryDelivery(
+      String(req.params.deliveryId),
+      req.userId!
+    );
+    res.json({ data: delivery });
   }
 };

@@ -115,9 +115,9 @@ Send one email using either direct content or a template:
 
 ```sh
 curl -s http://localhost:4000/api/v1/transactional-email/send \
+  -H "Authorization: Bearer qq_live_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "organizationId": "ORG_ID",
     "to": "recipient@example.com",
     "templateId": "TEMPLATE_ID",
     "variables": {
@@ -125,6 +125,10 @@ curl -s http://localhost:4000/api/v1/transactional-email/send \
     }
   }'
 ```
+
+See [docs/TRANSACTIONAL_API.md](docs/TRANSACTIONAL_API.md) for API key setup,
+SDK usage, self-hosted `baseUrl` configuration, error codes, webhook signing,
+and retry semantics.
 
 ## Testing & Coverage
 

@@ -18,12 +18,14 @@ const qqueue = new QQueueClient({
   baseUrl: "https://mail.example.com/api/v1"
 });
 
-await qqueue.sendEmail({
+const email = await qqueue.sendEmail({
   to: "user@example.com",
   subject: "Welcome",
   html: "<p>Hello from QQueue.</p>",
   text: "Hello from QQueue."
 });
+
+console.log(email.id, email.status);
 ```
 
 ## Templates
@@ -55,7 +57,7 @@ try {
   });
 } catch (error) {
   if (error instanceof QQueueError) {
-    console.error(error.status, error.message);
+    console.error(error.status, error.code, error.message);
   }
 }
 ```
@@ -71,3 +73,9 @@ const qqueue = new QQueueClient({
   baseUrl: "https://mail.example.com/api/v1"
 });
 ```
+
+## Releases
+
+See [CHANGELOG.md](./CHANGELOG.md) for version history and
+[RELEASE.md](./RELEASE.md) for the publishing checklist, install smoke test, and
+version bump flow.

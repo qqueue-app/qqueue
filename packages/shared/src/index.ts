@@ -46,6 +46,15 @@ export type EmailEventType =
   | "BOUNCED"
   | "COMPLAINED"
   | "FAILED";
+export type ApiErrorCode =
+  | "invalid_api_key"
+  | "missing_smtp_connection"
+  | "invalid_template"
+  | "smtp_failure"
+  | "invalid_schedule"
+  | "validation_error"
+  | "not_found"
+  | "conflict";
 
 export interface User {
   id: string;
@@ -128,6 +137,11 @@ export interface EmailEvent {
   type: EmailEventType;
   occurredAt: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface TransactionalSendResponse {
+  id: string;
+  status: EmailJobStatus;
 }
 
 export interface ApiKey {
