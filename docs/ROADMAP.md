@@ -143,8 +143,9 @@ See `docs/CLOUD_BOUNDARY.md` for the current Phase 7 boundary rules.
       `docs/legal/`.
 - [ ] Have the SaaS Terms of Service and Privacy Policy reviewed by qualified
       legal counsel before serious commercial launch.
-- [ ] Add a data processing agreement, subprocessor list, cookie policy, SLA,
-      and enterprise terms before larger customer or enterprise sales.
+- [x] Add a data processing agreement, subprocessor list, cookie policy, SLA,
+      and enterprise terms before larger customer or enterprise sales (drafts in
+      `docs/legal/`; pending legal-counsel review).
 
 ### Phase 7 design notes (planning)
 

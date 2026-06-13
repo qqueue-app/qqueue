@@ -29,6 +29,30 @@ controls here unless a piece is intentionally reusable AGPL core infrastructure.
 
 ## Current Status
 
-This is a scaffold only. Do not add production cloud behavior until the
-commercial license terms, CLA enforcement, and dependency license audit are in
-place.
+Buildable scaffold (Phase 7, slice 0). The directory is now a real
+`@qqueue/cloud` app — an Express skeleton with `dev`/`build`/`typecheck`/`test`
+scripts, env config, an error handler, and three feature modules (`billing`,
+`workspaces`, `usage-limits`) laid out in the core `routes/controller/service`
+convention.
+
+What works today:
+
+- A health check and a real plan catalog (`src/plans/catalog.ts`, placeholder
+  tiers/limits) served at `/cloud/v1/billing/plans`.
+- Pure quota evaluation (`src/modules/usage-limits/service.ts`) that the
+  queue/worker enforcement layer will call later.
+
+Slice 1 (data layer) adds the proprietary billing/metering data model in
+`../api/prisma/schema/cloud.prisma` (`Subscription`, `Seat`, `UsageCounter`,
+related to the core `Organization` with cascade FKs) and wires the service layer:
+
+- `billing` — subscription lookup, idempotent `ensureSubscription` (free/trialing
+  default), and `getPlanForOrganization` (catalog-validated, falls back to free).
+- `usage-limits` — `incrementUsage` (upsert counter), `loadSnapshot`, and
+  `getCurrentUsage` (snapshot evaluated against the tenant's effective plan).
+  This is what the queue/worker enforcement layer will call.
+
+The Stripe checkout/webhook path and the authenticated HTTP surface still return
+`501 not_implemented` on purpose. Do not add production billing behavior until the
+commercial license terms are reviewed by counsel. Remaining slices: Stripe
+integration, queue/worker enforcement hook, and the auth + tenant-scoping audit.

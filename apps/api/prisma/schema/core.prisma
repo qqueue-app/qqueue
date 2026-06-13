@@ -1,3 +1,11 @@
+// QQueue core data model (AGPL-3.0-only).
+//
+// This file plus any other *.prisma file in this folder form a single Prisma
+// schema. Proprietary QQueue Cloud (Phase 7) models live in cloud.prisma under a
+// separate commercial license; see docs/CLOUD_BOUNDARY.md. Prisma requires both
+// sides of a relation, so a few cloud back-reference fields appear on
+// Organization below — they are relation metadata only and carry no logic.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -87,6 +95,10 @@ model Organization {
   apiKeys         ApiKey[]
   webhookEndpoints WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
+  // Cloud (Phase 7) back-references — defined in cloud.prisma. Relation metadata
+  // only; no AGPL obligation attaches to these fields.
+  subscription    Subscription?
+  usageCounters   UsageCounter[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 }

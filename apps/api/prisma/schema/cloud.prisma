@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: LicenseRef-QQueue-Commercial
+// Copyright (C) 2026 Nana Aboagye Boateng
+//
+// Proprietary QQueue Cloud (Phase 7) data model. NOT covered by the repository's
+// AGPL-3.0-only license — see apps/cloud/LICENSE and docs/CLOUD_BOUNDARY.md.
+//
+// These models extend the AGPL core through a relation to Organization (the
+// tenant/billing boundary). They are part of the same Prisma schema and generated
+// client by design (one database, one migration pipeline); the boundary is the
+// license, not physical separation. Keep all billing/metering BEHAVIOR in
+// apps/cloud — these are data definitions only.
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+}
+
+// One subscription per tenant (Organization). planKey references the in-code plan
+// catalog in apps/cloud (free/pro/scale) rather than a DB table, so plan/pricing
+// changes do not require a migration.
+model Subscription {
+  id                     String             @id @default(cuid())
+  organizationId         String             @unique
+  planKey                String
+  status                 SubscriptionStatus @default(TRIALING)
+  // Billing-provider linkage (e.g. Stripe). Null until checkout completes.
+  providerCustomerId     String?            @unique
+  providerSubscriptionId String?            @unique
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  organization           Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  seats                  Seat[]
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  @@index([planKey])
+}
+
+// A seat occupied by a core user within a subscription. userId is the core
+// User id, scoped to the subscription's organization at the application layer
+// (kept as a plain string to avoid coupling the core User model to cloud).
+model Seat {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  userId         String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([subscriptionId, userId])
+}
+
+// Metered usage counter, bucketed per tenant + billing period + resource.
+// periodKey is a coarse bucket such as "2026-06" (month) for monthly quotas, or
+// "lifetime" for non-resetting resources like contacts. resource is one of the
+// metered keys: "emails", "contacts", "apiCalls", "seats".
+model UsageCounter {
+  id             String       @id @default(cuid())
+  organizationId String
+  periodKey      String
+  resource       String
+  used           Int          @default(0)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, periodKey, resource])
+  @@index([organizationId, periodKey])
+}

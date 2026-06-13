@@ -5,6 +5,9 @@
   "private": true,
   "type": "module",
   "main": "dist/index.js",
+  "prisma": {
+    "schema": "prisma/schema"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
