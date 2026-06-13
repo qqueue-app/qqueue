@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { BrandMark } from "../components/BrandMark.js";
 
 type LegalPageKind = "terms" | "privacy" | "licensing" | "trademark";
 
@@ -296,9 +297,7 @@ export function LegalPage({ kind }: LegalPageProps) {
             to="/"
             className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
-              Q
-            </span>
+            <BrandMark className="h-7 w-7 rounded-lg" />
             QQueue
           </Link>
           <h1 className="text-3xl font-semibold tracking-tight">

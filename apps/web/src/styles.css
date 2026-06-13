@@ -87,3 +87,77 @@
       sans-serif;
   }
 }
+
+@layer utilities {
+  .dashboard-splash-mark {
+    animation: dashboard-splash-mark 700ms ease-out both;
+  }
+
+  .dashboard-splash-node {
+    animation: dashboard-splash-node 900ms ease-in-out infinite;
+  }
+
+  .dashboard-splash-progress {
+    animation: dashboard-splash-progress 1050ms ease-in-out infinite;
+  }
+
+  .dashboard-splash-pulse {
+    animation: dashboard-splash-pulse 1400ms ease-out infinite;
+  }
+
+  @keyframes dashboard-splash-mark {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes dashboard-splash-node {
+    0%,
+    100% {
+      border-color: hsl(var(--primary) / 0.2);
+      transform: translateY(0);
+    }
+
+    50% {
+      border-color: hsl(var(--primary) / 0.65);
+      transform: translateY(-5px);
+    }
+  }
+
+  @keyframes dashboard-splash-progress {
+    from {
+      transform: translateX(-100%);
+    }
+
+    to {
+      transform: translateX(220%);
+    }
+  }
+
+  @keyframes dashboard-splash-pulse {
+    from {
+      opacity: 0.85;
+      transform: translate(-50%, -50%) scale(0.7);
+    }
+
+    to {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(1.25);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dashboard-splash-mark,
+    .dashboard-splash-node,
+    .dashboard-splash-progress,
+    .dashboard-splash-pulse {
+      animation: none;
+    }
+  }
+}

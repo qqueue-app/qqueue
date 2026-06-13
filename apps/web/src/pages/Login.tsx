@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
+import { BrandMark } from "../components/BrandMark.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
@@ -126,9 +127,7 @@ export function Login({ mode }: LoginProps) {
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-6 flex items-center justify-center gap-2.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-lg font-semibold text-primary-foreground">
-            Q
-          </div>
+          <BrandMark className="h-10 w-10" />
           <span className="text-xl font-semibold tracking-tight">QQueue</span>
         </div>
         <Card>

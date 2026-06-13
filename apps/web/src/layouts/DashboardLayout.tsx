@@ -21,6 +21,9 @@ import {
 } from "lucide-react";
 import { useSession } from "../lib/session-context.js";
 import { cn } from "../lib/utils.js";
+import { BrandMark } from "../components/BrandMark.js";
+import { BrandWordmark } from "../components/BrandWordmark.js";
+import { DashboardSplash } from "../components/DashboardSplash.js";
 import { ThemeToggle } from "../components/ThemeToggle.js";
 import {
   DropdownMenu,
@@ -62,9 +65,23 @@ const navItems: NavItem[] = [
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
+const SPLASH_STORAGE_KEY = "qqueue.dashboard-splash-seen";
+const SPLASH_DURATION_MS = 3000;
+
 export function DashboardLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [showSplash, setShowSplash] = useState(() => {
+    if (import.meta.env.MODE === "test") {
+      return false;
+    }
+
+    try {
+      return window.sessionStorage.getItem(SPLASH_STORAGE_KEY) !== "true";
+    } catch {
+      return true;
+    }
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const {
@@ -82,6 +99,23 @@ export function DashboardLayout() {
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!showSplash) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      try {
+        window.sessionStorage.setItem(SPLASH_STORAGE_KEY, "true");
+      } catch {
+        // Private browsing or strict storage settings can block sessionStorage.
+      }
+      setShowSplash(false);
+    }, SPLASH_DURATION_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [showSplash]);
 
   // Auto-expand a nav group when the current route lives inside it.
   useEffect(() => {
@@ -113,11 +147,8 @@ export function DashboardLayout() {
     return (
       <>
         {showLogo ? (
-          <div className="flex items-center gap-2.5 px-5 py-5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary font-semibold text-primary-foreground">
-              Q
-            </div>
-            <div className="text-sm font-semibold leading-tight">QQueue</div>
+          <div className="flex items-center px-5 py-5">
+            <BrandWordmark />
           </div>
         ) : null}
 
@@ -327,6 +358,8 @@ export function DashboardLayout() {
 
   return (
     <div className="flex min-h-screen flex-col gap-3 p-3 md:h-screen md:flex-row md:overflow-hidden">
+      {showSplash ? <DashboardSplash /> : null}
+
       {/* Desktop sidebar */}
       <aside className="hidden flex-col rounded-2xl border bg-card shadow-sm md:flex md:h-full md:w-64 md:shrink-0">
         <SidebarBody />
@@ -343,9 +376,7 @@ export function DashboardLayout() {
           <Menu className="h-5 w-5" />
         </button>
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-            Q
-          </div>
+          <BrandMark className="h-7 w-7 rounded-lg" />
           <span className="text-sm font-semibold">QQueue</span>
         </div>
         <ThemeToggle />
@@ -360,14 +391,7 @@ export function DashboardLayout() {
           />
           <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col bg-card shadow-xl animate-in slide-in-from-left duration-200">
             <div className="flex items-center justify-between px-5 py-4">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary font-semibold text-primary-foreground">
-                  Q
-                </div>
-                <div className="text-sm font-semibold leading-tight">
-                  QQueue
-                </div>
-              </div>
+              <BrandWordmark />
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}
