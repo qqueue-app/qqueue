@@ -4,10 +4,15 @@ import {
   campaignSchema,
   campaignScheduleSchema,
   campaignUpdateSchema,
+  contactActivityQuerySchema,
   contactListSchema,
   contactListUpdateSchema,
   contactSchema,
+  createListFromSegmentSchema,
   cronExpressionSchema,
+  csvImportSchema,
+  segmentFilterSchema,
+  suppressionCreateSchema,
   emailAddressSchema,
   emailDraftSchema,
   emailDraftUpdateSchema,
@@ -474,6 +479,102 @@ describe("emailPreviewSchema", () => {
     expect(
       emailPreviewSchema.safeParse({ organizationId: "org_1" }).success
     ).toBe(true);
+  });
+});
+
+describe("segmentFilterSchema", () => {
+  it("defaults match to ANY and requires at least one tag", () => {
+    const parsed = segmentFilterSchema.safeParse({
+      organizationId: "org_1",
+      tags: ["vip"]
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.match).toBe("ANY");
+  });
+
+  it("rejects an empty tag list", () => {
+    expect(
+      segmentFilterSchema.safeParse({ organizationId: "org_1", tags: [] })
+        .success
+    ).toBe(false);
+  });
+
+  it("accepts ALL match and an optional status filter", () => {
+    expect(
+      segmentFilterSchema.safeParse({
+        organizationId: "org_1",
+        tags: ["a", "b"],
+        match: "ALL",
+        status: "ACTIVE"
+      }).success
+    ).toBe(true);
+  });
+});
+
+describe("createListFromSegmentSchema", () => {
+  it("requires a list name on top of the filter", () => {
+    expect(
+      createListFromSegmentSchema.safeParse({
+        organizationId: "org_1",
+        tags: ["vip"]
+      }).success
+    ).toBe(false);
+    expect(
+      createListFromSegmentSchema.safeParse({
+        organizationId: "org_1",
+        tags: ["vip"],
+        name: "VIPs"
+      }).success
+    ).toBe(true);
+  });
+});
+
+describe("csvImportSchema", () => {
+  it("allows an optional target list", () => {
+    expect(
+      csvImportSchema.safeParse({ organizationId: "org_1" }).success
+    ).toBe(true);
+    expect(
+      csvImportSchema.safeParse({
+        organizationId: "org_1",
+        contactListId: "list_1"
+      }).success
+    ).toBe(true);
+  });
+});
+
+describe("suppressionCreateSchema", () => {
+  it("defaults reason to MANUAL and validates the email", () => {
+    const parsed = suppressionCreateSchema.safeParse({
+      organizationId: "org_1",
+      email: "blocked@example.com"
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.reason).toBe("MANUAL");
+    expect(
+      suppressionCreateSchema.safeParse({
+        organizationId: "org_1",
+        email: "not-an-email"
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("contactActivityQuerySchema", () => {
+  it("defaults and clamps the limit", () => {
+    const parsed = contactActivityQuerySchema.safeParse({});
+    expect(parsed.success && parsed.data.limit).toBe(50);
+    expect(contactActivityQuerySchema.safeParse({ limit: 0 }).success).toBe(
+      false
+    );
+    expect(contactActivityQuerySchema.safeParse({ limit: 1000 }).success).toBe(
+      false
+    );
+  });
+
+  it("coerces a string limit from the query string", () => {
+    const parsed = contactActivityQuerySchema.safeParse({ limit: "25" });
+    expect(parsed.success && parsed.data.limit).toBe(25);
   });
 });
 

@@ -29,6 +29,10 @@ const h = vi.hoisted(() => {
     send,
     SMTPProvider: vi.fn(() => ({ send })),
     injectTracking: vi.fn((html: string | null) => `tracked:${html}`),
+    buildListUnsubscribeHeaders: vi.fn(() => ({
+      "List-Unsubscribe": "<https://app/api/v1/unsubscribe?token=tok>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    })),
     decryptSecret: vi.fn((v: string) => `dec:${v}`),
     settleRunIfComplete: vi.fn(),
     loadAttachmentsForJob: vi.fn()
@@ -52,7 +56,8 @@ vi.mock("../config/redis.js", () => ({ redisConnection: {} }));
 
 vi.mock("@qqueue/email-engine", () => ({
   SMTPProvider: h.SMTPProvider,
-  injectTracking: h.injectTracking
+  injectTracking: h.injectTracking,
+  buildListUnsubscribeHeaders: h.buildListUnsubscribeHeaders
 }));
 
 vi.mock("../lib/crypto.js", () => ({ decryptSecret: h.decryptSecret }));
@@ -124,6 +129,7 @@ beforeEach(() => {
   send.mockReset();
   SMTPProvider.mockClear();
   injectTracking.mockClear();
+  h.buildListUnsubscribeHeaders.mockClear();
   decryptSecret.mockClear();
   settleRunIfComplete.mockReset().mockResolvedValue(undefined);
   // Default: no attachments. Tests override this to assert forwarding.
@@ -171,6 +177,25 @@ describe("email-sending worker", () => {
     await expect(run(makeJob())).rejects.toThrow(
       "Email job requires an SMTP connection"
     );
+  });
+
+  it("marks SUPPRESSED and skips sending when the recipient is suppressed", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
+
+    await run(makeJob());
+
+    expect(send).not.toHaveBeenCalled();
+    expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
+      where: { id: "ej1" },
+      data: { status: "SUPPRESSED" }
+    });
+    // Never transitions to PROCESSING.
+    expect(prismaMock.emailJob.update).not.toHaveBeenCalledWith({
+      where: { id: "ej1" },
+      data: { status: "PROCESSING" }
+    });
+    expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
   });
 
   it("sends successfully, records SENT and settles the run", async () => {
@@ -307,6 +332,50 @@ describe("email-sending worker", () => {
     expect(sendArgs.references).toBeUndefined();
   });
 
+  it("adds List-Unsubscribe headers for CAMPAIGN origin", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "CAMPAIGN"
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(h.buildListUnsubscribeHeaders).toHaveBeenCalledWith(
+      expect.any(String),
+      "org1",
+      "to@example.com",
+      expect.any(String)
+    );
+    const sendArgs = send.mock.calls[0][0];
+    expect(sendArgs.headers).toMatchObject({
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    });
+  });
+
+  it("omits List-Unsubscribe headers for non-campaign origin", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "TRANSACTIONAL"
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(h.buildListUnsubscribeHeaders).not.toHaveBeenCalled();
+    expect(send.mock.calls[0][0].headers).toBeUndefined();
+  });
+
   it("uses bare fromEmail when fromName is null", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
@@ -341,6 +410,16 @@ describe("email-sending worker", () => {
     expect(prismaMock.$transaction).toHaveBeenCalledOnce();
     expect(prismaMock.contact.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: "BOUNCED" } })
+    );
+    // A hard bounce also adds the address to the suppression registry.
+    expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          organizationId: "org1",
+          email: "to@example.com",
+          reason: "BOUNCE"
+        })
+      })
     );
     const failedCall = prismaMock.emailJob.update.mock.calls.find(
       (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"

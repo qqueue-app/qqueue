@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { emailAddressSchema } from "@qqueue/shared";
 import { prisma } from "../../lib/prisma.js";
+import { suppressionService } from "../suppressions/service.js";
 import { webhookEndpointService } from "../webhooks/service.js";
 
 // A 1x1 fully transparent GIF, served as the open-tracking pixel.
@@ -130,12 +131,18 @@ export const trackingService = {
     await webhookEndpointService.enqueueForEmailEvent(event.id);
 
     if (input.type === "BOUNCED" || input.type === "COMPLAINED") {
+      const email = input.email ?? job.toEmail;
       await prisma.contact.updateMany({
-        where: {
-          organizationId: job.organizationId,
-          email: input.email ?? job.toEmail
-        },
+        where: { organizationId: job.organizationId, email },
         data: { status: "BOUNCED" }
+      });
+      // Add to the org-wide suppression registry so the address is skipped on
+      // every future send, not only sends to a matching Contact row.
+      await suppressionService.addSuppression({
+        organizationId: job.organizationId,
+        email,
+        reason: input.type === "COMPLAINED" ? "COMPLAINT" : "BOUNCE",
+        source: "webhook"
       });
     }
 

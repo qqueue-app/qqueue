@@ -119,7 +119,7 @@ async function main() {
     "prisma",
     "generate",
     "--schema",
-    "apps/api/prisma/schema.prisma"
+    "apps/api/prisma/schema"
   ]);
 
   run("pnpm", [
@@ -128,7 +128,7 @@ async function main() {
     "migrate",
     "deploy",
     "--schema",
-    "apps/api/prisma/schema.prisma"
+    "apps/api/prisma/schema"
   ]);
 
   const [

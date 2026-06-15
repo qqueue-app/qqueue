@@ -80,10 +80,11 @@ describe("trackingService.recordWebhookEvent", () => {
     expect(data).toMatchObject({ type: "DELIVERED", metadata: { source: "webhook", messageId: "msg_1" } });
   });
 
-  it("marks the contact BOUNCED on a bounce, using the provided email", async () => {
+  it("marks the contact BOUNCED and suppresses the address on a bounce", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
     prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
     prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
     const result = await trackingService.recordWebhookEvent({
       type: "BOUNCED",
       emailJobId: "job_1",
@@ -95,14 +96,22 @@ describe("trackingService.recordWebhookEvent", () => {
       where: { organizationId: "org_1", email: "bounced@y.com" },
       data: { status: "BOUNCED" }
     });
+    const suppress = prismaMock.suppression.upsert.mock.calls[0][0];
+    expect(suppress.create).toMatchObject({
+      organizationId: "org_1",
+      email: "bounced@y.com",
+      reason: "BOUNCE",
+      source: "webhook"
+    });
     const data = prismaMock.emailEvent.create.mock.calls[0][0].data;
     expect(data).toMatchObject({ metadata: { source: "webhook", reason: "mailbox full" } });
   });
 
-  it("falls back to the job toEmail when no email is provided on a complaint", async () => {
+  it("suppresses with COMPLAINT and the job toEmail on a complaint without an email", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
     prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
     prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
     await trackingService.recordWebhookEvent({
       type: "COMPLAINED",
       emailJobId: "job_1"
@@ -111,5 +120,19 @@ describe("trackingService.recordWebhookEvent", () => {
       where: { organizationId: "org_1", email: "x@y.com" },
       data: { status: "BOUNCED" }
     });
+    expect(prismaMock.suppression.upsert.mock.calls[0][0].create).toMatchObject({
+      email: "x@y.com",
+      reason: "COMPLAINT"
+    });
+  });
+
+  it("does not suppress on a DELIVERED webhook", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
+    prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
+    await trackingService.recordWebhookEvent({
+      type: "DELIVERED",
+      emailJobId: "job_1"
+    });
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
   });
 });

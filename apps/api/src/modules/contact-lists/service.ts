@@ -1,9 +1,11 @@
 import type {
   ContactListInput,
-  ContactListUpdateInput
+  ContactListUpdateInput,
+  CreateListFromSegmentInput
 } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { buildSegmentWhere } from "../contacts/segment.js";
 
 // Membership is an explicit join (ContactListMember). We hydrate the related
 // contact and a member/campaign count, then flatten back to the legacy
@@ -142,5 +144,35 @@ export const contactListService = {
   async delete(id: string, userId: string) {
     await findOwned(id, userId);
     await prisma.contactList.delete({ where: { id } });
+  },
+
+  /**
+   * Materialize a tag-driven segment into a new list. Members are snapshotted
+   * from the current matches and tagged with source SEGMENT. This is a static
+   * snapshot — dynamic segments that re-resolve at send time are Phase D.
+   */
+  async createFromSegment(input: CreateListFromSegmentInput) {
+    const contacts = await prisma.contact.findMany({
+      where: buildSegmentWhere(input),
+      select: { id: true }
+    });
+
+    const list = await prisma.contactList.create({
+      data: {
+        organizationId: input.organizationId,
+        name: input.name,
+        description: input.description,
+        members: contacts.length
+          ? {
+              create: contacts.map((contact) => ({
+                contact: { connect: { id: contact.id } },
+                source: "SEGMENT" as const
+              }))
+            }
+          : undefined
+      },
+      include: contactListInclude
+    });
+    return toResponse(list as unknown as ContactListWithMembers);
   }
 };

@@ -1,5 +1,11 @@
 import type { Request, Response } from "express";
-import { contactSchema } from "@qqueue/shared";
+import {
+  contactActivityQuerySchema,
+  contactSchema,
+  csvImportSchema,
+  segmentFilterSchema
+} from "@qqueue/shared";
+import { HttpError } from "../../lib/http-error.js";
 import { contactService } from "./service.js";
 
 export const contactController = {
@@ -42,5 +48,59 @@ export const contactController = {
   async delete(req: Request, res: Response) {
     await contactService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
+  },
+
+  async previewSegment(req: Request, res: Response) {
+    const input = segmentFilterSchema.parse(req.body);
+    const result = await contactService.previewSegment(input);
+    res.json({ data: result });
+  },
+
+  async activity(req: Request, res: Response) {
+    const query = contactActivityQuerySchema.parse(req.query);
+    const result = await contactService.activity(
+      String(req.params.id),
+      req.userId!,
+      query
+    );
+    res.json({ data: result });
+  },
+
+  async import(req: Request, res: Response) {
+    // CSV arrives either as an uploaded file (multipart) or a `csv` body field.
+    const csv = req.file
+      ? req.file.buffer.toString("utf8")
+      : typeof req.body?.csv === "string"
+        ? req.body.csv
+        : undefined;
+
+    if (!csv) {
+      throw new HttpError(400, "A CSV file or csv field is required", "validation_error");
+    }
+
+    const { organizationId, contactListId } = csvImportSchema.parse(req.body);
+    const summary = await contactService.importContacts({
+      organizationId,
+      csv,
+      contactListId
+    });
+    res.status(200).json({ data: summary });
+  },
+
+  async export(req: Request, res: Response) {
+    const contactListId =
+      typeof req.query.contactListId === "string"
+        ? req.query.contactListId
+        : undefined;
+
+    const csv = await contactService.exportContacts(
+      // organizationId is verified and pinned by requireOrgMembership.
+      req.organizationId!,
+      contactListId
+    );
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="contacts.csv"');
+    res.send(csv);
   }
 };

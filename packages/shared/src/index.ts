@@ -23,6 +23,12 @@ export function isValidTimezone(value: string): boolean {
 
 export type UserRole = "OWNER" | "ADMIN" | "MEMBER";
 export type ContactStatus = "ACTIVE" | "UNSUBSCRIBED" | "BOUNCED";
+export type MembershipSource = "MANUAL" | "CSV_IMPORT" | "SEGMENT";
+export type SuppressionReason =
+  | "BOUNCE"
+  | "COMPLAINT"
+  | "UNSUBSCRIBE"
+  | "MANUAL";
 export type CampaignStatus =
   | "DRAFT"
   | "SCHEDULED"
@@ -36,7 +42,8 @@ export type EmailJobStatus =
   | "PROCESSING"
   | "SENT"
   | "FAILED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "SUPPRESSED";
 export type EmailEventType =
   | "QUEUED"
   | "SENT"
@@ -95,6 +102,16 @@ export interface ContactListMember {
   contactId: string;
   contactListId: string;
   addedAt: string;
+  source: MembershipSource;
+}
+
+export interface Suppression {
+  id: string;
+  organizationId: string;
+  email: string;
+  reason: SuppressionReason;
+  source?: string | null;
+  createdAt: string;
 }
 
 export interface Template {
@@ -287,6 +304,58 @@ export const contactListUpdateSchema = z.object({
 });
 
 export type ContactListUpdateInput = z.infer<typeof contactListUpdateSchema>;
+
+// Phase C — contacts & lists enhancements.
+
+// Tag-driven segment filter. `match: ANY` matches contacts with at least one of
+// the tags; `ALL` requires every tag. Optional status narrows to a single
+// ContactStatus (defaults to all statuses when omitted).
+export const segmentFilterSchema = z.object({
+  organizationId: z.string().min(1),
+  tags: z.array(z.string().min(1)).min(1),
+  match: z.enum(["ANY", "ALL"]).default("ANY"),
+  status: z.enum(["ACTIVE", "UNSUBSCRIBED", "BOUNCED"]).optional()
+});
+
+export type SegmentFilterInput = z.infer<typeof segmentFilterSchema>;
+
+// Materialize a tag filter into a new contact list (members tagged SEGMENT).
+export const createListFromSegmentSchema = segmentFilterSchema.extend({
+  name: z.string().min(1),
+  description: z.string().optional()
+});
+
+export type CreateListFromSegmentInput = z.infer<
+  typeof createListFromSegmentSchema
+>;
+
+// CSV import options. The CSV payload itself is handled by the upload middleware,
+// not validated here; this only carries the optional target list.
+export const csvImportSchema = z.object({
+  organizationId: z.string().min(1),
+  contactListId: z.string().min(1).optional()
+});
+
+export type CsvImportInput = z.infer<typeof csvImportSchema>;
+
+export const suppressionCreateSchema = z.object({
+  organizationId: z.string().min(1),
+  email: emailAddressSchema,
+  reason: z.enum(["BOUNCE", "COMPLAINT", "UNSUBSCRIBE", "MANUAL"]).default(
+    "MANUAL"
+  )
+});
+
+export type SuppressionCreateInput = z.infer<typeof suppressionCreateSchema>;
+
+export const contactActivityQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50)
+});
+
+export type ContactActivityQueryInput = z.infer<
+  typeof contactActivityQuerySchema
+>;
 
 export const templateSchema = z.object({
   organizationId: z.string().min(1),

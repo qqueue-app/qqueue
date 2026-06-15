@@ -13,7 +13,12 @@ vi.mock("../lib/api.js", () => ({
     listContacts: vi.fn(),
     createContact: vi.fn(),
     updateContact: vi.fn(),
-    deleteContact: vi.fn()
+    deleteContact: vi.fn(),
+    importContacts: vi.fn(),
+    exportContacts: vi.fn(),
+    getContactActivity: vi.fn(),
+    previewSegment: vi.fn(),
+    createListFromSegment: vi.fn()
   }
 }));
 
@@ -141,5 +146,55 @@ describe("Contacts", () => {
       ).toBeDisabled()
     );
     expect(mockedApi.listContacts).not.toHaveBeenCalled();
+  });
+
+  it("opens the activity drawer for a contact", async () => {
+    const user = userEvent.setup();
+    mockedApi.listContacts.mockResolvedValue(makeContacts(1));
+    mockedApi.getContactActivity.mockResolvedValue({
+      events: [
+        {
+          id: "e1",
+          type: "CLICKED",
+          occurredAt: "2026-02-01T00:00:00.000Z",
+          emailJobId: "job_1",
+          subject: "Welcome",
+          origin: "CAMPAIGN",
+          campaignName: "Spring",
+          url: "https://x.com"
+        }
+      ],
+      nextCursor: null
+    });
+    render(<Contacts />);
+    await screen.findByText("user0@x.com");
+
+    await user.click(screen.getByLabelText("View activity"));
+
+    await waitFor(() =>
+      expect(mockedApi.getContactActivity).toHaveBeenCalledWith("c0")
+    );
+    expect(await screen.findByText("Welcome")).toBeInTheDocument();
+    expect(screen.getByText("CLICKED")).toBeInTheDocument();
+  });
+
+  it("exports contacts to a CSV download", async () => {
+    mockedApi.listContacts.mockResolvedValue(makeContacts(1));
+    mockedApi.exportContacts.mockResolvedValue("email\nuser0@x.com\n");
+    const createObjectURL = vi.fn(() => "blob:csv");
+    const revokeObjectURL = vi.fn();
+    Object.assign(URL, { createObjectURL, revokeObjectURL });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const user = userEvent.setup();
+    render(<Contacts />);
+    await screen.findByText("user0@x.com");
+
+    await user.click(screen.getByRole("button", { name: /export/i }));
+
+    await waitFor(() =>
+      expect(mockedApi.exportContacts).toHaveBeenCalledWith("org_1")
+    );
+    expect(createObjectURL).toHaveBeenCalled();
   });
 });

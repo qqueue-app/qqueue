@@ -158,4 +158,47 @@ describe("contactListService", () => {
       "Contact list not found"
     );
   });
+
+  it("creates a list from a segment with SEGMENT-sourced members", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([
+      { id: "c1" },
+      { id: "c2" }
+    ] as never);
+    prismaMock.contactList.create.mockResolvedValue(listWithMembers() as never);
+
+    await contactListService.createFromSegment({
+      organizationId: "org_1",
+      name: "VIPs",
+      tags: ["vip"],
+      match: "ANY"
+    });
+
+    // Segment selection uses hasSome for ANY.
+    expect(prismaMock.contact.findMany.mock.calls[0][0].where).toMatchObject({
+      organizationId: "org_1",
+      tags: { hasSome: ["vip"] }
+    });
+    // Members are created from the matches and tagged SEGMENT.
+    const createData = prismaMock.contactList.create.mock.calls[0][0].data;
+    expect(createData.members.create).toEqual([
+      { contact: { connect: { id: "c1" } }, source: "SEGMENT" },
+      { contact: { connect: { id: "c2" } }, source: "SEGMENT" }
+    ]);
+  });
+
+  it("creates an empty list when no contacts match the segment", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([] as never);
+    prismaMock.contactList.create.mockResolvedValue(
+      listWithMembers({ members: [], _count: { members: 0, campaigns: 0 } }) as never
+    );
+
+    await contactListService.createFromSegment({
+      organizationId: "org_1",
+      name: "Empty",
+      tags: ["none"],
+      match: "ALL"
+    });
+
+    expect(prismaMock.contactList.create.mock.calls[0][0].data.members).toBeUndefined();
+  });
 });

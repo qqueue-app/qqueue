@@ -12,9 +12,11 @@ import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
+import { suppressionRouter } from "../modules/suppressions/routes.js";
 import { templateRouter } from "../modules/templates/routes.js";
 import { trackingRouter } from "../modules/tracking/routes.js";
 import { transactionalEmailRouter } from "../modules/transactional-email/routes.js";
+import { unsubscribeRouter } from "../modules/unsubscribe/routes.js";
 import { webhookEndpointRouter } from "../modules/webhooks/routes.js";
 
 export const v1Router = Router();
@@ -25,6 +27,10 @@ v1Router.use("/auth", authRouter);
 // Public analytics endpoints: open/click pixels hit by mail clients and ESP
 // bounce webhooks, none of which carry an access token.
 v1Router.use(trackingRouter);
+
+// Public one-click unsubscribe (RFC 8058). Authorized by the signed token in the
+// link, not a session — recipients aren't QQueue users.
+v1Router.use(unsubscribeRouter);
 
 // Transactional sends support either dashboard JWT auth or public API keys.
 v1Router.use("/transactional-email", transactionalEmailRouter);
@@ -38,6 +44,9 @@ v1Router.use("/queue-operations", queueOperationsRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
 v1Router.use("/contacts", contactRouter);
 v1Router.use("/contact-lists", contactListRouter);
+// Org-wide suppression registry ("never send" list) consulted by the send
+// pipeline; also written by bounce/complaint/unsubscribe handling.
+v1Router.use("/suppressions", suppressionRouter);
 v1Router.use("/templates", templateRouter);
 v1Router.use("/campaigns", campaignRouter);
 // Email Studio: manual compose/preview/send and composer drafts. Both reuse the

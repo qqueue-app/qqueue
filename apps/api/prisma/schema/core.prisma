@@ -27,6 +27,22 @@ enum ContactStatus {
   BOUNCED
 }
 
+// How a contact came to be a member of a list. Recorded on ContactListMember so
+// imports and tag-driven segments are distinguishable from manual additions.
+enum MembershipSource {
+  MANUAL
+  CSV_IMPORT
+  SEGMENT
+}
+
+// Why an address is on the org-wide suppression list.
+enum SuppressionReason {
+  BOUNCE
+  COMPLAINT
+  UNSUBSCRIBE
+  MANUAL
+}
+
 enum CampaignStatus {
   DRAFT
   SCHEDULED
@@ -43,6 +59,9 @@ enum EmailJobStatus {
   SENT
   FAILED
   CANCELLED
+  // Recipient is on the suppression list: not sent, and not counted as a
+  // failure or in delivery/bounce-rate math.
+  SUPPRESSED
 }
 
 enum EmailOrigin {
@@ -94,6 +113,7 @@ model Organization {
   smtpConnections SMTPConnection[]
   contacts        Contact[]
   contactLists    ContactList[]
+  suppressions    Suppression[]
   templates       Template[]
   campaigns       Campaign[]
   emailJobs       EmailJob[]
@@ -180,15 +200,36 @@ model ContactList {
 // membership can record when (and later, how) a contact was added, and so large
 // list sends can be cursor-paginated efficiently.
 model ContactListMember {
-  id            String      @id @default(cuid())
+  id            String           @id @default(cuid())
   contactId     String
   contactListId String
-  addedAt       DateTime    @default(now())
-  contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  contactList   ContactList @relation(fields: [contactListId], references: [id], onDelete: Cascade)
+  addedAt       DateTime         @default(now())
+  // How the contact was added to the list (manual selection, CSV import, or a
+  // tag-driven segment). Existing rows default to MANUAL.
+  source        MembershipSource @default(MANUAL)
+  contact       Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactList   ContactList      @relation(fields: [contactListId], references: [id], onDelete: Cascade)
 
   @@unique([contactListId, contactId])
   @@index([contactId])
+}
+
+// Org-wide "never send to this address" registry. Deliberately separate from
+// Contact.status so suppression applies to addresses that are not contacts
+// (transactional recipients, CC/BCC, one-off sends). The send pipeline consults
+// this before every send; Contact.status remains the per-contact display state.
+model Suppression {
+  id             String            @id @default(cuid())
+  organizationId String
+  email          String
+  reason         SuppressionReason
+  // Free-form note about provenance (e.g. "webhook", "import", an emailJobId).
+  source         String?
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime          @default(now())
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
 }
 
 model Template {

@@ -2,7 +2,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "./test/prisma-mock.js";
 import { createAuthTokens } from "./lib/tokens.js";
-import { signTrackingToken } from "@qqueue/email-engine";
+import { signTrackingToken, signUnsubscribeToken } from "@qqueue/email-engine";
 
 // The BullMQ queue singletons are stubbed globally in src/test/setup.ts to keep
 // Redis out of unit tests. This file pins explicit stubs too because its
@@ -366,6 +366,89 @@ describe("tracking routes (public)", () => {
       .send({ type: "DELIVERED", emailJobId: "job_1" });
     expect(res.status).toBe(202);
     expect(res.body.data).toEqual({ recorded: true });
+  });
+});
+
+describe("contacts CSV routes", () => {
+  it("imports contacts from an uploaded CSV file", async () => {
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contact.findUnique.mockResolvedValue(null);
+    prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
+
+    const res = await request(app)
+      .post("/api/v1/contacts/import")
+      .set("Authorization", auth)
+      .field("organizationId", "org_1")
+      .attach("file", Buffer.from("email\nnew@x.com\n"), "contacts.csv");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ created: 1, updated: 0 });
+  });
+
+  it("exports contacts as CSV (and /export is not treated as a contact id)", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
+        email: "a@b.com",
+        firstName: "Ann",
+        lastName: "Bee",
+        status: "ACTIVE",
+        tags: ["vip"],
+        createdAt: new Date("2026-01-01T00:00:00.000Z")
+      }
+    ] as never);
+
+    const res = await request(app)
+      .get("/api/v1/contacts/export?organizationId=org_1")
+      .set("Authorization", auth);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/csv");
+    expect(res.text).toContain("a@b.com");
+  });
+});
+
+describe("unsubscribe routes (public)", () => {
+  it("records an unsubscribe and returns an HTML confirmation on GET", async () => {
+    const token = signUnsubscribeToken(
+      { o: "org_1", e: "u@x.com" },
+      "test-tracking-secret"
+    );
+    prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
+    prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    const res = await request(app).get(`/api/v1/unsubscribe?token=${token}`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org_1", email: "u@x.com" },
+      data: { status: "UNSUBSCRIBED" }
+    });
+  });
+
+  it("returns 400 for an invalid GET token without touching the db", async () => {
+    const res = await request(app).get("/api/v1/unsubscribe?token=bad.token");
+    expect(res.status).toBe(400);
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+  });
+
+  it("handles RFC 8058 one-click POST and returns JSON", async () => {
+    const token = signUnsubscribeToken(
+      { o: "org_1", e: "u@x.com" },
+      "test-tracking-secret"
+    );
+    prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
+    prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    const res = await request(app)
+      .post(`/api/v1/unsubscribe?token=${token}`)
+      .send("List-Unsubscribe=One-Click");
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ unsubscribed: true });
+  });
+
+  it("returns 400 for an invalid POST token", async () => {
+    const res = await request(app).post("/api/v1/unsubscribe?token=bad");
+    expect(res.status).toBe(400);
   });
 });
 

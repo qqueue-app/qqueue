@@ -68,6 +68,11 @@ const Templates = lazy(() =>
     default: module.Templates,
   }))
 );
+const Suppressions = lazy(() =>
+  import("../pages/Suppressions.js").then((module) => ({
+    default: module.Suppressions,
+  }))
+);
 
 function RouteFallback() {
   return (
@@ -97,6 +102,7 @@ export function AppRoutes() {
           <Route path="/send-email" element={<SendEmail />} />
           <Route path="/smtp-connections" element={<SMTPConnections />} />
           <Route path="/contacts" element={<Contacts />} />
+          <Route path="/suppressions" element={<Suppressions />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/lists" element={<ContactLists />} />

@@ -400,7 +400,10 @@ End-to-end, the app can currently support a self-hosted operator who:
   Docker Compose stacks; blobs streamed to SMTP by the send pipeline.
 - [x] MJML wired into the manual composer send + preview path (campaign default
   send path still sends stored HTML as-is).
-- [ ] Suppression list / List-Unsubscribe handling
+- [x] Phase C: contacts & lists — CSV import/export (membership `source`),
+  per-contact activity timeline, org-wide suppression registry + RFC 8058
+  List-Unsubscribe, and basic tag-driven segmentation (preview + materialize to
+  a list). See `docs/PHASE_C_PLAN.md`.
 - [ ] Optional IMAP inbox module (feature-flagged, off by default) — inbound
   message storage anchored to `EmailJob` threading metadata
 
@@ -454,6 +457,28 @@ End-to-end, the app can currently support a self-hosted operator who:
 10. Collect feedback from real installations.
 
 ## Verification
+
+### Phase C contacts & contact lists (2026-06-15)
+
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
+  `pnpm license:audit` passed (audit clean with the new MIT `csv-parse` /
+  `csv-stringify` dependencies).
+- [x] `pnpm test` passed across all packages; new coverage added for the
+  suppression service + pipeline enforcement (campaign fan-out exclusion,
+  synchronous `SUPPRESSED` job, send-worker re-check, bounce/complaint →
+  suppression), the `email-engine` unsubscribe token + List-Unsubscribe headers,
+  the public unsubscribe endpoints, CSV parse/import/export, the contact
+  activity timeline, tag-driven segment preview + list materialization, the
+  shared Zod schemas, and the web Suppressions page + Contacts import/export and
+  activity drawer.
+- [x] `pnpm test:smoke:docker` passed: the register → SMTP → transactional send
+  → worker flow reached `SENT` with the new `20260615040000_phase_c_contacts`
+  migration applied.
+- [x] Migration `20260615040000_phase_c_contacts` verified against a throwaway
+  PostgreSQL 16: all migrations apply in order (including the additive
+  `MembershipSource`/`SuppressionReason` enums, `EmailJobStatus.SUPPRESSED`,
+  `ContactListMember.source`, and the `Suppression` table) and `prisma migrate
+  diff` reports no drift from the schema.
 
 ### Phase A attachments storage + Phase B follow-ups (2026-06-15)
 

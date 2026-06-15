@@ -1,7 +1,8 @@
 import type { Request, Response } from "express";
 import {
   contactListSchema,
-  contactListUpdateSchema
+  contactListUpdateSchema,
+  createListFromSegmentSchema
 } from "@qqueue/shared";
 import { contactListService } from "./service.js";
 
@@ -25,6 +26,12 @@ export const contactListController = {
   async create(req: Request, res: Response) {
     const input = contactListSchema.parse(req.body);
     const list = await contactListService.create(input);
+    res.status(201).json({ data: list });
+  },
+
+  async createFromSegment(req: Request, res: Response) {
+    const input = createListFromSegmentSchema.parse(req.body);
+    const list = await contactListService.createFromSegment(input);
     res.status(201).json({ data: list });
   },
 

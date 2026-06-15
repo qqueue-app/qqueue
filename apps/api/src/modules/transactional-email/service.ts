@@ -11,6 +11,7 @@ import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 import { attachmentService } from "../attachments/service.js";
 import { smtpConnectionService } from "../smtp-connections/service.js";
+import { suppressionService } from "../suppressions/service.js";
 import { webhookEndpointService } from "../webhooks/service.js";
 
 function renderVariables(
@@ -122,6 +123,31 @@ export const transactionalEmailService = {
     const scheduledAt = parseScheduledAt(input.scheduledAt);
 
     const origin: EmailOrigin = input.origin ?? "TRANSACTIONAL";
+
+    // Suppression guard: if the recipient is on the org's "never send" list,
+    // record a SUPPRESSED job (not a failure, not delivered) and stop before
+    // enqueuing or sending.
+    if (await suppressionService.isSuppressed(input.organizationId, input.to)) {
+      const suppressed = await prisma.emailJob.create({
+        data: {
+          organizationId: input.organizationId,
+          smtpConnectionId: smtpConnection.id,
+          templateId: template?.id,
+          toEmail: input.to,
+          cc: input.cc ?? [],
+          bcc: input.bcc ?? [],
+          replyTo: input.replyTo,
+          origin,
+          createdByUserId: input.createdByUserId,
+          subject,
+          html,
+          text,
+          variables: input.variables as InputJsonValue | undefined,
+          status: "SUPPRESSED"
+        }
+      });
+      return { id: suppressed.id, status: suppressed.status };
+    }
 
     // Send later: queue the email for a future time instead of sending inline.
     if (scheduledAt) {

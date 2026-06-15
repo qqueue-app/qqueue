@@ -18,6 +18,8 @@ export interface SendEmailPayload {
   inReplyTo?: string;
   /** RFC 5322 References: the thread's prior Message-IDs. */
   references?: string | string[];
+  /** Extra raw headers (e.g. List-Unsubscribe). Forwarded to Nodemailer as-is. */
+  headers?: Record<string, string>;
   attachments?: EmailAttachment[];
 }
 

@@ -255,10 +255,12 @@ Contacts and lists exist; this phase enhances them. The Phase A.5 foundation
 (`Contact.tags`, explicit `ContactListMember` membership) is the substrate these
 build on.
 
-- [ ] CSV import/export (record import source on `ContactListMember`)
-- [ ] Contact activity timeline (driven by `EmailEvent`)
-- [ ] Suppression list and List-Unsubscribe handling
-- [ ] Segmentation (basic, tag-driven) — advanced segmentation in Phase D
+- [x] CSV import/export (record import source on `ContactListMember`)
+- [x] Contact activity timeline (driven by `EmailEvent`)
+- [x] Suppression list and List-Unsubscribe handling
+- [x] Segmentation (basic, tag-driven) — advanced segmentation in Phase D
+
+See [docs/PHASE_C_PLAN.md](PHASE_C_PLAN.md) for the implementation details.
 
 ### Phase D: Advanced campaign features
 

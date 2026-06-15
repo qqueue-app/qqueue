@@ -35,6 +35,44 @@ export interface ContactList {
   _count?: { contacts: number; campaigns: number };
 }
 
+export interface ContactImportSummary {
+  created: number;
+  updated: number;
+  skipped: number;
+  suppressed: number;
+  errors: { row: number; message: string }[];
+}
+
+export interface ContactActivityEvent {
+  id: string;
+  type: string;
+  occurredAt: string;
+  emailJobId: string;
+  subject?: string | null;
+  origin?: string | null;
+  campaignName?: string | null;
+  url?: string;
+}
+
+export interface ContactActivity {
+  events: ContactActivityEvent[];
+  nextCursor: string | null;
+}
+
+export interface Suppression {
+  id: string;
+  organizationId: string;
+  email: string;
+  reason: string;
+  source?: string | null;
+  createdAt: string;
+}
+
+export interface SegmentPreview {
+  count: number;
+  sample: Contact[];
+}
+
 export interface Template {
   id: string;
   organizationId: string;
@@ -546,6 +584,66 @@ export const api = {
     return request<void>(`/api/v1/contacts/${id}`, { method: "DELETE" });
   },
 
+  importContacts(
+    file: File,
+    options: { organizationId: string; contactListId?: string }
+  ) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("organizationId", options.organizationId);
+    if (options.contactListId) {
+      form.append("contactListId", options.contactListId);
+    }
+    return request<ContactImportSummary>("/api/v1/contacts/import", {
+      method: "POST",
+      body: form
+    });
+  },
+
+  // CSV export streams text/csv, not JSON, so it bypasses request() and returns
+  // the raw CSV text for the caller to turn into a download.
+  async exportContacts(organizationId: string, contactListId?: string) {
+    const params = new URLSearchParams({ organizationId });
+    if (contactListId) {
+      params.set("contactListId", contactListId);
+    }
+    const { accessToken } = getSession();
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/contacts/export?${params.toString()}`,
+      {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
+      }
+    );
+    if (!response.ok) {
+      throw new ApiError("Unable to export contacts", response.status);
+    }
+    return response.text();
+  },
+
+  getContactActivity(
+    contactId: string,
+    options: { cursor?: string; limit?: number } = {}
+  ) {
+    const params = new URLSearchParams();
+    if (options.cursor) {
+      params.set("cursor", options.cursor);
+    }
+    if (options.limit) {
+      params.set("limit", String(options.limit));
+    }
+    const query = params.toString();
+    return request<ContactActivity>(
+      `/api/v1/contacts/${contactId}/activity${query ? `?${query}` : ""}`
+    );
+  },
+
+  previewSegment(input: Record<string, unknown>) {
+    return request<SegmentPreview>("/api/v1/contacts/segment/preview", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
   listContactLists(organizationId: string) {
     return request<ContactList[]>(
       `/api/v1/contact-lists?organizationId=${encodeURIComponent(organizationId)}`
@@ -568,6 +666,30 @@ export const api = {
 
   deleteContactList(id: string) {
     return request<void>(`/api/v1/contact-lists/${id}`, { method: "DELETE" });
+  },
+
+  createListFromSegment(input: Record<string, unknown>) {
+    return request<ContactList>("/api/v1/contact-lists/from-segment", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  listSuppressions(organizationId: string) {
+    return request<Suppression[]>(
+      `/api/v1/suppressions?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  addSuppression(input: { organizationId: string; email: string; reason?: string }) {
+    return request<Suppression>("/api/v1/suppressions", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  deleteSuppression(id: string) {
+    return request<void>(`/api/v1/suppressions/${id}`, { method: "DELETE" });
   },
 
   listTemplates(organizationId: string) {

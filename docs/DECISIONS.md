@@ -288,3 +288,53 @@ incoming mail read-only, and view replies to sent emails (anchored to outbound
 `messageId`/`In-Reply-To`). Reply-from-QQueue, shared inboxes, assignment,
 internal notes, and ticketing are deferred and explicitly out of scope for the
 initial inbox.
+
+## Suppression Is an Org-Wide Registry, Not Just `Contact.status` (Phase C)
+
+Suppression lives in a dedicated `Suppression` table (`organizationId`, `email`,
+`reason`, unique on `(organizationId, email)`), **separate from
+`Contact.status`**. The send pipeline consults this registry before every send.
+
+A per-contact status cannot cover every case: transactional API sends, manual
+`To`/CC/BCC recipients, and one-off addresses are not necessarily `Contact`
+rows, yet a bounce, complaint, or unsubscribe for any of them must stop future
+mail. The registry is the canonical "never send to this address" check;
+`Contact.status` remains the per-contact display state. Bounces and complaints
+write to **both** (status → BOUNCED *and* a `Suppression` row), and unsubscribes
+set status → UNSUBSCRIBED plus a row.
+
+Enforcement is defense-in-depth: campaign fan-out excludes suppressed addresses,
+the synchronous transactional/manual path records a `SUPPRESSED` `EmailJob`
+without sending, and the send worker re-checks at processing time (an address
+can be suppressed between enqueue and send). `EmailJobStatus.SUPPRESSED` keeps
+these out of the failed-jobs view and out of delivery/bounce-rate math.
+
+Phase C suppresses on **hard** bounce/complaint (matching the prior
+`Contact.status = BOUNCED` behavior). Soft-vs-hard classification and
+threshold-based auto-suppression are Phase D ("bounce-driven auto-suppression").
+
+## List-Unsubscribe Applies to Campaign Sends (Phase C)
+
+Campaign (`origin = CAMPAIGN`) mail carries RFC 2369 / RFC 8058 one-click
+unsubscribe headers (`List-Unsubscribe` + `List-Unsubscribe-Post:
+List-Unsubscribe=One-Click`); transactional and manual sends do not, since they
+are not bulk marketing. The header URL carries an HMAC-signed `{org, email}`
+token (reusing the tracking-secret scheme in `email-engine/tracking.ts`) so the
+public `GET`/`POST /api/v1/unsubscribe` endpoints can act without auth or a DB
+lookup. The headers are URL-only — a `mailto:` would require a monitored inbox
+self-hosters may not run. Unsubscribing records a `Suppression` (reason
+UNSUBSCRIBE) and sets the matching `Contact.status = UNSUBSCRIBED`.
+
+## Basic Segmentation Materializes a List; Dynamic Segments Are Phase D (Phase C)
+
+Phase C's "basic, tag-driven" segmentation is a **filter that snapshots into a
+`ContactList`** — preview the count/sample for a tag filter (`ANY`/`ALL` match,
+optional status), then materialize the current matches into a new list whose
+members carry `source = SEGMENT`. No dynamic `Segment` model is introduced yet.
+
+A static snapshot covers the near-term need (build a list from tags and send to
+it) without the cost of a model that re-resolves membership at send time —
+deferred to Phase D, where advanced segmentation (rule trees, dynamic
+re-resolution) is in scope. The `ContactListMember.source` enum
+(`MANUAL | CSV_IMPORT | SEGMENT`) was anticipated by the Phase A.5 explicit-join
+decision and records how each member joined.

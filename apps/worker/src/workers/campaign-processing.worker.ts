@@ -137,10 +137,31 @@ export function startCampaignProcessingWorker() {
         throw new Error("Default SMTP connection not found");
       }
 
-      const contacts = campaign.contactList.members.map((member) => member.contact);
+      const activeContacts = campaign.contactList.members.map(
+        (member) => member.contact
+      );
+
+      // Exclude addresses on the org's suppression list. The ACTIVE-status
+      // filter already drops bounced/unsubscribed contacts, but a manual
+      // suppression can target an address whose contact is still ACTIVE.
+      const suppressed =
+        activeContacts.length > 0
+          ? await prisma.suppression.findMany({
+              where: {
+                organizationId: campaign.organizationId,
+                email: { in: activeContacts.map((contact) => contact.email) }
+              },
+              select: { email: true }
+            })
+          : [];
+      const suppressedEmails = new Set(suppressed.map((row) => row.email));
+      const contacts = activeContacts.filter(
+        (contact) => !suppressedEmails.has(contact.email)
+      );
+
       if (contacts.length === 0) {
-        // No recipients this run: settle it so a recurring campaign returns to
-        // SCHEDULED (and a one-shot is marked SENT).
+        // No deliverable recipients this run: settle it so a recurring campaign
+        // returns to SCHEDULED (and a one-shot is marked SENT).
         await settleRunIfComplete(run.id);
         return;
       }

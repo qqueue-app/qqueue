@@ -68,6 +68,8 @@ beforeEach(() => {
   emailSendingQueue.addBulk.mockReset().mockResolvedValue(undefined);
   campaignProcessingQueue.add.mockReset().mockResolvedValue(undefined);
   settleRunIfComplete.mockReset().mockResolvedValue(undefined);
+  // Default: nothing suppressed. Tests override to exclude specific addresses.
+  prismaMock.suppression.findMany.mockResolvedValue([] as never);
 });
 
 describe("campaign-processing worker", () => {
@@ -287,6 +289,66 @@ describe("campaign-processing worker", () => {
     });
     expect(emailSendingQueue.addBulk).toHaveBeenCalledOnce();
     expect(emailSendingQueue.addBulk.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it("excludes suppressed addresses from fan-out", async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      id: "c1",
+      status: "SENDING",
+      cronExpression: null,
+      scheduledAt: null,
+      organizationId: "org1",
+      templateId: "t1",
+      template: baseTemplate,
+      contactList: {
+        members: [
+          { contact: { email: "keep@b.com", firstName: "Ann", lastName: "Bee" } },
+          { contact: { email: "blocked@b.com", firstName: "X", lastName: "Y" } }
+        ]
+      }
+    } as never);
+    prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
+    prismaMock.emailJob.findMany
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "new1" }] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({ id: "smtp1" } as never);
+    prismaMock.emailJob.createMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.suppression.findMany.mockResolvedValue([
+      { email: "blocked@b.com" }
+    ] as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    const createData = prismaMock.emailJob.createMany.mock.calls[0][0].data;
+    expect(createData).toHaveLength(1);
+    expect(createData[0]).toMatchObject({ toEmail: "keep@b.com" });
+  });
+
+  it("settles the run when every recipient is suppressed", async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      id: "c1",
+      status: "SENDING",
+      cronExpression: null,
+      scheduledAt: null,
+      organizationId: "org1",
+      templateId: "t1",
+      template: baseTemplate,
+      contactList: {
+        members: [{ contact: { email: "blocked@b.com" } }]
+      }
+    } as never);
+    prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
+    prismaMock.emailJob.findMany.mockResolvedValue([] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({ id: "smtp1" } as never);
+    prismaMock.suppression.findMany.mockResolvedValue([
+      { email: "blocked@b.com" }
+    ] as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
+    expect(prismaMock.emailJob.createMany).not.toHaveBeenCalled();
+    expect(emailSendingQueue.addBulk).not.toHaveBeenCalled();
   });
 
   it("falls back to job id then timestamp for the occurrence key", async () => {

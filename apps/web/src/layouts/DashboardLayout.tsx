@@ -7,6 +7,7 @@ import {
   Send,
   Server,
   Users,
+  ShieldBan,
   FileText,
   Megaphone,
   ListRestart,
@@ -53,6 +54,7 @@ const navItems: NavItem[] = [
   { to: "/send-email", label: "Send Email", icon: Send },
   { to: "/smtp-connections", label: "SMTP Connections", icon: Server },
   { to: "/contacts", label: "Contacts", icon: Users },
+  { to: "/suppressions", label: "Suppressions", icon: ShieldBan },
   { to: "/templates", label: "Templates", icon: FileText },
   {
     to: "/campaigns",

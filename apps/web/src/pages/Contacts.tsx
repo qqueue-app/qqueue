@@ -1,10 +1,26 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ListPlus,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  Users
+} from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { api, type Contact } from "../lib/api.js";
+import {
+  api,
+  type Contact,
+  type ContactActivityEvent
+} from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
@@ -29,6 +45,17 @@ import {
   TableHeader,
   TableRow
 } from "../components/ui/table.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "../components/ui/select.js";
+
+function parseFilterTags(value: string) {
+  return [...new Set(value.split(",").map((tag) => tag.trim()).filter(Boolean))];
+}
 
 interface ContactForm {
   email: string;
@@ -82,6 +109,25 @@ export function Contacts() {
   const [deleting, setDeleting] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  // CSV import/export.
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // Tag-driven segment filter.
+  const [filterTags, setFilterTags] = useState("");
+  const [filterMatch, setFilterMatch] = useState<"ANY" | "ALL">("ANY");
+  const [segmentCount, setSegmentCount] = useState<number | null>(null);
+  const [segmentLoading, setSegmentLoading] = useState(false);
+  const [listDialogOpen, setListDialogOpen] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [creatingList, setCreatingList] = useState(false);
+
+  // Activity drawer.
+  const [activityContact, setActivityContact] = useState<Contact | null>(null);
+  const [activity, setActivity] = useState<ContactActivityEvent[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -195,20 +241,220 @@ export function Contacts() {
     }
   }
 
+  async function handleImportFile(event: FormEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    // Reset so selecting the same file again still fires onChange.
+    input.value = "";
+    if (!file || !organizationId) {
+      return;
+    }
+    setImporting(true);
+    try {
+      const summary = await api.importContacts(file, { organizationId });
+      const parts = [`${summary.created} added`, `${summary.updated} updated`];
+      if (summary.suppressed > 0) parts.push(`${summary.suppressed} suppressed`);
+      if (summary.skipped > 0) parts.push(`${summary.skipped} skipped`);
+      toast.success(`Import complete: ${parts.join(", ")}.`);
+      await load();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to import contacts"
+      );
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function handleExport() {
+    if (!organizationId) {
+      return;
+    }
+    setExporting(true);
+    try {
+      const csv = await api.exportContacts(organizationId);
+      const url = URL.createObjectURL(
+        new Blob([csv], { type: "text/csv;charset=utf-8" })
+      );
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "contacts.csv";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to export contacts"
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // Live segment preview: re-count matching contacts as the filter changes.
+  useEffect(() => {
+    const tags = parseFilterTags(filterTags);
+    if (!organizationId || tags.length === 0) {
+      setSegmentCount(null);
+      return;
+    }
+    let cancelled = false;
+    setSegmentLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await api.previewSegment({
+          organizationId,
+          tags,
+          match: filterMatch
+        });
+        if (!cancelled) setSegmentCount(result.count);
+      } catch {
+        if (!cancelled) setSegmentCount(null);
+      } finally {
+        if (!cancelled) setSegmentLoading(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [organizationId, filterTags, filterMatch]);
+
+  async function createListFromSegment(event: FormEvent) {
+    event.preventDefault();
+    const tags = parseFilterTags(filterTags);
+    if (!organizationId || tags.length === 0) {
+      return;
+    }
+    setCreatingList(true);
+    try {
+      await api.createListFromSegment({
+        organizationId,
+        name: newListName,
+        tags,
+        match: filterMatch
+      });
+      toast.success("List created from filter.");
+      setListDialogOpen(false);
+      setNewListName("");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to create list"
+      );
+    } finally {
+      setCreatingList(false);
+    }
+  }
+
+  async function openActivity(contact: Contact) {
+    setActivityContact(contact);
+    setActivity([]);
+    setActivityLoading(true);
+    try {
+      const result = await api.getContactActivity(contact.id);
+      setActivity(result.events);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to load activity"
+      );
+    } finally {
+      setActivityLoading(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Contacts"
         description="Store contacts and list memberships."
         actions={
-          <Button onClick={openCreate} disabled={!organizationId}>
-            <Plus className="h-4 w-4" />
-            Add contact
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!organizationId || importing}
+            >
+              {importing ? <Spinner /> : <Upload className="h-4 w-4" />}
+              Import
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              disabled={!organizationId || exporting}
+            >
+              {exporting ? <Spinner /> : <Download className="h-4 w-4" />}
+              Export
+            </Button>
+            <Button onClick={openCreate} disabled={!organizationId}>
+              <Plus className="h-4 w-4" />
+              Add contact
+            </Button>
+          </div>
         }
       />
 
-      <section className="p-6">
+      <section className="space-y-4 p-6">
+        <Card className="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="filter-tags">Filter by tags (segment)</Label>
+              <Input
+                id="filter-tags"
+                placeholder="vip, newsletter (comma separated)"
+                value={filterTags}
+                onChange={(event) => setFilterTags(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Match</Label>
+              <Select
+                value={filterMatch}
+                onValueChange={(value) =>
+                  setFilterMatch(value === "ALL" ? "ALL" : "ANY")
+                }
+              >
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ANY">Any tag</SelectItem>
+                  <SelectItem value="ALL">All tags</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">
+                {parseFilterTags(filterTags).length === 0
+                  ? "Enter tags to preview"
+                  : segmentLoading
+                    ? "Counting…"
+                    : `${segmentCount ?? 0} match`}
+              </span>
+              <Button
+                variant="outline"
+                disabled={
+                  !organizationId ||
+                  parseFilterTags(filterTags).length === 0 ||
+                  !segmentCount
+                }
+                onClick={() => {
+                  setNewListName("");
+                  setListDialogOpen(true);
+                }}
+              >
+                <ListPlus className="h-4 w-4" />
+                Create list
+              </Button>
+            </div>
+          </div>
+        </Card>
+
         <Card className="overflow-hidden">
           {loading ? (
             <div className="space-y-3 p-5">
@@ -299,6 +545,15 @@ export function Contacts() {
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openActivity(contact)}
+                              aria-label="View activity"
+                            >
+                              <Activity className="h-4 w-4" />
+                            </Button>
                             <Button
                               type="button"
                               variant="ghost"
@@ -438,6 +693,91 @@ export function Contacts() {
         loading={deleting}
         onConfirm={confirmDelete}
       />
+
+      <Dialog open={listDialogOpen} onOpenChange={setListDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create list from filter</DialogTitle>
+            <DialogDescription>
+              {segmentCount ?? 0} contact{segmentCount === 1 ? "" : "s"} matching{" "}
+              {filterMatch === "ALL" ? "all" : "any"} of:{" "}
+              {parseFilterTags(filterTags).join(", ")}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={createListFromSegment} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-list-name">List name</Label>
+              <Input
+                id="new-list-name"
+                value={newListName}
+                onChange={(event) => setNewListName(event.target.value)}
+                required
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setListDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creatingList}>
+                {creatingList ? <Spinner /> : null}
+                Create list
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={activityContact !== null}
+        onOpenChange={(open) => !open && setActivityContact(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Activity</DialogTitle>
+            <DialogDescription>{activityContact?.email}</DialogDescription>
+          </DialogHeader>
+          {activityLoading ? (
+            <div className="space-y-2">
+              {[0, 1, 2].map((index) => (
+                <Skeleton key={index} className="h-8 w-full" />
+              ))}
+            </div>
+          ) : activity.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No email activity yet.
+            </p>
+          ) : (
+            <ul className="max-h-80 space-y-3 overflow-y-auto">
+              {activity.map((event) => (
+                <li key={event.id} className="flex items-start gap-3 text-sm">
+                  <Badge variant="outline" className="mt-0.5 font-normal">
+                    {event.type}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">
+                      {event.subject ?? "(no subject)"}
+                      {event.campaignName ? (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {event.campaignName}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatDate(event.occurredAt)}
+                      {event.url ? ` · ${event.url}` : ""}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

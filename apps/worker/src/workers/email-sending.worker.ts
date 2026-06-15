@@ -1,5 +1,9 @@
 import { DelayedError, Worker } from "bullmq";
-import { SMTPProvider, injectTracking } from "@qqueue/email-engine";
+import {
+  SMTPProvider,
+  buildListUnsubscribeHeaders,
+  injectTracking
+} from "@qqueue/email-engine";
 import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
 import { loadAttachmentsForJob } from "../lib/attachments.js";
@@ -7,6 +11,7 @@ import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { decryptSecret } from "../lib/crypto.js";
 import { enqueueLatestWebhookDeliveries } from "../lib/outbound-webhooks.js";
 import { prisma } from "../lib/prisma.js";
+import { addSuppression, isSuppressed } from "../lib/suppression.js";
 import type { EmailSendingJob } from "../queues/email-sending.queue.js";
 
 const PAUSE_RETRY_DELAY_MS = 30_000;
@@ -43,6 +48,18 @@ export function startEmailSendingWorker() {
         throw new Error("Email job requires an SMTP connection");
       }
 
+      // Defense-in-depth: an address can be suppressed (bounce, complaint,
+      // unsubscribe, manual) between enqueue and send. Skip without sending and
+      // without counting it as a failure.
+      if (await isSuppressed(emailJob.organizationId, emailJob.toEmail)) {
+        await prisma.emailJob.update({
+          where: { id: emailJob.id },
+          data: { status: "SUPPRESSED" }
+        });
+        await settleRunIfComplete(emailJob.campaignRunId);
+        return;
+      }
+
       await prisma.emailJob.update({
         where: { id: emailJob.id },
         data: { status: "PROCESSING" }
@@ -67,6 +84,18 @@ export function startEmailSendingWorker() {
 
         const attachments = await loadAttachmentsForJob(emailJob.id);
 
+        // Marketing (campaign) mail carries RFC 8058 one-click unsubscribe
+        // headers; transactional/manual sends do not.
+        const headers =
+          emailJob.origin === "CAMPAIGN"
+            ? buildListUnsubscribeHeaders(
+                env.APP_URL,
+                emailJob.organizationId,
+                emailJob.toEmail,
+                env.TRACKING_SECRET
+              )
+            : undefined;
+
         const result = await provider.send({
           from: formatFrom(emailJob.smtpConnection),
           to: emailJob.toEmail,
@@ -78,6 +107,7 @@ export function startEmailSendingWorker() {
           subject: emailJob.subject,
           html, // tracking already injected above
           text: emailJob.text ?? undefined,
+          headers,
           attachments
         });
 
@@ -111,6 +141,14 @@ export function startEmailSendingWorker() {
               data: { status: "BOUNCED" }
             })
           ]);
+
+          // Suppress the address org-wide so future sends skip it.
+          await addSuppression({
+            organizationId: emailJob.organizationId,
+            email: emailJob.toEmail,
+            reason: "BOUNCE",
+            source: emailJob.id
+          });
 
           await enqueueLatestWebhookDeliveries({
             organizationId: emailJob.organizationId,

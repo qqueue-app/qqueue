@@ -81,6 +81,30 @@ describe("transactionalEmailService.send", () => {
     ).rejects.toThrow("Provide a subject and html/text body, or a templateId");
   });
 
+  it("records a SUPPRESSED job and does not enqueue or send a suppressed recipient", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_sup",
+      status: "SUPPRESSED"
+    } as never);
+
+    const result = await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "blocked@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>"
+    });
+
+    expect(result).toEqual({ id: "job_sup", status: "SUPPRESSED" });
+    expect(prismaMock.emailJob.create.mock.calls[0][0].data).toMatchObject({
+      status: "SUPPRESSED",
+      toEmail: "blocked@y.com"
+    });
+    expect(queueAdd).not.toHaveBeenCalled();
+    expect(providerSend).not.toHaveBeenCalled();
+  });
+
   it("queues a future email and does not send inline", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
