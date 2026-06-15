@@ -308,7 +308,7 @@ export function LegalPage({ kind }: LegalPageProps) {
           </p>
         </header>
 
-        <article className="prose prose-slate max-w-none dark:prose-invert prose-headings:font-semibold prose-a:text-primary">
+        <article className="prose prose-slate max-w-none prose-headings:font-semibold prose-a:text-primary">
           {page.intro.map((paragraph) => (
             <p key={paragraph}>{paragraph}</p>
           ))}

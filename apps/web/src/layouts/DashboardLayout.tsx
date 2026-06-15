@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import {
   LayoutDashboard,
   PenSquare,
-  Send,
   Server,
   Users,
   ShieldBan,
@@ -26,7 +25,6 @@ import { cn } from "../lib/utils.js";
 import { BrandMark } from "../components/BrandMark.js";
 import { BrandWordmark } from "../components/BrandWordmark.js";
 import { DashboardSplash } from "../components/DashboardSplash.js";
-import { ThemeToggle } from "../components/ThemeToggle.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,7 +49,6 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/email-studio", label: "Email Studio", icon: PenSquare },
-  { to: "/send-email", label: "Send Email", icon: Send },
   { to: "/smtp-connections", label: "SMTP Connections", icon: Server },
   { to: "/contacts", label: "Contacts", icon: Users },
   { to: "/suppressions", label: "Suppressions", icon: ShieldBan },
@@ -342,18 +339,14 @@ export function DashboardLayout() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <ThemeToggle className="shrink-0" />
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <NavLink
-                to="/login"
-                className="flex flex-1 items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                Sign in
-              </NavLink>
-              <ThemeToggle className="shrink-0" />
-            </div>
+            <NavLink
+              to="/login"
+              className="flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Sign in
+            </NavLink>
           )}
         </div>
       </>
@@ -383,7 +376,7 @@ export function DashboardLayout() {
           <BrandMark className="h-7 w-7 rounded-lg" />
           <span className="text-sm font-semibold">QQueue</span>
         </div>
-        <ThemeToggle />
+        <div className="h-9 w-9" aria-hidden />
       </header>
 
       {/* Mobile drawer */}

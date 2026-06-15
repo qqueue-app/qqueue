@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { EmailPreviewFrame } from "../components/EmailPreviewFrame.js";
 import { RichTextEditor } from "../components/editor/RichTextEditor.js";
 import {
   api,
@@ -654,7 +655,7 @@ export function EmailStudio() {
           <form onSubmit={send} className="grid gap-6 lg:grid-cols-3">
             <div className="space-y-5 lg:col-span-2">
               {noSmtp ? (
-                <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
                   <p className="font-medium">No SMTP connection yet</p>
                   <p className="mt-1">
                     Add an SMTP connection before you can send email.
@@ -922,15 +923,20 @@ export function EmailStudio() {
                     <Skeleton className="h-40 w-full" />
                   </div>
                 ) : preview ? (
-                  <div className="space-y-3">
-                    <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                      <p>
-                        <span className="text-muted-foreground">Subject: </span>
-                        <span className="font-medium">
-                          {preview.subject || "(no subject)"}
-                        </span>
+                  // An inbox-style preview window: a header strip with the
+                  // subject + recipients, then the rendered email on a tinted
+                  // backdrop so the branded message card floats like it will in
+                  // a real client.
+                  <div className="overflow-hidden rounded-lg border shadow-sm">
+                    <div className="border-b bg-muted/30 px-4 py-3">
+                      <p className="font-medium leading-snug">
+                        {preview.subject || (
+                          <span className="text-muted-foreground">
+                            (no subject)
+                          </span>
+                        )}
                       </p>
-                      <p className="mt-1 text-muted-foreground">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {preview.recipients.total} recipient
                         {preview.recipients.total === 1 ? "" : "s"}
                         {preview.recipients.to.length
@@ -944,7 +950,7 @@ export function EmailStudio() {
                           : ""}
                       </p>
                       {attachments.length > 0 ? (
-                        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-muted-foreground">
+                        <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                           <Paperclip className="h-3.5 w-3.5" />
                           {attachments
                             .map((attachment) => attachment.filename)
@@ -952,11 +958,14 @@ export function EmailStudio() {
                         </p>
                       ) : null}
                     </div>
-                    <div
-                      className="overflow-auto rounded-md border bg-white p-3"
+                    {/* Render in a sandboxed iframe: the preview HTML is a full
+                        email-safe document whose styles must not leak into the
+                        dashboard (which previously blanked the page). */}
+                    <EmailPreviewFrame
+                      html={preview.html}
+                      title="Email preview"
                       data-testid="preview-body"
-                      // Preview HTML comes from our own MJML render pipeline.
-                      dangerouslySetInnerHTML={{ __html: preview.html }}
+                      className="rounded-none border-0 bg-[#eef2f1]"
                     />
                   </div>
                 ) : (

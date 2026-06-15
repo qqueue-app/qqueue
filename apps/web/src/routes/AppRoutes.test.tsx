@@ -26,7 +26,7 @@ vi.mock("../pages/Login.js", () => ({
 vi.mock("../pages/Legal.js", () => ({
   LegalPage: ({ kind }: { kind: string }) => <div>Legal {kind}</div>,
 }));
-vi.mock("../pages/SendEmail.js", () => ({ SendEmail: () => <div /> }));
+vi.mock("../pages/EmailStudio.js", () => ({ EmailStudio: () => <div /> }));
 vi.mock("../pages/SMTPConnections.js", () => ({
   SMTPConnections: () => <div />,
 }));

@@ -39,38 +39,8 @@
     --ring: 164 40% 31%;
 
     --radius: 0.75rem;
-  }
 
-  .dark {
-    --background: 222 28% 9%;
-    --foreground: 210 20% 92%;
-    --card: 222 24% 12%;
-    --card-foreground: 210 20% 92%;
-    --popover: 222 24% 12%;
-    --popover-foreground: 210 20% 92%;
-
-    /* Lighter moss reads better on dark surfaces */
-    --primary: 164 44% 48%;
-    --primary-foreground: 222 47% 9%;
-
-    --secondary: 217 20% 18%;
-    --secondary-foreground: 210 20% 92%;
-    --muted: 217 20% 17%;
-    --muted-foreground: 215 16% 62%;
-    --accent: 217 20% 20%;
-    --accent-foreground: 210 20% 92%;
-
-    --destructive: 14 70% 57%;
-    --destructive-foreground: 0 0% 100%;
-
-    --success: 158 55% 52%;
-    --success-foreground: 222 47% 9%;
-    --warning: 36 90% 60%;
-    --warning-foreground: 222 47% 9%;
-
-    --border: 217 20% 20%;
-    --input: 217 20% 23%;
-    --ring: 164 44% 48%;
+    color-scheme: light;
   }
 }
 

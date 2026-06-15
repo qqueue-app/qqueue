@@ -180,7 +180,7 @@ export function Dashboard() {
               </Link>
             </Button>
             <Button asChild>
-              <Link to="/send-email">
+              <Link to="/email-studio">
                 <Mail className="h-4 w-4" />
                 Send email
               </Link>

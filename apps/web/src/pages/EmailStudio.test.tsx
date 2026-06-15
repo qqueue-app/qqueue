@@ -316,8 +316,11 @@ describe("EmailStudio", () => {
     await user.click(screen.getByRole("button", { name: /Preview/i }));
 
     await waitFor(() => expect(mockedApi.previewEmail).toHaveBeenCalled());
-    expect(await screen.findByTestId("preview-body")).toHaveTextContent(
-      "rendered body"
+    // The preview is rendered inside a sandboxed iframe so the email's own
+    // styles cannot leak into the dashboard; assert on its srcdoc document.
+    expect(await screen.findByTestId("preview-body")).toHaveAttribute(
+      "srcdoc",
+      expect.stringContaining("rendered body")
     );
   });
 });

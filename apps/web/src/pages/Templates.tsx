@@ -246,7 +246,7 @@ export function Templates() {
                   </div>
                 </div>
                 <div
-                  className="prose prose-sm mt-4 max-h-48 max-w-none overflow-auto rounded-md border bg-muted/30 p-3 dark:prose-invert"
+                  className="prose prose-sm mt-4 max-h-48 max-w-none overflow-auto rounded-md border bg-muted/30 p-3"
                   dangerouslySetInnerHTML={{ __html: template.html }}
                 />
               </CardContent>
@@ -333,7 +333,7 @@ export function Templates() {
             <DialogDescription>{previewTarget?.subject}</DialogDescription>
           </DialogHeader>
           <div
-            className="prose prose-sm max-h-[60vh] max-w-none overflow-auto rounded-md border bg-white p-4 dark:prose-invert"
+            className="prose prose-sm max-h-[60vh] max-w-none overflow-auto rounded-md border bg-white p-4"
             dangerouslySetInnerHTML={{ __html: previewTarget?.html ?? "" }}
           />
         </DialogContent>

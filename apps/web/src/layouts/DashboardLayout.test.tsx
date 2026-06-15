@@ -32,21 +32,18 @@ vi.mock("../lib/session-context.js", () => ({
 }));
 
 import { DashboardLayout } from "./DashboardLayout.js";
-import { ThemeProvider } from "../lib/theme.js";
 
 function renderLayout(initial = "/") {
   return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[initial]}>
-        <Routes>
-          <Route element={<DashboardLayout />}>
-            <Route index element={<div>Home page</div>} />
-            <Route path="campaigns" element={<div>Campaigns page</div>} />
-            <Route path="campaigns/lists" element={<div>Lists page</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </ThemeProvider>
+    <MemoryRouter initialEntries={[initial]}>
+      <Routes>
+        <Route element={<DashboardLayout />}>
+          <Route index element={<div>Home page</div>} />
+          <Route path="campaigns" element={<div>Campaigns page</div>} />
+          <Route path="campaigns/lists" element={<div>Lists page</div>} />
+        </Route>
+      </Routes>
+    </MemoryRouter>
   );
 }
 

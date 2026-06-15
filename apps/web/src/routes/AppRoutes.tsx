@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { DashboardLayout } from "../layouts/DashboardLayout.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 
@@ -48,11 +48,6 @@ const QueueOperations = lazy(() =>
     default: module.QueueOperations,
   }))
 );
-const SendEmail = lazy(() =>
-  import("../pages/SendEmail.js").then((module) => ({
-    default: module.SendEmail,
-  }))
-);
 const EmailStudio = lazy(() =>
   import("../pages/EmailStudio.js").then((module) => ({
     default: module.EmailStudio,
@@ -99,7 +94,11 @@ export function AppRoutes() {
         <Route element={<DashboardLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="/email-studio" element={<EmailStudio />} />
-          <Route path="/send-email" element={<SendEmail />} />
+          {/* The standalone Send Email page was merged into Email Studio. */}
+          <Route
+            path="/send-email"
+            element={<Navigate to="/email-studio" replace />}
+          />
           <Route path="/smtp-connections" element={<SMTPConnections />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/suppressions" element={<Suppressions />} />

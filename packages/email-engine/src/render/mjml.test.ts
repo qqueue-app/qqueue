@@ -62,10 +62,27 @@ describe("renderMjml", () => {
 });
 
 describe("wrapHtmlInMjml / renderHtmlAsEmailSafe", () => {
-  it("wraps body HTML in a minimal MJML document", () => {
+  it("wraps body HTML in a branded MJML document", () => {
     const doc = wrapHtmlInMjml("<p>Body</p>");
     expect(doc).toContain("<mjml>");
-    expect(doc).toContain("<mj-raw><p>Body</p></mj-raw>");
+    // Author HTML survives verbatim inside the branded body card.
+    expect(doc).toContain(
+      `<mj-raw><div class="qq-body"><p>Body</p></div></mj-raw>`
+    );
+    // Default branding renders the wordmark/footer.
+    expect(doc).toContain("QQueue");
+  });
+
+  it("applies custom branding (brand name + accent + unsubscribe)", () => {
+    const doc = wrapHtmlInMjml("<p>Hi</p>", {
+      brandName: "Acme",
+      accentColor: "#ff0000",
+      unsubscribeUrl: "https://app.example.com/unsub?token=abc"
+    });
+    expect(doc).toContain("Acme");
+    expect(doc).toContain("#ff0000");
+    expect(doc).toContain("https://app.example.com/unsub?token=abc");
+    expect(doc).toContain("Unsubscribe");
   });
 
   it("renders wrapped body HTML to email-safe HTML", async () => {
