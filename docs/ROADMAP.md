@@ -179,7 +179,7 @@ pipeline** (`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`):
 2. **Transactional emails** — API/SDK/SMTP application-triggered sends
    (implemented, Phase 6).
 3. **Manual email sending** — a user-facing composer for individual/small-batch
-   sends (partially shipped; see Phase B).
+   sends (implemented as **Email Studio**, Phase B).
 4. **Optional inbox module** — opt-in, feature-flagged IMAP for viewing replies
    to sent mail (Phase E).
 
@@ -193,15 +193,17 @@ See [docs/PHASE_A_PLAN.md](PHASE_A_PLAN.md) for the detailed implementation plan
 
 Harden the shared send pipeline before larger UI work.
 
-- [ ] Add `origin` (`CAMPAIGN | TRANSACTIONAL | MANUAL`) and a
+- [x] Add `origin` (`CAMPAIGN | TRANSACTIONAL | MANUAL`) and a
   `createdByUserId` audit field to `EmailJob`.
-- [ ] Add `cc`, `bcc`, `replyTo`, and attachments to `SendEmailPayload`
+- [x] Add `cc`, `bcc`, `replyTo`, and attachments to `SendEmailPayload`
   (`packages/email-engine`) and `EmailJob`.
-- [ ] Introduce **MJML** as the canonical email-safe HTML rendering layer used
+- [x] Introduce **MJML** as the canonical email-safe HTML rendering layer used
   by both the manual composer and campaigns (Tiptap output is not email-client
   safe on its own).
-- [ ] Object storage (S3-compatible; MinIO for self-host) for attachments and
-  hosted images — metadata in the DB, blobs in object storage.
+- [x] Object storage (S3-compatible; MinIO for self-host) for attachments and
+  hosted images — metadata in the DB (`EmailAttachment`), blobs in object
+  storage via the shared `@qqueue/storage` package. (Hosted-image rewriting is
+  not built yet; the storage layer it needs is in place.)
 
 ### Phase A.5: Foundation domains (enabling — before Email Studio)
 
@@ -221,18 +223,31 @@ Before Building the Email Studio").
   Inbound storage for the inbox is deferred to Phase E.
 - [x] Migration, indexes, constraints, repositories/services, and tests.
 
-### Phase B: Manual email composer
+### Phase B: Email Studio (manual email composer)
 
-Extend the existing one-off send flow (`apps/web/src/pages/SendEmail.tsx`),
-**not** a separate product. The Tiptap editor, templates, variables, preview,
-SMTP selection, and schedule-for-later already exist.
+Delivered as **Email Studio** (`apps/web/src/pages/EmailStudio.tsx`) — the first
+complete manual-email workflow. It is a dedicated composer surface but **not** a
+separate product: every send flows through the existing shared pipeline
+(`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`) with `origin = MANUAL`
+and `createdByUserId` recorded. A thin `manual-email` API module resolves and
+deduplicates recipients, renders the body through the MJML email-safe layer, and
+delegates to `transactionalEmailService.send`; it does **not** introduce a
+parallel delivery path. The legacy one-off `SendEmail.tsx` page remains for
+single-recipient sends.
 
-- [ ] Multiple `To` recipients
-- [ ] `CC` and `BCC`
-- [ ] Contact picker and contact-list picker (reuse existing modules)
-- [ ] Attachments
-- [ ] Surface delivery status from existing `EmailEvent` records
-- [ ] Schedule send (reuse existing `scheduledAt` path)
+- [x] Multiple `To` recipients (one message, deduplicated)
+- [x] `CC` and `BCC`
+- [x] Contact picker and contact-list picker (reuse existing modules)
+- [x] Template apply (working copy; never mutates the source template)
+- [x] Tiptap editor (headings, bold/italic/underline, links, lists, rules)
+- [x] Preview through the canonical MJML render + tracking pipeline
+- [x] Drafts (`EmailDraft`): auto-save, manual save, resume, delete, send
+- [x] Schedule send (reuse existing `scheduledAt` path)
+- [x] Attachments (upload to object storage, link to the `EmailJob`, streamed
+  to SMTP by the send pipeline; round-tripped through drafts)
+- [x] Surface per-recipient delivery status from `EmailEvent` records
+  (`GET /manual-email/:id/status` — derived from the SMTP accepted/rejected
+  result plus engagement events; shown in Email Studio after a send)
 
 ### Phase C: Contacts and contact lists
 

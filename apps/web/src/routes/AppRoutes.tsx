@@ -53,6 +53,11 @@ const SendEmail = lazy(() =>
     default: module.SendEmail,
   }))
 );
+const EmailStudio = lazy(() =>
+  import("../pages/EmailStudio.js").then((module) => ({
+    default: module.EmailStudio,
+  }))
+);
 const SMTPConnections = lazy(() =>
   import("../pages/SMTPConnections.js").then((module) => ({
     default: module.SMTPConnections,
@@ -88,6 +93,7 @@ export function AppRoutes() {
         <Route path="/trademark" element={<LegalPage kind="trademark" />} />
         <Route element={<DashboardLayout />}>
           <Route index element={<Dashboard />} />
+          <Route path="/email-studio" element={<EmailStudio />} />
           <Route path="/send-email" element={<SendEmail />} />
           <Route path="/smtp-connections" element={<SMTPConnections />} />
           <Route path="/contacts" element={<Contacts />} />

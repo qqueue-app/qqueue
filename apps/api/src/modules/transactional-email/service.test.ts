@@ -18,6 +18,15 @@ vi.mock("../smtp-connections/service.js", () => ({
   }
 }));
 
+const storageGetObject = vi.fn();
+vi.mock("../../lib/storage.js", () => ({
+  storage: {
+    getObject: storageGetObject,
+    putObject: vi.fn(),
+    deleteObject: vi.fn()
+  }
+}));
+
 const { transactionalEmailService } = await import("./service.js");
 
 const smtpConnection = {
@@ -30,6 +39,10 @@ const smtpConnection = {
 beforeEach(() => {
   queueAdd.mockReset().mockResolvedValue(undefined);
   providerSend.mockReset();
+  // Default: no attachments. Individual tests override findMany to attach files.
+  prismaMock.emailAttachment.findMany.mockResolvedValue([] as never);
+  prismaMock.emailAttachment.updateMany.mockResolvedValue({ count: 0 } as never);
+  storageGetObject.mockReset();
 });
 
 afterEach(() => {
@@ -263,6 +276,78 @@ describe("transactionalEmailService.send", () => {
     const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
     expect(createData.origin).toBe("MANUAL");
     expect(createData.createdByUserId).toBe("user_1");
+  });
+
+  it("links attachments to the job and forwards their blobs to the provider (inline)", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.update.mockResolvedValue({ id: "job_1", status: "SENT" } as never);
+    prismaMock.emailAttachment.updateMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.emailAttachment.findMany.mockResolvedValue([
+      {
+        id: "att_1",
+        filename: "report.pdf",
+        contentType: "application/pdf",
+        storageKey: "org/org_1/k-report.pdf"
+      }
+    ] as never);
+    storageGetObject.mockResolvedValue(Buffer.from("PDF"));
+    providerSend.mockResolvedValue({
+      messageId: "m",
+      provider: "smtp",
+      accepted: ["x@y.com"],
+      rejected: []
+    });
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      attachmentIds: ["att_1"]
+    });
+
+    // Links only unlinked rows in this org to the new job.
+    expect(prismaMock.emailAttachment.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["att_1"] }, organizationId: "org_1", emailJobId: null },
+      data: { emailJobId: "job_1" }
+    });
+
+    const sendArgs = providerSend.mock.calls[0][0];
+    expect(sendArgs.attachments).toEqual([
+      {
+        filename: "report.pdf",
+        content: Buffer.from("PDF"),
+        contentType: "application/pdf"
+      }
+    ]);
+  });
+
+  it("links attachments on the scheduled (send-later) path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+    prismaMock.emailAttachment.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      text: "Body",
+      scheduledAt: "2026-01-01T01:00:00.000Z",
+      attachmentIds: ["att_1"]
+    });
+
+    expect(prismaMock.emailAttachment.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["att_1"] }, organizationId: "org_1", emailJobId: null },
+      data: { emailJobId: "job_1" }
+    });
+    // Blobs are not loaded inline for a scheduled send — the worker does that.
+    expect(storageGetObject).not.toHaveBeenCalled();
   });
 
   it("persists cc, bcc, replyTo and origin on the scheduled (send-later) path", async () => {

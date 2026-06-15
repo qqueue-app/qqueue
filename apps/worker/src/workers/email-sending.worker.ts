@@ -2,6 +2,7 @@ import { DelayedError, Worker } from "bullmq";
 import { SMTPProvider, injectTracking } from "@qqueue/email-engine";
 import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
+import { loadAttachmentsForJob } from "../lib/attachments.js";
 import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { decryptSecret } from "../lib/crypto.js";
 import { enqueueLatestWebhookDeliveries } from "../lib/outbound-webhooks.js";
@@ -64,6 +65,8 @@ export function startEmailSendingWorker() {
           secret: env.TRACKING_SECRET
         });
 
+        const attachments = await loadAttachmentsForJob(emailJob.id);
+
         const result = await provider.send({
           from: formatFrom(emailJob.smtpConnection),
           to: emailJob.toEmail,
@@ -74,7 +77,8 @@ export function startEmailSendingWorker() {
           references: emailJob.references.length ? emailJob.references : undefined,
           subject: emailJob.subject,
           html, // tracking already injected above
-          text: emailJob.text ?? undefined
+          text: emailJob.text ?? undefined,
+          attachments
         });
 
         // The SMTP server rejected the recipient outright: treat as a bounce

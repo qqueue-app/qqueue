@@ -1,11 +1,14 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/require-auth.js";
 import { apiKeyRouter } from "../modules/api-keys/routes.js";
+import { attachmentRouter } from "../modules/attachments/routes.js";
 import { authRouter } from "../modules/auth/routes.js";
 import { campaignRouter } from "../modules/campaigns/routes.js";
 import { contactListRouter } from "../modules/contact-lists/routes.js";
 import { contactRouter } from "../modules/contacts/routes.js";
 import { dashboardRouter } from "../modules/dashboard/routes.js";
+import { emailDraftRouter } from "../modules/email-drafts/routes.js";
+import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
@@ -37,4 +40,11 @@ v1Router.use("/contacts", contactRouter);
 v1Router.use("/contact-lists", contactListRouter);
 v1Router.use("/templates", templateRouter);
 v1Router.use("/campaigns", campaignRouter);
+// Email Studio: manual compose/preview/send and composer drafts. Both reuse the
+// shared send pipeline (origin = MANUAL) rather than a parallel send path.
+v1Router.use("/manual-email", manualEmailRouter);
+v1Router.use("/email-drafts", emailDraftRouter);
+// Email attachment upload/download/delete. Blobs live in object storage; the
+// send pipeline links rows to the EmailJob and the worker streams them to SMTP.
+v1Router.use("/attachments", attachmentRouter);
 v1Router.use("/webhook-endpoints", webhookEndpointRouter);

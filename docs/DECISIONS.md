@@ -106,6 +106,34 @@ The email payload contract (`SendEmailPayload` in `packages/email-engine`) and
 the `EmailJob` model gain `cc`, `bcc`, `replyTo`, and attachment support
 (Nodemailer already supports these natively). `EmailJob` also records `origin`.
 
+## Object Storage (S3/MinIO) for Attachments
+
+Email attachments are stored in **S3-compatible object storage** — MinIO is
+bundled in both Docker Compose stacks for self-host, and any S3 provider (AWS
+S3, Cloudflare R2, Backblaze B2, …) can be used by pointing the `S3_*` env vars
+at it. The storage client is a thin wrapper over the AWS S3 v3 SDK in a shared
+**`@qqueue/storage`** package (AGPL core, used by both the API and the worker).
+
+**Metadata in Postgres, blobs in object storage.** An `EmailAttachment` row
+holds the filename, content type, size, and `storageKey`; the bytes live only in
+object storage. This keeps the database small, lets the worker stream blobs to
+SMTP independently of the API, and matches how the payload already carries
+attachments (Nodemailer-ready `{ filename, content, contentType }`).
+
+**Lifecycle.** An attachment is uploaded ahead of the send
+(`POST /attachments`), optionally linked to a draft while composing
+(`emailDraftId`) so resuming restores it, then linked to the `EmailJob` at send
+time (`emailJobId`). Both foreign keys are `ON DELETE SET NULL` so removing a
+draft or job never deletes the metadata row mid-read. The synchronous send path
+loads blobs inline; queued sends load them in the worker. Campaign sends do not
+expose attachments (no campaign attachment UI); the capability is manual /
+transactional only for now.
+
+Why not store blobs in Postgres (`bytea`)? It bloats the primary database and
+its backups, and couples blob throughput to the transactional DB. Object storage
+is the standard separation and is what hosted images (a later sub-task) will
+reuse.
+
 ## Introduce MJML for Email-Safe Rendering
 
 Tiptap remains the MVP composer (already shipping in
@@ -202,6 +230,52 @@ mail, joined to the outbound `EmailJob` by matching its `inReplyTo`/`references`
 against `EmailJob.messageId`. Inbound storage is an inbox concern and stays out
 of the core send pipeline — consistent with keeping the inbox optional and
 modular (below).
+
+## Email Studio Is a Dedicated Surface but Reuses the Send Pipeline (Phase B)
+
+Phase B ships the manual composer as a dedicated **Email Studio** page rather
+than only extending the single-recipient `SendEmail.tsx` flow. The composer is a
+distinct surface (multi-recipient header, contact/list pickers, preview, drafts)
+because the manual workflow is meaningfully richer than a one-off send — but it
+is emphatically **not** a separate product or a parallel delivery path.
+
+Every Email Studio send goes through `transactionalEmailService.send` with
+`origin: "MANUAL"` and `createdByUserId` set, producing a normal `EmailJob` that
+reuses the existing queue, SMTP providers, tracking, and analytics. A thin
+`manual-email` API module sits in front of that call to (1) resolve manual
+addresses, individual contacts, and whole contact lists into a deduplicated
+recipient set, and (2) render the editor body through the MJML email-safe layer.
+`SendEmail.tsx` remains for quick single-recipient sends.
+
+A manual send is modeled as **one message** addressed to one or more `To`
+recipients plus `CC`/`BCC` (not per-recipient fan-out), which is the correct
+semantics for CC/BCC and matches user expectations for composing an email. The
+deduplicated `To` set is stored joined on `EmailJob.toEmail`; Nodemailer accepts
+the comma-separated list natively.
+
+## Email Studio Renders Through MJML; Preview Equals Send
+
+The manual composer is the first surface to adopt the Phase A MJML render layer
+on the **default** path: the Tiptap editor body is wrapped in MJML and compiled
+to email-safe HTML (`renderHtmlAsEmailSafe`) before it is persisted on the
+`EmailJob`. The preview endpoint runs the **same** render plus tracking
+injection, so the preview matches the delivered email. Campaigns and the legacy
+transactional path still send their stored HTML as-is; widening MJML to those
+paths is deferred until the manual path has proven the serializer in production.
+
+## Implement EmailDraft for the Composer (Phase B)
+
+Drafts are core to the Email Studio workflow (save, resume, delete, send), so
+`EmailDraft` was implemented rather than deferred — the model is a clean,
+additive, organization- and user-scoped table that carries a snapshot of
+composer state (recipients, body, template/SMTP selection). It is intentionally
+permissive (recipient arrays are plain strings, not validated emails) so an
+in-progress message can always be saved; validation happens only at send time.
+
+Drafts do **not** own sending: sending is the shared pipeline's job. On a
+successful send the client deletes the working draft, keeping the send service
+free of draft coupling. Draft versioning/history was not built — consistent with
+the template-versioning deferral, drafts are single mutable rows.
 
 ## Keep the Inbox Optional, Modular, and Feature-Flagged
 

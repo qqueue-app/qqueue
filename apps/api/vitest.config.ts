@@ -31,6 +31,7 @@ export default defineConfig({
         "src/index.ts",
         "src/config/env.ts",
         "src/lib/prisma.ts",
+        "src/lib/storage.ts",
         "src/queues/**",
         "src/test/**"
       ],

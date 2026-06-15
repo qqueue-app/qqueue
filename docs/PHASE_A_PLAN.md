@@ -1,7 +1,11 @@
 # Phase A — Send-Pipeline Refactor (Implementation Plan)
 
-> **Status: PLAN ONLY. Do not implement until the direction docs
-> (`ROADMAP.md`, `STATUS.md`, `DECISIONS.md`) are reviewed and approved.**
+> **Status: IMPLEMENTED.** All Phase A scope below has shipped, including the
+> object-storage sub-task that was originally deferred: attachments now persist
+> to S3-compatible object storage (MinIO for self-host) via the shared
+> `@qqueue/storage` package, with an `EmailAttachment` metadata table and
+> end-to-end wiring through the send pipeline and Email Studio. See
+> `docs/DECISIONS.md` ("Object Storage (S3/MinIO) for Attachments").
 
 Phase A hardens the single shared send pipeline
 (`EmailJob` → BullMQ `email-sending` → `email-engine` → SMTP → `EmailEvent`) so

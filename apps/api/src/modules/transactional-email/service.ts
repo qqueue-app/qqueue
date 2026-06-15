@@ -9,6 +9,7 @@ import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
+import { attachmentService } from "../attachments/service.js";
 import { smtpConnectionService } from "../smtp-connections/service.js";
 import { webhookEndpointService } from "../webhooks/service.js";
 
@@ -150,6 +151,12 @@ export const transactionalEmailService = {
         }
       });
 
+      await attachmentService.linkToJob(
+        input.attachmentIds,
+        input.organizationId,
+        queuedJob.id
+      );
+
       await emailSendingQueue.add(
         "send-email",
         { emailJobId: queuedJob.id },
@@ -195,6 +202,12 @@ export const transactionalEmailService = {
       }
     });
 
+    await attachmentService.linkToJob(
+      input.attachmentIds,
+      input.organizationId,
+      emailJob.id
+    );
+
     await webhookEndpointService.enqueueLatestForEmailEvent({
       organizationId: input.organizationId,
       emailJobId: emailJob.id,
@@ -204,6 +217,7 @@ export const transactionalEmailService = {
     try {
       const provider =
         smtpConnectionService.getProviderForConnection(smtpConnection);
+      const attachments = await attachmentService.loadForJob(emailJob.id);
       const result = await provider.send({
         from: formatFrom(smtpConnection),
         to: input.to,
@@ -216,7 +230,8 @@ export const transactionalEmailService = {
           baseUrl: env.APP_URL,
           secret: env.TRACKING_SECRET
         }),
-        text
+        text,
+        attachments
       });
 
       const sentJob = await prisma.emailJob.update({

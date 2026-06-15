@@ -8,6 +8,7 @@ const allowedLicenseTokens = new Set([
   "BSD-2-Clause",
   "BSD-3-Clause",
   "CC-BY-4.0",
+  "CC0-1.0",
   "ISC",
   "MIT",
   "MIT-0",
@@ -15,6 +16,24 @@ const allowedLicenseTokens = new Set([
   "PostgreSQL",
   "Python-2.0",
 ]);
+
+// Packages whose license metadata is a non-standard string that the SPDX token
+// parser cannot read, but which have been manually reviewed and accepted. Keyed
+// by `name@version`.
+const reviewedPackageExceptions = new Set([
+  // `slick` declares its license as the non-SPDX string
+  // "MIT (http://mootools.net/license.txt)" — it is MIT-licensed. Pulled in
+  // transitively via mjml -> juice. Reviewed and accepted.
+  "slick@1.12.2",
+]);
+
+function allPackagesExcepted(packages) {
+  return packages.every((dependency) =>
+    dependency.versions.every((version) =>
+      reviewedPackageExceptions.has(`${dependency.name}@${version}`),
+    ),
+  );
+}
 
 const blockedLicenseTokens = new Set([
   "AGPL-1.0",
@@ -88,6 +107,13 @@ for (const [licenseExpression, packages] of Object.entries(licenses)) {
   }
 
   if (unknown.length > 0) {
+    // A non-SPDX license string is acceptable when every package carrying it has
+    // been individually reviewed (see reviewedPackageExceptions).
+    if (allPackagesExcepted(packages)) {
+      reviewed.push({ licenseExpression, count: packages.length });
+      continue;
+    }
+
     failures.push({
       licenseExpression,
       reason: `unreviewed license token(s): ${unknown.join(", ")}`,

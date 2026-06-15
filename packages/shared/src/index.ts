@@ -54,6 +54,7 @@ export type ApiErrorCode =
   | "smtp_failure"
   | "invalid_schedule"
   | "validation_error"
+  | "attachment_too_large"
   | "not_found"
   | "conflict";
 
@@ -349,7 +350,11 @@ export const sendEmailSchema = z.object({
   html: z.string().optional(),
   text: z.string().optional(),
   variables: z.record(z.unknown()).optional(),
-  scheduledAt: z.string().datetime().optional()
+  scheduledAt: z.string().datetime().optional(),
+  // Ids of attachments uploaded ahead of time (POST /attachments). Their blobs
+  // live in object storage; the send pipeline links them to the EmailJob and the
+  // worker streams them to SMTP.
+  attachmentIds: z.array(z.string().min(1)).optional()
 });
 
 export type SendEmailInput = z.infer<typeof sendEmailSchema>;
@@ -359,6 +364,146 @@ export const publicSendEmailSchema = sendEmailSchema.omit({
 });
 
 export type PublicSendEmailInput = z.infer<typeof publicSendEmailSchema>;
+
+// Email Studio (manual composer). A manual send is one message addressed to one
+// or more recipients, optionally with CC/BCC, drawn from manually-typed
+// addresses, individual contacts, and/or whole contact lists. Recipients are
+// resolved and deduplicated server-side before the message flows through the
+// same pipeline as transactional/campaign sends (origin = MANUAL).
+export const manualEmailSendSchema = z
+  .object({
+    organizationId: z.string().min(1),
+    to: z.array(emailAddressSchema).optional(),
+    cc: z.array(emailAddressSchema).optional(),
+    bcc: z.array(emailAddressSchema).optional(),
+    contactIds: z.array(z.string().min(1)).optional(),
+    listIds: z.array(z.string().min(1)).optional(),
+    replyTo: emailAddressSchema.optional(),
+    smtpConnectionId: z.string().min(1).optional(),
+    templateId: z.string().min(1).optional(),
+    subject: z.string().min(1),
+    html: z.string().optional(),
+    text: z.string().optional(),
+    variables: z.record(z.unknown()).optional(),
+    scheduledAt: z.string().datetime().optional(),
+    attachmentIds: z.array(z.string().min(1)).optional()
+  })
+  .refine(
+    (input) =>
+      (input.to?.length ?? 0) +
+        (input.contactIds?.length ?? 0) +
+        (input.listIds?.length ?? 0) >
+      0,
+    { message: "At least one recipient is required", path: ["to"] }
+  )
+  .refine((input) => Boolean(input.html || input.text), {
+    message: "Provide an email body",
+    path: ["html"]
+  });
+
+export type ManualEmailSendInput = z.infer<typeof manualEmailSendSchema>;
+
+// Preview renders the composed body through the exact same MJML + tracking
+// pipeline used when sending, so the preview matches the delivered email. All
+// fields are optional so a half-finished draft can still be previewed.
+export const emailPreviewSchema = z.object({
+  organizationId: z.string().min(1),
+  subject: z.string().optional(),
+  html: z.string().optional(),
+  text: z.string().optional(),
+  to: z.array(z.string()).optional(),
+  cc: z.array(z.string()).optional(),
+  bcc: z.array(z.string()).optional(),
+  contactIds: z.array(z.string().min(1)).optional(),
+  listIds: z.array(z.string().min(1)).optional()
+});
+
+export type EmailPreviewInput = z.infer<typeof emailPreviewSchema>;
+
+export interface EmailPreviewResult {
+  subject: string;
+  html: string;
+  recipients: {
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    total: number;
+  };
+}
+
+// Per-recipient delivery status for a manual send. A manual send is one EmailJob
+// addressed to many recipients, so granularity is derived from the SMTP
+// accepted/rejected result recorded on the SENT/BOUNCED events plus thread-level
+// engagement events — not separate jobs per recipient.
+export type RecipientDeliveryStatus =
+  | "delivered"
+  | "rejected"
+  | "pending"
+  | "failed";
+
+export interface RecipientDelivery {
+  email: string;
+  field: "to" | "cc" | "bcc";
+  status: RecipientDeliveryStatus;
+}
+
+export interface ManualEmailDeliveryStatus {
+  id: string;
+  status: string;
+  sentAt?: string | null;
+  recipients: RecipientDelivery[];
+  opens: number;
+  clicks: number;
+  bounces: number;
+  complaints: number;
+}
+
+// Draft persistence for the composer. Drafts are intentionally permissive (the
+// recipient arrays are plain strings, not validated emails) so an in-progress
+// message can always be saved. Validation happens at send time.
+export const emailDraftSchema = z.object({
+  organizationId: z.string().min(1),
+  subject: z.string().optional(),
+  html: z.string().optional(),
+  text: z.string().optional(),
+  to: z.array(z.string()).optional(),
+  cc: z.array(z.string()).optional(),
+  bcc: z.array(z.string()).optional(),
+  contactIds: z.array(z.string().min(1)).optional(),
+  listIds: z.array(z.string().min(1)).optional(),
+  replyTo: z.string().optional(),
+  smtpConnectionId: z.string().optional(),
+  templateId: z.string().optional(),
+  variables: z.record(z.unknown()).optional()
+});
+
+export type EmailDraftInput = z.infer<typeof emailDraftSchema>;
+
+export const emailDraftUpdateSchema = emailDraftSchema
+  .omit({ organizationId: true })
+  .partial();
+
+export type EmailDraftUpdateInput = z.infer<typeof emailDraftUpdateSchema>;
+
+export interface EmailDraft {
+  id: string;
+  organizationId: string;
+  createdByUserId: string;
+  subject: string;
+  html?: string | null;
+  text?: string | null;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  contactIds: string[];
+  listIds: string[];
+  replyTo?: string | null;
+  smtpConnectionId?: string | null;
+  templateId?: string | null;
+  variables?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export const apiKeyCreateSchema = z.object({
   organizationId: z.string().min(1),

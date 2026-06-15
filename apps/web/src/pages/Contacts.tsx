@@ -34,11 +34,35 @@ interface ContactForm {
   email: string;
   firstName: string;
   lastName: string;
+  tags: string;
 }
 
-const emptyForm: ContactForm = { email: "", firstName: "", lastName: "" };
+const emptyForm: ContactForm = {
+  email: "",
+  firstName: "",
+  lastName: "",
+  tags: ""
+};
 
 const PAGE_SIZE = 10;
+
+function parseTags(value: string) {
+  return [...new Set(value.split(",").map((tag) => tag.trim()).filter(Boolean))];
+}
+
+function formatDate(value?: string) {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      });
+}
 
 function statusVariant(status: string) {
   if (status === "ACTIVE") return "success" as const;
@@ -65,7 +89,7 @@ export function Contacts() {
       return contacts;
     }
     return contacts.filter((contact) =>
-      [contact.email, contact.firstName, contact.lastName]
+      [contact.email, contact.firstName, contact.lastName, ...(contact.tags ?? [])]
         .filter(Boolean)
         .some((field) => field!.toLowerCase().includes(query))
     );
@@ -115,7 +139,8 @@ export function Contacts() {
     setForm({
       email: contact.email,
       firstName: contact.firstName ?? "",
-      lastName: contact.lastName ?? ""
+      lastName: contact.lastName ?? "",
+      tags: (contact.tags ?? []).join(", ")
     });
     setDialogOpen(true);
   }
@@ -131,7 +156,8 @@ export function Contacts() {
       organizationId,
       email: form.email,
       firstName: form.firstName || undefined,
-      lastName: form.lastName || undefined
+      lastName: form.lastName || undefined,
+      tags: parseTags(form.tags)
     };
 
     setSaving(true);
@@ -231,7 +257,9 @@ export function Contacts() {
                     <TableRow>
                       <TableHead>Email</TableHead>
                       <TableHead>Name</TableHead>
+                      <TableHead>Tags</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Created</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -245,9 +273,29 @@ export function Contacts() {
                             .join(" ") || "—"}
                         </TableCell>
                         <TableCell>
+                          {contact.tags && contact.tags.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {contact.tags.map((tag) => (
+                                <Badge
+                                  key={tag}
+                                  variant="outline"
+                                  className="font-normal"
+                                >
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <Badge variant={statusVariant(contact.status)}>
                             {contact.status}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {formatDate(contact.createdAt)}
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">
@@ -354,6 +402,15 @@ export function Contacts() {
                   onChange={(e) => setForm({ ...form, lastName: e.target.value })}
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tags">Tags</Label>
+              <Input
+                id="tags"
+                placeholder="vip, newsletter (comma separated)"
+                value={form.tags}
+                onChange={(e) => setForm({ ...form, tags: e.target.value })}
+              />
             </div>
             <DialogFooter>
               <Button

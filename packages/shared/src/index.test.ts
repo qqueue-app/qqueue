@@ -9,9 +9,13 @@ import {
   contactSchema,
   cronExpressionSchema,
   emailAddressSchema,
+  emailDraftSchema,
+  emailDraftUpdateSchema,
+  emailPreviewSchema,
   isValidCron,
   isValidTimezone,
   loginSchema,
+  manualEmailSendSchema,
   organizationSchema,
   outboundWebhookEventNameSchema,
   refreshSchema,
@@ -301,6 +305,18 @@ describe("sendEmailSchema", () => {
       }).success
     ).toBe(false);
   });
+
+  it("accepts optional attachment ids", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        subject: "Hi",
+        html: "<p>Hi</p>",
+        attachmentIds: ["att_1"]
+      }).success
+    ).toBe(true);
+  });
 });
 
 describe("webhook endpoint schemas", () => {
@@ -373,5 +389,113 @@ describe("smtpConnection schemas", () => {
     expect(smtpConnectionUpdateSchema.safeParse({ port: 25 }).success).toBe(
       true
     );
+  });
+});
+
+describe("manualEmailSendSchema", () => {
+  const base = {
+    organizationId: "org_1",
+    subject: "Hello",
+    html: "<p>Hi</p>"
+  };
+
+  it("accepts manually typed To recipients", () => {
+    expect(
+      manualEmailSendSchema.safeParse({ ...base, to: ["a@x.com"] }).success
+    ).toBe(true);
+  });
+
+  it("accepts a send addressed only by contact list", () => {
+    expect(
+      manualEmailSendSchema.safeParse({ ...base, listIds: ["list_1"] }).success
+    ).toBe(true);
+  });
+
+  it("accepts contact selection", () => {
+    expect(
+      manualEmailSendSchema.safeParse({ ...base, contactIds: ["c1"] }).success
+    ).toBe(true);
+  });
+
+  it("rejects a send with no recipients", () => {
+    expect(manualEmailSendSchema.safeParse(base).success).toBe(false);
+  });
+
+  it("rejects invalid To addresses", () => {
+    expect(
+      manualEmailSendSchema.safeParse({ ...base, to: ["not-an-email"] }).success
+    ).toBe(false);
+  });
+
+  it("requires a body (html or text)", () => {
+    expect(
+      manualEmailSendSchema.safeParse({
+        organizationId: "org_1",
+        subject: "Hi",
+        to: ["a@x.com"]
+      }).success
+    ).toBe(false);
+  });
+
+  it("supports cc and bcc", () => {
+    expect(
+      manualEmailSendSchema.safeParse({
+        ...base,
+        to: ["a@x.com"],
+        cc: ["cc@x.com"],
+        bcc: ["bcc@x.com"]
+      }).success
+    ).toBe(true);
+  });
+
+  it("accepts attachment ids", () => {
+    expect(
+      manualEmailSendSchema.safeParse({
+        ...base,
+        to: ["a@x.com"],
+        attachmentIds: ["att_1", "att_2"]
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects empty attachment ids", () => {
+    expect(
+      manualEmailSendSchema.safeParse({
+        ...base,
+        to: ["a@x.com"],
+        attachmentIds: [""]
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("emailPreviewSchema", () => {
+  it("allows a fully empty preview (besides the org id)", () => {
+    expect(
+      emailPreviewSchema.safeParse({ organizationId: "org_1" }).success
+    ).toBe(true);
+  });
+});
+
+describe("emailDraftSchema", () => {
+  it("permits an empty in-progress draft", () => {
+    expect(emailDraftSchema.safeParse({ organizationId: "org_1" }).success).toBe(
+      true
+    );
+  });
+
+  it("accepts unvalidated recipient strings for partial drafts", () => {
+    expect(
+      emailDraftSchema.safeParse({
+        organizationId: "org_1",
+        to: ["half-typed"]
+      }).success
+    ).toBe(true);
+  });
+
+  it("allows partial updates without an organization id", () => {
+    expect(
+      emailDraftUpdateSchema.safeParse({ subject: "Updated" }).success
+    ).toBe(true);
   });
 });

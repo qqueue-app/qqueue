@@ -17,6 +17,7 @@
   "dependencies": {
     "@prisma/client": "^6.1.0",
     "@qqueue/email-engine": "workspace:*",
+    "@qqueue/storage": "workspace:*",
     "bullmq": "^5.34.5",
     "cron-parser": "^5.5.0",
     "dotenv": "^16.4.7",

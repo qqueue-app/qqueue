@@ -18,6 +18,7 @@ const corePackageFiles = [
   "apps/worker/package.json",
   "packages/shared/package.json",
   "packages/email-engine/package.json",
+  "packages/storage/package.json",
   "packages/sdk/package.json",
 ];
 

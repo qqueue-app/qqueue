@@ -97,6 +97,8 @@ model Organization {
   templates       Template[]
   campaigns       Campaign[]
   emailJobs       EmailJob[]
+  emailDrafts     EmailDraft[]
+  emailAttachments EmailAttachment[]
   emailEvents     EmailEvent[]
   apiKeys         ApiKey[]
   webhookEndpoints WebhookEndpoint[]
@@ -278,11 +280,67 @@ model EmailJob {
   campaign         Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   campaignRun      CampaignRun?    @relation(fields: [campaignRunId], references: [id], onDelete: SetNull)
   events           EmailEvent[]
+  attachments      EmailAttachment[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
   @@index([messageId])
   @@index([organizationId, origin])
+}
+
+// Email Studio composer drafts. Org- and user-scoped, editable until sent. A
+// draft is a snapshot of the in-progress composer state (recipients, body,
+// template/SMTP selection); it is intentionally permissive so an unfinished
+// message can always be saved. On send it produces an EmailJob (origin = MANUAL)
+// through the shared pipeline and the draft is removed by the client.
+model EmailDraft {
+  id               String       @id @default(cuid())
+  organizationId   String
+  createdByUserId  String
+  smtpConnectionId String?
+  templateId       String?
+  subject          String       @default("")
+  html             String?
+  text             String?
+  to               String[]     @default([])
+  cc               String[]     @default([])
+  bcc              String[]     @default([])
+  contactIds       String[]     @default([])
+  listIds          String[]     @default([])
+  replyTo          String?
+  variables        Json?
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  attachments      EmailAttachment[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([organizationId, createdByUserId])
+}
+
+// Email attachment metadata. The blob itself lives in S3-compatible object
+// storage (see packages/storage) addressed by `storageKey`; only metadata lives
+// here. An attachment is first linked to a draft while composing (emailDraftId),
+// then linked to the EmailJob when the message is sent (emailJobId). Both FKs
+// are SetNull so deleting a draft/job leaves the row harmlessly orphaned until
+// cleaned up. See docs/DECISIONS.md ("Object Storage (S3/MinIO) for Attachments").
+model EmailAttachment {
+  id              String       @id @default(cuid())
+  organizationId  String
+  emailJobId      String?
+  emailDraftId    String?
+  filename        String
+  contentType     String
+  size            Int
+  storageKey      String
+  createdByUserId String?
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  emailJob        EmailJob?    @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  emailDraft      EmailDraft?  @relation(fields: [emailDraftId], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([emailJobId])
+  @@index([emailDraftId])
 }
 
 model EmailEvent {

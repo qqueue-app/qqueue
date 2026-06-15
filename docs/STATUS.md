@@ -14,9 +14,10 @@ Following the Beta Polish + Launch Prep Sprint, QQueue now includes:
 - Authentication
 - Organizations
 - SMTP connections
-- Contacts
-- Contact lists
-- Templates
+- Contacts (with tags + created date in the UI)
+- Contact lists (with descriptions and membership management)
+- Templates (with preview and MJML-aware source)
+- Email Studio (manual composer, preview, drafts, manual send)
 - Campaigns
 - Transactional API
 - API keys
@@ -53,10 +54,12 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
 2. **Transactional emails** — API/SDK/SMTP application-triggered sends.
    *Implemented.*
 3. **Manual email sending** — a user-facing composer for individual/small-batch
-   sends. *Partially shipped* (single-recipient composer with Tiptap editor,
-   templates, variables, preview, and schedule-for-later already exist in
-   `apps/web/src/pages/SendEmail.tsx`). Remaining: multiple `To` recipients,
-   `CC`/`BCC`, contact and contact-list pickers, and attachments.
+   sends. *Implemented as **Email Studio*** (`apps/web/src/pages/EmailStudio.tsx`):
+   multiple `To` recipients, `CC`/`BCC`, contact and contact-list pickers,
+   template apply, Tiptap editor, MJML-backed preview, drafts (`EmailDraft`:
+   auto-save/resume/delete/send), schedule-for-later, **attachments**
+   (S3/MinIO object storage), and **per-recipient delivery status** after a
+   send. Sends run through the shared pipeline with `origin = MANUAL`.
 4. **Optional inbox module** — opt-in, feature-flagged IMAP capability for
    viewing replies to sent mail. *Not started; deliberately out of scope for the
    current beta.*
@@ -102,12 +105,17 @@ operational and abuse-control gaps from the original audit have been closed.
 
 - `apps/api`: Express API. It owns HTTP routing, auth/session tokens, password
   reset, organization access checks, Prisma access, product modules,
-  transactional sends, tracking endpoints, inbound ESP webhook normalization,
-  queue operations endpoints, Redis-backed rate limiting, and queue enqueueing.
+  transactional sends, the `manual-email` module (Email Studio send + preview +
+  per-recipient delivery status), `email-drafts` module (composer drafts), and
+  `attachments` module (upload/download/delete to object storage), tracking
+  endpoints, inbound ESP webhook normalization, queue operations endpoints,
+  Redis-backed rate limiting, and queue enqueueing. The `manual-email` module
+  reuses `transactionalEmailService.send` rather than introducing a parallel
+  path.
 - `apps/web`: Vite React dashboard. It includes login/register, password reset,
-  dashboard, one-off send, SMTP connections, contacts, contact lists, templates,
-  campaigns, campaign analytics, queue operations, settings/API keys/webhooks,
-  and legal pages.
+  dashboard, Email Studio (manual composer), one-off send, SMTP connections,
+  contacts, contact lists, templates, campaigns, campaign analytics, queue
+  operations, settings/API keys/webhooks, and legal pages.
 - `apps/worker`: BullMQ workers. It processes campaign fan-out jobs, email
   sending jobs, outbound webhook delivery jobs, and startup recovery for queued
   work.
@@ -118,8 +126,10 @@ operational and abuse-control gaps from the original audit have been closed.
   organizations, contacts, lists, templates, campaigns, transactional sends, API
   keys, webhooks, SMTP connections, cron validation, and timezones.
 - `packages/email-engine`: email provider abstraction, Nodemailer-backed SMTP
-  provider, tracking URL/token helpers, and explicit placeholder provider
-  classes for Mailcow/SES/Resend/Brevo/Postmark.
+  provider, tracking URL/token helpers, the MJML email-safe render layer, and
+  explicit placeholder provider classes for Mailcow/SES/Resend/Brevo/Postmark.
+- `packages/storage`: shared S3-compatible object-storage client (AWS S3 v3
+  SDK; works against MinIO) used by the API and worker for attachment blobs.
 - `packages/sdk`: MIT-licensed TypeScript SDK package. It currently wraps the
   public transactional email send endpoint.
 - `apps/api/prisma`: PostgreSQL schema and migrations for users,
@@ -127,12 +137,14 @@ operational and abuse-control gaps from the original audit have been closed.
   explicit contact-list membership (`ContactListMember`), templates (with MJML
   source), campaigns, campaign runs, email jobs (with `origin` and threading
   metadata: `messageId`/`inReplyTo`/`references`), email events, API keys,
-  webhook endpoints, webhook deliveries, and password reset tokens.
+  webhook endpoints, webhook deliveries, email drafts (Email Studio composer
+  state), email attachments (metadata for blobs in object storage), and
+  password reset tokens.
 - `scripts`: coverage badge generation, dependency license audit, cloud
   boundary guardrail checks, and the Docker-backed smoke test (`docker-smoke.ts`).
 - `.github/workflows`: coverage, Phase 7 guardrails, and SDK publish workflows.
-- Deployment files: `docker-compose.yml` for local Postgres/Redis,
-  `docker-compose.prod.yml` for Caddy/API/worker/Postgres/Redis/migrations,
+- Deployment files: `docker-compose.yml` for local Postgres/Redis/MinIO,
+  `docker-compose.prod.yml` for Caddy/API/worker/Postgres/Redis/MinIO/migrations,
   `docker-compose.smoke.yml` for the throwaway smoke-test stack, app Dockerfiles,
   and `Caddyfile`.
 
@@ -233,13 +245,17 @@ operational and abuse-control gaps from the original audit have been closed.
 
 ### Contacts, Templates, and Campaigns
 
-- [x] Contacts CRUD exists.
-- [x] Contact lists CRUD and contact membership exist.
-- [x] Templates CRUD exists.
+- [x] Contacts CRUD exists, with tags and created date surfaced in the UI.
+- [x] Contact lists CRUD, descriptions, and contact membership exist.
+- [x] Templates CRUD exists, with an in-app preview.
+- [x] Email Studio manual composer: multiple `To`, `CC`/`BCC`, contact and
+  contact-list pickers, template apply, MJML-backed preview, drafts,
+  attachments (object storage), per-recipient delivery status, and manual send
+  through the shared pipeline (`origin = MANUAL`, `createdByUserId` set).
 - [x] Campaign drafts, duplicate, delete, send now, one-shot schedule,
   recurrence, pause, resume, and analytics exist.
-- [x] Dashboard pages exist for contacts, contact lists, templates, campaigns,
-  and analytics.
+- [x] Dashboard pages exist for Email Studio, contacts, contact lists,
+  templates, campaigns, and analytics.
 - [~] Template variables are simple string replacement.
 
 ### Queues and Workers
@@ -376,9 +392,14 @@ End-to-end, the app can currently support a self-hosted operator who:
   `ContactList.description`, explicit `ContactListMember` join, `Template.mjml`,
   and `EmailJob` threading metadata (`inReplyTo`/`references`). Backend only; no
   UI. Template versioning evaluated and deferred (see `docs/DECISIONS.md`).
-- [ ] Manual composer / Email Studio: multiple `To`, `CC`/`BCC`, contact and
-  list pickers, attachments
-- [ ] MJML wired into the default composer/campaign send path
+- [x] Manual composer / Email Studio: multiple `To`, `CC`/`BCC`, contact and
+  list pickers, template apply, preview, drafts, manual send, **attachments**
+  (S3/MinIO object storage), and **per-recipient delivery status**.
+- [x] Attachment object storage (Phase A sub-task): `EmailAttachment` metadata
+  table + shared `@qqueue/storage` (S3/MinIO) package + bundled MinIO in both
+  Docker Compose stacks; blobs streamed to SMTP by the send pipeline.
+- [x] MJML wired into the manual composer send + preview path (campaign default
+  send path still sends stored HTML as-is).
 - [ ] Suppression list / List-Unsubscribe handling
 - [ ] Optional IMAP inbox module (feature-flagged, off by default) — inbound
   message storage anchored to `EmailJob` threading metadata
@@ -433,6 +454,37 @@ End-to-end, the app can currently support a self-hosted operator who:
 10. Collect feedback from real installations.
 
 ## Verification
+
+### Phase A attachments storage + Phase B follow-ups (2026-06-15)
+
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
+  `pnpm license:audit` passed (audit allowlist updated for `CC0-1.0` and a
+  reviewed exception for `slick`'s non-SPDX `MIT (…)` string, both pulled in
+  transitively by `mjml`).
+- [x] `pnpm test` passed across API, web, worker, shared, email-engine, sdk,
+  and the new `@qqueue/storage` package.
+- [x] New coverage: `@qqueue/storage` client (put/get/delete/ensureBucket),
+  `attachments` service (upload size/type guards, org/draft scoping, link/load
+  for the send pipeline), transactional + worker attachment passthrough,
+  `manual-email` delivery-status derivation, shared `attachmentIds` schema, and
+  the Email Studio attachment + delivery-status UI.
+- [x] Migration `20260615030000_phase_a_attachments` (additive `EmailAttachment`
+  table) verified against a throwaway PostgreSQL 16: all migrations apply in
+  order and `prisma migrate diff` reports no drift from the schema.
+
+### Phase B Email Studio (2026-06-15)
+
+- [x] `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `pnpm cloud:boundary`
+  passed.
+- [x] `pnpm test` passed across API, web, worker, shared, email-engine, and SDK.
+- [x] New coverage added: `manual-email` service (recipient resolution +
+  dedup, MANUAL origin/`createdByUserId`, MJML render, CC/BCC, preview),
+  `email-drafts` service (CRUD + org/user scoping), shared schema validation
+  (`manualEmailSendSchema`, `emailPreviewSchema`, `emailDraft*`), and the
+  Email Studio page (manual recipient entry, contact/list selection, template
+  apply, preview).
+- [x] Migration `20260615020000_phase_b_email_studio` adds the `EmailDraft`
+  table (additive only; no existing table touched).
 
 ### Phase A.5 foundation domains (2026-06-15)
 

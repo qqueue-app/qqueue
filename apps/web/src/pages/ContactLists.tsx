@@ -44,6 +44,7 @@ export function ContactLists() {
     null
   );
   const [listName, setListName] = useState("");
+  const [listDescription, setListDescription] = useState("");
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -95,6 +96,7 @@ export function ContactLists() {
   function openCreateList() {
     setEditingList(null);
     setListName("");
+    setListDescription("");
     setSelectedContactIds([]);
     setListDialogOpen(true);
   }
@@ -102,6 +104,7 @@ export function ContactLists() {
   function openEditList(list: ContactList) {
     setEditingList(list);
     setListName(list.name);
+    setListDescription(list.description ?? "");
     setSelectedContactIds(list.contacts?.map((contact) => contact.id) ?? []);
     setListDialogOpen(true);
   }
@@ -111,6 +114,7 @@ export function ContactLists() {
     if (!open) {
       setEditingList(null);
       setListName("");
+      setListDescription("");
       setSelectedContactIds([]);
     }
   }
@@ -124,6 +128,7 @@ export function ContactLists() {
       if (editingList) {
         await api.updateContactList(editingList.id, {
           name: listName,
+          description: listDescription || undefined,
           contactIds: selectedContactIds
         });
         toast.success("Contact list updated.");
@@ -131,6 +136,7 @@ export function ContactLists() {
         await api.createContactList({
           organizationId,
           name: listName,
+          description: listDescription || undefined,
           contactIds: selectedContactIds
         });
         toast.success("Contact list created.");
@@ -138,6 +144,7 @@ export function ContactLists() {
       setListDialogOpen(false);
       setEditingList(null);
       setListName("");
+      setListDescription("");
       setSelectedContactIds([]);
       await load();
     } catch (error) {
@@ -255,7 +262,14 @@ export function ContactLists() {
                               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                                 <Users className="h-4 w-4" />
                               </div>
-                              <span className="font-medium">{list.name}</span>
+                              <div className="min-w-0">
+                                <span className="font-medium">{list.name}</span>
+                                {list.description ? (
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {list.description}
+                                  </p>
+                                ) : null}
+                              </div>
                             </div>
                           </TableCell>
                           <TableCell>
@@ -346,6 +360,15 @@ export function ContactLists() {
                 value={listName}
                 onChange={(event) => setListName(event.target.value)}
                 required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="listDescription">Description</Label>
+              <Input
+                id="listDescription"
+                placeholder="What is this list for? (optional)"
+                value={listDescription}
+                onChange={(event) => setListDescription(event.target.value)}
               />
             </div>
             <div className="space-y-2">

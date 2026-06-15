@@ -30,7 +30,8 @@ const h = vi.hoisted(() => {
     SMTPProvider: vi.fn(() => ({ send })),
     injectTracking: vi.fn((html: string | null) => `tracked:${html}`),
     decryptSecret: vi.fn((v: string) => `dec:${v}`),
-    settleRunIfComplete: vi.fn()
+    settleRunIfComplete: vi.fn(),
+    loadAttachmentsForJob: vi.fn()
   };
 });
 
@@ -58,6 +59,10 @@ vi.mock("../lib/crypto.js", () => ({ decryptSecret: h.decryptSecret }));
 
 vi.mock("../lib/campaign-run.js", () => ({
   settleRunIfComplete: h.settleRunIfComplete
+}));
+
+vi.mock("../lib/attachments.js", () => ({
+  loadAttachmentsForJob: h.loadAttachmentsForJob
 }));
 
 import { startEmailSendingWorker } from "./email-sending.worker.js";
@@ -121,6 +126,8 @@ beforeEach(() => {
   injectTracking.mockClear();
   decryptSecret.mockClear();
   settleRunIfComplete.mockReset().mockResolvedValue(undefined);
+  // Default: no attachments. Tests override this to assert forwarding.
+  h.loadAttachmentsForJob.mockReset().mockResolvedValue(undefined);
 });
 
 describe("email-sending worker", () => {
@@ -253,6 +260,31 @@ describe("email-sending worker", () => {
         inReplyTo: "<parent@mail>",
         references: ["<root@mail>", "<parent@mail>"]
       })
+    );
+  });
+
+  it("loads and forwards attachments to the provider", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    const attachments = [
+      {
+        filename: "report.pdf",
+        content: Buffer.from("PDF"),
+        contentType: "application/pdf"
+      }
+    ];
+    h.loadAttachmentsForJob.mockResolvedValue(attachments);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(h.loadAttachmentsForJob).toHaveBeenCalledWith("ej1");
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ attachments })
     );
   });
 

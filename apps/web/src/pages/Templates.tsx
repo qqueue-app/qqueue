@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { FileText, Pencil, Plus, Trash2 } from "lucide-react";
+import { Eye, FileText, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -42,6 +42,20 @@ function htmlIsEmpty(html: string) {
   return stripped === "" && !/<(img|hr|br)/i.test(html);
 }
 
+function formatDate(value?: string) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? null
+    : date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      });
+}
+
 export function Templates() {
   const { currentOrganizationId: organizationId } = useSession();
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -52,6 +66,7 @@ export function Templates() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [previewTarget, setPreviewTarget] = useState<Template | null>(null);
 
   async function load() {
     if (!organizationId) {
@@ -193,8 +208,22 @@ export function Templates() {
                     <p className="mt-1 text-sm text-muted-foreground">
                       {template.subject}
                     </p>
+                    {formatDate(template.updatedAt) ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Updated {formatDate(template.updatedAt)}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setPreviewTarget(template)}
+                      aria-label="Preview template"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
                     <Button
                       type="button"
                       variant="ghost"
@@ -291,6 +320,22 @@ export function Templates() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={previewTarget !== null}
+        onOpenChange={(open) => !open && setPreviewTarget(null)}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{previewTarget?.name}</DialogTitle>
+            <DialogDescription>{previewTarget?.subject}</DialogDescription>
+          </DialogHeader>
+          <div
+            className="prose prose-sm max-h-[60vh] max-w-none overflow-auto rounded-md border bg-white p-4 dark:prose-invert"
+            dangerouslySetInnerHTML={{ __html: previewTarget?.html ?? "" }}
+          />
         </DialogContent>
       </Dialog>
 

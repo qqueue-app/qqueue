@@ -21,13 +21,17 @@ export interface Contact {
   firstName?: string | null;
   lastName?: string | null;
   status: string;
+  tags?: string[];
+  createdAt?: string;
 }
 
 export interface ContactList {
   id: string;
   organizationId: string;
   name: string;
+  description?: string | null;
   contacts?: Contact[];
+  createdAt?: string;
   _count?: { contacts: number; campaigns: number };
 }
 
@@ -37,7 +41,72 @@ export interface Template {
   name: string;
   subject: string;
   html: string;
+  mjml?: string | null;
   text?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface EmailAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+}
+
+export interface EmailDraft {
+  id: string;
+  organizationId: string;
+  createdByUserId: string;
+  subject: string;
+  html?: string | null;
+  text?: string | null;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  contactIds: string[];
+  listIds: string[];
+  replyTo?: string | null;
+  smtpConnectionId?: string | null;
+  templateId?: string | null;
+  variables?: Record<string, unknown>;
+  attachments?: EmailAttachment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RecipientDeliveryStatus =
+  | "delivered"
+  | "rejected"
+  | "pending"
+  | "failed";
+
+export interface RecipientDelivery {
+  email: string;
+  field: "to" | "cc" | "bcc";
+  status: RecipientDeliveryStatus;
+}
+
+export interface ManualEmailDeliveryStatus {
+  id: string;
+  status: string;
+  sentAt?: string | null;
+  recipients: RecipientDelivery[];
+  opens: number;
+  clicks: number;
+  bounces: number;
+  complaints: number;
+}
+
+export interface EmailPreviewResult {
+  subject: string;
+  html: string;
+  recipients: {
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    total: number;
+  };
 }
 
 export interface SMTPConnection {
@@ -312,12 +381,16 @@ async function request<T>(
   retryOnUnauthorized = true
 ): Promise<T> {
   const { accessToken } = getSession();
+  // FormData (file uploads) must set its own multipart boundary — never force a
+  // JSON content type for it.
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
   let response: Response;
   try {
     response = await fetch(`${apiBaseUrl}${path}`, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...options.headers
       }
@@ -598,6 +671,77 @@ export const api = {
         body: JSON.stringify(input)
       }
     );
+  },
+
+  sendManualEmail(input: Record<string, unknown>) {
+    return request<{ id: string; status: string }>(
+      "/api/v1/manual-email/send",
+      {
+        method: "POST",
+        body: JSON.stringify(input)
+      }
+    );
+  },
+
+  previewEmail(input: Record<string, unknown>) {
+    return request<EmailPreviewResult>("/api/v1/manual-email/preview", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  manualEmailStatus(emailJobId: string, organizationId: string) {
+    return request<ManualEmailDeliveryStatus>(
+      `/api/v1/manual-email/${emailJobId}/status?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  uploadAttachment(
+    file: File,
+    options: { organizationId: string; emailDraftId?: string }
+  ) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("organizationId", options.organizationId);
+    if (options.emailDraftId) {
+      form.append("emailDraftId", options.emailDraftId);
+    }
+    return request<EmailAttachment>("/api/v1/attachments", {
+      method: "POST",
+      body: form
+    });
+  },
+
+  deleteAttachment(id: string) {
+    return request<void>(`/api/v1/attachments/${id}`, { method: "DELETE" });
+  },
+
+  listEmailDrafts(organizationId: string) {
+    return request<EmailDraft[]>(
+      `/api/v1/email-drafts?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  getEmailDraft(id: string) {
+    return request<EmailDraft>(`/api/v1/email-drafts/${id}`);
+  },
+
+  createEmailDraft(input: Record<string, unknown>) {
+    return request<EmailDraft>("/api/v1/email-drafts", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  updateEmailDraft(id: string, input: Record<string, unknown>) {
+    return request<EmailDraft>(`/api/v1/email-drafts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
+  deleteEmailDraft(id: string) {
+    return request<void>(`/api/v1/email-drafts/${id}`, { method: "DELETE" });
   },
 
   listApiKeys(organizationId: string) {
