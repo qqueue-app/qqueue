@@ -103,6 +103,11 @@ const baseEmailJob = {
   organizationId: "org1",
   campaignRunId: "run1",
   toEmail: "to@example.com",
+  cc: [] as string[],
+  bcc: [] as string[],
+  replyTo: null as string | null,
+  inReplyTo: null as string | null,
+  references: [] as string[],
   subject: "Subject",
   html: "<p>Body</p>",
   text: "Body",
@@ -201,6 +206,73 @@ describe("email-sending worker", () => {
     );
     expect(sentCall).toBeDefined();
     expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
+  });
+
+  it("forwards cc, bcc and replyTo to the provider when present", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      cc: ["cc@example.com"],
+      bcc: ["bcc@example.com"],
+      replyTo: "reply@example.com"
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cc: ["cc@example.com"],
+        bcc: ["bcc@example.com"],
+        replyTo: "reply@example.com"
+      })
+    );
+  });
+
+  it("forwards threading headers (inReplyTo, references) to the provider", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      inReplyTo: "<parent@mail>",
+      references: ["<root@mail>", "<parent@mail>"]
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inReplyTo: "<parent@mail>",
+        references: ["<root@mail>", "<parent@mail>"]
+      })
+    );
+  });
+
+  it("omits cc, bcc and replyTo for jobs without them (unchanged behavior)", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    const sendArgs = send.mock.calls[0][0];
+    expect(sendArgs.cc).toBeUndefined();
+    expect(sendArgs.bcc).toBeUndefined();
+    expect(sendArgs.replyTo).toBeUndefined();
+    expect(sendArgs.inReplyTo).toBeUndefined();
+    expect(sendArgs.references).toBeUndefined();
   });
 
   it("uses bare fromEmail when fromName is null", async () => {

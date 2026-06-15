@@ -168,3 +168,128 @@ See `docs/CLOUD_BOUNDARY.md` for the current Phase 7 boundary rules.
 - [ ] Usage limits
 - [ ] Hosted onboarding
 - [ ] Multi-tenant hardening
+
+## Email Operations Platform (Phases A–F)
+
+QQueue is positioned as an **email operations platform**, not a Gmail/Outlook/
+Zoho clone. It is built around four capabilities that share **one delivery
+pipeline** (`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`):
+
+1. **Campaign emails** — bulk marketing/communication (implemented, Phase 3–5).
+2. **Transactional emails** — API/SDK/SMTP application-triggered sends
+   (implemented, Phase 6).
+3. **Manual email sending** — a user-facing composer for individual/small-batch
+   sends (partially shipped; see Phase B).
+4. **Optional inbox module** — opt-in, feature-flagged IMAP for viewing replies
+   to sent mail (Phase E).
+
+Campaign, transactional, and manual sends are three entry points into one
+pipeline, not three products. See `docs/DECISIONS.md` for the rationale behind
+the decisions referenced below.
+
+### Phase A: Send-pipeline refactor (enabling — do first)
+
+See [docs/PHASE_A_PLAN.md](PHASE_A_PLAN.md) for the detailed implementation plan.
+
+Harden the shared send pipeline before larger UI work.
+
+- [ ] Add `origin` (`CAMPAIGN | TRANSACTIONAL | MANUAL`) and a
+  `createdByUserId` audit field to `EmailJob`.
+- [ ] Add `cc`, `bcc`, `replyTo`, and attachments to `SendEmailPayload`
+  (`packages/email-engine`) and `EmailJob`.
+- [ ] Introduce **MJML** as the canonical email-safe HTML rendering layer used
+  by both the manual composer and campaigns (Tiptap output is not email-client
+  safe on its own).
+- [ ] Object storage (S3-compatible; MinIO for self-host) for attachments and
+  hosted images — metadata in the DB, blobs in object storage.
+
+### Phase A.5: Foundation domains (enabling — before Email Studio)
+
+Backend-first domain hardening so Email Studio and Phases B–E build on a stable
+schema. No UI in this phase. See `docs/DECISIONS.md` ("Add Foundation Domains
+Before Building the Email Studio").
+
+- [x] `Contact.tags` (`String[]`) for future segmentation/import mapping.
+- [x] `ContactList.description`.
+- [x] Explicit `ContactListMember` join (replaces the implicit M2M) with
+  `addedAt` and a unique `(contactListId, contactId)` constraint; existing
+  memberships migrated, legacy API response shape preserved.
+- [x] `Template.mjml` source column alongside the compiled `html`. Template
+  versioning evaluated and **deferred** (documented in `DECISIONS.md`).
+- [x] Threading metadata on `EmailJob` (`inReplyTo`, `references`; `messageId`
+  already existed), wired through `SendEmailPayload` and the send worker.
+  Inbound storage for the inbox is deferred to Phase E.
+- [x] Migration, indexes, constraints, repositories/services, and tests.
+
+### Phase B: Manual email composer
+
+Extend the existing one-off send flow (`apps/web/src/pages/SendEmail.tsx`),
+**not** a separate product. The Tiptap editor, templates, variables, preview,
+SMTP selection, and schedule-for-later already exist.
+
+- [ ] Multiple `To` recipients
+- [ ] `CC` and `BCC`
+- [ ] Contact picker and contact-list picker (reuse existing modules)
+- [ ] Attachments
+- [ ] Surface delivery status from existing `EmailEvent` records
+- [ ] Schedule send (reuse existing `scheduledAt` path)
+
+### Phase C: Contacts and contact lists
+
+Contacts and lists exist; this phase enhances them. The Phase A.5 foundation
+(`Contact.tags`, explicit `ContactListMember` membership) is the substrate these
+build on.
+
+- [ ] CSV import/export (record import source on `ContactListMember`)
+- [ ] Contact activity timeline (driven by `EmailEvent`)
+- [ ] Suppression list and List-Unsubscribe handling
+- [ ] Segmentation (basic, tag-driven) — advanced segmentation in Phase D
+
+### Phase D: Advanced campaign features
+
+- [ ] Segmentation
+- [ ] A/B subject testing
+- [ ] Per-domain throttling
+- [ ] Bounce-driven auto-suppression
+- [ ] Deliverability tooling
+
+### Phase E: Optional inbox module
+
+**Separate module, disabled by default, behind a feature flag** — mirroring the
+`apps/cloud` boundary discipline. It exists to support sending (seeing replies),
+not to become a mailbox product.
+
+- Phase 1
+  - [ ] Connect mailbox via IMAP
+  - [ ] Sync incoming emails (read-only)
+  - [ ] View replies to sent emails (anchored to outbound `messageId` /
+    `In-Reply-To`)
+  - [ ] Search emails
+  - [ ] Filter unread/read
+- Phase 2 (deferred)
+  - [ ] Reply from QQueue
+  - [ ] Shared inbox
+  - [ ] Assign conversations
+  - [ ] Internal notes
+- Phase 3 (deferred)
+  - [ ] Inbound email routing
+  - [ ] Support workflows
+  - [ ] Ticketing integrations
+
+### Phase F: Collaboration and team workflows
+
+- [ ] Reply-from-QQueue
+- [ ] Shared inbox with conversation assignment
+- [ ] Internal notes
+- [ ] Team collaboration on conversations
+
+(Ticketing is an integration target, not a build.)
+
+### Editor stack
+
+- **MVP composer:** Tiptap (already shipping) with `{{variable}}` support.
+- **Email-safe rendering:** MJML as the canonical render layer for composer and
+  campaigns; store both editor source and compiled email-safe HTML on
+  `Template`.
+- **Future drag-and-drop:** GrapesJS + `grapesjs-mjml` preset in the AGPL core;
+  Unlayer only as an optional cloud-only premium editor under `apps/cloud`.

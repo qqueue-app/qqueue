@@ -1,6 +1,10 @@
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import { injectTracking } from "@qqueue/email-engine";
-import type { SendEmailInput, TransactionalSendResponse } from "@qqueue/shared";
+import type {
+  EmailOrigin,
+  SendEmailInput,
+  TransactionalSendResponse
+} from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -55,8 +59,21 @@ function parseScheduledAt(value: string | undefined) {
   return scheduledAt;
 }
 
+/**
+ * Internal send options. `origin`/`createdByUserId` are not part of the public
+ * API schema: the transactional endpoint leaves them unset (defaults to
+ * TRANSACTIONAL), while a future manual-composer route (Phase B) will pass
+ * `origin: "MANUAL"` and the authenticated dashboard user.
+ */
+export type TransactionalSendInput = SendEmailInput & {
+  origin?: EmailOrigin;
+  createdByUserId?: string | null;
+};
+
 export const transactionalEmailService = {
-  async send(input: SendEmailInput): Promise<TransactionalSendResponse> {
+  async send(
+    input: TransactionalSendInput
+  ): Promise<TransactionalSendResponse> {
     const smtpConnection = await prisma.sMTPConnection.findFirst({
       where: {
         organizationId: input.organizationId,
@@ -103,6 +120,8 @@ export const transactionalEmailService = {
 
     const scheduledAt = parseScheduledAt(input.scheduledAt);
 
+    const origin: EmailOrigin = input.origin ?? "TRANSACTIONAL";
+
     // Send later: queue the email for a future time instead of sending inline.
     if (scheduledAt) {
       const queuedJob = await prisma.emailJob.create({
@@ -111,6 +130,11 @@ export const transactionalEmailService = {
           smtpConnectionId: smtpConnection.id,
           templateId: template?.id,
           toEmail: input.to,
+          cc: input.cc ?? [],
+          bcc: input.bcc ?? [],
+          replyTo: input.replyTo,
+          origin,
+          createdByUserId: input.createdByUserId,
           subject,
           html,
           text,
@@ -152,6 +176,11 @@ export const transactionalEmailService = {
         smtpConnectionId: smtpConnection.id,
         templateId: template?.id,
         toEmail: input.to,
+        cc: input.cc ?? [],
+        bcc: input.bcc ?? [],
+        replyTo: input.replyTo,
+        origin,
+        createdByUserId: input.createdByUserId,
         subject,
         html,
         text,
@@ -178,6 +207,9 @@ export const transactionalEmailService = {
       const result = await provider.send({
         from: formatFrom(smtpConnection),
         to: input.to,
+        cc: input.cc,
+        bcc: input.bcc,
+        replyTo: input.replyTo,
         subject,
         html: injectTracking(html, {
           emailJobId: emailJob.id,

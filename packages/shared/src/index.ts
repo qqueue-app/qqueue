@@ -46,6 +46,7 @@ export type EmailEventType =
   | "BOUNCED"
   | "COMPLAINED"
   | "FAILED";
+export type EmailOrigin = "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL";
 export type ApiErrorCode =
   | "invalid_api_key"
   | "missing_smtp_connection"
@@ -76,6 +77,7 @@ export interface Contact {
   firstName?: string | null;
   lastName?: string | null;
   status: ContactStatus;
+  tags: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -83,7 +85,15 @@ export interface ContactList {
   id: string;
   organizationId: string;
   name: string;
+  description?: string | null;
   createdAt: string;
+}
+
+export interface ContactListMember {
+  id: string;
+  contactId: string;
+  contactListId: string;
+  addedAt: string;
 }
 
 export interface Template {
@@ -91,7 +101,10 @@ export interface Template {
   organizationId: string;
   name: string;
   subject: string;
+  /** Compiled, email-safe HTML (the artifact actually sent). */
   html: string;
+  /** MJML source when authored through the MJML render layer; null otherwise. */
+  mjml?: string | null;
   text?: string | null;
 }
 
@@ -123,10 +136,18 @@ export interface EmailJob {
   id: string;
   organizationId: string;
   to: string;
+  cc?: string[];
+  bcc?: string[];
+  replyTo?: string | null;
   subject: string;
   templateId?: string | null;
   campaignId?: string | null;
+  origin: EmailOrigin;
+  createdByUserId?: string | null;
   status: EmailJobStatus;
+  messageId?: string | null;
+  inReplyTo?: string | null;
+  references?: string[];
   variables?: Record<string, unknown>;
 }
 
@@ -243,6 +264,7 @@ export const contactSchema = z.object({
   email: emailAddressSchema,
   firstName: z.string().optional(),
   lastName: z.string().optional(),
+  tags: z.array(z.string().min(1)).optional(),
   metadata: z.record(z.unknown()).optional()
 });
 
@@ -251,6 +273,7 @@ export type ContactInput = z.infer<typeof contactSchema>;
 export const contactListSchema = z.object({
   organizationId: z.string().min(1),
   name: z.string().min(1),
+  description: z.string().optional(),
   contactIds: z.array(z.string().min(1)).optional()
 });
 
@@ -258,6 +281,7 @@ export type ContactListInput = z.infer<typeof contactListSchema>;
 
 export const contactListUpdateSchema = z.object({
   name: z.string().min(1).optional(),
+  description: z.string().optional(),
   contactIds: z.array(z.string().min(1)).optional()
 });
 
@@ -268,6 +292,7 @@ export const templateSchema = z.object({
   name: z.string().min(1),
   subject: z.string().min(1),
   html: z.string().min(1),
+  mjml: z.string().optional(),
   text: z.string().optional()
 });
 
@@ -315,6 +340,9 @@ export type CampaignRecurrenceInput = z.infer<typeof campaignRecurrenceSchema>;
 export const sendEmailSchema = z.object({
   organizationId: z.string().min(1),
   to: emailAddressSchema,
+  cc: z.array(emailAddressSchema).optional(),
+  bcc: z.array(emailAddressSchema).optional(),
+  replyTo: emailAddressSchema.optional(),
   smtpConnectionId: z.string().min(1).optional(),
   templateId: z.string().min(1).optional(),
   subject: z.string().min(1).optional(),

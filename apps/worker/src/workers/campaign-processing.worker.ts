@@ -46,9 +46,10 @@ export function startCampaignProcessingWorker() {
           template: true,
           contactList: {
             include: {
-              contacts: {
-                where: { status: "ACTIVE" },
-                orderBy: { createdAt: "asc" }
+              members: {
+                where: { contact: { status: "ACTIVE" } },
+                include: { contact: true },
+                orderBy: { contact: { createdAt: "asc" } }
               }
             }
           }
@@ -136,7 +137,7 @@ export function startCampaignProcessingWorker() {
         throw new Error("Default SMTP connection not found");
       }
 
-      const contacts = campaign.contactList.contacts;
+      const contacts = campaign.contactList.members.map((member) => member.contact);
       if (contacts.length === 0) {
         // No recipients this run: settle it so a recurring campaign returns to
         // SCHEDULED (and a one-shot is marked SENT).
@@ -159,6 +160,7 @@ export function startCampaignProcessingWorker() {
               templateId: campaign.templateId,
               campaignId: campaign.id,
               campaignRunId: run.id,
+              origin: "CAMPAIGN" as const,
               toEmail: contact.email,
               subject:
                 renderVariables(template.subject, variables) ??

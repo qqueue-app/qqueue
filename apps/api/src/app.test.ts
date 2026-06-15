@@ -236,7 +236,11 @@ describe("contact-lists routes", () => {
   });
 
   it("creates a list (201)", async () => {
-    prismaMock.contactList.create.mockResolvedValue({ id: "l1" } as never);
+    prismaMock.contactList.create.mockResolvedValue({
+      id: "l1",
+      members: [],
+      _count: { members: 0, campaigns: 0 }
+    } as never);
     const res = await request(app)
       .post("/api/v1/contact-lists")
       .set("Authorization", auth)
@@ -584,7 +588,11 @@ describe("templates mutations", () => {
 
 describe("contact-lists mutations", () => {
   it("returns a list when found", async () => {
-    prismaMock.contactList.findFirst.mockResolvedValue({ id: "l1" } as never);
+    prismaMock.contactList.findFirst.mockResolvedValue({
+      id: "l1",
+      members: [],
+      _count: { members: 0, campaigns: 0 }
+    } as never);
     const res = await request(app)
       .get("/api/v1/contact-lists/l1")
       .set("Authorization", auth);
@@ -596,7 +604,11 @@ describe("contact-lists mutations", () => {
       id: "l1",
       organizationId: "org_1"
     } as never);
-    prismaMock.contactList.update.mockResolvedValue({ id: "l1" } as never);
+    prismaMock.contactList.update.mockResolvedValue({
+      id: "l1",
+      members: [],
+      _count: { members: 0, campaigns: 0 }
+    } as never);
     const res = await request(app)
       .put("/api/v1/contact-lists/l1")
       .set("Authorization", auth)

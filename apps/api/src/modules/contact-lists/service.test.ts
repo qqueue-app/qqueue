@@ -3,36 +3,72 @@ import { prismaMock } from "../../test/prisma-mock.js";
 import { HttpError } from "../../lib/http-error.js";
 import { contactListService } from "./service.js";
 
+// A contact list as Prisma returns it with the membership join hydrated. The
+// service flattens this back to the legacy `contacts` + `_count.contacts` shape.
+function listWithMembers(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "l1",
+    organizationId: "org_1",
+    name: "List",
+    description: null,
+    members: [
+      { contact: { id: "c1", email: "a@b.com", status: "ACTIVE" } }
+    ],
+    _count: { members: 1, campaigns: 2 },
+    ...overrides
+  };
+}
+
 describe("contactListService", () => {
-  it("lists contact lists for an organization", () => {
-    prismaMock.contactList.findMany.mockResolvedValue([] as never);
-    contactListService.list("org_1");
+  it("lists contact lists and flattens members to contacts", async () => {
+    prismaMock.contactList.findMany.mockResolvedValue([listWithMembers()] as never);
+    const result = await contactListService.list("org_1");
     expect(prismaMock.contactList.findMany).toHaveBeenCalled();
+    expect(result[0].contacts).toEqual([{ id: "c1", email: "a@b.com", status: "ACTIVE" }]);
+    expect(result[0]._count).toEqual({ contacts: 1, campaigns: 2 });
   });
 
-  it("gets a contact list scoped by membership", () => {
-    prismaMock.contactList.findFirst.mockResolvedValue({ id: "l1" } as never);
-    contactListService.get("l1", "user_1");
+  it("gets a contact list scoped by membership", async () => {
+    prismaMock.contactList.findFirst.mockResolvedValue(listWithMembers() as never);
+    const result = await contactListService.get("l1", "user_1");
     expect(prismaMock.contactList.findFirst).toHaveBeenCalled();
+    expect(result?.contacts).toHaveLength(1);
   });
 
-  it("creates a list with no contacts", async () => {
-    prismaMock.contactList.create.mockResolvedValue({ id: "l1" } as never);
+  it("returns null when getting a list the user does not own", async () => {
+    prismaMock.contactList.findFirst.mockResolvedValue(null);
+    const result = await contactListService.get("l1", "user_1");
+    expect(result).toBeNull();
+  });
+
+  it("creates a list with no members", async () => {
+    prismaMock.contactList.create.mockResolvedValue(
+      listWithMembers({ members: [], _count: { members: 0, campaigns: 0 } }) as never
+    );
     await contactListService.create({ organizationId: "org_1", name: "List" });
     const call = prismaMock.contactList.create.mock.calls[0][0];
-    expect(call.data.contacts).toBeUndefined();
+    expect(call.data.members).toBeUndefined();
   });
 
   it("creates a list connecting unique contacts after validating them", async () => {
     prismaMock.contact.count.mockResolvedValue(2 as never);
-    prismaMock.contactList.create.mockResolvedValue({ id: "l1" } as never);
+    prismaMock.contactList.create.mockResolvedValue(listWithMembers() as never);
     await contactListService.create({
       organizationId: "org_1",
       name: "List",
+      description: "desc",
       contactIds: ["c1", "c2", "c1"]
     });
     expect(prismaMock.contact.count).toHaveBeenCalledWith({
       where: { organizationId: "org_1", id: { in: ["c1", "c2"] } }
+    });
+    const call = prismaMock.contactList.create.mock.calls[0][0];
+    expect(call.data.description).toBe("desc");
+    expect(call.data.members).toEqual({
+      create: [
+        { contact: { connect: { id: "c1" } } },
+        { contact: { connect: { id: "c2" } } }
+      ]
     });
   });
 
@@ -47,30 +83,57 @@ describe("contactListService", () => {
     ).rejects.toThrow("One or more contacts do not belong to this organization");
   });
 
-  it("updates an owned list and sets contacts", async () => {
+  it("replaces membership when updating with contactIds", async () => {
     prismaMock.contactList.findFirst.mockResolvedValue({
       id: "l1",
       organizationId: "org_1"
     } as never);
     prismaMock.contact.count.mockResolvedValue(1 as never);
-    prismaMock.contactList.update.mockResolvedValue({ id: "l1" } as never);
-    await contactListService.update("l1", "user_1", {
-      name: "New",
-      contactIds: ["c1"]
+    prismaMock.contactListMember.deleteMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.contactListMember.createMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.contactList.update.mockResolvedValue(listWithMembers() as never);
+
+    await contactListService.update("l1", "user_1", { name: "New", contactIds: ["c1"] });
+
+    expect(prismaMock.contactListMember.deleteMany).toHaveBeenCalledWith({
+      where: { contactListId: "l1" }
+    });
+    expect(prismaMock.contactListMember.createMany).toHaveBeenCalledWith({
+      data: [{ contactId: "c1", contactListId: "l1" }]
     });
     const call = prismaMock.contactList.update.mock.calls[0][0];
-    expect(call.data.contacts).toEqual({ set: [{ id: "c1" }] });
+    expect(call.data).toEqual({ name: "New", description: undefined });
   });
 
-  it("updates an owned list without touching contacts when none given", async () => {
+  it("leaves membership untouched when updating without contactIds", async () => {
     prismaMock.contactList.findFirst.mockResolvedValue({
       id: "l1",
       organizationId: "org_1"
     } as never);
-    prismaMock.contactList.update.mockResolvedValue({ id: "l1" } as never);
+    prismaMock.contactList.update.mockResolvedValue(listWithMembers() as never);
+
     await contactListService.update("l1", "user_1", { name: "New" });
-    const call = prismaMock.contactList.update.mock.calls[0][0];
-    expect(call.data.contacts).toBeUndefined();
+
+    expect(prismaMock.contactListMember.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.contactListMember.createMany).not.toHaveBeenCalled();
+  });
+
+  it("removes all members when updating with an empty contactIds array", async () => {
+    prismaMock.contactList.findFirst.mockResolvedValue({
+      id: "l1",
+      organizationId: "org_1"
+    } as never);
+    prismaMock.contactListMember.deleteMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.contactList.update.mockResolvedValue(
+      listWithMembers({ members: [], _count: { members: 0, campaigns: 0 } }) as never
+    );
+
+    await contactListService.update("l1", "user_1", { contactIds: [] });
+
+    expect(prismaMock.contactListMember.deleteMany).toHaveBeenCalledWith({
+      where: { contactListId: "l1" }
+    });
+    expect(prismaMock.contactListMember.createMany).not.toHaveBeenCalled();
   });
 
   it("throws 404 updating a list the user does not own", async () => {

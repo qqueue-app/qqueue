@@ -45,6 +45,12 @@ enum EmailJobStatus {
   CANCELLED
 }
 
+enum EmailOrigin {
+  CAMPAIGN
+  TRANSACTIONAL
+  MANUAL
+}
+
 enum EmailEventType {
   QUEUED
   SENT
@@ -134,30 +140,53 @@ model SMTPConnection {
 }
 
 model Contact {
-  id             String        @id @default(cuid())
+  id             String              @id @default(cuid())
   organizationId String
   email          String
   firstName      String?
   lastName       String?
-  status         ContactStatus @default(ACTIVE)
+  status         ContactStatus       @default(ACTIVE)
+  // Free-form labels for future segmentation, filtering, and import mapping.
+  tags           String[]            @default([])
   metadata       Json?
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  lists          ContactList[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // List membership is an explicit join (ContactListMember) rather than an
+  // implicit M2M so membership can carry metadata and be paginated for large
+  // campaign sends.
+  listMemberships ContactListMember[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@unique([organizationId, email])
 }
 
 model ContactList {
-  id             String       @id @default(cuid())
+  id             String              @id @default(cuid())
   organizationId String
   name           String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  contacts       Contact[]
+  description    String?
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        ContactListMember[]
   campaigns      Campaign[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([organizationId])
+}
+
+// Explicit contact-list membership. Replaces Prisma's implicit M2M join so a
+// membership can record when (and later, how) a contact was added, and so large
+// list sends can be cursor-paginated efficiently.
+model ContactListMember {
+  id            String      @id @default(cuid())
+  contactId     String
+  contactListId String
+  addedAt       DateTime    @default(now())
+  contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactList   ContactList @relation(fields: [contactListId], references: [id], onDelete: Cascade)
+
+  @@unique([contactListId, contactId])
+  @@index([contactId])
 }
 
 model Template {
@@ -165,13 +194,21 @@ model Template {
   organizationId String
   name           String
   subject        String
+  // Compiled, email-safe HTML (the artifact actually sent). When a template is
+  // authored with MJML, `html` is the mjml2html output of `mjml`.
   html           String
+  // MJML source, when the template was authored through the MJML render layer.
+  // Null for plain-HTML templates. See docs/DECISIONS.md (template versioning is
+  // intentionally deferred).
+  mjml           String?
   text           String?
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaigns      Campaign[]
   emailJobs      EmailJob[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
 }
 
 model Campaign {
@@ -216,12 +253,23 @@ model EmailJob {
   campaignId       String?
   campaignRunId    String?
   toEmail          String
+  cc               String[]        @default([])
+  bcc              String[]        @default([])
+  replyTo          String?
   subject          String
   html             String?
   text             String?
   variables        Json?
+  origin           EmailOrigin     @default(TRANSACTIONAL)
+  createdByUserId  String?
   status           EmailJobStatus  @default(PENDING)
+  // Threading metadata (RFC 5322). `messageId` is the Message-ID assigned to the
+  // sent message; `inReplyTo`/`references` let a reply thread correctly in the
+  // recipient's client and let a future inbox anchor replies to outbound mail.
+  // See docs/DECISIONS.md ("Threading Foundation Lives on EmailJob").
   messageId        String?
+  inReplyTo        String?
+  references       String[]        @default([])
   scheduledAt      DateTime?
   sentAt           DateTime?
   organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -234,6 +282,7 @@ model EmailJob {
   updatedAt        DateTime        @updatedAt
 
   @@index([messageId])
+  @@index([organizationId, origin])
 }
 
 model EmailEvent {

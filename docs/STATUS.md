@@ -44,6 +44,29 @@ The remaining open items are primarily commercial/cloud features, multi-user
 organization management, and qualified legal review — none of which block an
 early self-hosted beta.
 
+## Product Direction
+
+QQueue is positioned as an **email operations platform** (not a Gmail/Outlook/
+Zoho clone) built around four capabilities that share one delivery pipeline:
+
+1. **Campaign emails** — bulk marketing/communication. *Implemented.*
+2. **Transactional emails** — API/SDK/SMTP application-triggered sends.
+   *Implemented.*
+3. **Manual email sending** — a user-facing composer for individual/small-batch
+   sends. *Partially shipped* (single-recipient composer with Tiptap editor,
+   templates, variables, preview, and schedule-for-later already exist in
+   `apps/web/src/pages/SendEmail.tsx`). Remaining: multiple `To` recipients,
+   `CC`/`BCC`, contact and contact-list pickers, and attachments.
+4. **Optional inbox module** — opt-in, feature-flagged IMAP capability for
+   viewing replies to sent mail. *Not started; deliberately out of scope for the
+   current beta.*
+
+Campaign, transactional, and manual sends are three entry points into a single
+pipeline (`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`), not three
+separate products. See `docs/DECISIONS.md` and the "Email Operations Platform"
+section of `docs/ROADMAP.md` for the phased plan and the Phase-A pipeline
+refactor that precedes the larger UI work.
+
 ## Beta Readiness Assessment
 
 **Status:** Feature-Complete Self-Hosted Beta Candidate
@@ -100,9 +123,11 @@ operational and abuse-control gaps from the original audit have been closed.
 - `packages/sdk`: MIT-licensed TypeScript SDK package. It currently wraps the
   public transactional email send endpoint.
 - `apps/api/prisma`: PostgreSQL schema and migrations for users,
-  organizations, SMTP connections, contacts, contact lists, templates,
-  campaigns, campaign runs, email jobs, email events, API keys, webhook
-  endpoints, webhook deliveries, and password reset tokens.
+  organizations, SMTP connections, contacts (with `tags`), contact lists,
+  explicit contact-list membership (`ContactListMember`), templates (with MJML
+  source), campaigns, campaign runs, email jobs (with `origin` and threading
+  metadata: `messageId`/`inReplyTo`/`references`), email events, API keys,
+  webhook endpoints, webhook deliveries, and password reset tokens.
 - `scripts`: coverage badge generation, dependency license audit, cloud
   boundary guardrail checks, and the Docker-backed smoke test (`docker-smoke.ts`).
 - `.github/workflows`: coverage, Phase 7 guardrails, and SDK publish workflows.
@@ -343,6 +368,21 @@ End-to-end, the app can currently support a self-hosted operator who:
 - [ ] Provider-specific inbound webhook adapters
 - [ ] Expanded SDK functionality beyond `sendEmail`
 
+### Email Operations Platform (see ROADMAP Phase A+)
+
+- [x] Phase A: send-pipeline refactor (`origin`, `cc`/`bcc`/`replyTo`,
+  attachments, MJML rendering utility)
+- [x] Phase A.5: foundation domains — `Contact.tags`,
+  `ContactList.description`, explicit `ContactListMember` join, `Template.mjml`,
+  and `EmailJob` threading metadata (`inReplyTo`/`references`). Backend only; no
+  UI. Template versioning evaluated and deferred (see `docs/DECISIONS.md`).
+- [ ] Manual composer / Email Studio: multiple `To`, `CC`/`BCC`, contact and
+  list pickers, attachments
+- [ ] MJML wired into the default composer/campaign send path
+- [ ] Suppression list / List-Unsubscribe handling
+- [ ] Optional IMAP inbox module (feature-flagged, off by default) — inbound
+  message storage anchored to `EmailJob` threading metadata
+
 ### UX
 
 - [ ] Hide Queue Operations navigation for non-admin members
@@ -393,6 +433,19 @@ End-to-end, the app can currently support a self-hosted operator who:
 10. Collect feedback from real installations.
 
 ## Verification
+
+### Phase A.5 foundation domains (2026-06-15)
+
+- [x] `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `pnpm cloud:boundary`
+  passed.
+- [x] `pnpm test` passed across API, web, worker, shared, email-engine, and SDK.
+- [x] Migration `20260615010000_phase_a5_foundation_domains` verified against a
+  throwaway PostgreSQL 16 instance: all migrations apply in order, an existing
+  implicit `_ContactToContactList` membership is copied into
+  `ContactListMember` (with `addedAt`), the implicit join is dropped, and
+  `Contact.tags` defaults to an empty array.
+
+### Beta polish + launch prep sprint
 
 Verified with the following commands on 2026-06-11:
 

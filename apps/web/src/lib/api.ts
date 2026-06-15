@@ -144,7 +144,7 @@ export interface Campaign {
   contactList?: {
     id: string;
     name: string;
-    _count?: { contacts: number };
+    _count?: { members: number };
   } | null;
   _count?: { emailJobs: number };
 }

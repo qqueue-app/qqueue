@@ -8,6 +8,7 @@ const input = {
   email: "a@b.com",
   firstName: "A",
   lastName: "B",
+  tags: ["vip", "newsletter"],
   metadata: { tier: "gold" }
 };
 
@@ -27,17 +28,19 @@ describe("contactService", () => {
     expect(prismaMock.contact.findFirst).toHaveBeenCalled();
   });
 
-  it("creates a contact", () => {
+  it("creates a contact with tags", () => {
     prismaMock.contact.create.mockResolvedValue({ id: "c1" } as never);
     contactService.create(input);
-    expect(prismaMock.contact.create).toHaveBeenCalled();
+    const call = prismaMock.contact.create.mock.calls[0][0];
+    expect(call.data.tags).toEqual(["vip", "newsletter"]);
   });
 
-  it("updates an owned contact", async () => {
+  it("updates an owned contact and persists tags", async () => {
     prismaMock.contact.findFirst.mockResolvedValue({ id: "c1" } as never);
     prismaMock.contact.update.mockResolvedValue({ id: "c1" } as never);
     await contactService.update("c1", "user_1", input);
-    expect(prismaMock.contact.update).toHaveBeenCalled();
+    const call = prismaMock.contact.update.mock.calls[0][0];
+    expect(call.data.tags).toEqual(["vip", "newsletter"]);
   });
 
   it("throws 404 updating a contact the user does not own", async () => {

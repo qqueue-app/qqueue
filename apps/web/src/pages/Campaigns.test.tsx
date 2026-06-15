@@ -45,7 +45,7 @@ function campaign(overrides: Record<string, unknown> = {}) {
     name: "Spring",
     status: "DRAFT",
     template: { id: "t1", name: "Welcome", subject: "Hi there" },
-    contactList: { id: "l1", name: "VIPs", _count: { contacts: 5 } },
+    contactList: { id: "l1", name: "VIPs", _count: { members: 5 } },
     templateId: "t1",
     contactListId: "l1",
     _count: { emailJobs: 0 },

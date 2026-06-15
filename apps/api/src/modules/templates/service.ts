@@ -38,6 +38,7 @@ export const templateService = {
         name: input.name,
         subject: input.subject,
         html: input.html,
+        mjml: input.mjml,
         text: input.text
       }
     });

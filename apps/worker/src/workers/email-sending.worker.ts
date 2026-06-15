@@ -67,8 +67,13 @@ export function startEmailSendingWorker() {
         const result = await provider.send({
           from: formatFrom(emailJob.smtpConnection),
           to: emailJob.toEmail,
+          cc: emailJob.cc.length ? emailJob.cc : undefined,
+          bcc: emailJob.bcc.length ? emailJob.bcc : undefined,
+          replyTo: emailJob.replyTo ?? undefined,
+          inReplyTo: emailJob.inReplyTo ?? undefined,
+          references: emailJob.references.length ? emailJob.references : undefined,
           subject: emailJob.subject,
-          html,
+          html, // tracking already injected above
           text: emailJob.text ?? undefined
         });
 

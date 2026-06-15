@@ -8,6 +8,7 @@ const input = {
   name: "Welcome",
   subject: "Hi",
   html: "<p>Hi</p>",
+  mjml: "<mjml><mj-body><mj-text>Hi</mj-text></mj-body></mjml>",
   text: "Hi"
 };
 
@@ -39,7 +40,13 @@ describe("templateService", () => {
     await templateService.update("t1", "user_1", input);
     expect(prismaMock.template.update).toHaveBeenCalledWith({
       where: { id: "t1" },
-      data: { name: input.name, subject: input.subject, html: input.html, text: input.text }
+      data: {
+        name: input.name,
+        subject: input.subject,
+        html: input.html,
+        mjml: input.mjml,
+        text: input.text
+      }
     });
   });
 

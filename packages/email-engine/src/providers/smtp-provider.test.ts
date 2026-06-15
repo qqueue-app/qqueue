@@ -66,6 +66,32 @@ describe("SMTPProvider", () => {
     });
   });
 
+  it("forwards cc, bcc, replyTo, threading headers and attachments to the transporter", async () => {
+    sendMail.mockResolvedValue({
+      messageId: "<id>",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+    const provider = new SMTPProvider(options);
+
+    const payload = {
+      from: "from@example.com",
+      to: "to@example.com",
+      cc: ["cc1@example.com", "cc2@example.com"],
+      bcc: "bcc@example.com",
+      replyTo: "reply@example.com",
+      inReplyTo: "<parent@mail>",
+      references: ["<root@mail>", "<parent@mail>"],
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      attachments: [{ filename: "a.txt", content: "aGk=" }]
+    };
+
+    await provider.send(payload);
+
+    expect(sendMail).toHaveBeenCalledWith(payload);
+  });
+
   it("maps accepted/rejected entries through String()", async () => {
     sendMail.mockResolvedValue({
       messageId: "<id>",

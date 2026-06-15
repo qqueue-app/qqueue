@@ -120,14 +120,24 @@ describe("contactSchema", () => {
       contactSchema.safeParse({ organizationId: "", email: "a@b.com" }).success
     ).toBe(false);
   });
+
+  it("accepts tags", () => {
+    const result = contactSchema.parse({
+      organizationId: "org_1",
+      email: "a@b.com",
+      tags: ["vip", "newsletter"]
+    });
+    expect(result.tags).toEqual(["vip", "newsletter"]);
+  });
 });
 
 describe("contactList schemas", () => {
-  it("accepts a list with contactIds", () => {
+  it("accepts a list with contactIds and a description", () => {
     expect(
       contactListSchema.safeParse({
         organizationId: "org_1",
         name: "List",
+        description: "VIP customers",
         contactIds: ["c1", "c2"]
       }).success
     ).toBe(true);
@@ -151,6 +161,17 @@ describe("templateSchema", () => {
         html: "<p>hi</p>"
       }).success
     ).toBe(false);
+  });
+
+  it("accepts optional mjml source", () => {
+    const result = templateSchema.parse({
+      organizationId: "org_1",
+      name: "T",
+      subject: "Hi",
+      html: "<p>hi</p>",
+      mjml: "<mjml><mj-body /></mjml>"
+    });
+    expect(result.mjml).toBe("<mjml><mj-body /></mjml>");
   });
 });
 
@@ -223,6 +244,61 @@ describe("sendEmailSchema", () => {
   it("rejects an invalid recipient", () => {
     expect(
       sendEmailSchema.safeParse({ organizationId: "org_1", to: "nope" }).success
+    ).toBe(false);
+  });
+
+  it("accepts cc, bcc and replyTo with valid addresses", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        cc: ["c1@b.com", "c2@b.com"],
+        bcc: ["b1@b.com"],
+        replyTo: "reply@b.com",
+        subject: "Hi",
+        text: "Body"
+      }).success
+    ).toBe(true);
+  });
+
+  it("treats cc, bcc and replyTo as optional (backward compatible)", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        subject: "Hi",
+        text: "Body"
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects an invalid cc address", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        cc: ["nope"]
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects an invalid bcc address", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        bcc: ["also-nope"]
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects an invalid replyTo address", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        replyTo: "not-an-email"
+      }).success
     ).toBe(false);
   });
 });

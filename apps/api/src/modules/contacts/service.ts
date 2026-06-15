@@ -42,6 +42,7 @@ export const contactService = {
         email: input.email,
         firstName: input.firstName,
         lastName: input.lastName,
+        tags: input.tags,
         metadata: input.metadata as InputJsonValue | undefined
       }
     });

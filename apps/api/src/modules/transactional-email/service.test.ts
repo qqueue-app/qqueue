@@ -183,6 +183,116 @@ describe("transactionalEmailService.send", () => {
     expect(providerSend.mock.calls[0][0].from).toBe("from@b.com");
   });
 
+  it("persists cc, bcc and replyTo and forwards them to the provider", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.update.mockResolvedValue({ id: "job_1", status: "SENT" } as never);
+    providerSend.mockResolvedValue({
+      messageId: "m",
+      provider: "smtp",
+      accepted: ["x@y.com"],
+      rejected: []
+    });
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      cc: ["cc@y.com"],
+      bcc: ["bcc@y.com"],
+      replyTo: "reply@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>"
+    });
+
+    const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
+    expect(createData.cc).toEqual(["cc@y.com"]);
+    expect(createData.bcc).toEqual(["bcc@y.com"]);
+    expect(createData.replyTo).toBe("reply@y.com");
+
+    const sendArgs = providerSend.mock.calls[0][0];
+    expect(sendArgs.cc).toEqual(["cc@y.com"]);
+    expect(sendArgs.bcc).toEqual(["bcc@y.com"]);
+    expect(sendArgs.replyTo).toBe("reply@y.com");
+  });
+
+  it("defaults origin to TRANSACTIONAL and leaves createdByUserId unset", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.update.mockResolvedValue({ id: "job_1", status: "SENT" } as never);
+    providerSend.mockResolvedValue({
+      messageId: "m",
+      provider: "smtp",
+      accepted: ["x@y.com"],
+      rejected: []
+    });
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>"
+    });
+
+    const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
+    expect(createData.origin).toBe("TRANSACTIONAL");
+    expect(createData.createdByUserId).toBeUndefined();
+    expect(createData.cc).toEqual([]);
+    expect(createData.bcc).toEqual([]);
+  });
+
+  it("sets origin MANUAL and createdByUserId on the manual path", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.update.mockResolvedValue({ id: "job_1", status: "SENT" } as never);
+    providerSend.mockResolvedValue({
+      messageId: "m",
+      provider: "smtp",
+      accepted: ["x@y.com"],
+      rejected: []
+    });
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      origin: "MANUAL",
+      createdByUserId: "user_1"
+    });
+
+    const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
+    expect(createData.origin).toBe("MANUAL");
+    expect(createData.createdByUserId).toBe("user_1");
+  });
+
+  it("persists cc, bcc, replyTo and origin on the scheduled (send-later) path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      cc: ["cc@y.com"],
+      bcc: ["bcc@y.com"],
+      replyTo: "reply@y.com",
+      subject: "Hi",
+      text: "Body",
+      scheduledAt: "2026-01-01T01:00:00.000Z"
+    });
+
+    const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
+    expect(createData.cc).toEqual(["cc@y.com"]);
+    expect(createData.bcc).toEqual(["bcc@y.com"]);
+    expect(createData.replyTo).toBe("reply@y.com");
+    expect(createData.origin).toBe("TRANSACTIONAL");
+    expect(providerSend).not.toHaveBeenCalled();
+  });
+
   it("marks the job FAILED and throws 502 when the provider send fails", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
     prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);

@@ -136,7 +136,7 @@ describe("campaign-processing worker", () => {
       organizationId: "org1",
       templateId: "t1",
       template: baseTemplate,
-      contactList: { contacts: [] }
+      contactList: { members: [] }
     } as never);
     prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
     prismaMock.emailJob.findMany.mockResolvedValue([
@@ -165,7 +165,7 @@ describe("campaign-processing worker", () => {
       organizationId: "org1",
       templateId: "t1",
       template: baseTemplate,
-      contactList: { contacts: [] }
+      contactList: { members: [] }
     } as never);
     prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
     prismaMock.emailJob.findMany.mockResolvedValue([] as never);
@@ -211,7 +211,7 @@ describe("campaign-processing worker", () => {
       organizationId: "org1",
       templateId: "t1",
       template: baseTemplate,
-      contactList: { contacts: [{ email: "a@b.com" }] }
+      contactList: { members: [{ contact: { email: "a@b.com" } }] }
     } as never);
     prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
     prismaMock.emailJob.findMany.mockResolvedValue([] as never);
@@ -231,7 +231,7 @@ describe("campaign-processing worker", () => {
       organizationId: "org1",
       templateId: "t1",
       template: baseTemplate,
-      contactList: { contacts: [] }
+      contactList: { members: [] }
     } as never);
     prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
     prismaMock.emailJob.findMany.mockResolvedValue([] as never);
@@ -253,9 +253,9 @@ describe("campaign-processing worker", () => {
       templateId: "t1",
       template: baseTemplate,
       contactList: {
-        contacts: [
-          { email: "a@b.com", firstName: "Ann", lastName: "Bee" },
-          { email: "c@d.com", firstName: null, lastName: null }
+        members: [
+          { contact: { email: "a@b.com", firstName: "Ann", lastName: "Bee" } },
+          { contact: { email: "c@d.com", firstName: null, lastName: null } }
         ]
       }
     } as never);
@@ -276,7 +276,8 @@ describe("campaign-processing worker", () => {
       subject: "Hi Ann",
       html: "<p>Hello Ann Bee </p>",
       text: "Hello Ann",
-      status: "QUEUED"
+      status: "QUEUED",
+      origin: "CAMPAIGN"
     });
     // null first/last names render as empty strings.
     expect(createData[1]).toMatchObject({
@@ -297,7 +298,7 @@ describe("campaign-processing worker", () => {
       organizationId: "org1",
       templateId: "t1",
       template: baseTemplate,
-      contactList: { contacts: [] }
+      contactList: { members: [] }
     } as never);
     prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
     prismaMock.emailJob.findMany.mockResolvedValue([] as never);

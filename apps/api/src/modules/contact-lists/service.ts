@@ -5,19 +5,44 @@ import type {
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 
+// Membership is an explicit join (ContactListMember). We hydrate the related
+// contact and a member/campaign count, then flatten back to the legacy
+// `contacts` + `_count.contacts` shape so existing API/dashboard consumers are
+// unaffected by the join-table migration.
 const contactListInclude = {
-  contacts: {
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      status: true
+  members: {
+    include: {
+      contact: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          status: true
+        }
+      }
     },
-    orderBy: { createdAt: "desc" as const }
+    orderBy: { addedAt: "desc" as const }
   },
-  _count: { select: { contacts: true, campaigns: true } }
+  _count: { select: { members: true, campaigns: true } }
 };
+
+type ContactListWithMembers = {
+  members: { contact: unknown }[];
+  _count: { members: number; campaigns: number };
+  [key: string]: unknown;
+};
+
+// Present the explicit membership as the historical `contacts` array so the API
+// contract (and the web dashboard) stays identical to the implicit-M2M era.
+function toResponse(list: ContactListWithMembers) {
+  const { members, _count, ...rest } = list;
+  return {
+    ...rest,
+    contacts: members.map((member) => member.contact),
+    _count: { contacts: _count.members, campaigns: _count.campaigns }
+  };
+}
 
 async function assertContactsInOrganization(
   organizationId: string,
@@ -48,49 +73,69 @@ async function findOwned(id: string, userId: string) {
 }
 
 export const contactListService = {
-  list(organizationId: string) {
-    return prisma.contactList.findMany({
+  async list(organizationId: string) {
+    const lists = await prisma.contactList.findMany({
       where: { organizationId },
       include: contactListInclude,
       orderBy: { createdAt: "desc" }
     });
+    return lists.map((list) => toResponse(list as unknown as ContactListWithMembers));
   },
 
-  get(id: string, userId: string) {
-    return prisma.contactList.findFirst({
+  async get(id: string, userId: string) {
+    const list = await prisma.contactList.findFirst({
       where: { id, organization: { members: { some: { userId } } } },
       include: contactListInclude
     });
+    return list ? toResponse(list as unknown as ContactListWithMembers) : null;
   },
 
   async create(input: ContactListInput) {
     await assertContactsInOrganization(input.organizationId, input.contactIds);
 
-    return prisma.contactList.create({
+    const list = await prisma.contactList.create({
       data: {
         organizationId: input.organizationId,
         name: input.name,
-        contacts: input.contactIds?.length
-          ? { connect: [...new Set(input.contactIds)].map((id) => ({ id })) }
+        description: input.description,
+        members: input.contactIds?.length
+          ? {
+              create: [...new Set(input.contactIds)].map((contactId) => ({
+                contact: { connect: { id: contactId } }
+              }))
+            }
           : undefined
       },
       include: contactListInclude
     });
+    return toResponse(list as unknown as ContactListWithMembers);
   },
 
   async update(id: string, userId: string, input: ContactListUpdateInput) {
     const existing = await findOwned(id, userId);
     await assertContactsInOrganization(existing.organizationId, input.contactIds);
 
-    return prisma.contactList.update({
-      where: { id },
-      data: {
-        name: input.name,
-        contacts: input.contactIds
-          ? { set: [...new Set(input.contactIds)].map((contactId) => ({ id: contactId })) }
-          : undefined
-      },
-      include: contactListInclude
+    return prisma.$transaction(async (tx) => {
+      // Replace membership wholesale when contactIds is provided; leave it
+      // untouched when omitted (e.g. a rename-only update).
+      if (input.contactIds) {
+        await tx.contactListMember.deleteMany({ where: { contactListId: id } });
+        if (input.contactIds.length) {
+          await tx.contactListMember.createMany({
+            data: [...new Set(input.contactIds)].map((contactId) => ({
+              contactId,
+              contactListId: id
+            }))
+          });
+        }
+      }
+
+      const updated = await tx.contactList.update({
+        where: { id },
+        data: { name: input.name, description: input.description },
+        include: contactListInclude
+      });
+      return toResponse(updated as unknown as ContactListWithMembers);
     });
   },
 
