@@ -68,6 +68,16 @@ const Suppressions = lazy(() =>
     default: module.Suppressions,
   }))
 );
+const Segments = lazy(() =>
+  import("../pages/Segments.js").then((module) => ({
+    default: module.Segments,
+  }))
+);
+const Deliverability = lazy(() =>
+  import("../pages/Deliverability.js").then((module) => ({
+    default: module.Deliverability,
+  }))
+);
 
 function RouteFallback() {
   return (
@@ -105,6 +115,8 @@ export function AppRoutes() {
           <Route path="/templates" element={<Templates />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/lists" element={<ContactLists />} />
+          <Route path="/campaigns/segments" element={<Segments />} />
+          <Route path="/deliverability" element={<Deliverability />} />
           <Route
             path="/campaigns/:id/analytics"
             element={<CampaignAnalytics />}

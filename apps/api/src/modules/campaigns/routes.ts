@@ -9,6 +9,7 @@ campaignRouter.post("/", requireOrgMembership, campaignController.create);
 campaignRouter.get("/:id", campaignController.get);
 campaignRouter.get("/:id/analytics", campaignController.analytics);
 campaignRouter.put("/:id", campaignController.update);
+campaignRouter.put("/:id/ab-test", campaignController.configureAbTest);
 campaignRouter.delete("/:id", campaignController.delete);
 campaignRouter.post("/:id/duplicate", campaignController.duplicate);
 campaignRouter.post("/:id/send", campaignController.sendNow);

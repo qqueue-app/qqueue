@@ -7,10 +7,13 @@ import { campaignRouter } from "../modules/campaigns/routes.js";
 import { contactListRouter } from "../modules/contact-lists/routes.js";
 import { contactRouter } from "../modules/contacts/routes.js";
 import { dashboardRouter } from "../modules/dashboard/routes.js";
+import { deliverabilityRouter } from "../modules/deliverability/routes.js";
+import { domainThrottleRouter } from "../modules/domain-throttles/routes.js";
 import { emailDraftRouter } from "../modules/email-drafts/routes.js";
 import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
+import { segmentRouter } from "../modules/segments/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
 import { suppressionRouter } from "../modules/suppressions/routes.js";
 import { templateRouter } from "../modules/templates/routes.js";
@@ -44,9 +47,15 @@ v1Router.use("/queue-operations", queueOperationsRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
 v1Router.use("/contacts", contactRouter);
 v1Router.use("/contact-lists", contactListRouter);
+// Dynamic, rule-tree segments resolved to contacts at send time.
+v1Router.use("/segments", segmentRouter);
 // Org-wide suppression registry ("never send" list) consulted by the send
 // pipeline; also written by bounce/complaint/unsubscribe handling.
 v1Router.use("/suppressions", suppressionRouter);
+// Per-recipient-domain send-rate caps enforced by the send worker.
+v1Router.use("/domain-throttles", domainThrottleRouter);
+// Deliverability dashboards (rates, per-domain, reputation alerts).
+v1Router.use("/deliverability", deliverabilityRouter);
 v1Router.use("/templates", templateRouter);
 v1Router.use("/campaigns", campaignRouter);
 // Email Studio: manual compose/preview/send and composer drafts. Both reuse the

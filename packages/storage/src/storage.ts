@@ -10,7 +10,7 @@ import {
 export interface StorageConfig {
   /**
    * S3-compatible endpoint. Set for MinIO / non-AWS providers
-   * (e.g. `http://localhost:9000`). Omit to use the real AWS S3.
+   * (e.g. `http://localhost:9100`). Omit to use the real AWS S3.
    */
   endpoint?: string;
   region: string;

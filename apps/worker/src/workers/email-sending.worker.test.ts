@@ -28,6 +28,7 @@ const h = vi.hoisted(() => {
     },
     send,
     SMTPProvider: vi.fn(() => ({ send })),
+    classifyBounce: vi.fn(() => "HARD" as "HARD" | "SOFT" | "BLOCK"),
     injectTracking: vi.fn((html: string | null) => `tracked:${html}`),
     buildListUnsubscribeHeaders: vi.fn(() => ({
       "List-Unsubscribe": "<https://app/api/v1/unsubscribe?token=tok>",
@@ -35,13 +36,21 @@ const h = vi.hoisted(() => {
     })),
     decryptSecret: vi.fn((v: string) => `dec:${v}`),
     settleRunIfComplete: vi.fn(),
-    loadAttachmentsForJob: vi.fn()
+    loadAttachmentsForJob: vi.fn(),
+    reserveDomainSlot: vi.fn(async () => ({ allowed: true }))
   };
 });
 
 const DelayedError = h.DelayedError;
-const { send, SMTPProvider, injectTracking, decryptSecret, settleRunIfComplete } =
-  h;
+const {
+  send,
+  SMTPProvider,
+  classifyBounce,
+  injectTracking,
+  decryptSecret,
+  settleRunIfComplete,
+  reserveDomainSlot
+} = h;
 
 vi.mock("bullmq", () => ({
   Queue: vi.fn(() => ({ add: vi.fn() })),
@@ -56,6 +65,7 @@ vi.mock("../config/redis.js", () => ({ redisConnection: {} }));
 
 vi.mock("@qqueue/email-engine", () => ({
   SMTPProvider: h.SMTPProvider,
+  classifyBounce: h.classifyBounce,
   injectTracking: h.injectTracking,
   buildListUnsubscribeHeaders: h.buildListUnsubscribeHeaders
 }));
@@ -68,6 +78,10 @@ vi.mock("../lib/campaign-run.js", () => ({
 
 vi.mock("../lib/attachments.js", () => ({
   loadAttachmentsForJob: h.loadAttachmentsForJob
+}));
+
+vi.mock("../lib/throttle.js", () => ({
+  reserveDomainSlot: h.reserveDomainSlot
 }));
 
 import { startEmailSendingWorker } from "./email-sending.worker.js";
@@ -134,6 +148,9 @@ beforeEach(() => {
   settleRunIfComplete.mockReset().mockResolvedValue(undefined);
   // Default: no attachments. Tests override this to assert forwarding.
   h.loadAttachmentsForJob.mockReset().mockResolvedValue(undefined);
+  // Default: domain throttle allows the send. Tests override to assert holding.
+  reserveDomainSlot.mockReset().mockResolvedValue({ allowed: true });
+  classifyBounce.mockReset().mockReturnValue("HARD");
 });
 
 describe("email-sending worker", () => {
@@ -196,6 +213,22 @@ describe("email-sending worker", () => {
       data: { status: "PROCESSING" }
     });
     expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
+  });
+
+  it("holds the job (DelayedError) when the recipient domain is over its throttle", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    prismaMock.suppression.findUnique.mockResolvedValue(null as never);
+    reserveDomainSlot.mockResolvedValue({ allowed: false, retryInMs: 5_000 });
+    const job = makeJob();
+
+    await expect(run(job, "tok")).rejects.toBeInstanceOf(DelayedError);
+    expect(job.moveToDelayed).toHaveBeenCalledWith(expect.any(Number), "tok");
+    expect(send).not.toHaveBeenCalled();
+    // Never transitions to PROCESSING while held.
+    expect(prismaMock.emailJob.update).not.toHaveBeenCalledWith({
+      where: { id: "ej1" },
+      data: { status: "PROCESSING" }
+    });
   });
 
   it("sends successfully, records SENT and settles the run", async () => {
@@ -396,22 +429,24 @@ describe("email-sending worker", () => {
     );
   });
 
-  it("marks FAILED and bounces the contact when the recipient is rejected", async () => {
+  it("marks FAILED and bounces the contact on a hard rejection", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    classifyBounce.mockReturnValueOnce("HARD");
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: [],
-      rejected: ["to@example.com"]
+      rejected: ["to@example.com"],
+      rejectionResponse: "550 5.1.1 No such user"
     });
 
     await run(makeJob());
 
-    expect(prismaMock.$transaction).toHaveBeenCalledOnce();
     expect(prismaMock.contact.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: "BOUNCED" } })
     );
-    // A hard bounce also adds the address to the suppression registry.
+    // A hard bounce adds the address to the suppression registry immediately,
+    // without consulting the soft-bounce count.
     expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -421,11 +456,64 @@ describe("email-sending worker", () => {
         })
       })
     );
+    expect(prismaMock.emailEvent.count).not.toHaveBeenCalled();
     const failedCall = prismaMock.emailJob.update.mock.calls.find(
       (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"
     );
     expect(failedCall).toBeDefined();
     expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
+  });
+
+  it("records a soft bounce without suppressing below the threshold", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    classifyBounce.mockReturnValueOnce("SOFT");
+    prismaMock.suppressionPolicy.findUnique.mockResolvedValue(null as never);
+    // One soft bounce so far (the just-recorded one); default threshold is 3.
+    prismaMock.emailEvent.count.mockResolvedValue(1 as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: [],
+      rejected: ["to@example.com"],
+      rejectionResponse: "452 4.2.2 Mailbox full"
+    });
+
+    await run(makeJob());
+
+    // FAILED (the delivery did fail) but NOT suppressed and contact untouched.
+    const failedCall = prismaMock.emailJob.update.mock.calls.find(
+      (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"
+    );
+    expect(failedCall).toBeDefined();
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.contact.updateMany).not.toHaveBeenCalled();
+    expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
+  });
+
+  it("suppresses once soft bounces reach the threshold", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    classifyBounce.mockReturnValueOnce("SOFT");
+    prismaMock.suppressionPolicy.findUnique.mockResolvedValue(null as never);
+    // Threshold (default 3) reached, counting the just-recorded soft bounce.
+    prismaMock.emailEvent.count.mockResolvedValue(3 as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: [],
+      rejected: ["to@example.com"],
+      rejectionResponse: "452 4.2.2 Mailbox full"
+    });
+
+    await run(makeJob());
+
+    expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ reason: "BOUNCE" })
+      })
+    );
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "BOUNCED" } })
+    );
   });
 
   it("requeues (QUEUED) on a non-final failed attempt and rethrows", async () => {

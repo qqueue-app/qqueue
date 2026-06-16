@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { classifyBounce } from "@qqueue/email-engine";
 import { emailAddressSchema } from "@qqueue/shared";
 import { prisma } from "../../lib/prisma.js";
 import { suppressionService } from "../suppressions/service.js";
@@ -17,7 +18,10 @@ export const webhookEventSchema = z.object({
   messageId: z.string().min(1).optional(),
   emailJobId: z.string().min(1).optional(),
   email: emailAddressSchema.optional(),
-  reason: z.string().optional()
+  reason: z.string().optional(),
+  // Some ESPs report whether a bounce is hard/soft. When omitted, the bounce is
+  // classified from `reason`; an unclassifiable bounce defaults to hard.
+  bounceType: z.enum(["HARD", "SOFT", "BLOCK"]).optional()
 });
 
 export type WebhookEventInput = z.infer<typeof webhookEventSchema>;
@@ -115,6 +119,13 @@ export const trackingService = {
       return false;
     }
 
+    // Classify bounces so a transient (soft) bounce doesn't immediately
+    // suppress. Complaints always suppress and need no classification.
+    const bounceType =
+      input.type === "BOUNCED"
+        ? input.bounceType ?? classifyBounce({ message: input.reason })
+        : undefined;
+
     const event = await prisma.emailEvent.create({
       data: {
         organizationId: job.organizationId,
@@ -123,7 +134,8 @@ export const trackingService = {
         metadata: {
           source: "webhook",
           ...(input.reason ? { reason: input.reason } : {}),
-          ...(input.messageId ? { messageId: input.messageId } : {})
+          ...(input.messageId ? { messageId: input.messageId } : {}),
+          ...(bounceType ? { bounceType } : {})
         }
       }
     });
@@ -132,18 +144,30 @@ export const trackingService = {
 
     if (input.type === "BOUNCED" || input.type === "COMPLAINED") {
       const email = input.email ?? job.toEmail;
-      await prisma.contact.updateMany({
-        where: { organizationId: job.organizationId, email },
-        data: { status: "BOUNCED" }
-      });
-      // Add to the org-wide suppression registry so the address is skipped on
-      // every future send, not only sends to a matching Contact row.
-      await suppressionService.addSuppression({
-        organizationId: job.organizationId,
-        email,
-        reason: input.type === "COMPLAINED" ? "COMPLAINT" : "BOUNCE",
-        source: "webhook"
-      });
+      // Complaints suppress immediately; bounces go through the soft/hard
+      // threshold policy (the just-recorded BOUNCED event is counted).
+      const suppress =
+        input.type === "COMPLAINED" ||
+        (await suppressionService.shouldSuppressBounce({
+          organizationId: job.organizationId,
+          email,
+          bounceType: bounceType ?? "HARD"
+        }));
+
+      if (suppress) {
+        await prisma.contact.updateMany({
+          where: { organizationId: job.organizationId, email },
+          data: { status: "BOUNCED" }
+        });
+        // Add to the org-wide suppression registry so the address is skipped on
+        // every future send, not only sends to a matching Contact row.
+        await suppressionService.addSuppression({
+          organizationId: job.organizationId,
+          email,
+          reason: input.type === "COMPLAINED" ? "COMPLAINT" : "BOUNCE",
+          source: "webhook"
+        });
+      }
     }
 
     return true;

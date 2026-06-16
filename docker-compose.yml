@@ -29,8 +29,8 @@ services:
       MINIO_ROOT_USER: qqueue
       MINIO_ROOT_PASSWORD: qqueue-secret
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9100:9000"
+      - "9101:9001"
     volumes:
       - qqueue-minio-data:/data
 

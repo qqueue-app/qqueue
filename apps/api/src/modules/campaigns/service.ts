@@ -1,4 +1,5 @@
 import type {
+  AbTestConfigInput,
   CampaignInput,
   CampaignRecurrenceInput,
   CampaignScheduleInput,
@@ -20,6 +21,12 @@ const campaignInclude = {
   contactList: {
     select: { id: true, name: true, _count: { select: { members: true } } }
   },
+  segment: {
+    select: { id: true, name: true }
+  },
+  variants: {
+    orderBy: { label: "asc" as const }
+  },
   _count: { select: { emailJobs: true } }
 };
 
@@ -27,6 +34,7 @@ async function assertCampaignRelations(input: {
   organizationId: string;
   templateId?: string | null;
   contactListId?: string | null;
+  segmentId?: string | null;
 }) {
   if (input.templateId) {
     const template = await prisma.template.findFirst({
@@ -45,6 +53,16 @@ async function assertCampaignRelations(input: {
     });
     if (!contactList) {
       throw new HttpError(404, "Contact list not found");
+    }
+  }
+
+  if (input.segmentId) {
+    const segment = await prisma.segment.findFirst({
+      where: { id: input.segmentId, organizationId: input.organizationId },
+      select: { id: true }
+    });
+    if (!segment) {
+      throw new HttpError(404, "Segment not found");
     }
   }
 }
@@ -105,6 +123,7 @@ export const campaignService = {
         name: input.name,
         templateId: input.templateId,
         contactListId: input.contactListId,
+        segmentId: input.segmentId,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
       },
       include: campaignInclude
@@ -121,19 +140,78 @@ export const campaignService = {
     await assertCampaignRelations({
       organizationId: existing.organizationId,
       templateId: input.templateId,
-      contactListId: input.contactListId
+      contactListId: input.contactListId,
+      segmentId: input.segmentId
     });
+
+    // Targeting a segment clears any existing contact list and vice versa, so a
+    // campaign never ends up pointing at both.
+    const targetUpdate =
+      input.segmentId !== undefined
+        ? { segmentId: input.segmentId, contactListId: null }
+        : input.contactListId !== undefined
+          ? { contactListId: input.contactListId, segmentId: null }
+          : {};
 
     return prisma.campaign.update({
       where: { id },
       data: {
         name: input.name,
         templateId: input.templateId,
-        contactListId: input.contactListId,
+        ...targetUpdate,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
       },
       include: campaignInclude
     });
+  },
+
+  /**
+   * Configure (or disable) A/B subject testing on a draft campaign. Replaces any
+   * existing variants. Disabling clears the config and removes variants.
+   */
+  async configureAbTest(id: string, userId: string, input: AbTestConfigInput) {
+    const existing = await findOwned(id, userId);
+    if (existing.status !== "DRAFT") {
+      throw new HttpError(400, "A/B testing can only be configured on a draft");
+    }
+
+    if (!input.enabled) {
+      await prisma.$transaction([
+        prisma.campaignVariant.deleteMany({ where: { campaignId: id } }),
+        prisma.campaign.update({
+          where: { id },
+          data: {
+            abTestEnabled: false,
+            abTestPercent: null,
+            abWinnerMetric: null,
+            abTestWindowMin: null,
+            abTestStatus: null
+          }
+        })
+      ]);
+      return this.get(id, userId);
+    }
+
+    await prisma.$transaction([
+      prisma.campaignVariant.deleteMany({ where: { campaignId: id } }),
+      prisma.campaign.update({
+        where: { id },
+        data: {
+          abTestEnabled: true,
+          abTestPercent: input.percent,
+          abWinnerMetric: input.metric,
+          abTestWindowMin: input.windowMin,
+          abTestStatus: null,
+          variants: {
+            create: input.variants!.map((variant) => ({
+              label: variant.label,
+              subject: variant.subject
+            }))
+          }
+        }
+      })
+    ]);
+    return this.get(id, userId);
   },
 
   async duplicate(id: string, userId: string) {
@@ -357,6 +435,40 @@ export const campaignService = {
     const rate = (value: number, total: number) =>
       total > 0 ? value / total : 0;
 
+    // Per-variant open/click breakdown for A/B campaigns (empty otherwise).
+    const variants = await prisma.campaignVariant.findMany({
+      where: { campaignId: id },
+      orderBy: { label: "asc" }
+    });
+    const variantBreakdown = await Promise.all(
+      variants.map(async (variant) => {
+        const [variantSent, variantOpens, variantClicks] = await Promise.all([
+          prisma.emailJob.count({
+            where: { campaignId: id, variantId: variant.id }
+          }),
+          prisma.emailEvent.groupBy({
+            by: ["emailJobId"],
+            where: { type: "OPENED", emailJob: { variantId: variant.id } }
+          }),
+          prisma.emailEvent.groupBy({
+            by: ["emailJobId"],
+            where: { type: "CLICKED", emailJob: { variantId: variant.id } }
+          })
+        ]);
+        return {
+          id: variant.id,
+          label: variant.label,
+          subject: variant.subject,
+          isWinner: variant.isWinner,
+          sent: variantSent,
+          uniqueOpened: variantOpens.length,
+          uniqueClicked: variantClicks.length,
+          openRate: rate(variantOpens.length, variantSent),
+          clickRate: rate(variantClicks.length, variantSent)
+        };
+      })
+    );
+
     return {
       campaign: { id: campaign.id, name: campaign.name, status: campaign.status },
       totals: {
@@ -377,6 +489,7 @@ export const campaignService = {
         bounce: rate(bounced, recipients)
       },
       links,
+      variantBreakdown,
       recentEvents: recentEvents.map(
         (event: {
           id: string;

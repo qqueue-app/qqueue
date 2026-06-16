@@ -80,7 +80,7 @@ describe("trackingService.recordWebhookEvent", () => {
     expect(data).toMatchObject({ type: "DELIVERED", metadata: { source: "webhook", messageId: "msg_1" } });
   });
 
-  it("marks the contact BOUNCED and suppresses the address on a bounce", async () => {
+  it("suppresses immediately on a hard bounce", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
     prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
     prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
@@ -89,7 +89,7 @@ describe("trackingService.recordWebhookEvent", () => {
       type: "BOUNCED",
       emailJobId: "job_1",
       email: "bounced@y.com",
-      reason: "mailbox full"
+      reason: "550 5.1.1 No such user"
     });
     expect(result).toBe(true);
     expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
@@ -103,8 +103,65 @@ describe("trackingService.recordWebhookEvent", () => {
       reason: "BOUNCE",
       source: "webhook"
     });
+    // A hard bounce suppresses without counting prior soft bounces.
+    expect(prismaMock.emailEvent.count).not.toHaveBeenCalled();
     const data = prismaMock.emailEvent.create.mock.calls[0][0].data;
-    expect(data).toMatchObject({ metadata: { source: "webhook", reason: "mailbox full" } });
+    expect(data).toMatchObject({
+      metadata: { source: "webhook", reason: "550 5.1.1 No such user", bounceType: "HARD" }
+    });
+  });
+
+  it("does not suppress a soft bounce below the threshold", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
+    prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
+    prismaMock.suppressionPolicy.findUnique.mockResolvedValue(null as never);
+    prismaMock.emailEvent.count.mockResolvedValue(1 as never); // below default 3
+    const result = await trackingService.recordWebhookEvent({
+      type: "BOUNCED",
+      emailJobId: "job_1",
+      email: "soft@y.com",
+      reason: "452 4.2.2 Mailbox full, over quota"
+    });
+    expect(result).toBe(true);
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.contact.updateMany).not.toHaveBeenCalled();
+    const data = prismaMock.emailEvent.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ metadata: { bounceType: "SOFT" } });
+  });
+
+  it("suppresses a soft bounce once the threshold is reached", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
+    prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
+    prismaMock.suppressionPolicy.findUnique.mockResolvedValue(null as never);
+    prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
+    prismaMock.emailEvent.count.mockResolvedValue(3 as never); // at default 3
+    await trackingService.recordWebhookEvent({
+      type: "BOUNCED",
+      emailJobId: "job_1",
+      email: "soft@y.com",
+      reason: "452 4.2.2 Mailbox full, over quota"
+    });
+    expect(prismaMock.suppression.upsert.mock.calls[0][0].create).toMatchObject({
+      reason: "BOUNCE"
+    });
+  });
+
+  it("honors an explicit provider bounceType over the reason text", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
+    prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
+    prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
+    // Reason text alone looks soft, but the ESP labeled it a hard bounce.
+    await trackingService.recordWebhookEvent({
+      type: "BOUNCED",
+      emailJobId: "job_1",
+      email: "hard@y.com",
+      reason: "mailbox full",
+      bounceType: "HARD"
+    });
+    expect(prismaMock.emailEvent.count).not.toHaveBeenCalled();
+    expect(prismaMock.suppression.upsert).toHaveBeenCalled();
   });
 
   it("suppresses with COMPLAINT and the job toEmail on a complaint without an email", async () => {

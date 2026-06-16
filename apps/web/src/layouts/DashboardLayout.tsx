@@ -10,6 +10,7 @@ import {
   FileText,
   Megaphone,
   ListRestart,
+  Gauge,
   Settings as SettingsIcon,
   LogOut,
   Check,
@@ -60,8 +61,10 @@ const navItems: NavItem[] = [
     children: [
       { to: "/campaigns", label: "All campaigns" },
       { to: "/campaigns/lists", label: "Contact lists" },
+      { to: "/campaigns/segments", label: "Segments" },
     ],
   },
+  { to: "/deliverability", label: "Deliverability", icon: Gauge },
   { to: "/queue-operations", label: "Queue Operations", icon: ListRestart },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];

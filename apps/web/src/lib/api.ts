@@ -73,6 +73,78 @@ export interface SegmentPreview {
   sample: Contact[];
 }
 
+export interface SuppressionPolicy {
+  organizationId: string;
+  softBounceThreshold: number;
+  softBounceWindowDays: number;
+}
+
+export interface DomainThrottle {
+  id: string;
+  organizationId: string;
+  domain: string;
+  maxPerMinute: number;
+}
+
+export interface DomainThrottleList {
+  throttles: DomainThrottle[];
+  defaultPerMinute: number;
+}
+
+export interface Segment {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string | null;
+  rules: unknown;
+  createdAt?: string;
+}
+
+export interface DeliverabilityOverview {
+  window: { from: string; to: string };
+  totals: {
+    sent: number;
+    delivered: number;
+    opened: number;
+    clicked: number;
+    bounced: number;
+    hardBounced: number;
+    softBounced: number;
+    complained: number;
+    suppressed: number;
+  };
+  rates: {
+    delivery: number;
+    bounce: number;
+    complaint: number;
+    open: number;
+    click: number;
+  };
+}
+
+export interface DeliverabilityDomains {
+  truncated: boolean;
+  domains: Array<{
+    domain: string;
+    sent: number;
+    delivered: number;
+    bounced: number;
+    complained: number;
+    bounceRate: number;
+    complaintRate: number;
+  }>;
+}
+
+export interface DeliverabilityAlerts {
+  alerts: Array<{
+    level: "warning" | "critical";
+    metric: string;
+    value: number;
+    threshold: number;
+    message: string;
+  }>;
+}
+
 export interface Template {
   id: string;
   organizationId: string;
@@ -690,6 +762,102 @@ export const api = {
 
   deleteSuppression(id: string) {
     return request<void>(`/api/v1/suppressions/${id}`, { method: "DELETE" });
+  },
+
+  // Phase D — auto-suppression policy, throttles, segments, deliverability.
+
+  getSuppressionPolicy(organizationId: string) {
+    return request<SuppressionPolicy>(
+      `/api/v1/suppressions/policy?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  updateSuppressionPolicy(input: {
+    organizationId: string;
+    softBounceThreshold: number;
+    softBounceWindowDays: number;
+  }) {
+    return request<SuppressionPolicy>("/api/v1/suppressions/policy", {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
+  listDomainThrottles(organizationId: string) {
+    return request<DomainThrottleList>(
+      `/api/v1/domain-throttles?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  upsertDomainThrottle(input: {
+    organizationId: string;
+    domain: string;
+    maxPerMinute: number;
+  }) {
+    return request<DomainThrottle>("/api/v1/domain-throttles", {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
+  deleteDomainThrottle(id: string) {
+    return request<void>(`/api/v1/domain-throttles/${id}`, { method: "DELETE" });
+  },
+
+  listSegments(organizationId: string) {
+    return request<Segment[]>(
+      `/api/v1/segments?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createSegment(input: Record<string, unknown>) {
+    return request<Segment>("/api/v1/segments", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  updateSegment(id: string, input: Record<string, unknown>) {
+    return request<Segment>(`/api/v1/segments/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
+  deleteSegment(id: string) {
+    return request<void>(`/api/v1/segments/${id}`, { method: "DELETE" });
+  },
+
+  previewSegmentRules(input: { organizationId: string; rules: unknown }) {
+    return request<SegmentPreview>("/api/v1/segments/preview", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+
+  configureAbTest(campaignId: string, input: Record<string, unknown>) {
+    return request<Campaign>(`/api/v1/campaigns/${campaignId}/ab-test`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+
+  deliverabilityOverview(organizationId: string) {
+    return request<DeliverabilityOverview>(
+      `/api/v1/deliverability/overview?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  deliverabilityDomains(organizationId: string) {
+    return request<DeliverabilityDomains>(
+      `/api/v1/deliverability/domains?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  deliverabilityAlerts(organizationId: string) {
+    return request<DeliverabilityAlerts>(
+      `/api/v1/deliverability/alerts?organizationId=${encodeURIComponent(organizationId)}`
+    );
   },
 
   listTemplates(organizationId: string) {

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  abTestConfigSchema,
   campaignRecurrenceSchema,
   campaignScheduleSchema,
   campaignSchema,
@@ -44,6 +45,16 @@ export const campaignController = {
   async update(req: Request, res: Response) {
     const input = campaignUpdateSchema.parse(req.body);
     const campaign = await campaignService.update(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.json({ data: campaign });
+  },
+
+  async configureAbTest(req: Request, res: Response) {
+    const input = abTestConfigSchema.parse(req.body);
+    const campaign = await campaignService.configureAbTest(
       String(req.params.id),
       req.userId!,
       input

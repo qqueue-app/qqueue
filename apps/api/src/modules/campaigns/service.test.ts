@@ -15,6 +15,8 @@ beforeEach(() => {
   add.mockReset().mockResolvedValue(undefined);
   upsertJobScheduler.mockReset().mockResolvedValue(undefined);
   removeJobScheduler.mockReset().mockResolvedValue(undefined);
+  // Most campaigns have no A/B variants; analytics defaults to an empty set.
+  prismaMock.campaignVariant.findMany.mockResolvedValue([] as never);
 });
 
 afterEach(() => {
@@ -89,6 +91,55 @@ describe("campaignService.create", () => {
         contactListId: "list_x"
       })
     ).rejects.toThrow("Contact list not found");
+  });
+});
+
+describe("campaignService.configureAbTest", () => {
+  it("enables A/B testing and replaces variants on a draft", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
+    await campaignService.configureAbTest("c1", "user_1", {
+      enabled: true,
+      percent: 20,
+      metric: "OPEN",
+      windowMin: 120,
+      variants: [
+        { label: "A", subject: "First" },
+        { label: "B", subject: "Second" }
+      ]
+    });
+    // deleteMany (clear) + campaign.update (set config + nested variant create).
+    expect(prismaMock.campaignVariant.deleteMany).toHaveBeenCalledWith({
+      where: { campaignId: "c1" }
+    });
+    const updateData = prismaMock.campaign.update.mock.calls[0][0].data;
+    expect(updateData).toMatchObject({
+      abTestEnabled: true,
+      abTestPercent: 20,
+      abWinnerMetric: "OPEN",
+      abTestWindowMin: 120
+    });
+  });
+
+  it("disabling clears config and removes variants", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
+    await campaignService.configureAbTest("c1", "user_1", { enabled: false });
+    expect(prismaMock.campaignVariant.deleteMany).toHaveBeenCalled();
+    const updateData = prismaMock.campaign.update.mock.calls[0][0].data;
+    expect(updateData).toMatchObject({
+      abTestEnabled: false,
+      abTestPercent: null,
+      abWinnerMetric: null
+    });
+  });
+
+  it("rejects configuring A/B on a non-draft campaign", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      status: "SENDING"
+    } as never);
+    await expect(
+      campaignService.configureAbTest("c1", "user_1", { enabled: false })
+    ).rejects.toThrow("A/B testing can only be configured on a draft");
   });
 });
 

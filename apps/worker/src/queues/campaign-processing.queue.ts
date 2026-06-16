@@ -9,6 +9,11 @@ export interface CampaignProcessingJob {
    * worker falls back to the BullMQ job id.
    */
   occurrenceKey?: string;
+  /**
+   * When "decide", this job runs the A/B winner selection for the run instead of
+   * fanning out recipients. Scheduled with a delay after the test fraction sends.
+   */
+  phase?: "decide";
 }
 
 export const campaignProcessingQueue = new Queue<CampaignProcessingJob>(

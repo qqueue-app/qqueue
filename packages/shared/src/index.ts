@@ -29,6 +29,7 @@ export type SuppressionReason =
   | "COMPLAINT"
   | "UNSUBSCRIBE"
   | "MANUAL";
+export type BounceType = "HARD" | "SOFT" | "BLOCK";
 export type CampaignStatus =
   | "DRAFT"
   | "SCHEDULED"
@@ -112,6 +113,20 @@ export interface Suppression {
   reason: SuppressionReason;
   source?: string | null;
   createdAt: string;
+}
+
+export interface SuppressionPolicy {
+  organizationId: string;
+  softBounceThreshold: number;
+  softBounceWindowDays: number;
+}
+
+export interface DomainThrottle {
+  id: string;
+  organizationId: string;
+  /** Recipient domain; "" is the org-wide default cap. */
+  domain: string;
+  maxPerMinute: number;
 }
 
 export interface Template {
@@ -329,6 +344,128 @@ export type CreateListFromSegmentInput = z.infer<
   typeof createListFromSegmentSchema
 >;
 
+// Phase D — dynamic segmentation. A rule tree that re-resolves to the current
+// matching contacts at send time (vs. the Phase C static "create list from
+// segment" snapshot above).
+
+export type SegmentRule =
+  | { op: "AND" | "OR"; rules: SegmentRule[] }
+  | { field: "tags"; match: "ANY" | "ALL" | "NONE"; values: string[] }
+  | { field: "status"; eq: ContactStatus }
+  | { field: "emailDomain"; eq: string }
+  | { field: "createdAt"; before?: string; after?: string };
+
+export const segmentRuleSchema: z.ZodType<SegmentRule> = z.lazy(() =>
+  z.union([
+    z.object({
+      op: z.enum(["AND", "OR"]),
+      rules: z.array(segmentRuleSchema).min(1).max(20)
+    }),
+    z.object({
+      field: z.literal("tags"),
+      match: z.enum(["ANY", "ALL", "NONE"]),
+      values: z.array(z.string().min(1)).min(1)
+    }),
+    z.object({
+      field: z.literal("status"),
+      eq: z.enum(["ACTIVE", "UNSUBSCRIBED", "BOUNCED"])
+    }),
+    z.object({ field: z.literal("emailDomain"), eq: z.string().min(1) }),
+    z.object({
+      field: z.literal("createdAt"),
+      before: z.string().datetime().optional(),
+      after: z.string().datetime().optional()
+    })
+  ])
+);
+
+const MAX_SEGMENT_RULE_DEPTH = 5;
+
+function segmentRuleDepth(rule: SegmentRule): number {
+  if ("op" in rule) {
+    return 1 + Math.max(...rule.rules.map(segmentRuleDepth));
+  }
+  return 1;
+}
+
+// Bound nesting so a pathological tree can't blow up query compilation.
+const boundedSegmentRule = segmentRuleSchema.refine(
+  (rule) => segmentRuleDepth(rule) <= MAX_SEGMENT_RULE_DEPTH,
+  `Segment rules may not nest deeper than ${MAX_SEGMENT_RULE_DEPTH} levels`
+);
+
+export const segmentSchema = z.object({
+  organizationId: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  rules: boundedSegmentRule
+});
+
+export type SegmentInput = z.infer<typeof segmentSchema>;
+
+export const segmentUpdateSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  rules: boundedSegmentRule
+});
+
+export type SegmentUpdateInput = z.infer<typeof segmentUpdateSchema>;
+
+export const segmentPreviewSchema = z.object({
+  organizationId: z.string().min(1),
+  rules: boundedSegmentRule
+});
+
+export type SegmentPreviewInput = z.infer<typeof segmentPreviewSchema>;
+
+export interface Segment {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string | null;
+  rules: SegmentRule;
+  createdAt: string;
+}
+
+/**
+ * Compile a segment rule tree into a Prisma `ContactWhereInput`-shaped plain
+ * object (returned untyped so this stays free of a Prisma dependency). Callers
+ * AND it with `organizationId` (and, at send time, `status: ACTIVE`). Shared by
+ * the API preview/resolve paths and the worker's campaign fan-out.
+ */
+export function compileSegmentRules(
+  rule: SegmentRule
+): Record<string, unknown> {
+  if ("op" in rule) {
+    const compiled = rule.rules.map(compileSegmentRules);
+    return rule.op === "AND" ? { AND: compiled } : { OR: compiled };
+  }
+
+  switch (rule.field) {
+    case "tags":
+      if (rule.match === "ALL") {
+        return { tags: { hasEvery: rule.values } };
+      }
+      if (rule.match === "NONE") {
+        return { NOT: { tags: { hasSome: rule.values } } };
+      }
+      return { tags: { hasSome: rule.values } };
+    case "status":
+      return { status: rule.eq };
+    case "emailDomain":
+      return {
+        email: { endsWith: `@${rule.eq.toLowerCase()}`, mode: "insensitive" }
+      };
+    case "createdAt":
+      return {
+        createdAt: {
+          ...(rule.after ? { gte: rule.after } : {}),
+          ...(rule.before ? { lte: rule.before } : {})
+        }
+      };
+  }
+}
+
 // CSV import options. The CSV payload itself is handled by the upload middleware,
 // not validated here; this only carries the optional target list.
 export const csvImportSchema = z.object({
@@ -347,6 +484,32 @@ export const suppressionCreateSchema = z.object({
 });
 
 export type SuppressionCreateInput = z.infer<typeof suppressionCreateSchema>;
+
+export const suppressionPolicySchema = z.object({
+  organizationId: z.string().min(1),
+  softBounceThreshold: z.coerce.number().int().min(1).max(100),
+  softBounceWindowDays: z.coerce.number().int().min(1).max(365)
+});
+
+export type SuppressionPolicyInput = z.infer<typeof suppressionPolicySchema>;
+
+export const domainThrottleSchema = z.object({
+  organizationId: z.string().min(1),
+  // "" targets the org-wide default; otherwise a bare recipient domain.
+  domain: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .refine(
+      (value) =>
+        value === "" || /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value),
+      "Must be a valid domain or empty for the default"
+    )
+    .default(""),
+  maxPerMinute: z.coerce.number().int().min(1).max(100000)
+});
+
+export type DomainThrottleInput = z.infer<typeof domainThrottleSchema>;
 
 export const contactActivityQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
@@ -368,21 +531,125 @@ export const templateSchema = z.object({
 
 export type TemplateInput = z.infer<typeof templateSchema>;
 
-export const campaignSchema = z.object({
-  organizationId: z.string().min(1),
-  name: z.string().min(1),
-  templateId: z.string().min(1).optional(),
-  contactListId: z.string().min(1).optional(),
-  scheduledAt: z.string().datetime().optional()
-});
+// A campaign targets a static contact list OR a dynamic segment, never both.
+const campaignTargetExclusive = (
+  data: { contactListId?: string; segmentId?: string },
+  ctx: z.RefinementCtx
+) => {
+  if (data.contactListId && data.segmentId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide either contactListId or segmentId, not both",
+      path: ["segmentId"]
+    });
+  }
+};
+
+export const campaignSchema = z
+  .object({
+    organizationId: z.string().min(1),
+    name: z.string().min(1),
+    templateId: z.string().min(1).optional(),
+    contactListId: z.string().min(1).optional(),
+    segmentId: z.string().min(1).optional(),
+    scheduledAt: z.string().datetime().optional()
+  })
+  .superRefine(campaignTargetExclusive);
 
 export type CampaignInput = z.infer<typeof campaignSchema>;
 
-export const campaignUpdateSchema = campaignSchema
-  .omit({ organizationId: true })
-  .partial();
+export const campaignUpdateSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    templateId: z.string().min(1).optional(),
+    contactListId: z.string().min(1).optional(),
+    segmentId: z.string().min(1).optional(),
+    scheduledAt: z.string().datetime().optional()
+  })
+  .superRefine(campaignTargetExclusive);
 
 export type CampaignUpdateInput = z.infer<typeof campaignUpdateSchema>;
+
+// Phase D — A/B subject testing.
+
+export type AbWinnerMetric = "OPEN" | "CLICK";
+export type AbTestStatus = "TESTING" | "DECIDED" | "SENT";
+
+export interface CampaignVariant {
+  id: string;
+  campaignId: string;
+  label: string;
+  subject: string;
+  isWinner: boolean;
+}
+
+// Configure (or disable) a campaign's A/B subject test. When `enabled`, all of
+// percent/metric/windowMin and at least two variants are required.
+export const abTestConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    percent: z.coerce.number().int().min(1).max(50).optional(),
+    metric: z.enum(["OPEN", "CLICK"]).optional(),
+    windowMin: z.coerce.number().int().min(1).max(10080).optional(),
+    variants: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(40),
+          subject: z.string().min(1).max(500)
+        })
+      )
+      .min(2)
+      .max(5)
+      .optional()
+  })
+  .superRefine((data, ctx) => {
+    if (!data.enabled) {
+      return;
+    }
+    if (data.percent === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "percent is required when A/B testing is enabled",
+        path: ["percent"]
+      });
+    }
+    if (!data.metric) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "metric is required when A/B testing is enabled",
+        path: ["metric"]
+      });
+    }
+    if (data.windowMin === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "windowMin is required when A/B testing is enabled",
+        path: ["windowMin"]
+      });
+    }
+    if (!data.variants || data.variants.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "At least two variants are required",
+        path: ["variants"]
+      });
+    }
+  });
+
+export type AbTestConfigInput = z.infer<typeof abTestConfigSchema>;
+
+// Phase D — deliverability tooling. A time-windowed view over EmailEvent +
+// Suppression. `from`/`to` are ISO datetimes; the service defaults to the last
+// 30 days when omitted.
+export const deliverabilityQuerySchema = z.object({
+  organizationId: z.string().min(1),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional()
+});
+
+export type DeliverabilityQueryInput = z.infer<
+  typeof deliverabilityQuerySchema
+>;
 
 export const campaignScheduleSchema = z.object({
   scheduledAt: z.string().datetime()

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  abTestConfigSchema,
   campaignRecurrenceSchema,
   campaignSchema,
   campaignScheduleSchema,
@@ -11,8 +12,12 @@ import {
   createListFromSegmentSchema,
   cronExpressionSchema,
   csvImportSchema,
+  compileSegmentRules,
   segmentFilterSchema,
+  segmentSchema,
+  domainThrottleSchema,
   suppressionCreateSchema,
+  suppressionPolicySchema,
   emailAddressSchema,
   emailDraftSchema,
   emailDraftUpdateSchema,
@@ -555,6 +560,229 @@ describe("suppressionCreateSchema", () => {
       suppressionCreateSchema.safeParse({
         organizationId: "org_1",
         email: "not-an-email"
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("suppressionPolicySchema", () => {
+  it("accepts in-range threshold and window", () => {
+    const parsed = suppressionPolicySchema.safeParse({
+      organizationId: "org_1",
+      softBounceThreshold: 3,
+      softBounceWindowDays: 30
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects out-of-range or non-integer values", () => {
+    expect(
+      suppressionPolicySchema.safeParse({
+        organizationId: "org_1",
+        softBounceThreshold: 0,
+        softBounceWindowDays: 30
+      }).success
+    ).toBe(false);
+    expect(
+      suppressionPolicySchema.safeParse({
+        organizationId: "org_1",
+        softBounceThreshold: 3,
+        softBounceWindowDays: 400
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("domainThrottleSchema", () => {
+  it("accepts a bare domain and a positive cap, lowercasing the domain", () => {
+    const parsed = domainThrottleSchema.safeParse({
+      organizationId: "org_1",
+      domain: "Gmail.com",
+      maxPerMinute: 30
+    });
+    expect(parsed.success && parsed.data.domain).toBe("gmail.com");
+  });
+
+  it("defaults the domain to '' (the org-wide default cap)", () => {
+    const parsed = domainThrottleSchema.safeParse({
+      organizationId: "org_1",
+      maxPerMinute: 30
+    });
+    expect(parsed.success && parsed.data.domain).toBe("");
+  });
+
+  it("rejects an invalid domain or a non-positive cap", () => {
+    expect(
+      domainThrottleSchema.safeParse({
+        organizationId: "org_1",
+        domain: "not a domain",
+        maxPerMinute: 30
+      }).success
+    ).toBe(false);
+    expect(
+      domainThrottleSchema.safeParse({
+        organizationId: "org_1",
+        domain: "gmail.com",
+        maxPerMinute: 0
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("segmentRuleSchema + compileSegmentRules", () => {
+  it("compiles tag matches (ANY/ALL/NONE)", () => {
+    expect(
+      compileSegmentRules({ field: "tags", match: "ANY", values: ["a", "b"] })
+    ).toEqual({ tags: { hasSome: ["a", "b"] } });
+    expect(
+      compileSegmentRules({ field: "tags", match: "ALL", values: ["a"] })
+    ).toEqual({ tags: { hasEvery: ["a"] } });
+    expect(
+      compileSegmentRules({ field: "tags", match: "NONE", values: ["a"] })
+    ).toEqual({ NOT: { tags: { hasSome: ["a"] } } });
+  });
+
+  it("compiles status, emailDomain and createdAt leaves", () => {
+    expect(compileSegmentRules({ field: "status", eq: "ACTIVE" })).toEqual({
+      status: "ACTIVE"
+    });
+    expect(
+      compileSegmentRules({ field: "emailDomain", eq: "Gmail.com" })
+    ).toEqual({ email: { endsWith: "@gmail.com", mode: "insensitive" } });
+    expect(
+      compileSegmentRules({
+        field: "createdAt",
+        after: "2026-01-01T00:00:00.000Z"
+      })
+    ).toEqual({ createdAt: { gte: "2026-01-01T00:00:00.000Z" } });
+  });
+
+  it("compiles nested AND/OR groups", () => {
+    const compiled = compileSegmentRules({
+      op: "AND",
+      rules: [
+        { field: "status", eq: "ACTIVE" },
+        {
+          op: "OR",
+          rules: [
+            { field: "tags", match: "ANY", values: ["vip"] },
+            { field: "emailDomain", eq: "example.com" }
+          ]
+        }
+      ]
+    });
+    expect(compiled).toEqual({
+      AND: [
+        { status: "ACTIVE" },
+        {
+          OR: [
+            { tags: { hasSome: ["vip"] } },
+            { email: { endsWith: "@example.com", mode: "insensitive" } }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("accepts a valid rule tree and rejects an unknown field", () => {
+    expect(
+      segmentSchema.safeParse({
+        organizationId: "org_1",
+        name: "VIPs",
+        rules: { field: "tags", match: "ANY", values: ["vip"] }
+      }).success
+    ).toBe(true);
+    expect(
+      segmentSchema.safeParse({
+        organizationId: "org_1",
+        name: "Bad",
+        rules: { field: "unknown", eq: "x" }
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects a rule tree nested too deeply", () => {
+    let rule: unknown = { field: "status", eq: "ACTIVE" };
+    for (let i = 0; i < 6; i += 1) {
+      rule = { op: "AND", rules: [rule] };
+    }
+    expect(
+      segmentSchema.safeParse({
+        organizationId: "org_1",
+        name: "Deep",
+        rules: rule
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("campaignSchema target exclusivity", () => {
+  it("rejects setting both contactListId and segmentId", () => {
+    expect(
+      campaignSchema.safeParse({
+        organizationId: "org_1",
+        name: "C",
+        contactListId: "l1",
+        segmentId: "s1"
+      }).success
+    ).toBe(false);
+  });
+
+  it("accepts a segment-only target", () => {
+    expect(
+      campaignSchema.safeParse({
+        organizationId: "org_1",
+        name: "C",
+        segmentId: "s1"
+      }).success
+    ).toBe(true);
+  });
+});
+
+describe("abTestConfigSchema", () => {
+  it("accepts a full enabled config with >= 2 variants", () => {
+    expect(
+      abTestConfigSchema.safeParse({
+        enabled: true,
+        percent: 20,
+        metric: "OPEN",
+        windowMin: 60,
+        variants: [
+          { label: "A", subject: "One" },
+          { label: "B", subject: "Two" }
+        ]
+      }).success
+    ).toBe(true);
+  });
+
+  it("accepts a disable payload with no other fields", () => {
+    expect(abTestConfigSchema.safeParse({ enabled: false }).success).toBe(true);
+  });
+
+  it("rejects enabling without required fields or with one variant", () => {
+    expect(
+      abTestConfigSchema.safeParse({ enabled: true, percent: 20 }).success
+    ).toBe(false);
+    expect(
+      abTestConfigSchema.safeParse({
+        enabled: true,
+        percent: 20,
+        metric: "OPEN",
+        windowMin: 60,
+        variants: [{ label: "A", subject: "One" }]
+      }).success
+    ).toBe(false);
+    // percent capped at 50.
+    expect(
+      abTestConfigSchema.safeParse({
+        enabled: true,
+        percent: 80,
+        metric: "OPEN",
+        windowMin: 60,
+        variants: [
+          { label: "A", subject: "One" },
+          { label: "B", subject: "Two" }
+        ]
       }).success
     ).toBe(false);
   });

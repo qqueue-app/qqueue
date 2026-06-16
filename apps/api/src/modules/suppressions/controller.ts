@@ -1,5 +1,8 @@
 import type { Request, Response } from "express";
-import { suppressionCreateSchema } from "@qqueue/shared";
+import {
+  suppressionCreateSchema,
+  suppressionPolicySchema
+} from "@qqueue/shared";
 import { suppressionService } from "./service.js";
 
 export const suppressionController = {
@@ -23,5 +26,19 @@ export const suppressionController = {
   async remove(req: Request, res: Response) {
     await suppressionService.remove(String(req.params.id), req.userId!);
     res.status(204).send();
+  },
+
+  async getPolicy(req: Request, res: Response) {
+    // organizationId is verified and pinned by requireOrgMembership.
+    const policy = await suppressionService.getEffectivePolicy(
+      req.organizationId!
+    );
+    res.json({ data: policy });
+  },
+
+  async updatePolicy(req: Request, res: Response) {
+    const input = suppressionPolicySchema.parse(req.body);
+    const policy = await suppressionService.upsertPolicy(input);
+    res.json({ data: policy });
   }
 };

@@ -404,6 +404,12 @@ End-to-end, the app can currently support a self-hosted operator who:
   per-contact activity timeline, org-wide suppression registry + RFC 8058
   List-Unsubscribe, and basic tag-driven segmentation (preview + materialize to
   a list). See `docs/PHASE_C_PLAN.md`.
+- [x] Phase D: advanced campaign features (see `docs/PHASE_D_PLAN.md`) — all
+  shipped: bounce-driven auto-suppression (soft/hard threshold), per-domain
+  throttling (worker-side Redis fixed window), dynamic segmentation (`Segment`
+  rule tree resolved at send time), A/B subject testing (test fraction +
+  delayed winner decision), and deliverability tooling (rates, per-domain
+  breakdown, reputation alerts) with Segments and Deliverability web pages.
 - [ ] Optional IMAP inbox module (feature-flagged, off by default) — inbound
   message storage anchored to `EmailJob` threading metadata
 
@@ -457,6 +463,47 @@ End-to-end, the app can currently support a self-hosted operator who:
 10. Collect feedback from real installations.
 
 ## Verification
+
+### Phase D2–D5 advanced campaign features (2026-06-16)
+
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
+  `pnpm license:audit` passed.
+- [x] `pnpm test` passed across all packages (759 tests): added coverage for the
+  worker domain throttle (`recipientDomain`/`resolveCap`/`reserveDomainSlot` and
+  the send-worker hold), the `domain-throttles` and `segments` and
+  `deliverability` API services, segment rule compilation + campaign target
+  exclusivity, A/B fan-out split + delayed winner decision + `configureAbTest`,
+  per-variant analytics, and the new web Segments + Deliverability pages.
+- [x] `pnpm test:smoke:docker` passed with migrations `20260616020000`–
+  `20260616040000` applied (register → SMTP → transactional send → `SENT`).
+- [x] Migrations `20260616020000_phase_d_throttle`,
+  `20260616030000_phase_d_segments`, and `20260616040000_phase_d_ab_testing`
+  verified against a throwaway PostgreSQL 16: all migrations apply in order
+  (additive `DomainThrottle`/`Segment`/`CampaignVariant` tables, A/B enums,
+  nullable `Campaign.segmentId`/A/B columns, `EmailJob.variantId`) and
+  `prisma migrate diff` reports no drift.
+
+### Phase D1 bounce-driven auto-suppression (2026-06-16)
+
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
+  `pnpm license:audit` passed.
+- [x] `pnpm test` passed across all packages. New/updated coverage: the
+  `email-engine` `classifyBounce` (hard/soft/block codes + phrases, phrasing
+  over numeric class, unknown → hard); `suppressionService` effective-policy
+  defaults/override, policy upsert, and `shouldSuppressBounce` (hard/block skip
+  counting, soft only at/above threshold); the `tracking` webhook (hard
+  suppresses immediately, soft below threshold does not, soft at threshold does,
+  explicit provider `bounceType` overrides the reason text); the
+  `email-sending` worker (hard rejection suppresses without counting, soft below
+  threshold marks `FAILED` without suppressing or flipping `Contact.status`,
+  soft at threshold suppresses); and the shared `suppressionPolicySchema`.
+- [x] `pnpm test:smoke:docker` passed: register → SMTP → transactional send →
+  worker reached `SENT` with the new `20260616010000_phase_d_bounce_policy`
+  migration applied.
+- [x] Migration `20260616010000_phase_d_bounce_policy` verified against a
+  throwaway PostgreSQL 16: all migrations apply in order (additive `BounceType`
+  enum + `SuppressionPolicy` table) and `prisma migrate diff` reports no drift
+  from the schema.
 
 ### Phase C contacts & contact lists (2026-06-15)
 

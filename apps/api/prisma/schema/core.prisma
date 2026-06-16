@@ -43,6 +43,16 @@ enum SuppressionReason {
   MANUAL
 }
 
+enum BounceType {
+  // Permanent failure (5.x.x, invalid recipient): suppress immediately.
+  HARD
+  // Transient failure (4.x.x, mailbox full, greylist, deferred): only suppress
+  // after the org's soft-bounce threshold is reached within the window.
+  SOFT
+  // Policy/reputation block (spam, blacklist): treated like HARD for suppression.
+  BLOCK
+}
+
 enum CampaignStatus {
   DRAFT
   SCHEDULED
@@ -68,6 +78,20 @@ enum EmailOrigin {
   CAMPAIGN
   TRANSACTIONAL
   MANUAL
+}
+
+enum AbWinnerMetric {
+  OPEN
+  CLICK
+}
+
+enum AbTestStatus {
+  // Test fraction sent across variants; waiting for the decision window.
+  TESTING
+  // Winner chosen; remainder send in progress/queued.
+  DECIDED
+  // Winner sent to the full remaining audience.
+  SENT
 }
 
 enum EmailEventType {
@@ -114,6 +138,9 @@ model Organization {
   contacts        Contact[]
   contactLists    ContactList[]
   suppressions    Suppression[]
+  suppressionPolicy SuppressionPolicy?
+  domainThrottles DomainThrottle[]
+  segments        Segment[]
   templates       Template[]
   campaigns       Campaign[]
   emailJobs       EmailJob[]
@@ -232,6 +259,39 @@ model Suppression {
   @@index([organizationId])
 }
 
+// Per-organization auto-suppression policy. A row is optional; when absent the
+// env-provided defaults (SOFT_BOUNCE_THRESHOLD / SOFT_BOUNCE_WINDOW_DAYS) apply.
+// Lets operators tune how many soft bounces within the window suppress an
+// address. Hard bounces and complaints suppress immediately regardless.
+model SuppressionPolicy {
+  id                   String       @id @default(cuid())
+  organizationId       String       @unique
+  softBounceThreshold  Int          @default(3)
+  softBounceWindowDays Int          @default(30)
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+}
+
+// Per-organization send-rate cap per recipient domain, enforced by the send
+// worker via a Redis fixed-window counter. An empty `domain` ("") is the
+// org-wide default; a row with a specific domain overrides it. Absent rows fall
+// back to the DEFAULT_DOMAIN_MAX_PER_MINUTE env default. `domain` is non-null so
+// the (organizationId, domain) unique constraint also covers the default row
+// (Postgres treats NULLs as distinct, which would allow duplicate defaults).
+model DomainThrottle {
+  id             String       @id @default(cuid())
+  organizationId String
+  domain         String       @default("")
+  maxPerMinute   Int
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, domain])
+  @@index([organizationId])
+}
+
 model Template {
   id             String       @id @default(cuid())
   organizationId String
@@ -259,6 +319,9 @@ model Campaign {
   organizationId String
   templateId     String?
   contactListId  String?
+  // A campaign targets a static contact list OR a dynamic segment (resolved at
+  // send time). Exactly one is set; enforced by the API, not the schema.
+  segmentId      String?
   name           String
   status         CampaignStatus @default(DRAFT)
   scheduledAt    DateTime?
@@ -266,13 +329,54 @@ model Campaign {
   timezone       String?
   lastRunAt      DateTime?
   nextRunAt      DateTime?
+  // A/B subject testing. When enabled, the fan-out splits `abTestPercent` of the
+  // audience evenly across `variants`, waits `abTestWindowMin`, then sends the
+  // winning subject (by `abWinnerMetric`) to the remainder.
+  abTestEnabled   Boolean        @default(false)
+  abTestPercent   Int?
+  abWinnerMetric  AbWinnerMetric?
+  abTestWindowMin Int?
+  abTestStatus    AbTestStatus?
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   template       Template?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
   contactList    ContactList?   @relation(fields: [contactListId], references: [id], onDelete: SetNull)
+  segment        Segment?       @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  variants       CampaignVariant[]
   emailJobs      EmailJob[]
   runs           CampaignRun[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+}
+
+// A subject-line variant for a campaign's A/B test. The body comes from the
+// template; only the subject varies. `isWinner` is set by the decision job.
+model CampaignVariant {
+  id         String   @id @default(cuid())
+  campaignId String
+  label      String
+  subject    String
+  isWinner   Boolean  @default(false)
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+}
+
+// A saved, named audience defined by a rule tree (stored as JSON) that
+// re-resolves to the current matching contacts every time it is used — unlike a
+// Phase C "create list from segment" snapshot, which materializes a static list.
+model Segment {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  rules          Json
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaigns      Campaign[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
 }
 
 model CampaignRun {
@@ -305,6 +409,8 @@ model EmailJob {
   variables        Json?
   origin           EmailOrigin     @default(TRANSACTIONAL)
   createdByUserId  String?
+  // For A/B campaign sends: which CampaignVariant's subject this job used.
+  variantId        String?
   status           EmailJobStatus  @default(PENDING)
   // Threading metadata (RFC 5322). `messageId` is the Message-ID assigned to the
   // sent message; `inReplyTo`/`references` let a reply thread correctly in the

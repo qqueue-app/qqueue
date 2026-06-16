@@ -28,6 +28,11 @@ export interface SendEmailResult {
   accepted: string[];
   rejected: string[];
   provider: string;
+  /**
+   * The SMTP server's response line for a rejected recipient, when available.
+   * Used to classify the bounce (hard vs soft) for auto-suppression.
+   */
+  rejectionResponse?: string;
 }
 
 export interface EmailProvider {

@@ -2,6 +2,7 @@ import { DelayedError, Worker } from "bullmq";
 import {
   SMTPProvider,
   buildListUnsubscribeHeaders,
+  classifyBounce,
   injectTracking
 } from "@qqueue/email-engine";
 import { env } from "../config/env.js";
@@ -11,7 +12,12 @@ import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { decryptSecret } from "../lib/crypto.js";
 import { enqueueLatestWebhookDeliveries } from "../lib/outbound-webhooks.js";
 import { prisma } from "../lib/prisma.js";
-import { addSuppression, isSuppressed } from "../lib/suppression.js";
+import {
+  addSuppression,
+  isSuppressed,
+  shouldSuppressBounce
+} from "../lib/suppression.js";
+import { reserveDomainSlot } from "../lib/throttle.js";
 import type { EmailSendingJob } from "../queues/email-sending.queue.js";
 
 const PAUSE_RETRY_DELAY_MS = 30_000;
@@ -58,6 +64,18 @@ export function startEmailSendingWorker() {
         });
         await settleRunIfComplete(emailJob.campaignRunId);
         return;
+      }
+
+      // Per-domain throttle: if the recipient's domain is over its per-minute
+      // cap, re-check after the window without consuming an attempt (same
+      // mechanism as the paused-campaign hold above). The job stays QUEUED.
+      const slot = await reserveDomainSlot(
+        emailJob.organizationId,
+        emailJob.toEmail
+      );
+      if (!slot.allowed) {
+        await job.moveToDelayed(Date.now() + (slot.retryInMs ?? 1_000), token);
+        throw new DelayedError();
       }
 
       await prisma.emailJob.update({
@@ -114,41 +132,57 @@ export function startEmailSendingWorker() {
         // The SMTP server rejected the recipient outright: treat as a bounce
         // rather than a successful send.
         if (result.rejected.length > 0) {
-          await prisma.$transaction([
-            prisma.emailJob.update({
-              where: { id: emailJob.id },
-              data: {
-                status: "FAILED",
-                messageId: result.messageId,
-                events: {
-                  create: {
-                    organizationId: emailJob.organizationId,
-                    type: "BOUNCED",
-                    metadata: {
-                      provider: result.provider,
-                      messageId: result.messageId,
-                      rejected: result.rejected
-                    }
+          // Classify so a transient (soft) bounce doesn't permanently suppress.
+          const bounceType = classifyBounce({
+            message: result.rejectionResponse
+          });
+
+          await prisma.emailJob.update({
+            where: { id: emailJob.id },
+            data: {
+              status: "FAILED",
+              messageId: result.messageId,
+              events: {
+                create: {
+                  organizationId: emailJob.organizationId,
+                  type: "BOUNCED",
+                  metadata: {
+                    provider: result.provider,
+                    messageId: result.messageId,
+                    rejected: result.rejected,
+                    bounceType,
+                    ...(result.rejectionResponse
+                      ? { reason: result.rejectionResponse }
+                      : {})
                   }
                 }
               }
-            }),
-            prisma.contact.updateMany({
+            }
+          });
+
+          // Hard/block bounces suppress immediately; a soft bounce only after
+          // the org's threshold (the just-recorded BOUNCED event is counted).
+          if (
+            await shouldSuppressBounce({
+              organizationId: emailJob.organizationId,
+              email: emailJob.toEmail,
+              bounceType
+            })
+          ) {
+            await prisma.contact.updateMany({
               where: {
                 organizationId: emailJob.organizationId,
                 email: emailJob.toEmail
               },
               data: { status: "BOUNCED" }
-            })
-          ]);
-
-          // Suppress the address org-wide so future sends skip it.
-          await addSuppression({
-            organizationId: emailJob.organizationId,
-            email: emailJob.toEmail,
-            reason: "BOUNCE",
-            source: emailJob.id
-          });
+            });
+            await addSuppression({
+              organizationId: emailJob.organizationId,
+              email: emailJob.toEmail,
+              reason: "BOUNCE",
+              source: emailJob.id
+            });
+          }
 
           await enqueueLatestWebhookDeliveries({
             organizationId: emailJob.organizationId,

@@ -6,7 +6,7 @@ const config = {
   bucket: "qqueue-attachments",
   accessKeyId: "key",
   secretAccessKey: "secret",
-  endpoint: "http://localhost:9000",
+  endpoint: "http://localhost:9100",
   forcePathStyle: true
 };
 

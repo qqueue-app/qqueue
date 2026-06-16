@@ -272,6 +272,9 @@ importers:
       '@qqueue/email-engine':
         specifier: workspace:*
         version: link:../../packages/email-engine
+      '@qqueue/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@qqueue/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -284,6 +287,9 @@ importers:
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
+      ioredis:
+        specifier: ^5.10.1
+        version: 5.10.1
       zod:
         specifier: ^3.24.1
         version: 3.25.76

@@ -264,11 +264,19 @@ See [docs/PHASE_C_PLAN.md](PHASE_C_PLAN.md) for the implementation details.
 
 ### Phase D: Advanced campaign features
 
-- [ ] Segmentation
-- [ ] A/B subject testing
-- [ ] Per-domain throttling
-- [ ] Bounce-driven auto-suppression
-- [ ] Deliverability tooling
+See [docs/PHASE_D_PLAN.md](PHASE_D_PLAN.md) for the implementation plan.
+
+- [x] Segmentation (dynamic `Segment` rule tree, re-resolved at send time;
+  campaigns can target a segment instead of a list)
+- [x] A/B subject testing (subject variants, test fraction + delayed winner
+  decision by open/click, winner sent to the remainder)
+- [x] Per-domain throttling (Redis fixed-window per recipient domain, enforced
+  in the send worker; per-org caps + env default)
+- [x] Bounce-driven auto-suppression (soft/hard classification + per-org
+  threshold; hard bounces and complaints suppress immediately, soft bounces
+  only after the threshold within the window)
+- [x] Deliverability tooling (rates + hard/soft split, per-domain breakdown,
+  reputation alerts; dashboard hosts the policy + throttle controls)
 
 ### Phase E: Optional inbox module
 

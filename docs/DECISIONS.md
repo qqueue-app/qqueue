@@ -338,3 +338,85 @@ deferred to Phase D, where advanced segmentation (rule trees, dynamic
 re-resolution) is in scope. The `ContactListMember.source` enum
 (`MANUAL | CSV_IMPORT | SEGMENT`) was anticipated by the Phase A.5 explicit-join
 decision and records how each member joined.
+
+## Soft Bounces Use a Rolling Threshold, Not Immediate Suppression (Phase D1)
+
+Through Phase C, **any** bounce — soft or hard — immediately and permanently
+suppressed the address org-wide (SMTP rejection in the send worker, and the ESP
+bounce webhook). That is too aggressive: a transient soft bounce (mailbox full,
+greylisting, temporary defer) permanently kills a deliverable address.
+
+Phase D1 classifies bounces with `classifyBounce` (in `@qqueue/email-engine`)
+into `HARD | SOFT | BLOCK` from SMTP status codes and phrasing:
+
+- **Hard** (`5.x.x`, invalid recipient) and **block** (spam/blacklist/policy) →
+  suppress immediately, as before.
+- **Soft** (`4.x.x`, mailbox full, greylist, deferred) → record a `BOUNCED`
+  event tagged `metadata.bounceType = "SOFT"` but only suppress once the address
+  accumulates `softBounceThreshold` soft bounces within `softBounceWindowDays`.
+
+Counting is **event-sourced** off `EmailEvent` (no separate mutable counter), so
+the window is naturally rolling and a later successful send does not reset it.
+Thresholds live in an optional per-org `SuppressionPolicy` row, falling back to
+the `SOFT_BOUNCE_THRESHOLD` / `SOFT_BOUNCE_WINDOW_DAYS` env defaults (3 / 30).
+
+An **unclassifiable** bounce defaults to `HARD` — deliberately conservative, so
+the change can only make suppression *less* aggressive for clearly-transient
+failures and never silently keeps sending to a genuinely dead address. Complaints
+always suppress immediately regardless of classification. The same classify-then-
+decide logic runs in both bounce paths (worker `lib/suppression.ts` and API
+`suppressionService.shouldSuppressBounce`), mirroring the existing duplication of
+`addSuppression`/`isSuppressed` across the two apps.
+
+## Per-Domain Throttling Is Worker-Side, Not a BullMQ Limiter (Phase D2)
+
+BullMQ OSS only offers a single global queue rate limiter, not a per-key one, so
+throttling sends *per recipient domain* is enforced in the send worker
+(`lib/throttle.ts`) with a Redis fixed-window counter — the same INCR+EXPIRE
+pattern the API already uses for HTTP rate limiting. When a domain is over its
+per-minute cap, the job is `moveToDelayed`'d to the next window and re-checked
+(reusing the paused-campaign hold mechanism), so no BullMQ attempt is consumed.
+
+Caps live in an optional `DomainThrottle` row per `(organizationId, domain)`;
+`domain = ""` is the org-wide default and a specific domain overrides it. The
+column is **non-null** because Postgres treats NULLs as distinct in a unique
+index, which would otherwise allow duplicate "default" rows. Absent rows fall
+back to the `DEFAULT_DOMAIN_MAX_PER_MINUTE` env default (API and worker agree).
+
+## Dynamic Segments Re-Resolve at Send Time (Phase D3)
+
+Phase C's "create list from segment" snapshots a tag filter into a static
+`ContactList`. Phase D adds a `Segment` model holding a **rule tree** (JSON) that
+re-resolves to the current matching contacts every time a campaign sends. A
+campaign targets a contact list **or** a segment, never both (enforced in the
+API; the schema keeps both nullable). The rule compiler (`compileSegmentRules`)
+lives in `@qqueue/shared` so both the API (preview/validate) and the worker
+(fan-out resolution) share one implementation without a Prisma dependency — it
+returns a plain `ContactWhereInput`-shaped object. Rule depth is capped to keep
+query compilation bounded. At send time the worker ANDs `status = ACTIVE` onto
+the compiled rules so a segment never sends to unsubscribed/bounced contacts.
+
+## A/B Testing Splits a Test Fraction, Then Sends a Winner (Phase D4)
+
+A/B campaigns vary only the **subject** (the body comes from the template). The
+fan-out creates `EmailJob`s for the whole audience in one `CampaignRun`: the test
+fraction (`abTestPercent`, evenly round-robined across variants) is `QUEUED` with
+each variant's subject + `variantId`; the remainder is held as `PENDING`. A
+delayed `phase: "decide"` job on the campaign-processing queue fires after
+`abTestWindowMin`, counts the winning metric (open or click) per variant, marks
+the winner, and releases the held jobs with the winner's subject. Ties break to
+the lowest variant label for determinism. Holding the remainder as `PENDING`
+(rather than re-resolving the audience later) keeps the whole test in one
+idempotent run, and `settleRunIfComplete` already treats `PENDING` as active so a
+run never settles while the remainder is held.
+
+## Deliverability Tooling Reads Existing Events; No New Writes (Phase D5)
+
+The deliverability dashboards are pure aggregation over `EmailEvent` +
+`Suppression` — no new send-path writes or tables. The overview and alerts use
+efficient `groupBy`/`count` queries (including a hard/soft split via the
+`metadata.bounceType` written in D1). The per-domain breakdown has no indexable
+domain column, so it aggregates events in memory bounded by a scan cap and
+returns a `truncated` flag rather than silently capping. Reputation alerts are
+derived against fixed thresholds (bounce > 5%, complaint > 0.1%) and the view is
+restricted to OWNER/ADMIN, like queue operations.

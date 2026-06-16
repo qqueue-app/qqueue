@@ -610,6 +610,7 @@ describe("campaigns mutations", () => {
     prismaMock.emailJob.count.mockResolvedValue(0 as never);
     prismaMock.emailEvent.groupBy.mockResolvedValue([] as never);
     prismaMock.emailEvent.findMany.mockResolvedValue([] as never);
+    prismaMock.campaignVariant.findMany.mockResolvedValue([] as never);
     const res = await request(app)
       .get("/api/v1/campaigns/c1/analytics")
       .set("Authorization", auth);
