@@ -4,7 +4,10 @@ import {
   MailOpen,
   MailPlus,
   Plug,
+  Reply,
   Search,
+  Send,
+  StickyNote,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +17,9 @@ import {
   api,
   ApiError,
   type InboxAccount,
+  type InboundMessageNote,
   type InboundMessage,
+  type OrganizationMember,
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
@@ -30,6 +35,13 @@ import {
 } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select.js";
 import { Spinner } from "../components/ui/spinner.js";
 import {
   Table,
@@ -39,6 +51,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table.js";
+import { Textarea } from "../components/ui/textarea.js";
 
 function formatDate(value?: string | null) {
   if (!value) return "Never";
@@ -52,19 +65,32 @@ function snippet(message: InboundMessage) {
   return message.html ? "HTML message" : "No preview available";
 }
 
+function memberLabel(member: OrganizationMember["user"] | null | undefined) {
+  if (!member) return "Unassigned";
+  return member.name ? `${member.name} <${member.email}>` : member.email;
+}
+
 export function Inbox() {
   const { currentOrganizationId: organizationId } = useSession();
   const [accounts, setAccounts] = useState<InboxAccount[]>([]);
   const [messages, setMessages] = useState<InboundMessage[]>([]);
+  const [members, setMembers] = useState<OrganizationMember[]>([]);
+  const [notes, setNotes] = useState<InboundMessageNote[]>([]);
   const [selected, setSelected] = useState<InboundMessage | null>(null);
   const [loading, setLoading] = useState(true);
+  const [notesLoading, setNotesLoading] = useState(false);
   const [disabled, setDisabled] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [replying, setReplying] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
   const [search, setSearch] = useState("");
   const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">(
     "all"
   );
+  const [assigneeFilter, setAssigneeFilter] = useState("any");
+  const [replyBody, setReplyBody] = useState("");
+  const [noteBody, setNoteBody] = useState("");
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -96,6 +122,8 @@ export function Inbox() {
           organizationId,
           q: search || undefined,
           read: readFilter,
+          assignedToUserId:
+            assigneeFilter === "any" ? undefined : assigneeFilter,
         }),
       ]);
       setAccounts(nextAccounts);
@@ -125,7 +153,38 @@ export function Inbox() {
 
   useEffect(() => {
     void load();
-  }, [organizationId, readFilter]);
+  }, [organizationId, readFilter, assigneeFilter]);
+
+  useEffect(() => {
+    if (!organizationId) {
+      setMembers([]);
+      return;
+    }
+    api
+      .listOrganizationMembers(organizationId)
+      .then(setMembers)
+      .catch(() => setMembers([]));
+  }, [organizationId]);
+
+  useEffect(() => {
+    if (!organizationId || !selected) {
+      setNotes([]);
+      return;
+    }
+    setNotesLoading(true);
+    api
+      .listInboundMessageNotes(selected.id, organizationId)
+      .then(setNotes)
+      .catch(() => toast.error("Unable to load notes"))
+      .finally(() => setNotesLoading(false));
+  }, [organizationId, selected?.id]);
+
+  function updateMessage(message: InboundMessage) {
+    setMessages((current) =>
+      current.map((item) => (item.id === message.id ? message : item))
+    );
+    setSelected((current) => (current?.id === message.id ? message : current));
+  }
 
   async function submitAccount(event: FormEvent) {
     event.preventDefault();
@@ -182,12 +241,66 @@ export function Inbox() {
         organizationId,
         read: true,
       });
-      setMessages((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item))
-      );
-      setSelected(updated);
+      updateMessage(updated);
     } catch {
       // Reading locally still works if the read marker fails.
+    }
+  }
+
+  async function assignSelected(assignedToUserId: string) {
+    if (!organizationId || !selected) return;
+    try {
+      const updated = await api.assignInboundMessage(selected.id, {
+        organizationId,
+        assignedToUserId:
+          assignedToUserId === "unassigned" ? null : assignedToUserId,
+      });
+      updateMessage(updated);
+      toast.success(
+        assignedToUserId === "unassigned"
+          ? "Conversation unassigned."
+          : "Conversation assigned."
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to assign.");
+    }
+  }
+
+  async function submitNote(event: FormEvent) {
+    event.preventDefault();
+    if (!organizationId || !selected || !noteBody.trim()) return;
+    setAddingNote(true);
+    try {
+      const note = await api.createInboundMessageNote(selected.id, {
+        organizationId,
+        body: noteBody,
+      });
+      setNotes((current) => [...current, note]);
+      setNoteBody("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to add note.");
+    } finally {
+      setAddingNote(false);
+    }
+  }
+
+  async function submitReply(event: FormEvent) {
+    event.preventDefault();
+    if (!organizationId || !selected || !replyBody.trim()) return;
+    setReplying(true);
+    try {
+      await api.replyToInboundMessage(selected.id, {
+        organizationId,
+        subject: selected.subject || "(no subject)",
+        text: replyBody,
+      });
+      setReplyBody("");
+      toast.success("Reply queued.");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to reply.");
+    } finally {
+      setReplying(false);
     }
   }
 
@@ -247,19 +360,39 @@ export function Inbox() {
                     </Button>
                   </form>
                 </div>
-                <div className="mb-3 flex gap-2">
-                  {(["all", "unread", "read"] as const).map((value) => (
-                    <Button
-                      key={value}
-                      type="button"
-                      size="sm"
-                      variant={readFilter === value ? "default" : "outline"}
-                      onClick={() => setReadFilter(value)}
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex gap-2">
+                    {(["all", "unread", "read"] as const).map((value) => (
+                      <Button
+                        key={value}
+                        type="button"
+                        size="sm"
+                        variant={readFilter === value ? "default" : "outline"}
+                        onClick={() => setReadFilter(value)}
+                      >
+                        {value[0].toUpperCase()}
+                        {value.slice(1)}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="w-full sm:w-56">
+                    <Select
+                      value={assigneeFilter}
+                      onValueChange={setAssigneeFilter}
                     >
-                      {value[0].toUpperCase()}
-                      {value.slice(1)}
-                    </Button>
-                  ))}
+                      <SelectTrigger aria-label="Filter by assignee">
+                        <SelectValue placeholder="Any assignee" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="any">Any assignee</SelectItem>
+                        {members.map((member) => (
+                          <SelectItem key={member.userId} value={member.userId}>
+                            {memberLabel(member.user)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 {messages.length === 0 ? (
                   <EmptyState
@@ -302,6 +435,9 @@ export function Inbox() {
                               </div>
                               <div className="max-w-lg truncate text-xs text-muted-foreground">
                                 {snippet(message)}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {memberLabel(message.assignedTo)}
                               </div>
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-sm">
@@ -381,9 +517,120 @@ export function Inbox() {
                       ) : (
                         <Badge variant="outline">Unmatched</Badge>
                       )}
+                      <div className="space-y-2">
+                        <Label>Assigned to</Label>
+                        <Select
+                          value={selected.assignedToUserId ?? "unassigned"}
+                          onValueChange={(value) => void assignSelected(value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            {members.map((member) => (
+                              <SelectItem
+                                key={member.userId}
+                                value={member.userId}
+                              >
+                                {memberLabel(member.user)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm">
                         {selected.text || "This reply has no plain-text body."}
                       </div>
+                    </div>
+                  ) : (
+                    <EmptyState icon={MailOpen} title="No reply selected" />
+                  )}
+                </Card>
+
+                <Card className="p-4">
+                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
+                    <Reply className="h-4 w-4" />
+                    Reply
+                  </h2>
+                  {selected ? (
+                    <form className="space-y-3" onSubmit={submitReply}>
+                      <Textarea
+                        value={replyBody}
+                        onChange={(event) => setReplyBody(event.target.value)}
+                        placeholder={`Reply to ${selected.fromEmail}`}
+                        rows={5}
+                      />
+                      <Button
+                        type="submit"
+                        disabled={replying || !replyBody.trim()}
+                      >
+                        {replying ? (
+                          <Spinner />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        Send reply
+                      </Button>
+                    </form>
+                  ) : (
+                    <EmptyState icon={MailOpen} title="No reply selected" />
+                  )}
+                </Card>
+
+                <Card className="p-4">
+                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
+                    <StickyNote className="h-4 w-4" />
+                    Internal notes
+                  </h2>
+                  {selected ? (
+                    <div className="space-y-3">
+                      {notesLoading ? (
+                        <div className="flex min-h-20 items-center justify-center">
+                          <Spinner />
+                        </div>
+                      ) : notes.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No internal notes yet.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {notes.map((note) => (
+                            <div
+                              key={note.id}
+                              className="rounded-md border bg-muted/20 p-3"
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                                <span>{memberLabel(note.author)}</span>
+                                <span>{formatDate(note.createdAt)}</span>
+                              </div>
+                              <div className="whitespace-pre-wrap text-sm">
+                                {note.body}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <form className="space-y-3" onSubmit={submitNote}>
+                        <Textarea
+                          value={noteBody}
+                          onChange={(event) => setNoteBody(event.target.value)}
+                          placeholder="Add an internal note"
+                          rows={3}
+                        />
+                        <Button
+                          type="submit"
+                          variant="outline"
+                          disabled={addingNote || !noteBody.trim()}
+                        >
+                          {addingNote ? (
+                            <Spinner />
+                          ) : (
+                            <StickyNote className="h-4 w-4" />
+                          )}
+                          Add note
+                        </Button>
+                      </form>
                     </div>
                   ) : (
                     <EmptyState icon={MailOpen} title="No reply selected" />

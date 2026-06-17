@@ -22,6 +22,14 @@ export const organizationController = {
     res.json({ data: organization });
   },
 
+  async listMembers(req: Request, res: Response) {
+    const members = await organizationService.listMembers(
+      String(req.params.id),
+      req.userId!
+    );
+    res.json({ data: members });
+  },
+
   async create(req: Request, res: Response) {
     const input = organizationSchema.parse(req.body);
     const organization = await organizationService.create(input, req.userId!);

@@ -289,6 +289,13 @@ incoming mail read-only, and view replies to sent emails (anchored to outbound
 internal notes, and ticketing are deferred and explicitly out of scope for the
 initial inbox.
 
+Phase 2 keeps the same boundary: replies are a thin layer over the existing
+manual send pipeline with `In-Reply-To`/`References` populated from the selected
+inbound message, while shared inbox behavior is limited to organization-scoped
+assignment and append-only internal notes. Inbound routing, support workflow
+state machines, and ticketing integrations remain future Phase E/F work rather
+than becoming a parallel mailbox product.
+
 ## Suppression Is an Org-Wide Registry, Not Just `Contact.status` (Phase C)
 
 Suppression lives in a dedicated `Suppression` table (`organizationId`, `email`,

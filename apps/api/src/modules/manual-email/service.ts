@@ -147,6 +147,8 @@ export const manualEmailService = {
       html,
       text: input.text,
       variables: input.variables,
+      inReplyTo: input.inReplyTo,
+      references: input.references,
       scheduledAt: input.scheduledAt,
       attachmentIds: input.attachmentIds,
       origin: "MANUAL",

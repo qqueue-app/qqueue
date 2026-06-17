@@ -48,3 +48,23 @@ inboxRouter.patch(
   requireOrgMembership,
   inboxController.markRead
 );
+inboxRouter.patch(
+  "/messages/:id/assignment",
+  requireOrgMembership,
+  inboxController.assignMessage
+);
+inboxRouter.get(
+  "/messages/:id/notes",
+  requireOrgMembership,
+  inboxController.listNotes
+);
+inboxRouter.post(
+  "/messages/:id/notes",
+  requireOrgMembership,
+  inboxController.createNote
+);
+inboxRouter.post(
+  "/messages/:id/reply",
+  requireOrgMembership,
+  inboxController.replyToMessage
+);

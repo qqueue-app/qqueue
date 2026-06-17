@@ -294,10 +294,10 @@ not to become a mailbox product.
   - [x] Search emails
   - [x] Filter unread/read
 - Phase 2 (deferred)
-  - [ ] Reply from QQueue
-  - [ ] Shared inbox
-  - [ ] Assign conversations
-  - [ ] Internal notes
+  - [x] Reply from QQueue
+  - [x] Shared inbox
+  - [x] Assign conversations
+  - [x] Internal notes
 - Phase 3 (deferred)
   - [ ] Inbound email routing
   - [ ] Support workflows

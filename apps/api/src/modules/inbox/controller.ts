@@ -2,7 +2,10 @@ import type { Request, Response } from "express";
 import {
   inboxAccountSchema,
   inboxAccountUpdateSchema,
+  inboundMessageAssignmentSchema,
+  inboundMessageNoteSchema,
   inboundMessageQuerySchema,
+  inboundMessageReplySchema,
   inboundMessageStoreSchema,
 } from "@qqueue/shared";
 import { z } from "zod";
@@ -66,5 +69,45 @@ export const inboxController = {
       input.read
     );
     res.json({ data: message });
+  },
+
+  async assignMessage(req: Request, res: Response) {
+    const input = inboundMessageAssignmentSchema.parse(req.body);
+    const message = await inboxService.assignMessage(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.json({ data: message });
+  },
+
+  async listNotes(req: Request, res: Response) {
+    const query = z.object({ organizationId: z.string().min(1) }).parse(req.query);
+    const notes = await inboxService.listNotes(
+      String(req.params.id),
+      req.userId!,
+      query.organizationId
+    );
+    res.json({ data: notes });
+  },
+
+  async createNote(req: Request, res: Response) {
+    const input = inboundMessageNoteSchema.parse(req.body);
+    const note = await inboxService.createNote(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.status(201).json({ data: note });
+  },
+
+  async replyToMessage(req: Request, res: Response) {
+    const input = inboundMessageReplySchema.parse(req.body);
+    const result = await inboxService.replyToMessage(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.status(202).json({ data: result });
   },
 };

@@ -410,8 +410,9 @@ End-to-end, the app can currently support a self-hosted operator who:
   rule tree resolved at send time), A/B subject testing (test fraction +
   delayed winner decision), and deliverability tooling (rates, per-domain
   breakdown, reputation alerts) with Segments and Deliverability web pages.
-- [ ] Optional IMAP inbox module (feature-flagged, off by default) — inbound
-  message storage anchored to `EmailJob` threading metadata
+- [x] Optional IMAP inbox module (feature-flagged, off by default) — inbound
+  message storage anchored to `EmailJob` threading metadata, reply from QQueue,
+  shared assignment, and internal notes.
 
 ### UX
 

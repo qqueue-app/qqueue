@@ -8,8 +8,16 @@ const imapMock = vi.hoisted(() => ({
   close: vi.fn(),
 }));
 
+const manualEmailServiceMock = vi.hoisted(() => ({
+  send: vi.fn().mockResolvedValue({ id: "job_reply", status: "QUEUED" }),
+}));
+
 vi.mock("imapflow", () => ({
   ImapFlow: vi.fn(() => imapMock),
+}));
+
+vi.mock("../manual-email/service.js", () => ({
+  manualEmailService: manualEmailServiceMock,
 }));
 
 describe("inboxService", () => {
@@ -141,6 +149,114 @@ describe("inboxService", () => {
       ],
     });
     expect(call.take).toBe(26);
+  });
+
+  it("assigns a message to an organization member", async () => {
+    prismaMock.organizationMember.findFirst.mockResolvedValue({
+      id: "member_1",
+    } as never);
+    prismaMock.inboundMessage.updateMany.mockResolvedValue({
+      count: 1,
+    } as never);
+    prismaMock.inboundMessage.findUniqueOrThrow.mockResolvedValue({
+      id: "msg_1",
+      assignedToUserId: "user_2",
+    } as never);
+
+    await inboxService.assignMessage("msg_1", "user_1", {
+      organizationId: "org_1",
+      assignedToUserId: "user_2",
+    });
+
+    expect(prismaMock.organizationMember.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: "org_1", userId: "user_2" },
+      select: { id: true },
+    });
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "msg_1",
+        organizationId: "org_1",
+        organization: { members: { some: { userId: "user_1" } } },
+      },
+      data: { assignedToUserId: "user_2" },
+    });
+  });
+
+  it("rejects assignment to a user outside the organization", async () => {
+    prismaMock.organizationMember.findFirst.mockResolvedValue(null);
+
+    await expect(
+      inboxService.assignMessage("msg_1", "user_1", {
+        organizationId: "org_1",
+        assignedToUserId: "user_2",
+      })
+    ).rejects.toThrow("Assignee must be a member");
+  });
+
+  it("creates internal notes scoped to org membership", async () => {
+    prismaMock.inboundMessage.findFirst.mockResolvedValue({
+      id: "msg_1",
+    } as never);
+    prismaMock.inboundMessageNote.create.mockResolvedValue({
+      id: "note_1",
+    } as never);
+
+    await inboxService.createNote("msg_1", "user_1", {
+      organizationId: "org_1",
+      body: "Follow up after demo",
+    });
+
+    expect(prismaMock.inboundMessageNote.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: "org_1",
+        inboundMessageId: "msg_1",
+        authorUserId: "user_1",
+        body: "Follow up after demo",
+      },
+      include: {
+        author: { select: { id: true, email: true, name: true } },
+      },
+    });
+  });
+
+  it("replies to inbound messages through the manual send pipeline", async () => {
+    prismaMock.inboundMessage.findFirst.mockResolvedValue({
+      id: "msg_1",
+      organizationId: "org_1",
+      messageId: "<reply@example.com>",
+      inReplyTo: "<sent@example.com>",
+      references: ["<root@example.com>", "<sent@example.com>"],
+      fromEmail: "customer@example.com",
+      subject: "Question",
+      readAt: null,
+      inboxAccount: { email: "support@example.com" },
+    } as never);
+    prismaMock.inboundMessage.update.mockResolvedValue({ id: "msg_1" } as never);
+
+    await inboxService.replyToMessage("msg_1", "user_1", {
+      organizationId: "org_1",
+      subject: "Question",
+      text: "Thanks for reaching out.",
+    });
+
+    expect(manualEmailServiceMock.send).toHaveBeenCalledWith(
+      {
+        organizationId: "org_1",
+        to: ["customer@example.com"],
+        replyTo: "support@example.com",
+        smtpConnectionId: undefined,
+        subject: "Re: Question",
+        html: undefined,
+        text: "Thanks for reaching out.",
+        inReplyTo: "<reply@example.com>",
+        references: [
+          "<root@example.com>",
+          "<sent@example.com>",
+          "<reply@example.com>",
+        ],
+      },
+      "user_1"
+    );
   });
 
   it("marks a message read scoped by organization membership", async () => {

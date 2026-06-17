@@ -33,6 +33,23 @@ export const organizationService = {
     return prisma.organization.findUnique({ where: { id } });
   },
 
+  async listMembers(id: string, userId: string) {
+    await assertOrgAccess(userId, id);
+    return prisma.organizationMember.findMany({
+      where: { organizationId: id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true
+          }
+        }
+      },
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }]
+    });
+  },
+
   // Creating an org makes the creator its OWNER, so it's immediately accessible.
   async create(input: OrganizationInput, userId: string) {
     const organization = await prisma.organization.create({

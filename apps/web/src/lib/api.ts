@@ -14,6 +14,19 @@ export interface Organization {
   createdAt: string;
 }
 
+export interface OrganizationMember {
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: string;
+  createdAt: string;
+  user: {
+    id: string;
+    email: string;
+    name?: string | null;
+  };
+}
+
 export interface Contact {
   id: string;
   organizationId: string;
@@ -124,13 +137,33 @@ export interface InboundMessage {
   html?: string | null;
   receivedAt: string;
   readAt?: string | null;
+  assignedToUserId?: string | null;
   imapUid?: number | null;
+  assignedTo?: {
+    id: string;
+    email: string;
+    name?: string | null;
+  } | null;
   emailJob?: {
     id: string;
     subject: string;
     toEmail: string;
     messageId?: string | null;
   } | null;
+}
+
+export interface InboundMessageNote {
+  id: string;
+  organizationId: string;
+  inboundMessageId: string;
+  authorUserId: string;
+  body: string;
+  createdAt: string;
+  author: {
+    id: string;
+    email: string;
+    name?: string | null;
+  };
 }
 
 export interface InboundMessageList {
@@ -1068,6 +1101,12 @@ export const api = {
     return request<EmailDraft>(`/api/v1/email-drafts/${id}`);
   },
 
+  listOrganizationMembers(organizationId: string) {
+    return request<OrganizationMember[]>(
+      `/api/v1/organizations/${organizationId}/members`
+    );
+  },
+
   createEmailDraft(input: Record<string, unknown>) {
     return request<EmailDraft>("/api/v1/email-drafts", {
       method: "POST",
@@ -1120,6 +1159,7 @@ export const api = {
     organizationId: string;
     q?: string;
     read?: "read" | "unread" | "all";
+    assignedToUserId?: string;
     cursor?: string;
   }) {
     const params = new URLSearchParams({
@@ -1127,6 +1167,9 @@ export const api = {
     });
     if (input.q) params.set("q", input.q);
     if (input.read) params.set("read", input.read);
+    if (input.assignedToUserId) {
+      params.set("assignedToUserId", input.assignedToUserId);
+    }
     if (input.cursor) params.set("cursor", input.cursor);
     return request<InboundMessageList>(
       `/api/v1/inbox/messages?${params.toString()}`
@@ -1142,6 +1185,57 @@ export const api = {
       {
         method: "PATCH",
         body: JSON.stringify({ read: input.read }),
+      }
+    );
+  },
+
+  assignInboundMessage(
+    id: string,
+    input: { organizationId: string; assignedToUserId?: string | null }
+  ) {
+    return request<InboundMessage>(
+      `/api/v1/inbox/messages/${id}/assignment?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  listInboundMessageNotes(id: string, organizationId: string) {
+    return request<InboundMessageNote[]>(
+      `/api/v1/inbox/messages/${id}/notes?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createInboundMessageNote(
+    id: string,
+    input: { organizationId: string; body: string }
+  ) {
+    return request<InboundMessageNote>(
+      `/api/v1/inbox/messages/${id}/notes?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  replyToInboundMessage(
+    id: string,
+    input: {
+      organizationId: string;
+      smtpConnectionId?: string;
+      subject: string;
+      html?: string;
+      text?: string;
+    }
+  ) {
+    return request<{ id: string; status: string }>(
+      `/api/v1/inbox/messages/${id}/reply?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
       }
     );
   },

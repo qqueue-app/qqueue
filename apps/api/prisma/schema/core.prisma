@@ -116,6 +116,8 @@ model User {
   name                String?
   passwordHash        String?
   members             OrganizationMember[]
+  assignedInboxItems  InboundMessage[]     @relation("AssignedInboxItems")
+  inboxNotes          InboundMessageNote[]
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
   createdAt           DateTime             @default(now())
@@ -153,6 +155,7 @@ model Organization {
   emailAttachments  EmailAttachment[]
   inboxAccounts     InboxAccount[]
   inboundMessages   InboundMessage[]
+  inboundNotes      InboundMessageNote[]
   emailEvents       EmailEvent[]
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
@@ -557,17 +560,38 @@ model InboundMessage {
   html           String?
   receivedAt     DateTime
   readAt         DateTime?
+  assignedToUserId String?
   imapUid        Int?
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboxAccount   InboxAccount @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
   emailJob       EmailJob?    @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  assignedTo     User?        @relation("AssignedInboxItems", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  notes          InboundMessageNote[]
   createdAt      DateTime     @default(now())
 
   @@unique([inboxAccountId, messageId])
   @@index([organizationId, receivedAt])
   @@index([organizationId, readAt])
+  @@index([organizationId, assignedToUserId])
   @@index([emailJobId])
   @@index([inReplyTo])
+}
+
+// Internal shared-inbox notes. Notes are visible to organization members only
+// through the feature-flagged inbox API and never leave QQueue as email.
+model InboundMessageNote {
+  id               String         @id @default(cuid())
+  organizationId   String
+  inboundMessageId String
+  authorUserId     String
+  body             String
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboundMessage   InboundMessage @relation(fields: [inboundMessageId], references: [id], onDelete: Cascade)
+  author           User           @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@index([organizationId, inboundMessageId])
+  @@index([authorUserId])
 }
 
 model ApiKey {

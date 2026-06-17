@@ -165,13 +165,33 @@ export interface InboundMessage {
   html?: string | null;
   receivedAt: string;
   readAt?: string | null;
+  assignedToUserId?: string | null;
   imapUid?: number | null;
+  assignedTo?: {
+    id: string;
+    email: string;
+    name?: string | null;
+  } | null;
   emailJob?: {
     id: string;
     subject: string;
     toEmail: string;
     messageId?: string | null;
   } | null;
+}
+
+export interface InboundMessageNote {
+  id: string;
+  organizationId: string;
+  inboundMessageId: string;
+  authorUserId: string;
+  body: string;
+  createdAt: string;
+  author: {
+    id: string;
+    email: string;
+    name?: string | null;
+  };
 }
 
 export interface Template {
@@ -606,12 +626,48 @@ export const inboundMessageQuerySchema = z.object({
   organizationId: z.string().min(1),
   q: z.string().trim().min(1).optional(),
   read: z.enum(["read", "unread", "all"]).default("all").optional(),
+  assignedToUserId: z.string().min(1).optional(),
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export type InboundMessageQueryInput = z.infer<
   typeof inboundMessageQuerySchema
+>;
+
+export const inboundMessageAssignmentSchema = z.object({
+  organizationId: z.string().min(1),
+  assignedToUserId: z.string().min(1).nullable().optional(),
+});
+
+export type InboundMessageAssignmentInput = z.infer<
+  typeof inboundMessageAssignmentSchema
+>;
+
+export const inboundMessageNoteSchema = z.object({
+  organizationId: z.string().min(1),
+  body: z.string().trim().min(1).max(5000),
+});
+
+export type InboundMessageNoteInput = z.infer<
+  typeof inboundMessageNoteSchema
+>;
+
+export const inboundMessageReplySchema = z
+  .object({
+    organizationId: z.string().min(1),
+    smtpConnectionId: z.string().min(1).optional(),
+    subject: z.string().min(1),
+    html: z.string().optional(),
+    text: z.string().optional(),
+  })
+  .refine((input) => Boolean(input.html || input.text), {
+    message: "Provide an email body",
+    path: ["html"],
+  });
+
+export type InboundMessageReplyInput = z.infer<
+  typeof inboundMessageReplySchema
 >;
 
 export const contactActivityQuerySchema = z.object({
@@ -789,6 +845,8 @@ export const sendEmailSchema = z.object({
   html: z.string().optional(),
   text: z.string().optional(),
   variables: z.record(z.unknown()).optional(),
+  inReplyTo: z.string().min(1).optional(),
+  references: z.array(z.string().min(1)).optional(),
   scheduledAt: z.string().datetime().optional(),
   // Ids of attachments uploaded ahead of time (POST /attachments). Their blobs
   // live in object storage; the send pipeline links them to the EmailJob and the
@@ -824,6 +882,8 @@ export const manualEmailSendSchema = z
     html: z.string().optional(),
     text: z.string().optional(),
     variables: z.record(z.unknown()).optional(),
+    inReplyTo: z.string().min(1).optional(),
+    references: z.array(z.string().min(1)).optional(),
     scheduledAt: z.string().datetime().optional(),
     attachmentIds: z.array(z.string().min(1)).optional(),
   })
