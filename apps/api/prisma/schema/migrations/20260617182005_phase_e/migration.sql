@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "InboundMessage_organizationId_externalTicketProvider_externalTi" RENAME TO "InboundMessage_organizationId_externalTicketProvider_extern_idx";
