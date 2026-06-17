@@ -210,6 +210,45 @@ describe("EmailStudio", () => {
     ]);
   });
 
+  it("adds a repeat schedule option without sending a recurring manual email", async () => {
+    const user = userEvent.setup();
+    setup();
+    renderStudio();
+    await waitFor(() =>
+      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
+    );
+
+    await user.click(screen.getByLabelText("Repeat on a schedule"));
+    expect(screen.getByText("Frequency")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save schedule" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Hi");
+    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
+    await user.click(screen.getByRole("button", { name: "Save schedule" }));
+
+    expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      "Recurring Email Studio sends are not wired yet."
+    );
+  });
+
+  it("keeps one-time and repeat schedules mutually exclusive", async () => {
+    const user = userEvent.setup();
+    setup();
+    renderStudio();
+    await waitFor(() =>
+      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
+    );
+
+    await user.click(screen.getByLabelText("Schedule for later"));
+    expect(screen.getByLabelText("Scheduled time")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Repeat on a schedule"));
+    expect(screen.queryByLabelText("Scheduled time")).not.toBeInTheDocument();
+    expect(screen.getByText("Frequency")).toBeInTheDocument();
+  });
+
   it("loads a template into the composer without mutating it", async () => {
     const user = userEvent.setup();
     setup();

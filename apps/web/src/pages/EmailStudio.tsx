@@ -5,6 +5,7 @@ import {
   FileText,
   Paperclip,
   Pencil,
+  Repeat,
   Save,
   Search,
   Send,
@@ -12,6 +13,7 @@ import {
   Users,
   X
 } from "lucide-react";
+import cronstrue from "cronstrue";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -58,6 +60,40 @@ const DEFAULT_SMTP = "__default__";
 const NO_TEMPLATE = "__none__";
 const AUTOSAVE_DELAY_MS = 2000;
 
+const BROWSER_TIMEZONE =
+  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+const TIMEZONES: string[] = (() => {
+  const supported = (
+    Intl as unknown as { supportedValuesOf?: (k: string) => string[] }
+  ).supportedValuesOf;
+  const list = supported ? supported("timeZone") : ["UTC"];
+  return list.includes(BROWSER_TIMEZONE)
+    ? list
+    : [BROWSER_TIMEZONE, ...list];
+})();
+
+const WEEKDAYS = [
+  { value: "0", short: "S", label: "Sunday" },
+  { value: "1", short: "M", label: "Monday" },
+  { value: "2", short: "T", label: "Tuesday" },
+  { value: "3", short: "W", label: "Wednesday" },
+  { value: "4", short: "T", label: "Thursday" },
+  { value: "5", short: "F", label: "Friday" },
+  { value: "6", short: "S", label: "Saturday" }
+] as const;
+
+type RecurrencePreset = "daily" | "weekly" | "monthly" | "advanced";
+
+const emptyRecurrence = {
+  preset: "daily" as RecurrencePreset,
+  time: "09:00",
+  weekdays: ["1"] as string[],
+  dayOfMonth: "1",
+  cronExpression: "",
+  timezone: BROWSER_TIMEZONE
+};
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function isValidEmail(value: string) {
@@ -77,6 +113,34 @@ function formatBytes(bytes: number) {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function buildCron(form: typeof emptyRecurrence): string {
+  if (form.preset === "advanced") {
+    return form.cronExpression.trim();
+  }
+  const [hours, minutes] = form.time.split(":");
+  const min = String(Number(minutes ?? 0));
+  const hr = String(Number(hours ?? 0));
+  if (form.preset === "daily") return `${min} ${hr} * * *`;
+  if (form.preset === "weekly") {
+    if (form.weekdays.length === 0) return "";
+    const days = [...form.weekdays]
+      .map(Number)
+      .sort((a, b) => a - b)
+      .join(",");
+    return `${min} ${hr} * * ${days}`;
+  }
+  return `${min} ${hr} ${form.dayOfMonth} * *`;
+}
+
+function describeCron(cron: string): string | null {
+  if (!cron) return null;
+  try {
+    return cronstrue.toString(cron, { throwExceptionOnParseError: true });
+  } catch {
+    return null;
+  }
 }
 
 interface RecipientFieldProps {
@@ -203,6 +267,8 @@ export function EmailStudio() {
   const [uploading, setUploading] = useState(false);
   const [scheduleForLater, setScheduleForLater] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
+  const [recurring, setRecurring] = useState(false);
+  const [recurrence, setRecurrence] = useState(emptyRecurrence);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Per-recipient delivery status, shown after a send completes.
@@ -296,6 +362,8 @@ export function EmailStudio() {
     setAttachments([]);
     setScheduleForLater(false);
     setScheduledAt("");
+    setRecurring(false);
+    setRecurrence(emptyRecurrence);
     setDraftId(null);
     setLastSavedAt(null);
     setMode("compose");
@@ -555,6 +623,17 @@ export function EmailStudio() {
     }
 
     let scheduledAtIso: string | undefined;
+    if (recurring) {
+      const cron = buildCron(recurrence);
+      if (!describeCron(cron)) {
+        toast.error("Enter a valid schedule.");
+        return;
+      }
+      // TODO: Persist recurring manual sends once Email Studio has a recurring
+      // draft/job model. Campaign recurrence is currently campaign-only.
+      toast.error("Recurring Email Studio sends are not wired yet.");
+      return;
+    }
     if (scheduleForLater) {
       if (!scheduledAt) {
         toast.error("Pick a date and time to schedule.");
@@ -1006,9 +1085,13 @@ export function EmailStudio() {
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <Checkbox
                     checked={scheduleForLater}
-                    onCheckedChange={(checked) =>
-                      setScheduleForLater(checked === true)
-                    }
+                    onCheckedChange={(checked) => {
+                      const enabled = checked === true;
+                      setScheduleForLater(enabled);
+                      if (enabled) {
+                        setRecurring(false);
+                      }
+                    }}
                     aria-label="Schedule for later"
                   />
                   <Clock className="h-4 w-4" />
@@ -1023,13 +1106,230 @@ export function EmailStudio() {
                   />
                 ) : null}
 
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <Checkbox
+                    checked={recurring}
+                    onCheckedChange={(checked) => {
+                      const enabled = checked === true;
+                      setRecurring(enabled);
+                      if (enabled) {
+                        setScheduleForLater(false);
+                        setScheduledAt("");
+                      }
+                    }}
+                    aria-label="Repeat on a schedule"
+                  />
+                  <Repeat className="h-4 w-4" />
+                  Repeat on a schedule
+                </label>
+                {recurring ? (
+                  <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                    <div className="space-y-2">
+                      <Label>Frequency</Label>
+                      <Select
+                        value={recurrence.preset}
+                        onValueChange={(value) =>
+                          setRecurrence({
+                            ...recurrence,
+                            preset: value as RecurrencePreset
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="daily">Daily</SelectItem>
+                          <SelectItem value="weekly">Weekly</SelectItem>
+                          <SelectItem value="monthly">Monthly</SelectItem>
+                          <SelectItem value="advanced">
+                            Advanced (cron expression)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {recurrence.preset === "advanced" ? (
+                      <div className="space-y-2">
+                        <Label htmlFor="studioCronExpression">
+                          Cron expression
+                        </Label>
+                        <Input
+                          id="studioCronExpression"
+                          placeholder="0 9 * * 1"
+                          value={recurrence.cronExpression}
+                          onChange={(event) =>
+                            setRecurrence({
+                              ...recurrence,
+                              cronExpression: event.target.value
+                            })
+                          }
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {recurrence.preset === "weekly" ? (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <Label>Repeat on</Label>
+                              <div className="flex flex-wrap justify-end gap-1">
+                                {(
+                                  [
+                                    {
+                                      label: "Weekdays",
+                                      days: ["1", "2", "3", "4", "5"]
+                                    },
+                                    { label: "Weekend", days: ["0", "6"] },
+                                    {
+                                      label: "Every day",
+                                      days: [
+                                        "0",
+                                        "1",
+                                        "2",
+                                        "3",
+                                        "4",
+                                        "5",
+                                        "6"
+                                      ]
+                                    }
+                                  ] as const
+                                ).map((quick) => (
+                                  <Button
+                                    key={quick.label}
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() =>
+                                      setRecurrence({
+                                        ...recurrence,
+                                        weekdays: [...quick.days]
+                                      })
+                                    }
+                                  >
+                                    {quick.label}
+                                  </Button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {WEEKDAYS.map((day) => {
+                                const selected = recurrence.weekdays.includes(
+                                  day.value
+                                );
+                                return (
+                                  <Button
+                                    key={day.value}
+                                    type="button"
+                                    size="icon"
+                                    variant={selected ? "default" : "outline"}
+                                    className="h-9 w-9 rounded-full"
+                                    aria-label={day.label}
+                                    aria-pressed={selected}
+                                    onClick={() =>
+                                      setRecurrence({
+                                        ...recurrence,
+                                        weekdays: selected
+                                          ? recurrence.weekdays.filter(
+                                              (value) => value !== day.value
+                                            )
+                                          : [...recurrence.weekdays, day.value]
+                                      })
+                                    }
+                                  >
+                                    {day.short}
+                                  </Button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {recurrence.preset === "monthly" ? (
+                          <div className="space-y-2">
+                            <Label htmlFor="studioDayOfMonth">
+                              Day of month
+                            </Label>
+                            <Input
+                              id="studioDayOfMonth"
+                              type="number"
+                              min={1}
+                              max={31}
+                              value={recurrence.dayOfMonth}
+                              onChange={(event) =>
+                                setRecurrence({
+                                  ...recurrence,
+                                  dayOfMonth: event.target.value
+                                })
+                              }
+                            />
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-2">
+                          <Label htmlFor="studioTime">Time</Label>
+                          <Input
+                            id="studioTime"
+                            type="time"
+                            value={recurrence.time}
+                            onChange={(event) =>
+                              setRecurrence({
+                                ...recurrence,
+                                time: event.target.value
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label htmlFor="studioTimezone">Timezone</Label>
+                      <select
+                        id="studioTimezone"
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={recurrence.timezone}
+                        onChange={(event) =>
+                          setRecurrence({
+                            ...recurrence,
+                            timezone: event.target.value
+                          })
+                        }
+                      >
+                        {TIMEZONES.map((tz) => (
+                          <option key={tz} value={tz}>
+                            {tz}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="rounded-md border bg-background px-3 py-2 text-sm">
+                      {describeCron(buildCron(recurrence)) ? (
+                        <span>
+                          {describeCron(buildCron(recurrence))} (
+                          {recurrence.timezone})
+                        </span>
+                      ) : (
+                        <span className="text-destructive">
+                          Enter a valid cron expression.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
                 <Button
                   type="submit"
                   className="w-full"
                   disabled={sending || noSmtp || !organizationId}
                 >
                   {sending ? <Spinner /> : <Send className="h-4 w-4" />}
-                  {scheduleForLater ? "Schedule email" : "Send email"}
+                  {recurring
+                    ? "Save schedule"
+                    : scheduleForLater
+                      ? "Schedule email"
+                      : "Send email"}
                 </Button>
                 {lastSavedAt ? (
                   <p className="text-center text-xs text-muted-foreground">
