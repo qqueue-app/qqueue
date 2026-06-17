@@ -53,6 +53,11 @@ const EmailStudio = lazy(() =>
     default: module.EmailStudio,
   }))
 );
+const Inbox = lazy(() =>
+  import("../pages/Inbox.js").then((module) => ({
+    default: module.Inbox,
+  }))
+);
 const SMTPConnections = lazy(() =>
   import("../pages/SMTPConnections.js").then((module) => ({
     default: module.SMTPConnections,
@@ -104,6 +109,7 @@ export function AppRoutes() {
         <Route element={<DashboardLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="/email-studio" element={<EmailStudio />} />
+          <Route path="/inbox" element={<Inbox />} />
           {/* The standalone Send Email page was merged into Email Studio. */}
           <Route
             path="/send-email"

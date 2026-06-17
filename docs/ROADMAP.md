@@ -285,12 +285,14 @@ See [docs/PHASE_D_PLAN.md](PHASE_D_PLAN.md) for the implementation plan.
 not to become a mailbox product.
 
 - Phase 1
-  - [ ] Connect mailbox via IMAP
-  - [ ] Sync incoming emails (read-only)
-  - [ ] View replies to sent emails (anchored to outbound `messageId` /
+  - [x] Backend inbox foundation: feature flag, inbox account records,
+    inbound message storage, and outbound reply anchoring
+  - [x] Connect mailbox via IMAP
+  - [x] Sync incoming emails (read-only)
+  - [x] View replies to sent emails (anchored to outbound `messageId` /
     `In-Reply-To`)
-  - [ ] Search emails
-  - [ ] Filter unread/read
+  - [x] Search emails
+  - [x] Filter unread/read
 - Phase 2 (deferred)
   - [ ] Reply from QQueue
   - [ ] Shared inbox

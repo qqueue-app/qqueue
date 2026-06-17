@@ -91,6 +91,53 @@ export interface DomainThrottleList {
   defaultPerMinute: number;
 }
 
+export interface InboxAccount {
+  id: string;
+  organizationId: string;
+  name: string;
+  email: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  mailbox: string;
+  status: "ACTIVE" | "DISABLED";
+  lastSyncedAt?: string | null;
+  lastSeenUid?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InboundMessage {
+  id: string;
+  organizationId: string;
+  inboxAccountId: string;
+  emailJobId?: string | null;
+  messageId: string;
+  inReplyTo?: string | null;
+  references: string[];
+  fromEmail: string;
+  fromName?: string | null;
+  to: string[];
+  cc: string[];
+  subject: string;
+  text?: string | null;
+  html?: string | null;
+  receivedAt: string;
+  readAt?: string | null;
+  imapUid?: number | null;
+  emailJob?: {
+    id: string;
+    subject: string;
+    toEmail: string;
+    messageId?: string | null;
+  } | null;
+}
+
+export interface InboundMessageList {
+  data: InboundMessage[];
+  nextCursor?: string | null;
+}
+
 export interface Segment {
   id: string;
   organizationId: string;
@@ -249,7 +296,7 @@ export const outboundWebhookEvents = [
   "email.clicked",
   "email.bounced",
   "email.complained",
-  "email.failed"
+  "email.failed",
 ] as const;
 
 export type OutboundWebhookEvent = (typeof outboundWebhookEvents)[number];
@@ -455,7 +502,7 @@ async function refreshTokens(): Promise<boolean> {
     const response = await fetch(`${apiBaseUrl}/api/v1/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken })
+      body: JSON.stringify({ refreshToken }),
     });
     if (!response.ok) {
       return false;
@@ -502,8 +549,8 @@ async function request<T>(
       headers: {
         ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        ...options.headers
-      }
+        ...options.headers,
+      },
     });
   } catch {
     throw new ApiError("Cannot reach the API. Is the server running?", 0);
@@ -562,7 +609,7 @@ export const api = {
       tokens: { accessToken: string; refreshToken: string };
     }>("/api/v1/auth/register", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -573,7 +620,7 @@ export const api = {
       tokens: { accessToken: string; refreshToken: string };
     }>("/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -582,19 +629,16 @@ export const api = {
       "/api/v1/auth/password-reset/request",
       {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify(input),
       }
     );
   },
 
   resetPassword(input: { token: string; password: string }) {
-    return request<{ message: string }>(
-      "/api/v1/auth/password-reset/confirm",
-      {
-        method: "POST",
-        body: JSON.stringify(input)
-      }
-    );
+    return request<{ message: string }>("/api/v1/auth/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
 
   listOrganizations() {
@@ -604,7 +648,7 @@ export const api = {
   createOrganization(input: { name: string }) {
     return request<Organization>("/api/v1/organizations", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -617,19 +661,21 @@ export const api = {
   createSMTPConnection(input: Record<string, unknown>) {
     return request<SMTPConnection>("/api/v1/smtp-connections", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   updateSMTPConnection(id: string, input: Record<string, unknown>) {
     return request<SMTPConnection>(`/api/v1/smtp-connections/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   deleteSMTPConnection(id: string) {
-    return request<void>(`/api/v1/smtp-connections/${id}`, { method: "DELETE" });
+    return request<void>(`/api/v1/smtp-connections/${id}`, {
+      method: "DELETE",
+    });
   },
 
   listContacts(organizationId: string) {
@@ -641,14 +687,14 @@ export const api = {
   createContact(input: Record<string, unknown>) {
     return request<Contact>("/api/v1/contacts", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   updateContact(id: string, input: Record<string, unknown>) {
     return request<Contact>(`/api/v1/contacts/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -668,7 +714,7 @@ export const api = {
     }
     return request<ContactImportSummary>("/api/v1/contacts/import", {
       method: "POST",
-      body: form
+      body: form,
     });
   },
 
@@ -683,7 +729,7 @@ export const api = {
     const response = await fetch(
       `${apiBaseUrl}/api/v1/contacts/export?${params.toString()}`,
       {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       }
     );
     if (!response.ok) {
@@ -712,7 +758,7 @@ export const api = {
   previewSegment(input: Record<string, unknown>) {
     return request<SegmentPreview>("/api/v1/contacts/segment/preview", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -725,14 +771,14 @@ export const api = {
   createContactList(input: Record<string, unknown>) {
     return request<ContactList>("/api/v1/contact-lists", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   updateContactList(id: string, input: Record<string, unknown>) {
     return request<ContactList>(`/api/v1/contact-lists/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -743,7 +789,7 @@ export const api = {
   createListFromSegment(input: Record<string, unknown>) {
     return request<ContactList>("/api/v1/contact-lists/from-segment", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -753,10 +799,14 @@ export const api = {
     );
   },
 
-  addSuppression(input: { organizationId: string; email: string; reason?: string }) {
+  addSuppression(input: {
+    organizationId: string;
+    email: string;
+    reason?: string;
+  }) {
     return request<Suppression>("/api/v1/suppressions", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -779,7 +829,7 @@ export const api = {
   }) {
     return request<SuppressionPolicy>("/api/v1/suppressions/policy", {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -796,12 +846,14 @@ export const api = {
   }) {
     return request<DomainThrottle>("/api/v1/domain-throttles", {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   deleteDomainThrottle(id: string) {
-    return request<void>(`/api/v1/domain-throttles/${id}`, { method: "DELETE" });
+    return request<void>(`/api/v1/domain-throttles/${id}`, {
+      method: "DELETE",
+    });
   },
 
   listSegments(organizationId: string) {
@@ -813,14 +865,14 @@ export const api = {
   createSegment(input: Record<string, unknown>) {
     return request<Segment>("/api/v1/segments", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   updateSegment(id: string, input: Record<string, unknown>) {
     return request<Segment>(`/api/v1/segments/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -831,14 +883,14 @@ export const api = {
   previewSegmentRules(input: { organizationId: string; rules: unknown }) {
     return request<SegmentPreview>("/api/v1/segments/preview", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   configureAbTest(campaignId: string, input: Record<string, unknown>) {
     return request<Campaign>(`/api/v1/campaigns/${campaignId}/ab-test`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -869,14 +921,14 @@ export const api = {
   createTemplate(input: Record<string, unknown>) {
     return request<Template>("/api/v1/templates", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   updateTemplate(id: string, input: Record<string, unknown>) {
     return request<Template>(`/api/v1/templates/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -897,20 +949,20 @@ export const api = {
   createCampaign(input: Record<string, unknown>) {
     return request<Campaign>("/api/v1/campaigns", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   updateCampaign(id: string, input: Record<string, unknown>) {
     return request<Campaign>(`/api/v1/campaigns/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   duplicateCampaign(id: string) {
     return request<Campaign>(`/api/v1/campaigns/${id}/duplicate`, {
-      method: "POST"
+      method: "POST",
     });
   },
 
@@ -920,14 +972,14 @@ export const api = {
 
   sendCampaignNow(id: string) {
     return request<Campaign>(`/api/v1/campaigns/${id}/send`, {
-      method: "POST"
+      method: "POST",
     });
   },
 
   scheduleCampaign(id: string, scheduledAt: string) {
     return request<Campaign>(`/api/v1/campaigns/${id}/schedule`, {
       method: "POST",
-      body: JSON.stringify({ scheduledAt })
+      body: JSON.stringify({ scheduledAt }),
     });
   },
 
@@ -937,19 +989,19 @@ export const api = {
   ) {
     return request<Campaign>(`/api/v1/campaigns/${id}/recurrence`, {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   pauseCampaign(id: string) {
     return request<Campaign>(`/api/v1/campaigns/${id}/pause`, {
-      method: "POST"
+      method: "POST",
     });
   },
 
   resumeCampaign(id: string) {
     return request<Campaign>(`/api/v1/campaigns/${id}/resume`, {
-      method: "POST"
+      method: "POST",
     });
   },
 
@@ -958,7 +1010,7 @@ export const api = {
       "/api/v1/transactional-email/send",
       {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify(input),
       }
     );
   },
@@ -968,7 +1020,7 @@ export const api = {
       "/api/v1/manual-email/send",
       {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify(input),
       }
     );
   },
@@ -976,7 +1028,7 @@ export const api = {
   previewEmail(input: Record<string, unknown>) {
     return request<EmailPreviewResult>("/api/v1/manual-email/preview", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
@@ -998,7 +1050,7 @@ export const api = {
     }
     return request<EmailAttachment>("/api/v1/attachments", {
       method: "POST",
-      body: form
+      body: form,
     });
   },
 
@@ -1019,19 +1071,79 @@ export const api = {
   createEmailDraft(input: Record<string, unknown>) {
     return request<EmailDraft>("/api/v1/email-drafts", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   updateEmailDraft(id: string, input: Record<string, unknown>) {
     return request<EmailDraft>(`/api/v1/email-drafts/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   deleteEmailDraft(id: string) {
     return request<void>(`/api/v1/email-drafts/${id}`, { method: "DELETE" });
+  },
+
+  listInboxAccounts(organizationId: string) {
+    return request<InboxAccount[]>(
+      `/api/v1/inbox/accounts?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createInboxAccount(input: Record<string, unknown>) {
+    return request<InboxAccount>("/api/v1/inbox/accounts", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateInboxAccount(id: string, input: Record<string, unknown>) {
+    return request<InboxAccount>(
+      `/api/v1/inbox/accounts/${id}?organizationId=${encodeURIComponent(String(input.organizationId ?? ""))}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  deleteInboxAccount(id: string, organizationId: string) {
+    return request<void>(
+      `/api/v1/inbox/accounts/${id}?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  listInboundMessages(input: {
+    organizationId: string;
+    q?: string;
+    read?: "read" | "unread" | "all";
+    cursor?: string;
+  }) {
+    const params = new URLSearchParams({
+      organizationId: input.organizationId,
+    });
+    if (input.q) params.set("q", input.q);
+    if (input.read) params.set("read", input.read);
+    if (input.cursor) params.set("cursor", input.cursor);
+    return request<InboundMessageList>(
+      `/api/v1/inbox/messages?${params.toString()}`
+    );
+  },
+
+  markInboundMessageRead(
+    id: string,
+    input: { organizationId: string; read: boolean }
+  ) {
+    return request<InboundMessage>(
+      `/api/v1/inbox/messages/${id}/read?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ read: input.read }),
+      }
+    );
   },
 
   listApiKeys(organizationId: string) {
@@ -1043,13 +1155,13 @@ export const api = {
   createApiKey(input: { organizationId: string; name: string }) {
     return request<{ apiKey: ApiKey; key: string }>("/api/v1/api-keys", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   },
 
   revokeApiKey(id: string) {
     return request<ApiKey>(`/api/v1/api-keys/${id}/revoke`, {
-      method: "POST"
+      method: "POST",
     });
   },
 
@@ -1070,14 +1182,14 @@ export const api = {
       "/api/v1/webhook-endpoints",
       {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify(input),
       }
     );
   },
 
   deleteWebhookEndpoint(id: string) {
     return request<void>(`/api/v1/webhook-endpoints/${id}`, {
-      method: "DELETE"
+      method: "DELETE",
     });
   },
 
@@ -1091,7 +1203,7 @@ export const api = {
     return request<WebhookDelivery>(
       `/api/v1/webhook-endpoints/deliveries/${deliveryId}/retry`,
       {
-        method: "POST"
+        method: "POST",
       }
     );
   },
@@ -1107,8 +1219,8 @@ export const api = {
       `/api/v1/queue-operations/${encodeURIComponent(queueName)}/jobs/${encodeURIComponent(jobId)}/retry`,
       {
         method: "POST",
-        body: JSON.stringify({ organizationId })
+        body: JSON.stringify({ organizationId }),
       }
     );
-  }
+  },
 };

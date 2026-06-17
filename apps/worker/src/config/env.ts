@@ -31,7 +31,15 @@ const envSchema = z.object({
   SOFT_BOUNCE_WINDOW_DAYS: z.coerce.number().int().min(1).default(30),
   // Default per-recipient-domain send cap (messages/minute) used when an org has
   // no DomainThrottle row for the domain or a default. Must match the API.
-  DEFAULT_DOMAIN_MAX_PER_MINUTE: z.coerce.number().int().min(1).default(60)
+  DEFAULT_DOMAIN_MAX_PER_MINUTE: z.coerce.number().int().min(1).default(60),
+  // Optional Phase E inbox module. Disabled by default. When enabled, the worker
+  // periodically syncs active read-only IMAP inbox accounts.
+  INBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  INBOX_SYNC_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(120),
+  INBOX_SYNC_MAX_MESSAGES: z.coerce.number().int().min(1).max(500).default(50),
 });
 
 export const env = envSchema.parse(process.env);

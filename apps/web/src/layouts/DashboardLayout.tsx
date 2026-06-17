@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   LayoutDashboard,
+  Inbox,
   PenSquare,
   Server,
   Users,
@@ -50,6 +51,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/email-studio", label: "Email Studio", icon: PenSquare },
+  { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/smtp-connections", label: "SMTP Connections", icon: Server },
   { to: "/contacts", label: "Contacts", icon: Users },
   { to: "/suppressions", label: "Suppressions", icon: ShieldBan },

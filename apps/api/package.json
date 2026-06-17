@@ -31,6 +31,7 @@
     "csv-stringify": "^6.8.0",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
+    "imapflow": "^1.4.1",
     "ioredis": "^5.10.1",
     "multer": "^2.0.1",
     "zod": "^3.24.1"

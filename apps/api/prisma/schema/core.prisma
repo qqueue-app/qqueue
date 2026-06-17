@@ -105,16 +105,21 @@ enum EmailEventType {
   FAILED
 }
 
+enum InboxAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
 model User {
-  id           String               @id @default(cuid())
-  email        String               @unique
-  name         String?
-  passwordHash String?
-  members      OrganizationMember[]
-  apiKeys      ApiKey[]
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  name                String?
+  passwordHash        String?
+  members             OrganizationMember[]
+  apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 }
 
 model PasswordResetToken {
@@ -131,31 +136,33 @@ model PasswordResetToken {
 }
 
 model Organization {
-  id              String               @id @default(cuid())
-  name            String
-  members         OrganizationMember[]
-  smtpConnections SMTPConnection[]
-  contacts        Contact[]
-  contactLists    ContactList[]
-  suppressions    Suppression[]
+  id                String               @id @default(cuid())
+  name              String
+  members           OrganizationMember[]
+  smtpConnections   SMTPConnection[]
+  contacts          Contact[]
+  contactLists      ContactList[]
+  suppressions      Suppression[]
   suppressionPolicy SuppressionPolicy?
-  domainThrottles DomainThrottle[]
-  segments        Segment[]
-  templates       Template[]
-  campaigns       Campaign[]
-  emailJobs       EmailJob[]
-  emailDrafts     EmailDraft[]
-  emailAttachments EmailAttachment[]
-  emailEvents     EmailEvent[]
-  apiKeys         ApiKey[]
-  webhookEndpoints WebhookEndpoint[]
+  domainThrottles   DomainThrottle[]
+  segments          Segment[]
+  templates         Template[]
+  campaigns         Campaign[]
+  emailJobs         EmailJob[]
+  emailDrafts       EmailDraft[]
+  emailAttachments  EmailAttachment[]
+  inboxAccounts     InboxAccount[]
+  inboundMessages   InboundMessage[]
+  emailEvents       EmailEvent[]
+  apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
   // Cloud (Phase 7) back-references — defined in cloud.prisma. Relation metadata
   // only; no AGPL obligation attaches to these fields.
-  subscription    Subscription?
-  usageCounters   UsageCounter[]
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  subscription      Subscription?
+  usageCounters     UsageCounter[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 }
 
 model OrganizationMember {
@@ -189,22 +196,22 @@ model SMTPConnection {
 }
 
 model Contact {
-  id             String              @id @default(cuid())
-  organizationId String
-  email          String
-  firstName      String?
-  lastName       String?
-  status         ContactStatus       @default(ACTIVE)
+  id              String              @id @default(cuid())
+  organizationId  String
+  email           String
+  firstName       String?
+  lastName        String?
+  status          ContactStatus       @default(ACTIVE)
   // Free-form labels for future segmentation, filtering, and import mapping.
-  tags           String[]            @default([])
-  metadata       Json?
-  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tags            String[]            @default([])
+  metadata        Json?
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // List membership is an explicit join (ContactListMember) rather than an
   // implicit M2M so membership can carry metadata and be paginated for large
   // campaign sends.
   listMemberships ContactListMember[]
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
   @@unique([organizationId, email])
 }
@@ -315,37 +322,37 @@ model Template {
 }
 
 model Campaign {
-  id             String         @id @default(cuid())
-  organizationId String
-  templateId     String?
-  contactListId  String?
+  id              String            @id @default(cuid())
+  organizationId  String
+  templateId      String?
+  contactListId   String?
   // A campaign targets a static contact list OR a dynamic segment (resolved at
   // send time). Exactly one is set; enforced by the API, not the schema.
-  segmentId      String?
-  name           String
-  status         CampaignStatus @default(DRAFT)
-  scheduledAt    DateTime?
-  cronExpression String?
-  timezone       String?
-  lastRunAt      DateTime?
-  nextRunAt      DateTime?
+  segmentId       String?
+  name            String
+  status          CampaignStatus    @default(DRAFT)
+  scheduledAt     DateTime?
+  cronExpression  String?
+  timezone        String?
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
   // A/B subject testing. When enabled, the fan-out splits `abTestPercent` of the
   // audience evenly across `variants`, waits `abTestWindowMin`, then sends the
   // winning subject (by `abWinnerMetric`) to the remainder.
-  abTestEnabled   Boolean        @default(false)
+  abTestEnabled   Boolean           @default(false)
   abTestPercent   Int?
   abWinnerMetric  AbWinnerMetric?
   abTestWindowMin Int?
   abTestStatus    AbTestStatus?
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  template       Template?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  contactList    ContactList?   @relation(fields: [contactListId], references: [id], onDelete: SetNull)
-  segment        Segment?       @relation(fields: [segmentId], references: [id], onDelete: SetNull)
-  variants       CampaignVariant[]
-  emailJobs      EmailJob[]
-  runs           CampaignRun[]
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  template        Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  contactList     ContactList?      @relation(fields: [contactListId], references: [id], onDelete: SetNull)
+  segment         Segment?          @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  variants        CampaignVariant[]
+  emailJobs       EmailJob[]
+  runs            CampaignRun[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 }
 
 // A subject-line variant for a campaign's A/B test. The body comes from the
@@ -393,43 +400,44 @@ model CampaignRun {
 }
 
 model EmailJob {
-  id               String          @id @default(cuid())
+  id               String            @id @default(cuid())
   organizationId   String
   smtpConnectionId String?
   templateId       String?
   campaignId       String?
   campaignRunId    String?
   toEmail          String
-  cc               String[]        @default([])
-  bcc              String[]        @default([])
+  cc               String[]          @default([])
+  bcc              String[]          @default([])
   replyTo          String?
   subject          String
   html             String?
   text             String?
   variables        Json?
-  origin           EmailOrigin     @default(TRANSACTIONAL)
+  origin           EmailOrigin       @default(TRANSACTIONAL)
   createdByUserId  String?
   // For A/B campaign sends: which CampaignVariant's subject this job used.
   variantId        String?
-  status           EmailJobStatus  @default(PENDING)
+  status           EmailJobStatus    @default(PENDING)
   // Threading metadata (RFC 5322). `messageId` is the Message-ID assigned to the
   // sent message; `inReplyTo`/`references` let a reply thread correctly in the
   // recipient's client and let a future inbox anchor replies to outbound mail.
   // See docs/DECISIONS.md ("Threading Foundation Lives on EmailJob").
   messageId        String?
   inReplyTo        String?
-  references       String[]        @default([])
+  references       String[]          @default([])
   scheduledAt      DateTime?
   sentAt           DateTime?
-  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  smtpConnection   SMTPConnection? @relation(fields: [smtpConnectionId], references: [id], onDelete: SetNull)
-  template         Template?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  campaign         Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  campaignRun      CampaignRun?    @relation(fields: [campaignRunId], references: [id], onDelete: SetNull)
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  smtpConnection   SMTPConnection?   @relation(fields: [smtpConnectionId], references: [id], onDelete: SetNull)
+  template         Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  campaign         Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignRun      CampaignRun?      @relation(fields: [campaignRunId], references: [id], onDelete: SetNull)
   events           EmailEvent[]
   attachments      EmailAttachment[]
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  inboundReplies   InboundMessage[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   @@index([messageId])
   @@index([organizationId, origin])
@@ -441,25 +449,25 @@ model EmailJob {
 // message can always be saved. On send it produces an EmailJob (origin = MANUAL)
 // through the shared pipeline and the draft is removed by the client.
 model EmailDraft {
-  id               String       @id @default(cuid())
+  id               String            @id @default(cuid())
   organizationId   String
   createdByUserId  String
   smtpConnectionId String?
   templateId       String?
-  subject          String       @default("")
+  subject          String            @default("")
   html             String?
   text             String?
-  to               String[]     @default([])
-  cc               String[]     @default([])
-  bcc              String[]     @default([])
-  contactIds       String[]     @default([])
-  listIds          String[]     @default([])
+  to               String[]          @default([])
+  cc               String[]          @default([])
+  bcc              String[]          @default([])
+  contactIds       String[]          @default([])
+  listIds          String[]          @default([])
   replyTo          String?
   variables        Json?
-  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   attachments      EmailAttachment[]
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   @@index([organizationId, createdByUserId])
 }
@@ -491,15 +499,75 @@ model EmailAttachment {
 }
 
 model EmailEvent {
-  id             String         @id @default(cuid())
-  organizationId String
-  emailJobId     String
-  type           EmailEventType
-  metadata       Json?
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  emailJob       EmailJob       @relation(fields: [emailJobId], references: [id], onDelete: Cascade)
+  id                String            @id @default(cuid())
+  organizationId    String
+  emailJobId        String
+  type              EmailEventType
+  metadata          Json?
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  emailJob          EmailJob          @relation(fields: [emailJobId], references: [id], onDelete: Cascade)
   webhookDeliveries WebhookDelivery[]
-  occurredAt     DateTime       @default(now())
+  occurredAt        DateTime          @default(now())
+}
+
+// Optional Phase E inbox module. Accounts are read-only IMAP connection records
+// used by the sync worker; credentials are encrypted like SMTP secrets. The
+// module is feature-flagged at the API boundary and disabled by default.
+model InboxAccount {
+  id                String             @id @default(cuid())
+  organizationId    String
+  name              String
+  email             String
+  host              String
+  port              Int
+  secure            Boolean            @default(true)
+  usernameEncrypted String
+  passwordEncrypted String
+  mailbox           String             @default("INBOX")
+  status            InboxAccountStatus @default(ACTIVE)
+  lastSyncedAt      DateTime?
+  lastSeenUid       Int?
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboundMessages   InboundMessage[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+// Received mail synced from IMAP. This stays separate from EmailJob: EmailJob is
+// outbound identity, while inbound storage belongs to the optional inbox module.
+// Replies are anchored to sent mail by matching In-Reply-To/References against
+// EmailJob.messageId.
+model InboundMessage {
+  id             String       @id @default(cuid())
+  organizationId String
+  inboxAccountId String
+  emailJobId     String?
+  messageId      String
+  inReplyTo      String?
+  references     String[]     @default([])
+  fromEmail      String
+  fromName       String?
+  to             String[]     @default([])
+  cc             String[]     @default([])
+  subject        String
+  text           String?
+  html           String?
+  receivedAt     DateTime
+  readAt         DateTime?
+  imapUid        Int?
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboxAccount   InboxAccount @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
+  emailJob       EmailJob?    @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+
+  @@unique([inboxAccountId, messageId])
+  @@index([organizationId, receivedAt])
+  @@index([organizationId, readAt])
+  @@index([emailJobId])
+  @@index([inReplyTo])
 }
 
 model ApiKey {
@@ -531,23 +599,23 @@ model WebhookEndpoint {
 }
 
 model WebhookDelivery {
-  id              String           @id @default(cuid())
-  organizationId  String
-  endpointId      String
-  emailEventId    String
-  eventName       String
-  payload         Json
-  status          String           @default("PENDING")
-  attempts        Int              @default(0)
-  responseStatus  Int?
-  error           String?
-  nextAttemptAt   DateTime?
-  deliveredAt     DateTime?
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  endpoint        WebhookEndpoint  @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-  emailEvent      EmailEvent       @relation(fields: [emailEventId], references: [id], onDelete: Cascade)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id             String          @id @default(cuid())
+  organizationId String
+  endpointId     String
+  emailEventId   String
+  eventName      String
+  payload        Json
+  status         String          @default("PENDING")
+  attempts       Int             @default(0)
+  responseStatus Int?
+  error          String?
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  endpoint       WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  emailEvent     EmailEvent      @relation(fields: [emailEventId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@index([endpointId])
   @@index([emailEventId])

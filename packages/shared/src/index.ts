@@ -63,6 +63,7 @@ export type ApiErrorCode =
   | "invalid_schedule"
   | "validation_error"
   | "attachment_too_large"
+  | "feature_disabled"
   | "not_found"
   | "conflict";
 
@@ -127,6 +128,50 @@ export interface DomainThrottle {
   /** Recipient domain; "" is the org-wide default cap. */
   domain: string;
   maxPerMinute: number;
+}
+
+export type InboxAccountStatus = "ACTIVE" | "DISABLED";
+
+export interface InboxAccount {
+  id: string;
+  organizationId: string;
+  name: string;
+  email: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  mailbox: string;
+  status: InboxAccountStatus;
+  lastSyncedAt?: string | null;
+  lastSeenUid?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InboundMessage {
+  id: string;
+  organizationId: string;
+  inboxAccountId: string;
+  emailJobId?: string | null;
+  messageId: string;
+  inReplyTo?: string | null;
+  references: string[];
+  fromEmail: string;
+  fromName?: string | null;
+  to: string[];
+  cc: string[];
+  subject: string;
+  text?: string | null;
+  html?: string | null;
+  receivedAt: string;
+  readAt?: string | null;
+  imapUid?: number | null;
+  emailJob?: {
+    id: string;
+    subject: string;
+    toEmail: string;
+    messageId?: string | null;
+  } | null;
 }
 
 export interface Template {
@@ -251,26 +296,26 @@ export const registerSchema = z.object({
   email: emailAddressSchema,
   password: z.string().min(8),
   name: z.string().optional(),
-  organizationName: z.string().min(1).optional()
+  organizationName: z.string().min(1).optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 
 export const loginSchema = z.object({
   email: emailAddressSchema,
-  password: z.string().min(1)
+  password: z.string().min(1),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
 export const refreshSchema = z.object({
-  refreshToken: z.string().min(1)
+  refreshToken: z.string().min(1),
 });
 
 export type RefreshInput = z.infer<typeof refreshSchema>;
 
 export const passwordResetRequestSchema = z.object({
-  email: emailAddressSchema
+  email: emailAddressSchema,
 });
 
 export type PasswordResetRequestInput = z.infer<
@@ -279,7 +324,7 @@ export type PasswordResetRequestInput = z.infer<
 
 export const passwordResetConfirmSchema = z.object({
   token: z.string().min(32),
-  password: z.string().min(8)
+  password: z.string().min(8),
 });
 
 export type PasswordResetConfirmInput = z.infer<
@@ -287,7 +332,7 @@ export type PasswordResetConfirmInput = z.infer<
 >;
 
 export const organizationSchema = z.object({
-  name: z.string().min(1)
+  name: z.string().min(1),
 });
 
 export type OrganizationInput = z.infer<typeof organizationSchema>;
@@ -298,7 +343,7 @@ export const contactSchema = z.object({
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   tags: z.array(z.string().min(1)).optional(),
-  metadata: z.record(z.unknown()).optional()
+  metadata: z.record(z.unknown()).optional(),
 });
 
 export type ContactInput = z.infer<typeof contactSchema>;
@@ -307,7 +352,7 @@ export const contactListSchema = z.object({
   organizationId: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
-  contactIds: z.array(z.string().min(1)).optional()
+  contactIds: z.array(z.string().min(1)).optional(),
 });
 
 export type ContactListInput = z.infer<typeof contactListSchema>;
@@ -315,7 +360,7 @@ export type ContactListInput = z.infer<typeof contactListSchema>;
 export const contactListUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
-  contactIds: z.array(z.string().min(1)).optional()
+  contactIds: z.array(z.string().min(1)).optional(),
 });
 
 export type ContactListUpdateInput = z.infer<typeof contactListUpdateSchema>;
@@ -329,7 +374,7 @@ export const segmentFilterSchema = z.object({
   organizationId: z.string().min(1),
   tags: z.array(z.string().min(1)).min(1),
   match: z.enum(["ANY", "ALL"]).default("ANY"),
-  status: z.enum(["ACTIVE", "UNSUBSCRIBED", "BOUNCED"]).optional()
+  status: z.enum(["ACTIVE", "UNSUBSCRIBED", "BOUNCED"]).optional(),
 });
 
 export type SegmentFilterInput = z.infer<typeof segmentFilterSchema>;
@@ -337,7 +382,7 @@ export type SegmentFilterInput = z.infer<typeof segmentFilterSchema>;
 // Materialize a tag filter into a new contact list (members tagged SEGMENT).
 export const createListFromSegmentSchema = segmentFilterSchema.extend({
   name: z.string().min(1),
-  description: z.string().optional()
+  description: z.string().optional(),
 });
 
 export type CreateListFromSegmentInput = z.infer<
@@ -359,23 +404,23 @@ export const segmentRuleSchema: z.ZodType<SegmentRule> = z.lazy(() =>
   z.union([
     z.object({
       op: z.enum(["AND", "OR"]),
-      rules: z.array(segmentRuleSchema).min(1).max(20)
+      rules: z.array(segmentRuleSchema).min(1).max(20),
     }),
     z.object({
       field: z.literal("tags"),
       match: z.enum(["ANY", "ALL", "NONE"]),
-      values: z.array(z.string().min(1)).min(1)
+      values: z.array(z.string().min(1)).min(1),
     }),
     z.object({
       field: z.literal("status"),
-      eq: z.enum(["ACTIVE", "UNSUBSCRIBED", "BOUNCED"])
+      eq: z.enum(["ACTIVE", "UNSUBSCRIBED", "BOUNCED"]),
     }),
     z.object({ field: z.literal("emailDomain"), eq: z.string().min(1) }),
     z.object({
       field: z.literal("createdAt"),
       before: z.string().datetime().optional(),
-      after: z.string().datetime().optional()
-    })
+      after: z.string().datetime().optional(),
+    }),
   ])
 );
 
@@ -398,7 +443,7 @@ export const segmentSchema = z.object({
   organizationId: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
-  rules: boundedSegmentRule
+  rules: boundedSegmentRule,
 });
 
 export type SegmentInput = z.infer<typeof segmentSchema>;
@@ -406,14 +451,14 @@ export type SegmentInput = z.infer<typeof segmentSchema>;
 export const segmentUpdateSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
-  rules: boundedSegmentRule
+  rules: boundedSegmentRule,
 });
 
 export type SegmentUpdateInput = z.infer<typeof segmentUpdateSchema>;
 
 export const segmentPreviewSchema = z.object({
   organizationId: z.string().min(1),
-  rules: boundedSegmentRule
+  rules: boundedSegmentRule,
 });
 
 export type SegmentPreviewInput = z.infer<typeof segmentPreviewSchema>;
@@ -454,14 +499,14 @@ export function compileSegmentRules(
       return { status: rule.eq };
     case "emailDomain":
       return {
-        email: { endsWith: `@${rule.eq.toLowerCase()}`, mode: "insensitive" }
+        email: { endsWith: `@${rule.eq.toLowerCase()}`, mode: "insensitive" },
       };
     case "createdAt":
       return {
         createdAt: {
           ...(rule.after ? { gte: rule.after } : {}),
-          ...(rule.before ? { lte: rule.before } : {})
-        }
+          ...(rule.before ? { lte: rule.before } : {}),
+        },
       };
   }
 }
@@ -470,7 +515,7 @@ export function compileSegmentRules(
 // not validated here; this only carries the optional target list.
 export const csvImportSchema = z.object({
   organizationId: z.string().min(1),
-  contactListId: z.string().min(1).optional()
+  contactListId: z.string().min(1).optional(),
 });
 
 export type CsvImportInput = z.infer<typeof csvImportSchema>;
@@ -478,9 +523,9 @@ export type CsvImportInput = z.infer<typeof csvImportSchema>;
 export const suppressionCreateSchema = z.object({
   organizationId: z.string().min(1),
   email: emailAddressSchema,
-  reason: z.enum(["BOUNCE", "COMPLAINT", "UNSUBSCRIBE", "MANUAL"]).default(
-    "MANUAL"
-  )
+  reason: z
+    .enum(["BOUNCE", "COMPLAINT", "UNSUBSCRIBE", "MANUAL"])
+    .default("MANUAL"),
 });
 
 export type SuppressionCreateInput = z.infer<typeof suppressionCreateSchema>;
@@ -488,7 +533,7 @@ export type SuppressionCreateInput = z.infer<typeof suppressionCreateSchema>;
 export const suppressionPolicySchema = z.object({
   organizationId: z.string().min(1),
   softBounceThreshold: z.coerce.number().int().min(1).max(100),
-  softBounceWindowDays: z.coerce.number().int().min(1).max(365)
+  softBounceWindowDays: z.coerce.number().int().min(1).max(365),
 });
 
 export type SuppressionPolicyInput = z.infer<typeof suppressionPolicySchema>;
@@ -501,19 +546,77 @@ export const domainThrottleSchema = z.object({
     .trim()
     .toLowerCase()
     .refine(
-      (value) =>
-        value === "" || /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value),
+      (value) => value === "" || /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value),
       "Must be a valid domain or empty for the default"
     )
     .default(""),
-  maxPerMinute: z.coerce.number().int().min(1).max(100000)
+  maxPerMinute: z.coerce.number().int().min(1).max(100000),
 });
 
 export type DomainThrottleInput = z.infer<typeof domainThrottleSchema>;
 
+export const inboxAccountSchema = z.object({
+  organizationId: z.string().min(1),
+  name: z.string().trim().min(1),
+  email: emailAddressSchema,
+  host: z.string().trim().min(1),
+  port: z.coerce.number().int().min(1).max(65535).default(993),
+  secure: z
+    .union([
+      z.boolean(),
+      z.enum(["true", "false"]).transform((v) => v === "true"),
+    ])
+    .default(true),
+  username: z.string().min(1),
+  password: z.string().min(1),
+  mailbox: z.string().trim().min(1).default("INBOX"),
+});
+
+export type InboxAccountInput = z.infer<typeof inboxAccountSchema>;
+
+export const inboxAccountUpdateSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  status: z.enum(["ACTIVE", "DISABLED"]).optional(),
+});
+
+export type InboxAccountUpdateInput = z.infer<typeof inboxAccountUpdateSchema>;
+
+export const inboundMessageStoreSchema = z.object({
+  organizationId: z.string().min(1),
+  inboxAccountId: z.string().min(1),
+  messageId: z.string().min(1),
+  inReplyTo: z.string().min(1).optional(),
+  references: z.array(z.string().min(1)).default([]),
+  fromEmail: emailAddressSchema,
+  fromName: z.string().optional(),
+  to: z.array(emailAddressSchema).default([]),
+  cc: z.array(emailAddressSchema).default([]),
+  subject: z.string().default(""),
+  text: z.string().optional(),
+  html: z.string().optional(),
+  receivedAt: z.string().datetime(),
+  imapUid: z.coerce.number().int().positive().optional(),
+});
+
+export type InboundMessageStoreInput = z.infer<
+  typeof inboundMessageStoreSchema
+>;
+
+export const inboundMessageQuerySchema = z.object({
+  organizationId: z.string().min(1),
+  q: z.string().trim().min(1).optional(),
+  read: z.enum(["read", "unread", "all"]).default("all").optional(),
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export type InboundMessageQueryInput = z.infer<
+  typeof inboundMessageQuerySchema
+>;
+
 export const contactActivityQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50)
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export type ContactActivityQueryInput = z.infer<
@@ -526,7 +629,7 @@ export const templateSchema = z.object({
   subject: z.string().min(1),
   html: z.string().min(1),
   mjml: z.string().optional(),
-  text: z.string().optional()
+  text: z.string().optional(),
 });
 
 export type TemplateInput = z.infer<typeof templateSchema>;
@@ -540,7 +643,7 @@ const campaignTargetExclusive = (
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "Provide either contactListId or segmentId, not both",
-      path: ["segmentId"]
+      path: ["segmentId"],
     });
   }
 };
@@ -552,7 +655,7 @@ export const campaignSchema = z
     templateId: z.string().min(1).optional(),
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
-    scheduledAt: z.string().datetime().optional()
+    scheduledAt: z.string().datetime().optional(),
   })
   .superRefine(campaignTargetExclusive);
 
@@ -564,7 +667,7 @@ export const campaignUpdateSchema = z
     templateId: z.string().min(1).optional(),
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
-    scheduledAt: z.string().datetime().optional()
+    scheduledAt: z.string().datetime().optional(),
   })
   .superRefine(campaignTargetExclusive);
 
@@ -595,12 +698,12 @@ export const abTestConfigSchema = z
       .array(
         z.object({
           label: z.string().min(1).max(40),
-          subject: z.string().min(1).max(500)
+          subject: z.string().min(1).max(500),
         })
       )
       .min(2)
       .max(5)
-      .optional()
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.enabled) {
@@ -610,28 +713,28 @@ export const abTestConfigSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "percent is required when A/B testing is enabled",
-        path: ["percent"]
+        path: ["percent"],
       });
     }
     if (!data.metric) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "metric is required when A/B testing is enabled",
-        path: ["metric"]
+        path: ["metric"],
       });
     }
     if (data.windowMin === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "windowMin is required when A/B testing is enabled",
-        path: ["windowMin"]
+        path: ["windowMin"],
       });
     }
     if (!data.variants || data.variants.length < 2) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "At least two variants are required",
-        path: ["variants"]
+        path: ["variants"],
       });
     }
   });
@@ -644,7 +747,7 @@ export type AbTestConfigInput = z.infer<typeof abTestConfigSchema>;
 export const deliverabilityQuerySchema = z.object({
   organizationId: z.string().min(1),
   from: z.string().datetime().optional(),
-  to: z.string().datetime().optional()
+  to: z.string().datetime().optional(),
 });
 
 export type DeliverabilityQueryInput = z.infer<
@@ -652,7 +755,7 @@ export type DeliverabilityQueryInput = z.infer<
 >;
 
 export const campaignScheduleSchema = z.object({
-  scheduledAt: z.string().datetime()
+  scheduledAt: z.string().datetime(),
 });
 
 export type CampaignScheduleInput = z.infer<typeof campaignScheduleSchema>;
@@ -669,7 +772,7 @@ export const timezoneSchema = z
 
 export const campaignRecurrenceSchema = z.object({
   cronExpression: cronExpressionSchema,
-  timezone: timezoneSchema
+  timezone: timezoneSchema,
 });
 
 export type CampaignRecurrenceInput = z.infer<typeof campaignRecurrenceSchema>;
@@ -690,13 +793,13 @@ export const sendEmailSchema = z.object({
   // Ids of attachments uploaded ahead of time (POST /attachments). Their blobs
   // live in object storage; the send pipeline links them to the EmailJob and the
   // worker streams them to SMTP.
-  attachmentIds: z.array(z.string().min(1)).optional()
+  attachmentIds: z.array(z.string().min(1)).optional(),
 });
 
 export type SendEmailInput = z.infer<typeof sendEmailSchema>;
 
 export const publicSendEmailSchema = sendEmailSchema.omit({
-  organizationId: true
+  organizationId: true,
 });
 
 export type PublicSendEmailInput = z.infer<typeof publicSendEmailSchema>;
@@ -722,7 +825,7 @@ export const manualEmailSendSchema = z
     text: z.string().optional(),
     variables: z.record(z.unknown()).optional(),
     scheduledAt: z.string().datetime().optional(),
-    attachmentIds: z.array(z.string().min(1)).optional()
+    attachmentIds: z.array(z.string().min(1)).optional(),
   })
   .refine(
     (input) =>
@@ -734,7 +837,7 @@ export const manualEmailSendSchema = z
   )
   .refine((input) => Boolean(input.html || input.text), {
     message: "Provide an email body",
-    path: ["html"]
+    path: ["html"],
   });
 
 export type ManualEmailSendInput = z.infer<typeof manualEmailSendSchema>;
@@ -751,7 +854,7 @@ export const emailPreviewSchema = z.object({
   cc: z.array(z.string()).optional(),
   bcc: z.array(z.string()).optional(),
   contactIds: z.array(z.string().min(1)).optional(),
-  listIds: z.array(z.string().min(1)).optional()
+  listIds: z.array(z.string().min(1)).optional(),
 });
 
 export type EmailPreviewInput = z.infer<typeof emailPreviewSchema>;
@@ -810,7 +913,7 @@ export const emailDraftSchema = z.object({
   replyTo: z.string().optional(),
   smtpConnectionId: z.string().optional(),
   templateId: z.string().optional(),
-  variables: z.record(z.unknown()).optional()
+  variables: z.record(z.unknown()).optional(),
 });
 
 export type EmailDraftInput = z.infer<typeof emailDraftSchema>;
@@ -843,7 +946,7 @@ export interface EmailDraft {
 
 export const apiKeyCreateSchema = z.object({
   organizationId: z.string().min(1),
-  name: z.string().min(1)
+  name: z.string().min(1),
 });
 
 export type ApiKeyCreateInput = z.infer<typeof apiKeyCreateSchema>;
@@ -856,19 +959,17 @@ export const outboundWebhookEventNames = [
   "email.clicked",
   "email.bounced",
   "email.complained",
-  "email.failed"
+  "email.failed",
 ] as const;
 
-export const outboundWebhookEventNameSchema = z.enum(
-  outboundWebhookEventNames
-);
+export const outboundWebhookEventNameSchema = z.enum(outboundWebhookEventNames);
 
 export const webhookEndpointSchema = z.object({
   organizationId: z.string().min(1),
   name: z.string().min(1),
   url: z.string().url(),
   events: z.array(outboundWebhookEventNameSchema).min(1),
-  enabled: z.boolean().optional()
+  enabled: z.boolean().optional(),
 });
 
 export type WebhookEndpointInput = z.infer<typeof webhookEndpointSchema>;
@@ -877,7 +978,7 @@ export const webhookEndpointUpdateSchema = webhookEndpointSchema
   .omit({ organizationId: true })
   .partial()
   .refine((input) => Object.keys(input).length > 0, {
-    message: "At least one field is required"
+    message: "At least one field is required",
   });
 
 export type WebhookEndpointUpdateInput = z.infer<
@@ -894,7 +995,7 @@ export const smtpConnectionSchema = z.object({
   password: z.string().min(1),
   fromEmail: emailAddressSchema,
   fromName: z.string().optional(),
-  isDefault: z.boolean().optional()
+  isDefault: z.boolean().optional(),
 });
 
 export type SMTPConnectionInput = z.infer<typeof smtpConnectionSchema>;

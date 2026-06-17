@@ -10,6 +10,7 @@ import { dashboardRouter } from "../modules/dashboard/routes.js";
 import { deliverabilityRouter } from "../modules/deliverability/routes.js";
 import { domainThrottleRouter } from "../modules/domain-throttles/routes.js";
 import { emailDraftRouter } from "../modules/email-drafts/routes.js";
+import { inboxRouter } from "../modules/inbox/routes.js";
 import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
@@ -66,3 +67,5 @@ v1Router.use("/email-drafts", emailDraftRouter);
 // send pipeline links rows to the EmailJob and the worker streams them to SMTP.
 v1Router.use("/attachments", attachmentRouter);
 v1Router.use("/webhook-endpoints", webhookEndpointRouter);
+// Optional Phase E inbox module. Disabled by default via INBOX_ENABLED=false.
+v1Router.use("/inbox", inboxRouter);
