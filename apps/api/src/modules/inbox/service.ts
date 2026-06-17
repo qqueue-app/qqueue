@@ -7,6 +7,9 @@ import type {
   InboundMessageQueryInput,
   InboundMessageReplyInput,
   InboundMessageStoreInput,
+  InboundMessageTicketClearInput,
+  InboundMessageTicketInput,
+  InboundMessageWorkflowInput,
 } from "@qqueue/shared";
 import { ImapFlow } from "imapflow";
 import { encryptSecret } from "../../lib/crypto.js";
@@ -320,6 +323,87 @@ export const inboxService = {
         organization: { members: { some: { userId } } },
       },
       data: { assignedToUserId: input.assignedToUserId ?? null },
+    });
+    if (count === 0) {
+      throw new HttpError(404, "Inbound message not found", "not_found");
+    }
+
+    return prisma.inboundMessage.findUniqueOrThrow({
+      where: { id },
+      include: messageInclude,
+    });
+  },
+
+  async updateWorkflow(
+    id: string,
+    userId: string,
+    input: InboundMessageWorkflowInput
+  ) {
+    const { count } = await prisma.inboundMessage.updateMany({
+      where: {
+        id,
+        organizationId: input.organizationId,
+        organization: { members: { some: { userId } } },
+      },
+      data: {
+        ...(input.status ? { status: input.status } : {}),
+        ...(input.priority ? { priority: input.priority } : {}),
+        ...(input.routedTo !== undefined ? { routedTo: input.routedTo } : {}),
+      },
+    });
+    if (count === 0) {
+      throw new HttpError(404, "Inbound message not found", "not_found");
+    }
+
+    return prisma.inboundMessage.findUniqueOrThrow({
+      where: { id },
+      include: messageInclude,
+    });
+  },
+
+  async linkTicket(
+    id: string,
+    userId: string,
+    input: InboundMessageTicketInput
+  ) {
+    const { count } = await prisma.inboundMessage.updateMany({
+      where: {
+        id,
+        organizationId: input.organizationId,
+        organization: { members: { some: { userId } } },
+      },
+      data: {
+        externalTicketProvider: input.provider,
+        externalTicketKey: input.key,
+        externalTicketUrl: input.url ?? null,
+      },
+    });
+    if (count === 0) {
+      throw new HttpError(404, "Inbound message not found", "not_found");
+    }
+
+    return prisma.inboundMessage.findUniqueOrThrow({
+      where: { id },
+      include: messageInclude,
+    });
+  },
+
+  async clearTicket(
+    id: string,
+    userId: string,
+    input: InboundMessageTicketClearInput
+  ) {
+    const { count } = await prisma.inboundMessage.updateMany({
+      where: {
+        id,
+        organizationId: input.organizationId,
+        organization: { members: { some: { userId } } },
+      },
+      data: {
+        externalTicketProvider: null,
+        externalTicketKey: null,
+        externalTicketUrl: null,
+      },
     });
     if (count === 0) {
       throw new HttpError(404, "Inbound message not found", "not_found");

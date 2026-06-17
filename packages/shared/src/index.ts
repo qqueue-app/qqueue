@@ -131,6 +131,9 @@ export interface DomainThrottle {
 }
 
 export type InboxAccountStatus = "ACTIVE" | "DISABLED";
+export type InboundMessageStatus = "OPEN" | "PENDING" | "CLOSED";
+export type InboundMessagePriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+export type TicketProvider = "JIRA" | "LINEAR" | "GITHUB" | "ZENDESK" | "OTHER";
 
 export interface InboxAccount {
   id: string;
@@ -166,6 +169,12 @@ export interface InboundMessage {
   receivedAt: string;
   readAt?: string | null;
   assignedToUserId?: string | null;
+  status: InboundMessageStatus;
+  priority: InboundMessagePriority;
+  routedTo?: string | null;
+  externalTicketProvider?: TicketProvider | null;
+  externalTicketKey?: string | null;
+  externalTicketUrl?: string | null;
   imapUid?: number | null;
   assignedTo?: {
     id: string;
@@ -644,14 +653,50 @@ export type InboundMessageAssignmentInput = z.infer<
   typeof inboundMessageAssignmentSchema
 >;
 
+export const inboundMessageWorkflowSchema = z
+  .object({
+    organizationId: z.string().min(1),
+    status: z.enum(["OPEN", "PENDING", "CLOSED"]).optional(),
+    priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+    routedTo: z.string().trim().min(1).max(120).nullable().optional(),
+  })
+  .refine(
+    (input) =>
+      input.status !== undefined ||
+      input.priority !== undefined ||
+      input.routedTo !== undefined,
+    { message: "At least one workflow field is required" }
+  );
+
+export type InboundMessageWorkflowInput = z.infer<
+  typeof inboundMessageWorkflowSchema
+>;
+
+export const inboundMessageTicketSchema = z.object({
+  organizationId: z.string().min(1),
+  provider: z.enum(["JIRA", "LINEAR", "GITHUB", "ZENDESK", "OTHER"]),
+  key: z.string().trim().min(1).max(120),
+  url: z.string().url().optional(),
+});
+
+export type InboundMessageTicketInput = z.infer<
+  typeof inboundMessageTicketSchema
+>;
+
+export const inboundMessageTicketClearSchema = z.object({
+  organizationId: z.string().min(1),
+});
+
+export type InboundMessageTicketClearInput = z.infer<
+  typeof inboundMessageTicketClearSchema
+>;
+
 export const inboundMessageNoteSchema = z.object({
   organizationId: z.string().min(1),
   body: z.string().trim().min(1).max(5000),
 });
 
-export type InboundMessageNoteInput = z.infer<
-  typeof inboundMessageNoteSchema
->;
+export type InboundMessageNoteInput = z.infer<typeof inboundMessageNoteSchema>;
 
 export const inboundMessageReplySchema = z
   .object({

@@ -53,6 +53,21 @@ inboxRouter.patch(
   requireOrgMembership,
   inboxController.assignMessage
 );
+inboxRouter.patch(
+  "/messages/:id/workflow",
+  requireOrgMembership,
+  inboxController.updateWorkflow
+);
+inboxRouter.put(
+  "/messages/:id/ticket",
+  requireOrgMembership,
+  inboxController.linkTicket
+);
+inboxRouter.delete(
+  "/messages/:id/ticket",
+  requireOrgMembership,
+  inboxController.clearTicket
+);
 inboxRouter.get(
   "/messages/:id/notes",
   requireOrgMembership,

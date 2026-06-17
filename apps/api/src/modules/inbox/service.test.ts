@@ -193,6 +193,84 @@ describe("inboxService", () => {
     ).rejects.toThrow("Assignee must be a member");
   });
 
+  it("updates support workflow fields for an organization member", async () => {
+    prismaMock.inboundMessage.updateMany.mockResolvedValue({
+      count: 1,
+    } as never);
+    prismaMock.inboundMessage.findUniqueOrThrow.mockResolvedValue({
+      id: "msg_1",
+      status: "PENDING",
+      priority: "HIGH",
+      routedTo: "billing",
+    } as never);
+
+    await inboxService.updateWorkflow("msg_1", "user_1", {
+      organizationId: "org_1",
+      status: "PENDING",
+      priority: "HIGH",
+      routedTo: "billing",
+    });
+
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "msg_1",
+        organizationId: "org_1",
+        organization: { members: { some: { userId: "user_1" } } },
+      },
+      data: {
+        status: "PENDING",
+        priority: "HIGH",
+        routedTo: "billing",
+      },
+    });
+  });
+
+  it("links and clears external ticket references", async () => {
+    prismaMock.inboundMessage.updateMany.mockResolvedValue({
+      count: 1,
+    } as never);
+    prismaMock.inboundMessage.findUniqueOrThrow.mockResolvedValue({
+      id: "msg_1",
+    } as never);
+
+    await inboxService.linkTicket("msg_1", "user_1", {
+      organizationId: "org_1",
+      provider: "JIRA",
+      key: "SUP-12",
+      url: "https://jira.example.com/browse/SUP-12",
+    });
+
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "msg_1",
+        organizationId: "org_1",
+        organization: { members: { some: { userId: "user_1" } } },
+      },
+      data: {
+        externalTicketProvider: "JIRA",
+        externalTicketKey: "SUP-12",
+        externalTicketUrl: "https://jira.example.com/browse/SUP-12",
+      },
+    });
+
+    await inboxService.clearTicket("msg_1", "user_1", {
+      organizationId: "org_1",
+    });
+
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: "msg_1",
+        organizationId: "org_1",
+        organization: { members: { some: { userId: "user_1" } } },
+      },
+      data: {
+        externalTicketProvider: null,
+        externalTicketKey: null,
+        externalTicketUrl: null,
+      },
+    });
+  });
+
   it("creates internal notes scoped to org membership", async () => {
     prismaMock.inboundMessage.findFirst.mockResolvedValue({
       id: "msg_1",
@@ -231,7 +309,9 @@ describe("inboxService", () => {
       readAt: null,
       inboxAccount: { email: "support@example.com" },
     } as never);
-    prismaMock.inboundMessage.update.mockResolvedValue({ id: "msg_1" } as never);
+    prismaMock.inboundMessage.update.mockResolvedValue({
+      id: "msg_1",
+    } as never);
 
     await inboxService.replyToMessage("msg_1", "user_1", {
       organizationId: "org_1",

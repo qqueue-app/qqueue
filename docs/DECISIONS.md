@@ -427,3 +427,16 @@ domain column, so it aggregates events in memory bounded by a scan cap and
 returns a `truncated` flag rather than silently capping. Reputation alerts are
 derived against fixed thresholds (bounce > 5%, complaint > 0.1%) and the view is
 restricted to OWNER/ADMIN, like queue operations.
+
+## Inbox Workflows Stay Lightweight and Metadata-Driven (Phase E)
+
+Phase E completes the optional inbox module with route labels, support workflow
+state (`OPEN | PENDING | CLOSED`), priority, assignment, internal notes, and
+external ticket references. These fields live on `InboundMessage` because the
+module is meant to support email operations, not become a full helpdesk domain.
+
+Ticketing integrations are intentionally stored as provider/key/URL references
+for Jira, Linear, GitHub, Zendesk, or other systems. Creating and syncing remote
+tickets remains future integration work; the AGPL inbox keeps enough metadata to
+link a reply thread to an external ticket without introducing provider-specific
+state machines or proprietary workflow assumptions.

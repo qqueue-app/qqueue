@@ -299,9 +299,10 @@ not to become a mailbox product.
   - [x] Assign conversations
   - [x] Internal notes
 - Phase 3 (deferred)
-  - [ ] Inbound email routing
-  - [ ] Support workflows
-  - [ ] Ticketing integrations
+  - [x] Inbound email routing (manual route labels on synced messages)
+  - [x] Support workflows (status, priority, assignment, notes)
+  - [x] Ticketing integrations (external ticket reference fields for Jira,
+    Linear, GitHub, Zendesk, and other systems)
 
 ### Phase F: Collaboration and team workflows
 

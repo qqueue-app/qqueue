@@ -412,7 +412,8 @@ End-to-end, the app can currently support a self-hosted operator who:
   breakdown, reputation alerts) with Segments and Deliverability web pages.
 - [x] Optional IMAP inbox module (feature-flagged, off by default) — inbound
   message storage anchored to `EmailJob` threading metadata, reply from QQueue,
-  shared assignment, and internal notes.
+  shared assignment, internal notes, route labels, support workflow status /
+  priority, and external ticket references.
 
 ### UX
 
@@ -464,6 +465,16 @@ End-to-end, the app can currently support a self-hosted operator who:
 10. Collect feedback from real installations.
 
 ## Verification
+
+### Phase E inbox workflows (2026-06-17)
+
+- [x] Optional inbox Phase 3 scope completed as additive workflow metadata:
+  `InboundMessage.status`, `priority`, `routedTo`, and external ticket
+  reference fields for Jira, Linear, GitHub, Zendesk, and other systems.
+- [x] Inbox API now supports workflow updates and ticket link/clear actions
+  through the existing feature-flagged inbox routes.
+- [x] Inbox dashboard exposes routing, status, priority, and ticket reference
+  controls alongside assignment, notes, and reply-from-QQueue.
 
 ### Phase D2–D5 advanced campaign features (2026-06-16)
 

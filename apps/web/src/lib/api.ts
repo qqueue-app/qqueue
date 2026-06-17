@@ -138,6 +138,18 @@ export interface InboundMessage {
   receivedAt: string;
   readAt?: string | null;
   assignedToUserId?: string | null;
+  status: "OPEN" | "PENDING" | "CLOSED";
+  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  routedTo?: string | null;
+  externalTicketProvider?:
+    | "JIRA"
+    | "LINEAR"
+    | "GITHUB"
+    | "ZENDESK"
+    | "OTHER"
+    | null;
+  externalTicketKey?: string | null;
+  externalTicketUrl?: string | null;
   imapUid?: number | null;
   assignedTo?: {
     id: string;
@@ -1198,6 +1210,52 @@ export const api = {
       {
         method: "PATCH",
         body: JSON.stringify(input),
+      }
+    );
+  },
+
+  updateInboundMessageWorkflow(
+    id: string,
+    input: {
+      organizationId: string;
+      status?: InboundMessage["status"];
+      priority?: InboundMessage["priority"];
+      routedTo?: string | null;
+    }
+  ) {
+    return request<InboundMessage>(
+      `/api/v1/inbox/messages/${id}/workflow?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  linkInboundMessageTicket(
+    id: string,
+    input: {
+      organizationId: string;
+      provider: NonNullable<InboundMessage["externalTicketProvider"]>;
+      key: string;
+      url?: string;
+    }
+  ) {
+    return request<InboundMessage>(
+      `/api/v1/inbox/messages/${id}/ticket?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  clearInboundMessageTicket(id: string, organizationId: string) {
+    return request<InboundMessage>(
+      `/api/v1/inbox/messages/${id}/ticket?organizationId=${encodeURIComponent(organizationId)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ organizationId }),
       }
     );
   },

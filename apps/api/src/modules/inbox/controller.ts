@@ -7,6 +7,9 @@ import {
   inboundMessageQuerySchema,
   inboundMessageReplySchema,
   inboundMessageStoreSchema,
+  inboundMessageTicketClearSchema,
+  inboundMessageTicketSchema,
+  inboundMessageWorkflowSchema,
 } from "@qqueue/shared";
 import { z } from "zod";
 import { inboxService } from "./service.js";
@@ -81,8 +84,40 @@ export const inboxController = {
     res.json({ data: message });
   },
 
+  async updateWorkflow(req: Request, res: Response) {
+    const input = inboundMessageWorkflowSchema.parse(req.body);
+    const message = await inboxService.updateWorkflow(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.json({ data: message });
+  },
+
+  async linkTicket(req: Request, res: Response) {
+    const input = inboundMessageTicketSchema.parse(req.body);
+    const message = await inboxService.linkTicket(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.json({ data: message });
+  },
+
+  async clearTicket(req: Request, res: Response) {
+    const input = inboundMessageTicketClearSchema.parse(req.body);
+    const message = await inboxService.clearTicket(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.json({ data: message });
+  },
+
   async listNotes(req: Request, res: Response) {
-    const query = z.object({ organizationId: z.string().min(1) }).parse(req.query);
+    const query = z
+      .object({ organizationId: z.string().min(1) })
+      .parse(req.query);
     const notes = await inboxService.listNotes(
       String(req.params.id),
       req.userId!,

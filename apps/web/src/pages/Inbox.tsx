@@ -8,7 +8,9 @@ import {
   Search,
   Send,
   StickyNote,
+  Ticket,
   Trash2,
+  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
@@ -84,6 +86,8 @@ export function Inbox() {
   const [saving, setSaving] = useState(false);
   const [replying, setReplying] = useState(false);
   const [addingNote, setAddingNote] = useState(false);
+  const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [ticketSaving, setTicketSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">(
     "all"
@@ -91,6 +95,12 @@ export function Inbox() {
   const [assigneeFilter, setAssigneeFilter] = useState("any");
   const [replyBody, setReplyBody] = useState("");
   const [noteBody, setNoteBody] = useState("");
+  const [routedTo, setRoutedTo] = useState("");
+  const [ticketForm, setTicketForm] = useState({
+    provider: "JIRA" as NonNullable<InboundMessage["externalTicketProvider"]>,
+    key: "",
+    url: "",
+  });
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -179,6 +189,21 @@ export function Inbox() {
       .finally(() => setNotesLoading(false));
   }, [organizationId, selected?.id]);
 
+  useEffect(() => {
+    setRoutedTo(selected?.routedTo ?? "");
+    setTicketForm({
+      provider: selected?.externalTicketProvider ?? "JIRA",
+      key: selected?.externalTicketKey ?? "",
+      url: selected?.externalTicketUrl ?? "",
+    });
+  }, [
+    selected?.id,
+    selected?.routedTo,
+    selected?.externalTicketProvider,
+    selected?.externalTicketKey,
+    selected?.externalTicketUrl,
+  ]);
+
   function updateMessage(message: InboundMessage) {
     setMessages((current) =>
       current.map((item) => (item.id === message.id ? message : item))
@@ -266,6 +291,85 @@ export function Inbox() {
     }
   }
 
+  async function updateWorkflow(
+    input: Pick<InboundMessage, "status"> | Pick<InboundMessage, "priority">
+  ) {
+    if (!organizationId || !selected) return;
+    setWorkflowSaving(true);
+    try {
+      const updated = await api.updateInboundMessageWorkflow(selected.id, {
+        organizationId,
+        ...input,
+      });
+      updateMessage(updated);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to update workflow."
+      );
+    } finally {
+      setWorkflowSaving(false);
+    }
+  }
+
+  async function submitRoute(event: FormEvent) {
+    event.preventDefault();
+    if (!organizationId || !selected) return;
+    setWorkflowSaving(true);
+    try {
+      const updated = await api.updateInboundMessageWorkflow(selected.id, {
+        organizationId,
+        routedTo: routedTo.trim() || null,
+      });
+      updateMessage(updated);
+      toast.success(routedTo.trim() ? "Route saved." : "Route cleared.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to route.");
+    } finally {
+      setWorkflowSaving(false);
+    }
+  }
+
+  async function submitTicket(event: FormEvent) {
+    event.preventDefault();
+    if (!organizationId || !selected || !ticketForm.key.trim()) return;
+    setTicketSaving(true);
+    try {
+      const updated = await api.linkInboundMessageTicket(selected.id, {
+        organizationId,
+        provider: ticketForm.provider,
+        key: ticketForm.key.trim(),
+        url: ticketForm.url.trim() || undefined,
+      });
+      updateMessage(updated);
+      toast.success("Ticket linked.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to link ticket."
+      );
+    } finally {
+      setTicketSaving(false);
+    }
+  }
+
+  async function clearTicket() {
+    if (!organizationId || !selected) return;
+    setTicketSaving(true);
+    try {
+      const updated = await api.clearInboundMessageTicket(
+        selected.id,
+        organizationId
+      );
+      updateMessage(updated);
+      toast.success("Ticket cleared.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to clear ticket."
+      );
+    } finally {
+      setTicketSaving(false);
+    }
+  }
+
   async function submitNote(event: FormEvent) {
     event.preventDefault();
     if (!organizationId || !selected || !noteBody.trim()) return;
@@ -278,7 +382,9 @@ export function Inbox() {
       setNotes((current) => [...current, note]);
       setNoteBody("");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to add note.");
+      toast.error(
+        error instanceof Error ? error.message : "Unable to add note."
+      );
     } finally {
       setAddingNote(false);
     }
@@ -439,6 +545,19 @@ export function Inbox() {
                               <div className="mt-1 text-xs text-muted-foreground">
                                 {memberLabel(message.assignedTo)}
                               </div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <Badge variant="outline">
+                                  {message.status}
+                                </Badge>
+                                <Badge variant="secondary">
+                                  {message.priority}
+                                </Badge>
+                                {message.routedTo ? (
+                                  <Badge variant="outline">
+                                    {message.routedTo}
+                                  </Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-sm">
                               {formatDate(message.receivedAt)}
@@ -527,7 +646,9 @@ export function Inbox() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            <SelectItem value="unassigned">
+                              Unassigned
+                            </SelectItem>
                             {members.map((member) => (
                               <SelectItem
                                 key={member.userId}
@@ -550,6 +671,193 @@ export function Inbox() {
 
                 <Card className="p-4">
                   <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
+                    <Workflow className="h-4 w-4" />
+                    Workflow
+                  </h2>
+                  {selected ? (
+                    <div className="space-y-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Select
+                            value={selected.status}
+                            disabled={workflowSaving}
+                            onValueChange={(status) =>
+                              void updateWorkflow({
+                                status: status as InboundMessage["status"],
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="OPEN">Open</SelectItem>
+                              <SelectItem value="PENDING">Pending</SelectItem>
+                              <SelectItem value="CLOSED">Closed</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Priority</Label>
+                          <Select
+                            value={selected.priority}
+                            disabled={workflowSaving}
+                            onValueChange={(priority) =>
+                              void updateWorkflow({
+                                priority:
+                                  priority as InboundMessage["priority"],
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="LOW">Low</SelectItem>
+                              <SelectItem value="NORMAL">Normal</SelectItem>
+                              <SelectItem value="HIGH">High</SelectItem>
+                              <SelectItem value="URGENT">Urgent</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <form className="space-y-2" onSubmit={submitRoute}>
+                        <Label htmlFor="route-target">Inbound route</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="route-target"
+                            value={routedTo}
+                            onChange={(event) =>
+                              setRoutedTo(event.target.value)
+                            }
+                            placeholder="support, billing, sales"
+                          />
+                          <Button
+                            type="submit"
+                            variant="outline"
+                            disabled={workflowSaving}
+                          >
+                            Save
+                          </Button>
+                        </div>
+                      </form>
+                    </div>
+                  ) : (
+                    <EmptyState icon={MailOpen} title="No reply selected" />
+                  )}
+                </Card>
+
+                <Card className="p-4">
+                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
+                    <Ticket className="h-4 w-4" />
+                    Ticket
+                  </h2>
+                  {selected ? (
+                    <form className="space-y-3" onSubmit={submitTicket}>
+                      <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
+                        <div className="space-y-2">
+                          <Label>Provider</Label>
+                          <Select
+                            value={ticketForm.provider}
+                            onValueChange={(provider) =>
+                              setTicketForm((current) => ({
+                                ...current,
+                                provider: provider as NonNullable<
+                                  InboundMessage["externalTicketProvider"]
+                                >,
+                              }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="JIRA">Jira</SelectItem>
+                              <SelectItem value="LINEAR">Linear</SelectItem>
+                              <SelectItem value="GITHUB">GitHub</SelectItem>
+                              <SelectItem value="ZENDESK">Zendesk</SelectItem>
+                              <SelectItem value="OTHER">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="ticket-key">Ticket key</Label>
+                          <Input
+                            id="ticket-key"
+                            value={ticketForm.key}
+                            onChange={(event) =>
+                              setTicketForm((current) => ({
+                                ...current,
+                                key: event.target.value,
+                              }))
+                            }
+                            placeholder="SUP-123"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="ticket-url">Ticket URL</Label>
+                        <Input
+                          id="ticket-url"
+                          value={ticketForm.url}
+                          onChange={(event) =>
+                            setTicketForm((current) => ({
+                              ...current,
+                              url: event.target.value,
+                            }))
+                          }
+                          placeholder="https://..."
+                        />
+                      </div>
+                      {selected.externalTicketKey ? (
+                        <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                          <span className="font-medium">
+                            {selected.externalTicketProvider}
+                          </span>{" "}
+                          {selected.externalTicketUrl ? (
+                            <a
+                              href={selected.externalTicketUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary underline-offset-4 hover:underline"
+                            >
+                              {selected.externalTicketKey}
+                            </a>
+                          ) : (
+                            selected.externalTicketKey
+                          )}
+                        </div>
+                      ) : null}
+                      <div className="flex gap-2">
+                        <Button
+                          type="submit"
+                          disabled={ticketSaving || !ticketForm.key.trim()}
+                        >
+                          {ticketSaving ? (
+                            <Spinner />
+                          ) : (
+                            <Ticket className="h-4 w-4" />
+                          )}
+                          Link ticket
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={ticketSaving || !selected.externalTicketKey}
+                          onClick={() => void clearTicket()}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <EmptyState icon={MailOpen} title="No reply selected" />
+                  )}
+                </Card>
+
+                <Card className="p-4">
+                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
                     <Reply className="h-4 w-4" />
                     Reply
                   </h2>
@@ -565,11 +873,7 @@ export function Inbox() {
                         type="submit"
                         disabled={replying || !replyBody.trim()}
                       >
-                        {replying ? (
-                          <Spinner />
-                        ) : (
-                          <Send className="h-4 w-4" />
-                        )}
+                        {replying ? <Spinner /> : <Send className="h-4 w-4" />}
                         Send reply
                       </Button>
                     </form>

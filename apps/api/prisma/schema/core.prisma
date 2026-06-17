@@ -110,6 +110,27 @@ enum InboxAccountStatus {
   DISABLED
 }
 
+enum InboundMessageStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+enum InboundMessagePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketProvider {
+  JIRA
+  LINEAR
+  GITHUB
+  ZENDESK
+  OTHER
+}
+
 model User {
   id                  String               @id @default(cuid())
   email               String               @unique
@@ -544,35 +565,44 @@ model InboxAccount {
 // Replies are anchored to sent mail by matching In-Reply-To/References against
 // EmailJob.messageId.
 model InboundMessage {
-  id             String       @id @default(cuid())
-  organizationId String
-  inboxAccountId String
-  emailJobId     String?
-  messageId      String
-  inReplyTo      String?
-  references     String[]     @default([])
-  fromEmail      String
-  fromName       String?
-  to             String[]     @default([])
-  cc             String[]     @default([])
-  subject        String
-  text           String?
-  html           String?
-  receivedAt     DateTime
-  readAt         DateTime?
-  assignedToUserId String?
-  imapUid        Int?
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  inboxAccount   InboxAccount @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
-  emailJob       EmailJob?    @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
-  assignedTo     User?        @relation("AssignedInboxItems", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  notes          InboundMessageNote[]
-  createdAt      DateTime     @default(now())
+  id                     String                 @id @default(cuid())
+  organizationId         String
+  inboxAccountId         String
+  emailJobId             String?
+  messageId              String
+  inReplyTo              String?
+  references             String[]               @default([])
+  fromEmail              String
+  fromName               String?
+  to                     String[]               @default([])
+  cc                     String[]               @default([])
+  subject                String
+  text                   String?
+  html                   String?
+  receivedAt             DateTime
+  readAt                 DateTime?
+  assignedToUserId       String?
+  status                 InboundMessageStatus   @default(OPEN)
+  priority               InboundMessagePriority @default(NORMAL)
+  routedTo               String?
+  externalTicketProvider TicketProvider?
+  externalTicketKey      String?
+  externalTicketUrl      String?
+  imapUid                Int?
+  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboxAccount           InboxAccount           @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
+  emailJob               EmailJob?              @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  assignedTo             User?                  @relation("AssignedInboxItems", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  notes                  InboundMessageNote[]
+  createdAt              DateTime               @default(now())
 
   @@unique([inboxAccountId, messageId])
   @@index([organizationId, receivedAt])
   @@index([organizationId, readAt])
   @@index([organizationId, assignedToUserId])
+  @@index([organizationId, status])
+  @@index([organizationId, priority])
+  @@index([organizationId, externalTicketProvider, externalTicketKey])
   @@index([emailJobId])
   @@index([inReplyTo])
 }
