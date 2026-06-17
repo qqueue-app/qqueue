@@ -1,28 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  Inbox as InboxIcon,
   MailOpen,
   MailPlus,
   Plug,
   Reply,
   Search,
   Send,
-  StickyNote,
-  Ticket,
   Trash2,
-  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
 import { PageHeader } from "../components/PageHeader.js";
-import {
-  api,
-  ApiError,
-  type InboxAccount,
-  type InboundMessageNote,
-  type InboundMessage,
-  type OrganizationMember,
-} from "../lib/api.js";
+import { api, type InboxAccount, type InboundMessage } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
@@ -37,13 +26,6 @@ import {
 } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../components/ui/select.js";
 import { Spinner } from "../components/ui/spinner.js";
 import {
   Table,
@@ -54,6 +36,15 @@ import {
   TableRow,
 } from "../components/ui/table.js";
 import { Textarea } from "../components/ui/textarea.js";
+
+type ConversationThread = {
+  threadKey: string;
+  messages: InboundMessage[];
+  latestMessage: InboundMessage;
+  sender: string;
+  subject: string;
+  unreadCount: number;
+};
 
 function formatDate(value?: string | null) {
   if (!value) return "Never";
@@ -67,40 +58,83 @@ function snippet(message: InboundMessage) {
   return message.html ? "HTML message" : "No preview available";
 }
 
-function memberLabel(member: OrganizationMember["user"] | null | undefined) {
-  if (!member) return "Unassigned";
-  return member.name ? `${member.name} <${member.email}>` : member.email;
+function senderLabel(message: InboundMessage) {
+  return message.fromName
+    ? `${message.fromName} <${message.fromEmail}>`
+    : message.fromEmail;
+}
+
+function threadKeyForMessage(message: InboundMessage) {
+  return (
+    message.references[0] ??
+    message.inReplyTo ??
+    message.emailJob?.messageId ??
+    message.messageId
+  );
+}
+
+function compareMessages(a: InboundMessage, b: InboundMessage) {
+  const delta =
+    new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime();
+  return delta !== 0 ? delta : a.id.localeCompare(b.id);
+}
+
+function buildConversationThreads(messages: InboundMessage[]) {
+  const threads = new Map<string, ConversationThread>();
+
+  for (const message of messages) {
+    const threadKey = threadKeyForMessage(message);
+    const current = threads.get(threadKey);
+
+    if (!current) {
+      threads.set(threadKey, {
+        threadKey,
+        messages: [message],
+        latestMessage: message,
+        sender: senderLabel(message),
+        subject: message.subject || "(no subject)",
+        unreadCount: message.readAt ? 0 : 1,
+      });
+      continue;
+    }
+
+    current.messages.push(message);
+    current.messages.sort(compareMessages);
+    current.latestMessage =
+      current.messages[current.messages.length - 1] ?? current.latestMessage;
+    current.sender = senderLabel(current.latestMessage);
+    current.subject = current.latestMessage.subject || current.subject;
+    current.unreadCount += message.readAt ? 0 : 1;
+  }
+
+  return [...threads.values()]
+    .sort(
+      (a, b) =>
+        new Date(b.latestMessage.receivedAt).getTime() -
+        new Date(a.latestMessage.receivedAt).getTime()
+    )
+    .map((thread) => ({
+      ...thread,
+      messages: [...thread.messages].sort(compareMessages),
+    }));
 }
 
 export function Inbox() {
   const { currentOrganizationId: organizationId } = useSession();
   const [accounts, setAccounts] = useState<InboxAccount[]>([]);
   const [messages, setMessages] = useState<InboundMessage[]>([]);
-  const [members, setMembers] = useState<OrganizationMember[]>([]);
-  const [notes, setNotes] = useState<InboundMessageNote[]>([]);
-  const [selected, setSelected] = useState<InboundMessage | null>(null);
+  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
-  const [notesLoading, setNotesLoading] = useState(false);
-  const [disabled, setDisabled] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [replying, setReplying] = useState(false);
-  const [addingNote, setAddingNote] = useState(false);
-  const [workflowSaving, setWorkflowSaving] = useState(false);
-  const [ticketSaving, setTicketSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">(
     "all"
   );
-  const [assigneeFilter, setAssigneeFilter] = useState("any");
   const [replyBody, setReplyBody] = useState("");
-  const [noteBody, setNoteBody] = useState("");
-  const [routedTo, setRoutedTo] = useState("");
-  const [ticketForm, setTicketForm] = useState({
-    provider: "JIRA" as NonNullable<InboundMessage["externalTicketProvider"]>,
-    key: "",
-    url: "",
-  });
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -112,6 +146,11 @@ export function Inbox() {
     mailbox: "INBOX",
   });
 
+  const threads = useMemo(() => buildConversationThreads(messages), [messages]);
+  const selectedThread = useMemo(
+    () => threads.find((thread) => thread.threadKey === selectedThreadKey) ?? null,
+    [threads, selectedThreadKey]
+  );
   const unreadCount = useMemo(
     () => messages.filter((message) => !message.readAt).length,
     [messages]
@@ -124,7 +163,6 @@ export function Inbox() {
     }
 
     setLoading(true);
-    setDisabled(false);
     try {
       const [nextAccounts, nextMessages] = await Promise.all([
         api.listInboxAccounts(organizationId),
@@ -132,27 +170,11 @@ export function Inbox() {
           organizationId,
           q: search || undefined,
           read: readFilter,
-          assignedToUserId:
-            assigneeFilter === "any" ? undefined : assigneeFilter,
         }),
       ]);
       setAccounts(nextAccounts);
       setMessages(nextMessages.data);
-      setSelected((current) =>
-        current
-          ? (nextMessages.data.find((message) => message.id === current.id) ??
-            nextMessages.data[0] ??
-            null)
-          : (nextMessages.data[0] ?? null)
-      );
     } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        setDisabled(true);
-        setAccounts([]);
-        setMessages([]);
-        setSelected(null);
-        return;
-      }
       toast.error(
         error instanceof Error ? error.message : "Unable to load inbox"
       );
@@ -163,53 +185,22 @@ export function Inbox() {
 
   useEffect(() => {
     void load();
-  }, [organizationId, readFilter, assigneeFilter]);
+  }, [organizationId, readFilter]);
 
   useEffect(() => {
-    if (!organizationId) {
-      setMembers([]);
+    if (threads.length === 0) {
+      setSelectedThreadKey(null);
       return;
     }
-    api
-      .listOrganizationMembers(organizationId)
-      .then(setMembers)
-      .catch(() => setMembers([]));
-  }, [organizationId]);
 
-  useEffect(() => {
-    if (!organizationId || !selected) {
-      setNotes([]);
-      return;
+    if (!selectedThreadKey || !threads.some((thread) => thread.threadKey === selectedThreadKey)) {
+      setSelectedThreadKey(threads[0].threadKey);
     }
-    setNotesLoading(true);
-    api
-      .listInboundMessageNotes(selected.id, organizationId)
-      .then(setNotes)
-      .catch(() => toast.error("Unable to load notes"))
-      .finally(() => setNotesLoading(false));
-  }, [organizationId, selected?.id]);
+  }, [threads, selectedThreadKey]);
 
   useEffect(() => {
-    setRoutedTo(selected?.routedTo ?? "");
-    setTicketForm({
-      provider: selected?.externalTicketProvider ?? "JIRA",
-      key: selected?.externalTicketKey ?? "",
-      url: selected?.externalTicketUrl ?? "",
-    });
-  }, [
-    selected?.id,
-    selected?.routedTo,
-    selected?.externalTicketProvider,
-    selected?.externalTicketKey,
-    selected?.externalTicketUrl,
-  ]);
-
-  function updateMessage(message: InboundMessage) {
-    setMessages((current) =>
-      current.map((item) => (item.id === message.id ? message : item))
-    );
-    setSelected((current) => (current?.id === message.id ? message : current));
-  }
+    setReplyBody("");
+  }, [selectedThreadKey]);
 
   async function submitAccount(event: FormEvent) {
     event.preventDefault();
@@ -258,146 +249,37 @@ export function Inbox() {
     }
   }
 
-  async function openMessage(message: InboundMessage) {
-    setSelected(message);
-    if (!organizationId || message.readAt) return;
+  async function openThread(thread: ConversationThread) {
+    setSelectedThreadKey(thread.threadKey);
+    if (!organizationId) return;
+
+    const unreadMessages = thread.messages.filter((message) => !message.readAt);
+    if (unreadMessages.length === 0) return;
+
     try {
-      const updated = await api.markInboundMessageRead(message.id, {
-        organizationId,
-        read: true,
-      });
-      updateMessage(updated);
+      for (const message of unreadMessages) {
+        const updated = await api.markInboundMessageRead(message.id, {
+          organizationId,
+          read: true,
+        });
+        setMessages((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item))
+        );
+      }
     } catch {
-      // Reading locally still works if the read marker fails.
-    }
-  }
-
-  async function assignSelected(assignedToUserId: string) {
-    if (!organizationId || !selected) return;
-    try {
-      const updated = await api.assignInboundMessage(selected.id, {
-        organizationId,
-        assignedToUserId:
-          assignedToUserId === "unassigned" ? null : assignedToUserId,
-      });
-      updateMessage(updated);
-      toast.success(
-        assignedToUserId === "unassigned"
-          ? "Conversation unassigned."
-          : "Conversation assigned."
-      );
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to assign.");
-    }
-  }
-
-  async function updateWorkflow(
-    input: Pick<InboundMessage, "status"> | Pick<InboundMessage, "priority">
-  ) {
-    if (!organizationId || !selected) return;
-    setWorkflowSaving(true);
-    try {
-      const updated = await api.updateInboundMessageWorkflow(selected.id, {
-        organizationId,
-        ...input,
-      });
-      updateMessage(updated);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to update workflow."
-      );
-    } finally {
-      setWorkflowSaving(false);
-    }
-  }
-
-  async function submitRoute(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId || !selected) return;
-    setWorkflowSaving(true);
-    try {
-      const updated = await api.updateInboundMessageWorkflow(selected.id, {
-        organizationId,
-        routedTo: routedTo.trim() || null,
-      });
-      updateMessage(updated);
-      toast.success(routedTo.trim() ? "Route saved." : "Route cleared.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to route.");
-    } finally {
-      setWorkflowSaving(false);
-    }
-  }
-
-  async function submitTicket(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId || !selected || !ticketForm.key.trim()) return;
-    setTicketSaving(true);
-    try {
-      const updated = await api.linkInboundMessageTicket(selected.id, {
-        organizationId,
-        provider: ticketForm.provider,
-        key: ticketForm.key.trim(),
-        url: ticketForm.url.trim() || undefined,
-      });
-      updateMessage(updated);
-      toast.success("Ticket linked.");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to link ticket."
-      );
-    } finally {
-      setTicketSaving(false);
-    }
-  }
-
-  async function clearTicket() {
-    if (!organizationId || !selected) return;
-    setTicketSaving(true);
-    try {
-      const updated = await api.clearInboundMessageTicket(
-        selected.id,
-        organizationId
-      );
-      updateMessage(updated);
-      toast.success("Ticket cleared.");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to clear ticket."
-      );
-    } finally {
-      setTicketSaving(false);
-    }
-  }
-
-  async function submitNote(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId || !selected || !noteBody.trim()) return;
-    setAddingNote(true);
-    try {
-      const note = await api.createInboundMessageNote(selected.id, {
-        organizationId,
-        body: noteBody,
-      });
-      setNotes((current) => [...current, note]);
-      setNoteBody("");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to add note."
-      );
-    } finally {
-      setAddingNote(false);
+      // Keep the local view usable even if the read marker fails.
     }
   }
 
   async function submitReply(event: FormEvent) {
     event.preventDefault();
-    if (!organizationId || !selected || !replyBody.trim()) return;
+    if (!organizationId || !selectedThread || !replyBody.trim()) return;
+
     setReplying(true);
     try {
-      await api.replyToInboundMessage(selected.id, {
+      await api.replyToInboundMessage(selectedThread.latestMessage.id, {
         organizationId,
-        subject: selected.subject || "(no subject)",
+        subject: selectedThread.latestMessage.subject || "(no subject)",
         text: replyBody,
       });
       setReplyBody("");
@@ -414,11 +296,11 @@ export function Inbox() {
     <>
       <PageHeader
         title="Inbox"
-        description="Read-only replies synced from connected IMAP mailboxes."
+        description="Read synced IMAP conversations and reply from QQueue."
         actions={
           <Button
             onClick={() => setDialogOpen(true)}
-            disabled={!organizationId || disabled}
+            disabled={!organizationId}
           >
             <MailPlus className="h-4 w-4" />
             Connect mailbox
@@ -427,446 +309,208 @@ export function Inbox() {
       />
 
       <section className="space-y-6 p-6">
-        {disabled ? (
-          <EmptyState
-            icon={InboxIcon}
-            title="Inbox module disabled"
-            description="Set INBOX_ENABLED=true for the API and worker to enable read-only IMAP sync."
-          />
-        ) : loading ? (
+        {loading ? (
           <div className="flex min-h-60 items-center justify-center">
             <Spinner />
           </div>
         ) : (
-          <>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-              <Card className="p-4">
-                <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="text-base font-semibold">Replies</h2>
-                    <p className="text-sm text-muted-foreground">
-                      {messages.length} synced, {unreadCount} unread
-                    </p>
-                  </div>
-                  <form
-                    className="flex gap-2"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void load();
-                    }}
-                  >
-                    <Input
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Search"
-                      className="w-48"
-                    />
-                    <Button type="submit" variant="outline" size="icon">
-                      <Search className="h-4 w-4" />
-                    </Button>
-                  </form>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <Card className="p-4">
+              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold">Conversations</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {messages.length} synced, {unreadCount} unread
+                  </p>
                 </div>
-                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex gap-2">
-                    {(["all", "unread", "read"] as const).map((value) => (
-                      <Button
-                        key={value}
-                        type="button"
-                        size="sm"
-                        variant={readFilter === value ? "default" : "outline"}
-                        onClick={() => setReadFilter(value)}
-                      >
-                        {value[0].toUpperCase()}
-                        {value.slice(1)}
-                      </Button>
-                    ))}
-                  </div>
-                  <div className="w-full sm:w-56">
-                    <Select
-                      value={assigneeFilter}
-                      onValueChange={setAssigneeFilter}
-                    >
-                      <SelectTrigger aria-label="Filter by assignee">
-                        <SelectValue placeholder="Any assignee" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="any">Any assignee</SelectItem>
-                        {members.map((member) => (
-                          <SelectItem key={member.userId} value={member.userId}>
-                            {memberLabel(member.user)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {messages.length === 0 ? (
-                  <EmptyState
-                    icon={MailOpen}
-                    title="No replies synced"
-                    description="Connected inboxes sync from the worker when the module is enabled."
+                <form
+                  className="flex gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void load();
+                  }}
+                >
+                  <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search"
+                    className="w-48"
                   />
-                ) : (
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>From</TableHead>
-                          <TableHead>Subject</TableHead>
-                          <TableHead>Received</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {messages.map((message) => (
+                  <Button type="submit" variant="outline" size="icon">
+                    <Search className="h-4 w-4" />
+                  </Button>
+                </form>
+              </div>
+              <div className="mb-3 flex gap-2">
+                {(["all", "unread", "read"] as const).map((value) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={readFilter === value ? "default" : "outline"}
+                    onClick={() => setReadFilter(value)}
+                  >
+                    {value[0].toUpperCase()}
+                    {value.slice(1)}
+                  </Button>
+                ))}
+              </div>
+              {threads.length === 0 ? (
+                <EmptyState
+                  icon={MailOpen}
+                  title="No conversations synced"
+                  description="Connected inboxes sync read-only replies from the worker."
+                />
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Conversation</TableHead>
+                        <TableHead>Latest message</TableHead>
+                        <TableHead>Received</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {threads.map((thread) => {
+                        const selected = thread.threadKey === selectedThreadKey;
+                        return (
                           <TableRow
-                            key={message.id}
-                            className="cursor-pointer"
-                            onClick={() => void openMessage(message)}
+                            key={thread.threadKey}
+                            className={`cursor-pointer ${selected ? "bg-muted/50" : ""}`}
+                            onClick={() => void openThread(thread)}
                           >
                             <TableCell>
-                              <div className="font-medium">
-                                {message.fromName ?? message.fromEmail}
-                              </div>
+                              <div className="font-medium">{thread.sender}</div>
                               <div className="text-xs text-muted-foreground">
-                                {message.fromEmail}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div
-                                className={
-                                  !message.readAt ? "font-semibold" : ""
-                                }
-                              >
-                                {message.subject || "(no subject)"}
-                              </div>
-                              <div className="max-w-lg truncate text-xs text-muted-foreground">
-                                {snippet(message)}
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {memberLabel(message.assignedTo)}
+                                {thread.subject}
                               </div>
                               <div className="mt-2 flex flex-wrap gap-2">
                                 <Badge variant="outline">
-                                  {message.status}
+                                  {thread.messages.length} message
+                                  {thread.messages.length === 1 ? "" : "s"}
                                 </Badge>
-                                <Badge variant="secondary">
-                                  {message.priority}
-                                </Badge>
-                                {message.routedTo ? (
-                                  <Badge variant="outline">
-                                    {message.routedTo}
+                                {thread.unreadCount > 0 ? (
+                                  <Badge variant="secondary">
+                                    {thread.unreadCount} unread
                                   </Badge>
                                 ) : null}
                               </div>
                             </TableCell>
+                            <TableCell>
+                              <div className="max-w-lg truncate text-sm text-muted-foreground">
+                                {snippet(thread.latestMessage)}
+                              </div>
+                            </TableCell>
                             <TableCell className="whitespace-nowrap text-sm">
-                              {formatDate(message.receivedAt)}
+                              {formatDate(thread.latestMessage.receivedAt)}
                             </TableCell>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+
+            <div className="space-y-4">
+              <Card className="p-4">
+                <h2 className="mb-3 text-base font-semibold">Mailboxes</h2>
+                {accounts.length === 0 ? (
+                  <EmptyState
+                    icon={Plug}
+                    title="No mailbox connected"
+                    description="Connect an IMAP mailbox to sync replies."
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {accounts.map((account) => (
+                      <div
+                        key={account.id}
+                        className="flex items-start justify-between gap-3 rounded-md border p-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">
+                            {account.name}
+                          </div>
+                          <div className="truncate text-sm text-muted-foreground">
+                            {account.email}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <Badge variant="outline">{account.status}</Badge>
+                            <span>{account.mailbox}</span>
+                            <span>
+                              Synced {formatDate(account.lastSyncedAt)}
+                            </span>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => void deleteAccount(account)}
+                          aria-label="Remove inbox account"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </Card>
 
-              <div className="space-y-4">
-                <Card className="p-4">
-                  <h2 className="mb-3 text-base font-semibold">Mailboxes</h2>
-                  {accounts.length === 0 ? (
-                    <EmptyState
-                      icon={Plug}
-                      title="No mailbox connected"
-                      description="Connect an IMAP mailbox to sync replies."
-                    />
-                  ) : (
+              <Card className="p-4">
+                <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
+                  <Reply className="h-4 w-4" />
+                  Conversation
+                </h2>
+                {selectedThread ? (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="font-medium">{selectedThread.subject}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {selectedThread.sender}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Badge variant="outline">
+                          {selectedThread.messages.length} message
+                          {selectedThread.messages.length === 1 ? "" : "s"}
+                        </Badge>
+                        {selectedThread.unreadCount > 0 ? (
+                          <Badge variant="secondary">
+                            {selectedThread.unreadCount} unread
+                          </Badge>
+                        ) : null}
+                      </div>
+                    </div>
+
                     <div className="space-y-3">
-                      {accounts.map((account) => (
+                      {selectedThread.messages.map((message) => (
                         <div
-                          key={account.id}
-                          className="flex items-start justify-between gap-3 rounded-md border p-3"
+                          key={message.id}
+                          className="rounded-md border bg-muted/20 p-3"
                         >
-                          <div className="min-w-0">
-                            <div className="truncate font-medium">
-                              {account.name}
-                            </div>
-                            <div className="truncate text-sm text-muted-foreground">
-                              {account.email}
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                              <Badge variant="outline">{account.status}</Badge>
-                              <span>{account.mailbox}</span>
-                              <span>
-                                Synced {formatDate(account.lastSyncedAt)}
-                              </span>
-                            </div>
+                          <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                            <span>{senderLabel(message)}</span>
+                            <span>{formatDate(message.receivedAt)}</span>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => void deleteAccount(account)}
-                            aria-label="Remove inbox account"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {message.emailJob ? (
+                            <Badge className="mb-2" variant="outline">
+                              Reply to {message.emailJob.subject}
+                            </Badge>
+                          ) : null}
+                          <div className="whitespace-pre-wrap text-sm">
+                            {message.text || "This reply has no plain-text body."}
+                          </div>
                         </div>
                       ))}
                     </div>
-                  )}
-                </Card>
 
-                <Card className="p-4">
-                  <h2 className="mb-3 text-base font-semibold">
-                    Selected reply
-                  </h2>
-                  {selected ? (
-                    <div className="space-y-3">
-                      <div>
-                        <div className="font-medium">
-                          {selected.subject || "(no subject)"}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {selected.fromEmail}
-                        </div>
-                      </div>
-                      {selected.emailJob ? (
-                        <Badge variant="secondary">
-                          Reply to {selected.emailJob.subject}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline">Unmatched</Badge>
-                      )}
-                      <div className="space-y-2">
-                        <Label>Assigned to</Label>
-                        <Select
-                          value={selected.assignedToUserId ?? "unassigned"}
-                          onValueChange={(value) => void assignSelected(value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="unassigned">
-                              Unassigned
-                            </SelectItem>
-                            {members.map((member) => (
-                              <SelectItem
-                                key={member.userId}
-                                value={member.userId}
-                              >
-                                {memberLabel(member.user)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm">
-                        {selected.text || "This reply has no plain-text body."}
-                      </div>
-                    </div>
-                  ) : (
-                    <EmptyState icon={MailOpen} title="No reply selected" />
-                  )}
-                </Card>
-
-                <Card className="p-4">
-                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
-                    <Workflow className="h-4 w-4" />
-                    Workflow
-                  </h2>
-                  {selected ? (
-                    <div className="space-y-3">
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Status</Label>
-                          <Select
-                            value={selected.status}
-                            disabled={workflowSaving}
-                            onValueChange={(status) =>
-                              void updateWorkflow({
-                                status: status as InboundMessage["status"],
-                              })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="OPEN">Open</SelectItem>
-                              <SelectItem value="PENDING">Pending</SelectItem>
-                              <SelectItem value="CLOSED">Closed</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Priority</Label>
-                          <Select
-                            value={selected.priority}
-                            disabled={workflowSaving}
-                            onValueChange={(priority) =>
-                              void updateWorkflow({
-                                priority:
-                                  priority as InboundMessage["priority"],
-                              })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="LOW">Low</SelectItem>
-                              <SelectItem value="NORMAL">Normal</SelectItem>
-                              <SelectItem value="HIGH">High</SelectItem>
-                              <SelectItem value="URGENT">Urgent</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <form className="space-y-2" onSubmit={submitRoute}>
-                        <Label htmlFor="route-target">Inbound route</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            id="route-target"
-                            value={routedTo}
-                            onChange={(event) =>
-                              setRoutedTo(event.target.value)
-                            }
-                            placeholder="support, billing, sales"
-                          />
-                          <Button
-                            type="submit"
-                            variant="outline"
-                            disabled={workflowSaving}
-                          >
-                            Save
-                          </Button>
-                        </div>
-                      </form>
-                    </div>
-                  ) : (
-                    <EmptyState icon={MailOpen} title="No reply selected" />
-                  )}
-                </Card>
-
-                <Card className="p-4">
-                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
-                    <Ticket className="h-4 w-4" />
-                    Ticket
-                  </h2>
-                  {selected ? (
-                    <form className="space-y-3" onSubmit={submitTicket}>
-                      <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
-                        <div className="space-y-2">
-                          <Label>Provider</Label>
-                          <Select
-                            value={ticketForm.provider}
-                            onValueChange={(provider) =>
-                              setTicketForm((current) => ({
-                                ...current,
-                                provider: provider as NonNullable<
-                                  InboundMessage["externalTicketProvider"]
-                                >,
-                              }))
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="JIRA">Jira</SelectItem>
-                              <SelectItem value="LINEAR">Linear</SelectItem>
-                              <SelectItem value="GITHUB">GitHub</SelectItem>
-                              <SelectItem value="ZENDESK">Zendesk</SelectItem>
-                              <SelectItem value="OTHER">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="ticket-key">Ticket key</Label>
-                          <Input
-                            id="ticket-key"
-                            value={ticketForm.key}
-                            onChange={(event) =>
-                              setTicketForm((current) => ({
-                                ...current,
-                                key: event.target.value,
-                              }))
-                            }
-                            placeholder="SUP-123"
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="ticket-url">Ticket URL</Label>
-                        <Input
-                          id="ticket-url"
-                          value={ticketForm.url}
-                          onChange={(event) =>
-                            setTicketForm((current) => ({
-                              ...current,
-                              url: event.target.value,
-                            }))
-                          }
-                          placeholder="https://..."
-                        />
-                      </div>
-                      {selected.externalTicketKey ? (
-                        <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                          <span className="font-medium">
-                            {selected.externalTicketProvider}
-                          </span>{" "}
-                          {selected.externalTicketUrl ? (
-                            <a
-                              href={selected.externalTicketUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-primary underline-offset-4 hover:underline"
-                            >
-                              {selected.externalTicketKey}
-                            </a>
-                          ) : (
-                            selected.externalTicketKey
-                          )}
-                        </div>
-                      ) : null}
-                      <div className="flex gap-2">
-                        <Button
-                          type="submit"
-                          disabled={ticketSaving || !ticketForm.key.trim()}
-                        >
-                          {ticketSaving ? (
-                            <Spinner />
-                          ) : (
-                            <Ticket className="h-4 w-4" />
-                          )}
-                          Link ticket
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={ticketSaving || !selected.externalTicketKey}
-                          onClick={() => void clearTicket()}
-                        >
-                          Clear
-                        </Button>
-                      </div>
-                    </form>
-                  ) : (
-                    <EmptyState icon={MailOpen} title="No reply selected" />
-                  )}
-                </Card>
-
-                <Card className="p-4">
-                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
-                    <Reply className="h-4 w-4" />
-                    Reply
-                  </h2>
-                  {selected ? (
                     <form className="space-y-3" onSubmit={submitReply}>
                       <Textarea
                         value={replyBody}
                         onChange={(event) => setReplyBody(event.target.value)}
-                        placeholder={`Reply to ${selected.fromEmail}`}
+                        placeholder={`Reply to ${selectedThread.latestMessage.fromEmail}`}
                         rows={5}
                       />
                       <Button
@@ -877,72 +521,13 @@ export function Inbox() {
                         Send reply
                       </Button>
                     </form>
-                  ) : (
-                    <EmptyState icon={MailOpen} title="No reply selected" />
-                  )}
-                </Card>
-
-                <Card className="p-4">
-                  <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
-                    <StickyNote className="h-4 w-4" />
-                    Internal notes
-                  </h2>
-                  {selected ? (
-                    <div className="space-y-3">
-                      {notesLoading ? (
-                        <div className="flex min-h-20 items-center justify-center">
-                          <Spinner />
-                        </div>
-                      ) : notes.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                          No internal notes yet.
-                        </p>
-                      ) : (
-                        <div className="space-y-2">
-                          {notes.map((note) => (
-                            <div
-                              key={note.id}
-                              className="rounded-md border bg-muted/20 p-3"
-                            >
-                              <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                                <span>{memberLabel(note.author)}</span>
-                                <span>{formatDate(note.createdAt)}</span>
-                              </div>
-                              <div className="whitespace-pre-wrap text-sm">
-                                {note.body}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <form className="space-y-3" onSubmit={submitNote}>
-                        <Textarea
-                          value={noteBody}
-                          onChange={(event) => setNoteBody(event.target.value)}
-                          placeholder="Add an internal note"
-                          rows={3}
-                        />
-                        <Button
-                          type="submit"
-                          variant="outline"
-                          disabled={addingNote || !noteBody.trim()}
-                        >
-                          {addingNote ? (
-                            <Spinner />
-                          ) : (
-                            <StickyNote className="h-4 w-4" />
-                          )}
-                          Add note
-                        </Button>
-                      </form>
-                    </div>
-                  ) : (
-                    <EmptyState icon={MailOpen} title="No reply selected" />
-                  )}
-                </Card>
-              </div>
+                  </div>
+                ) : (
+                  <EmptyState icon={MailOpen} title="No conversation selected" />
+                )}
+              </Card>
             </div>
-          </>
+          </div>
         )}
       </section>
 

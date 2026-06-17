@@ -59,8 +59,7 @@ share one delivery substrate:
    (password resets, OTPs, confirmations, invoices, notifications).
 3. **Manual email sending** — a user-facing composer for individual or
    small-batch sends (customer contact, manual invoices, lead follow-up).
-4. **Optional inbox module** — an opt-in, feature-flagged IMAP capability for
-   viewing replies to sent mail.
+4. **Inbox module** — an IMAP capability for viewing replies to sent mail.
 
 QQueue must **not** become a Gmail/Outlook/Zoho clone. The product is about
 email *delivery and operations* — sending, campaigns, transactional messaging,
@@ -224,11 +223,11 @@ threading-ready end to end; no API surface populates them yet.
 per open/click/bounce), not the identity of a message. A dedicated table was
 rejected for now because it would duplicate `EmailJob`.
 
-**Preferred future design for the inbox (Phase E):** a separate, feature-flagged
+**Preferred future design for the inbox (Phase E):** a separate
 `InboundMessage`/`EmailMessage` table in the inbox module storing **received**
 mail, joined to the outbound `EmailJob` by matching its `inReplyTo`/`references`
 against `EmailJob.messageId`. Inbound storage is an inbox concern and stays out
-of the core send pipeline — consistent with keeping the inbox optional and
+of the core send pipeline — consistent with keeping the inbox focused and
 modular (below).
 
 ## Email Studio Is a Dedicated Surface but Reuses the Send Pipeline (Phase B)
@@ -277,24 +276,21 @@ successful send the client deletes the working draft, keeping the send service
 free of draft coupling. Draft versioning/history was not built — consistent with
 the template-versioning deferral, drafts are single mutable rows.
 
-## Keep the Inbox Optional, Modular, and Feature-Flagged
+## Keep the Inbox Modular and Focused
 
-Inbox/IMAP functionality is a **separate module**, **disabled by default**, and
-gated behind a feature flag — mirroring the discipline already used for the
-`apps/cloud` boundary. It is not tightly coupled to the core sending pipeline.
+Inbox/IMAP functionality is a **separate module** with a narrow product scope.
+It is not tightly coupled to the core sending pipeline.
 
 Phase 1 of the inbox is intentionally narrow: connect a mailbox via IMAP, sync
 incoming mail read-only, and view replies to sent emails (anchored to outbound
-`messageId`/`In-Reply-To`). Reply-from-QQueue, shared inboxes, assignment,
-internal notes, and ticketing are deferred and explicitly out of scope for the
-initial inbox.
+`messageId`/`In-Reply-To`). The inbox stays conversation-focused: a thread list
+and reply surface on top of the existing inbound message store. Ticketing and
+helpdesk-style collaboration are out of scope for the inbox.
 
-Phase 2 keeps the same boundary: replies are a thin layer over the existing
-manual send pipeline with `In-Reply-To`/`References` populated from the selected
-inbound message, while shared inbox behavior is limited to organization-scoped
-assignment and append-only internal notes. Inbound routing, support workflow
-state machines, and ticketing integrations remain future Phase E/F work rather
-than becoming a parallel mailbox product.
+Replies from QQueue stay a thin layer over the existing manual send pipeline
+with `In-Reply-To`/`References` populated from the selected inbound message.
+Conversation grouping remains a UI concern over the thread metadata; it does not
+add a separate mailbox model.
 
 ## Suppression Is an Org-Wide Registry, Not Just `Contact.status` (Phase C)
 
@@ -428,15 +424,13 @@ returns a `truncated` flag rather than silently capping. Reputation alerts are
 derived against fixed thresholds (bounce > 5%, complaint > 0.1%) and the view is
 restricted to OWNER/ADMIN, like queue operations.
 
-## Inbox Workflows Stay Lightweight and Metadata-Driven (Phase E)
+## Inbox Stays Conversation-Focused
 
-Phase E completes the optional inbox module with route labels, support workflow
-state (`OPEN | PENDING | CLOSED`), priority, assignment, internal notes, and
-external ticket references. These fields live on `InboundMessage` because the
-module is meant to support email operations, not become a full helpdesk domain.
+The inbox module stops at inbound storage, conversation grouping, and reply.
+Those are the pieces needed to see and answer replies to sent mail. The module
+does not grow into a helpdesk domain with assignment, notes, workflow state, or
+ticketing metadata.
 
-Ticketing integrations are intentionally stored as provider/key/URL references
-for Jira, Linear, GitHub, Zendesk, or other systems. Creating and syncing remote
-tickets remains future integration work; the AGPL inbox keeps enough metadata to
-link a reply thread to an external ticket without introducing provider-specific
-state machines or proprietary workflow assumptions.
+If QQueue later needs Jira, Linear, GitHub, Zendesk, or other ticketing
+integrations, those should be separate integration workflows rather than fields
+or panels in the core inbox.

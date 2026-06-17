@@ -63,7 +63,6 @@ export type ApiErrorCode =
   | "invalid_schedule"
   | "validation_error"
   | "attachment_too_large"
-  | "feature_disabled"
   | "not_found"
   | "conflict";
 
@@ -131,9 +130,6 @@ export interface DomainThrottle {
 }
 
 export type InboxAccountStatus = "ACTIVE" | "DISABLED";
-export type InboundMessageStatus = "OPEN" | "PENDING" | "CLOSED";
-export type InboundMessagePriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
-export type TicketProvider = "JIRA" | "LINEAR" | "GITHUB" | "ZENDESK" | "OTHER";
 
 export interface InboxAccount {
   id: string;
@@ -168,39 +164,13 @@ export interface InboundMessage {
   html?: string | null;
   receivedAt: string;
   readAt?: string | null;
-  assignedToUserId?: string | null;
-  status: InboundMessageStatus;
-  priority: InboundMessagePriority;
-  routedTo?: string | null;
-  externalTicketProvider?: TicketProvider | null;
-  externalTicketKey?: string | null;
-  externalTicketUrl?: string | null;
   imapUid?: number | null;
-  assignedTo?: {
-    id: string;
-    email: string;
-    name?: string | null;
-  } | null;
   emailJob?: {
     id: string;
     subject: string;
     toEmail: string;
     messageId?: string | null;
   } | null;
-}
-
-export interface InboundMessageNote {
-  id: string;
-  organizationId: string;
-  inboundMessageId: string;
-  authorUserId: string;
-  body: string;
-  createdAt: string;
-  author: {
-    id: string;
-    email: string;
-    name?: string | null;
-  };
 }
 
 export interface Template {
@@ -635,7 +605,6 @@ export const inboundMessageQuerySchema = z.object({
   organizationId: z.string().min(1),
   q: z.string().trim().min(1).optional(),
   read: z.enum(["read", "unread", "all"]).default("all").optional(),
-  assignedToUserId: z.string().min(1).optional(),
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -643,60 +612,6 @@ export const inboundMessageQuerySchema = z.object({
 export type InboundMessageQueryInput = z.infer<
   typeof inboundMessageQuerySchema
 >;
-
-export const inboundMessageAssignmentSchema = z.object({
-  organizationId: z.string().min(1),
-  assignedToUserId: z.string().min(1).nullable().optional(),
-});
-
-export type InboundMessageAssignmentInput = z.infer<
-  typeof inboundMessageAssignmentSchema
->;
-
-export const inboundMessageWorkflowSchema = z
-  .object({
-    organizationId: z.string().min(1),
-    status: z.enum(["OPEN", "PENDING", "CLOSED"]).optional(),
-    priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
-    routedTo: z.string().trim().min(1).max(120).nullable().optional(),
-  })
-  .refine(
-    (input) =>
-      input.status !== undefined ||
-      input.priority !== undefined ||
-      input.routedTo !== undefined,
-    { message: "At least one workflow field is required" }
-  );
-
-export type InboundMessageWorkflowInput = z.infer<
-  typeof inboundMessageWorkflowSchema
->;
-
-export const inboundMessageTicketSchema = z.object({
-  organizationId: z.string().min(1),
-  provider: z.enum(["JIRA", "LINEAR", "GITHUB", "ZENDESK", "OTHER"]),
-  key: z.string().trim().min(1).max(120),
-  url: z.string().url().optional(),
-});
-
-export type InboundMessageTicketInput = z.infer<
-  typeof inboundMessageTicketSchema
->;
-
-export const inboundMessageTicketClearSchema = z.object({
-  organizationId: z.string().min(1),
-});
-
-export type InboundMessageTicketClearInput = z.infer<
-  typeof inboundMessageTicketClearSchema
->;
-
-export const inboundMessageNoteSchema = z.object({
-  organizationId: z.string().min(1),
-  body: z.string().trim().min(1).max(5000),
-});
-
-export type InboundMessageNoteInput = z.infer<typeof inboundMessageNoteSchema>;
 
 export const inboundMessageReplySchema = z
   .object({

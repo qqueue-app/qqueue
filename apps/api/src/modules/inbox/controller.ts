@@ -2,14 +2,9 @@ import type { Request, Response } from "express";
 import {
   inboxAccountSchema,
   inboxAccountUpdateSchema,
-  inboundMessageAssignmentSchema,
-  inboundMessageNoteSchema,
   inboundMessageQuerySchema,
   inboundMessageReplySchema,
   inboundMessageStoreSchema,
-  inboundMessageTicketClearSchema,
-  inboundMessageTicketSchema,
-  inboundMessageWorkflowSchema,
 } from "@qqueue/shared";
 import { z } from "zod";
 import { inboxService } from "./service.js";
@@ -72,68 +67,6 @@ export const inboxController = {
       input.read
     );
     res.json({ data: message });
-  },
-
-  async assignMessage(req: Request, res: Response) {
-    const input = inboundMessageAssignmentSchema.parse(req.body);
-    const message = await inboxService.assignMessage(
-      String(req.params.id),
-      req.userId!,
-      input
-    );
-    res.json({ data: message });
-  },
-
-  async updateWorkflow(req: Request, res: Response) {
-    const input = inboundMessageWorkflowSchema.parse(req.body);
-    const message = await inboxService.updateWorkflow(
-      String(req.params.id),
-      req.userId!,
-      input
-    );
-    res.json({ data: message });
-  },
-
-  async linkTicket(req: Request, res: Response) {
-    const input = inboundMessageTicketSchema.parse(req.body);
-    const message = await inboxService.linkTicket(
-      String(req.params.id),
-      req.userId!,
-      input
-    );
-    res.json({ data: message });
-  },
-
-  async clearTicket(req: Request, res: Response) {
-    const input = inboundMessageTicketClearSchema.parse(req.body);
-    const message = await inboxService.clearTicket(
-      String(req.params.id),
-      req.userId!,
-      input
-    );
-    res.json({ data: message });
-  },
-
-  async listNotes(req: Request, res: Response) {
-    const query = z
-      .object({ organizationId: z.string().min(1) })
-      .parse(req.query);
-    const notes = await inboxService.listNotes(
-      String(req.params.id),
-      req.userId!,
-      query.organizationId
-    );
-    res.json({ data: notes });
-  },
-
-  async createNote(req: Request, res: Response) {
-    const input = inboundMessageNoteSchema.parse(req.body);
-    const note = await inboxService.createNote(
-      String(req.params.id),
-      req.userId!,
-      input
-    );
-    res.status(201).json({ data: note });
   },
 
   async replyToMessage(req: Request, res: Response) {

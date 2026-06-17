@@ -67,5 +67,5 @@ v1Router.use("/email-drafts", emailDraftRouter);
 // send pipeline links rows to the EmailJob and the worker streams them to SMTP.
 v1Router.use("/attachments", attachmentRouter);
 v1Router.use("/webhook-endpoints", webhookEndpointRouter);
-// Optional Phase E inbox module. Disabled by default via INBOX_ENABLED=false.
+// Inbox module: IMAP reply sync, assignment, notes, and reply-from-QQueue.
 v1Router.use("/inbox", inboxRouter);

@@ -189,10 +189,6 @@ export async function syncInboxAccount(account: InboxAccount) {
 }
 
 export async function syncInboxAccounts(inboxAccountId?: string) {
-  if (!env.INBOX_ENABLED) {
-    return;
-  }
-
   const accounts = await getActiveInboxAccounts(inboxAccountId);
   for (const account of accounts) {
     await syncInboxAccount(account);

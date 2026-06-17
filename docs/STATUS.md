@@ -60,9 +60,9 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    auto-save/resume/delete/send), schedule-for-later, **attachments**
    (S3/MinIO object storage), and **per-recipient delivery status** after a
    send. Sends run through the shared pipeline with `origin = MANUAL`.
-4. **Optional inbox module** — opt-in, feature-flagged IMAP capability for
-   viewing replies to sent mail. *Not started; deliberately out of scope for the
-   current beta.*
+4. **Inbox module** — IMAP reply sync, conversation view, and reply-from-QQueue.
+   *Implemented as a focused email-operations workflow, not a full mailbox or
+   ticketing product.*
 
 Campaign, transactional, and manual sends are three entry points into a single
 pipeline (`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`), not three
@@ -117,8 +117,8 @@ operational and abuse-control gaps from the original audit have been closed.
   contacts, contact lists, templates, campaigns, campaign analytics, queue
   operations, settings/API keys/webhooks, and legal pages.
 - `apps/worker`: BullMQ workers. It processes campaign fan-out jobs, email
-  sending jobs, outbound webhook delivery jobs, and startup recovery for queued
-  work.
+  sending jobs, outbound webhook delivery jobs, inbox sync jobs, and startup
+  recovery for queued work.
 - `apps/cloud`: proprietary managed-cloud boundary scaffold. It currently
   contains package metadata, README, and a commercial license draft, but no
   production cloud behavior.
@@ -410,10 +410,11 @@ End-to-end, the app can currently support a self-hosted operator who:
   rule tree resolved at send time), A/B subject testing (test fraction +
   delayed winner decision), and deliverability tooling (rates, per-domain
   breakdown, reputation alerts) with Segments and Deliverability web pages.
-- [x] Optional IMAP inbox module (feature-flagged, off by default) — inbound
-  message storage anchored to `EmailJob` threading metadata, reply from QQueue,
-  shared assignment, internal notes, route labels, support workflow status /
-  priority, and external ticket references.
+- [x] IMAP inbox module — inbound message storage anchored to `EmailJob`
+  threading metadata, conversation grouping in the dashboard, reply from
+  QQueue, and a simplified inbox UI without ticketing.
+- [~] Richer team collaboration on conversations remains out of scope for the
+  core inbox.
 
 ### UX
 
@@ -466,15 +467,16 @@ End-to-end, the app can currently support a self-hosted operator who:
 
 ## Verification
 
-### Phase E inbox workflows (2026-06-17)
+### Inbox simplification (2026-06-17)
 
-- [x] Optional inbox Phase 3 scope completed as additive workflow metadata:
-  `InboundMessage.status`, `priority`, `routedTo`, and external ticket
-  reference fields for Jira, Linear, GitHub, Zendesk, and other systems.
-- [x] Inbox API now supports workflow updates and ticket link/clear actions
-  through the existing feature-flagged inbox routes.
-- [x] Inbox dashboard exposes routing, status, priority, and ticket reference
-  controls alongside assignment, notes, and reply-from-QQueue.
+- [x] Removed the `INBOX_ENABLED` runtime feature flag. Inbox API routes now
+  mount by default for authenticated organization members, and the worker
+  always starts/schedules inbox sync with the existing cadence and max-message
+  limits.
+- [x] Removed assignment, workflow, and internal-note inbox features so the UI
+  stays focused on conversations and replies.
+- [x] The dashboard now shows conversation threads instead of the old
+  message-by-message support view.
 
 ### Phase D2–D5 advanced campaign features (2026-06-16)
 

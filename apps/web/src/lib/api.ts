@@ -137,45 +137,13 @@ export interface InboundMessage {
   html?: string | null;
   receivedAt: string;
   readAt?: string | null;
-  assignedToUserId?: string | null;
-  status: "OPEN" | "PENDING" | "CLOSED";
-  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
-  routedTo?: string | null;
-  externalTicketProvider?:
-    | "JIRA"
-    | "LINEAR"
-    | "GITHUB"
-    | "ZENDESK"
-    | "OTHER"
-    | null;
-  externalTicketKey?: string | null;
-  externalTicketUrl?: string | null;
   imapUid?: number | null;
-  assignedTo?: {
-    id: string;
-    email: string;
-    name?: string | null;
-  } | null;
   emailJob?: {
     id: string;
     subject: string;
     toEmail: string;
     messageId?: string | null;
   } | null;
-}
-
-export interface InboundMessageNote {
-  id: string;
-  organizationId: string;
-  inboundMessageId: string;
-  authorUserId: string;
-  body: string;
-  createdAt: string;
-  author: {
-    id: string;
-    email: string;
-    name?: string | null;
-  };
 }
 
 export interface InboundMessageList {
@@ -1171,7 +1139,6 @@ export const api = {
     organizationId: string;
     q?: string;
     read?: "read" | "unread" | "all";
-    assignedToUserId?: string;
     cursor?: string;
   }) {
     const params = new URLSearchParams({
@@ -1179,9 +1146,6 @@ export const api = {
     });
     if (input.q) params.set("q", input.q);
     if (input.read) params.set("read", input.read);
-    if (input.assignedToUserId) {
-      params.set("assignedToUserId", input.assignedToUserId);
-    }
     if (input.cursor) params.set("cursor", input.cursor);
     return request<InboundMessageList>(
       `/api/v1/inbox/messages?${params.toString()}`
@@ -1197,84 +1161,6 @@ export const api = {
       {
         method: "PATCH",
         body: JSON.stringify({ read: input.read }),
-      }
-    );
-  },
-
-  assignInboundMessage(
-    id: string,
-    input: { organizationId: string; assignedToUserId?: string | null }
-  ) {
-    return request<InboundMessage>(
-      `/api/v1/inbox/messages/${id}/assignment?organizationId=${encodeURIComponent(input.organizationId)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(input),
-      }
-    );
-  },
-
-  updateInboundMessageWorkflow(
-    id: string,
-    input: {
-      organizationId: string;
-      status?: InboundMessage["status"];
-      priority?: InboundMessage["priority"];
-      routedTo?: string | null;
-    }
-  ) {
-    return request<InboundMessage>(
-      `/api/v1/inbox/messages/${id}/workflow?organizationId=${encodeURIComponent(input.organizationId)}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(input),
-      }
-    );
-  },
-
-  linkInboundMessageTicket(
-    id: string,
-    input: {
-      organizationId: string;
-      provider: NonNullable<InboundMessage["externalTicketProvider"]>;
-      key: string;
-      url?: string;
-    }
-  ) {
-    return request<InboundMessage>(
-      `/api/v1/inbox/messages/${id}/ticket?organizationId=${encodeURIComponent(input.organizationId)}`,
-      {
-        method: "PUT",
-        body: JSON.stringify(input),
-      }
-    );
-  },
-
-  clearInboundMessageTicket(id: string, organizationId: string) {
-    return request<InboundMessage>(
-      `/api/v1/inbox/messages/${id}/ticket?organizationId=${encodeURIComponent(organizationId)}`,
-      {
-        method: "DELETE",
-        body: JSON.stringify({ organizationId }),
-      }
-    );
-  },
-
-  listInboundMessageNotes(id: string, organizationId: string) {
-    return request<InboundMessageNote[]>(
-      `/api/v1/inbox/messages/${id}/notes?organizationId=${encodeURIComponent(organizationId)}`
-    );
-  },
-
-  createInboundMessageNote(
-    id: string,
-    input: { organizationId: string; body: string }
-  ) {
-    return request<InboundMessageNote>(
-      `/api/v1/inbox/messages/${id}/notes?organizationId=${encodeURIComponent(input.organizationId)}`,
-      {
-        method: "POST",
-        body: JSON.stringify(input),
       }
     );
   },

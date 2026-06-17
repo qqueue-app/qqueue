@@ -117,10 +117,6 @@ async function recoverQueuedWork() {
 }
 
 async function scheduleInboxSync() {
-  if (!env.INBOX_ENABLED) {
-    return;
-  }
-
   await inboxSyncQueue.upsertJobScheduler(
     "inbox-sync-active-accounts",
     { every: env.INBOX_SYNC_INTERVAL_SECONDS * 1000 },
@@ -139,7 +135,7 @@ const workers = [
   startEmailSendingWorker(),
   startCampaignProcessingWorker(),
   startWebhookDeliveryWorker(),
-  ...(env.INBOX_ENABLED ? [startInboxSyncWorker()] : []),
+  startInboxSyncWorker(),
 ];
 
 await recoverQueuedWork();

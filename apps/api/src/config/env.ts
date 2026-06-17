@@ -49,12 +49,6 @@ const envSchema = z.object({
   // Default per-recipient-domain send cap (messages/minute) used when an org has
   // no DomainThrottle row for the domain or a default. Must match the worker.
   DEFAULT_DOMAIN_MAX_PER_MINUTE: z.coerce.number().int().min(1).default(60),
-  // Optional Phase E inbox module. Disabled by default; when false, inbox API
-  // routes return 404 so existing self-hosted installs do not expose the module.
-  INBOX_ENABLED: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((value) => value === "true"),
 });
 
 export const env = envSchema.parse(process.env);

@@ -180,8 +180,8 @@ pipeline** (`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`):
    (implemented, Phase 6).
 3. **Manual email sending** — a user-facing composer for individual/small-batch
    sends (implemented as **Email Studio**, Phase B).
-4. **Optional inbox module** — opt-in, feature-flagged IMAP for viewing replies
-   to sent mail (Phase E).
+4. **Inbox module** — IMAP reply sync and lightweight collaboration for sent
+   mail (Phases E-F).
 
 Campaign, transactional, and manual sends are three entry points into one
 pipeline, not three products. See `docs/DECISIONS.md` for the rationale behind
@@ -278,40 +278,26 @@ See [docs/PHASE_D_PLAN.md](PHASE_D_PLAN.md) for the implementation plan.
 - [x] Deliverability tooling (rates + hard/soft split, per-domain breakdown,
   reputation alerts; dashboard hosts the policy + throttle controls)
 
-### Phase E: Optional inbox module
+### Phase E: Inbox module
 
-**Separate module, disabled by default, behind a feature flag** — mirroring the
-`apps/cloud` boundary discipline. It exists to support sending (seeing replies),
-not to become a mailbox product.
+Separate module with focused IMAP sync and reply workflows. It exists to
+support sending by showing conversations and letting operators reply, not to
+become a mailbox product.
 
-- Phase 1
-  - [x] Backend inbox foundation: feature flag, inbox account records,
-    inbound message storage, and outbound reply anchoring
-  - [x] Connect mailbox via IMAP
-  - [x] Sync incoming emails (read-only)
-  - [x] View replies to sent emails (anchored to outbound `messageId` /
-    `In-Reply-To`)
-  - [x] Search emails
-  - [x] Filter unread/read
-- Phase 2 (deferred)
-  - [x] Reply from QQueue
-  - [x] Shared inbox
-  - [x] Assign conversations
-  - [x] Internal notes
-- Phase 3 (deferred)
-  - [x] Inbound email routing (manual route labels on synced messages)
-  - [x] Support workflows (status, priority, assignment, notes)
-  - [x] Ticketing integrations (external ticket reference fields for Jira,
-    Linear, GitHub, Zendesk, and other systems)
+- [x] Backend inbox foundation: inbox account records, inbound message storage,
+  and outbound reply anchoring
+- [x] Connect mailbox via IMAP
+- [x] Sync incoming emails (read-only)
+- [x] View replies to sent emails (anchored to outbound `messageId` /
+  `In-Reply-To`)
+- [x] Search emails
+- [x] Filter unread/read
+- [x] Conversation list and thread detail view in the dashboard
+- [x] Reply from QQueue
 
-### Phase F: Collaboration and team workflows
-
-- [ ] Reply-from-QQueue
-- [ ] Shared inbox with conversation assignment
-- [ ] Internal notes
-- [ ] Team collaboration on conversations
-
-(Ticketing is an integration target, not a build.)
+Ticketing and helpdesk-style collaboration are not part of the inbox scope. If
+added later, they should live as a separate integration workflow rather than in
+the core inbox UI.
 
 ### Editor stack
 

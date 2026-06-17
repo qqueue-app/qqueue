@@ -2,14 +2,9 @@ import type { Prisma } from "@prisma/client";
 import type {
   InboxAccountInput,
   InboxAccountUpdateInput,
-  InboundMessageAssignmentInput,
-  InboundMessageNoteInput,
   InboundMessageQueryInput,
   InboundMessageReplyInput,
   InboundMessageStoreInput,
-  InboundMessageTicketClearInput,
-  InboundMessageTicketInput,
-  InboundMessageWorkflowInput,
 } from "@qqueue/shared";
 import { ImapFlow } from "imapflow";
 import { encryptSecret } from "../../lib/crypto.js";
@@ -18,13 +13,6 @@ import { prisma } from "../../lib/prisma.js";
 import { manualEmailService } from "../manual-email/service.js";
 
 const messageInclude = {
-  assignedTo: {
-    select: {
-      id: true,
-      email: true,
-      name: true,
-    },
-  },
   emailJob: {
     select: {
       id: true,
@@ -263,9 +251,6 @@ export const inboxService = {
       organizationId: query.organizationId,
       ...(query.read === "read" ? { readAt: { not: null } } : {}),
       ...(query.read === "unread" ? { readAt: null } : {}),
-      ...(query.assignedToUserId
-        ? { assignedToUserId: query.assignedToUserId }
-        : {}),
     };
 
     if (query.q) {
@@ -292,183 +277,6 @@ export const inboxService = {
       data: messages.slice(0, query.limit),
       nextCursor,
     };
-  },
-
-  async assignMessage(
-    id: string,
-    userId: string,
-    input: InboundMessageAssignmentInput
-  ) {
-    if (input.assignedToUserId) {
-      const assignee = await prisma.organizationMember.findFirst({
-        where: {
-          organizationId: input.organizationId,
-          userId: input.assignedToUserId,
-        },
-        select: { id: true },
-      });
-      if (!assignee) {
-        throw new HttpError(
-          400,
-          "Assignee must be a member of the organization",
-          "validation_error"
-        );
-      }
-    }
-
-    const { count } = await prisma.inboundMessage.updateMany({
-      where: {
-        id,
-        organizationId: input.organizationId,
-        organization: { members: { some: { userId } } },
-      },
-      data: { assignedToUserId: input.assignedToUserId ?? null },
-    });
-    if (count === 0) {
-      throw new HttpError(404, "Inbound message not found", "not_found");
-    }
-
-    return prisma.inboundMessage.findUniqueOrThrow({
-      where: { id },
-      include: messageInclude,
-    });
-  },
-
-  async updateWorkflow(
-    id: string,
-    userId: string,
-    input: InboundMessageWorkflowInput
-  ) {
-    const { count } = await prisma.inboundMessage.updateMany({
-      where: {
-        id,
-        organizationId: input.organizationId,
-        organization: { members: { some: { userId } } },
-      },
-      data: {
-        ...(input.status ? { status: input.status } : {}),
-        ...(input.priority ? { priority: input.priority } : {}),
-        ...(input.routedTo !== undefined ? { routedTo: input.routedTo } : {}),
-      },
-    });
-    if (count === 0) {
-      throw new HttpError(404, "Inbound message not found", "not_found");
-    }
-
-    return prisma.inboundMessage.findUniqueOrThrow({
-      where: { id },
-      include: messageInclude,
-    });
-  },
-
-  async linkTicket(
-    id: string,
-    userId: string,
-    input: InboundMessageTicketInput
-  ) {
-    const { count } = await prisma.inboundMessage.updateMany({
-      where: {
-        id,
-        organizationId: input.organizationId,
-        organization: { members: { some: { userId } } },
-      },
-      data: {
-        externalTicketProvider: input.provider,
-        externalTicketKey: input.key,
-        externalTicketUrl: input.url ?? null,
-      },
-    });
-    if (count === 0) {
-      throw new HttpError(404, "Inbound message not found", "not_found");
-    }
-
-    return prisma.inboundMessage.findUniqueOrThrow({
-      where: { id },
-      include: messageInclude,
-    });
-  },
-
-  async clearTicket(
-    id: string,
-    userId: string,
-    input: InboundMessageTicketClearInput
-  ) {
-    const { count } = await prisma.inboundMessage.updateMany({
-      where: {
-        id,
-        organizationId: input.organizationId,
-        organization: { members: { some: { userId } } },
-      },
-      data: {
-        externalTicketProvider: null,
-        externalTicketKey: null,
-        externalTicketUrl: null,
-      },
-    });
-    if (count === 0) {
-      throw new HttpError(404, "Inbound message not found", "not_found");
-    }
-
-    return prisma.inboundMessage.findUniqueOrThrow({
-      where: { id },
-      include: messageInclude,
-    });
-  },
-
-  async listNotes(messageId: string, userId: string, organizationId: string) {
-    const message = await prisma.inboundMessage.findFirst({
-      where: {
-        id: messageId,
-        organizationId,
-        organization: { members: { some: { userId } } },
-      },
-      select: { id: true },
-    });
-    if (!message) {
-      throw new HttpError(404, "Inbound message not found", "not_found");
-    }
-
-    return prisma.inboundMessageNote.findMany({
-      where: { inboundMessageId: messageId, organizationId },
-      include: {
-        author: {
-          select: { id: true, email: true, name: true },
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    });
-  },
-
-  async createNote(
-    messageId: string,
-    userId: string,
-    input: InboundMessageNoteInput
-  ) {
-    const message = await prisma.inboundMessage.findFirst({
-      where: {
-        id: messageId,
-        organizationId: input.organizationId,
-        organization: { members: { some: { userId } } },
-      },
-      select: { id: true },
-    });
-    if (!message) {
-      throw new HttpError(404, "Inbound message not found", "not_found");
-    }
-
-    return prisma.inboundMessageNote.create({
-      data: {
-        organizationId: input.organizationId,
-        inboundMessageId: messageId,
-        authorUserId: userId,
-        body: input.body,
-      },
-      include: {
-        author: {
-          select: { id: true, email: true, name: true },
-        },
-      },
-    });
   },
 
   async replyToMessage(
