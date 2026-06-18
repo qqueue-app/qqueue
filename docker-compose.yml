@@ -19,8 +19,8 @@ services:
     volumes:
       - qqueue-redis-data:/data
 
-  # S3-compatible object storage for email attachments. The API console is on
-  # :9001; the S3 API is on :9000 (matches the default S3_ENDPOINT).
+  # S3-compatible object storage for email attachments. The host S3 API is on
+  # :9100 and the console is on :9101 (matches the default S3_ENDPOINT).
   minio:
     image: minio/minio:latest
     container_name: qqueue-minio

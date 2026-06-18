@@ -30,12 +30,15 @@ checks, and open-core licensing guardrails.
 It is beta software: expect rough edges, review the security and operational
 notes before exposing it publicly, and pin a known-good commit for production.
 
-New here? Start with the **[Quickstart](docs/QUICKSTART.md)**, then work through
-the **[Beta Launch Checklist](docs/BETA_CHECKLIST.md)** before going live.
+New here? Start with the **[Quickstart](docs/QUICKSTART.md)** for local setup.
+For a VPS, use the **[Deploy guide](docs/DEPLOY.md)**, then work through the
+**[Beta Launch Checklist](docs/BETA_CHECKLIST.md)** before going live.
 
 ## Documentation
 
 - [Quickstart](docs/QUICKSTART.md) — clone to first sent email, locally.
+- [Deploy on a VPS](docs/DEPLOY.md) — production Docker Compose setup with
+  Caddy, API, worker, Postgres, Redis, and MinIO.
 - [Mailcow SMTP setup](docs/MAILCOW_SETUP.md) — connect a Mailcow mail server.
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — fixes for the most common
   SMTP, Redis, Prisma, queue, tracking, and reverse-proxy issues.

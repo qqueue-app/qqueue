@@ -2,11 +2,11 @@
 
 This guide takes you from a fresh clone to sending your first test email on your
 own machine. It targets local development; for a production launch follow the
-[Beta Launch Checklist](BETA_CHECKLIST.md) afterwards.
+[VPS Deploy guide](DEPLOY.md) and then the [Beta Launch Checklist](BETA_CHECKLIST.md).
 
 **Time:** ~10 minutes. **You need:** Node.js 20+, [pnpm](https://pnpm.io), and
-Docker (for Postgres and Redis), plus SMTP credentials for a mailbox you can
-send from (see [Mailcow setup](MAILCOW_SETUP.md) if you run Mailcow).
+Docker (for Postgres, Redis, and MinIO), plus SMTP credentials for a mailbox
+you can send from (see [Mailcow setup](MAILCOW_SETUP.md) if you run Mailcow).
 
 ---
 
@@ -43,15 +43,16 @@ with the bundled Docker services, but you should at least skim:
 - `PUBLIC_APP_URL` — public base URL of the web dashboard, used to build
   password-reset links. Defaults to the local Vite server in dev.
 
-## 4. Start Postgres and Redis
+## 4. Start Postgres, Redis, and MinIO
 
-The repo ships a `docker-compose.yml` with Postgres and Redis:
+The repo ships a `docker-compose.yml` with Postgres, Redis, and MinIO for
+attachment storage:
 
 ```sh
 docker compose up -d
 ```
 
-Confirm both containers are healthy with `docker compose ps`.
+Confirm the containers are running with `docker compose ps`.
 
 ## 5. Run database migrations
 
@@ -168,6 +169,8 @@ A `202 Accepted` with a job id means it was sent (or queued, for a future
 
 - [Transactional API](TRANSACTIONAL_API.md) — API keys, the SDK, webhook
   signing, and retries.
+- [Deploy on a VPS](DEPLOY.md) — production Docker Compose setup for
+  self-hosting QQueue.
 - [Beta launch checklist](BETA_CHECKLIST.md) — everything to verify before a
   self-hosted production launch.
 - [Troubleshooting](TROUBLESHOOTING.md) — if something above didn't work.

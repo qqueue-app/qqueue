@@ -1,4 +1,4 @@
-{$DOMAIN} {
+{$CADDY_SITE_ADDRESS} {
 	root * /usr/share/caddy
 	encode zstd gzip
 

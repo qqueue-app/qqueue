@@ -1,0 +1,6 @@
+services:
+  caddy:
+    environment:
+      CADDY_SITE_ADDRESS: http://:80
+    ports: !override
+      - "127.0.0.1:${QQUEUE_UPSTREAM_PORT:-8080}:80"

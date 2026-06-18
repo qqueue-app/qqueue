@@ -15,7 +15,18 @@ const envSchema = z.object({
   TRACKING_SECRET: z.string().min(1),
   // Object storage (S3-compatible) for email attachments; must match the API's
   // S3 settings so the worker can read blobs the API stored at send time.
-  S3_ENDPOINT: z.string().url().default("http://localhost:9100"),
+  S3_ENDPOINT: z.preprocess(
+    (value) => {
+      if (value === undefined) {
+        return "http://localhost:9100";
+      }
+      if (value === "") {
+        return undefined;
+      }
+      return value;
+    },
+    z.string().url().optional()
+  ),
   S3_REGION: z.string().default("us-east-1"),
   S3_BUCKET: z.string().default("qqueue-attachments"),
   S3_ACCESS_KEY_ID: z.string().default("qqueue"),

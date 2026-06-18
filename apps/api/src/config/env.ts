@@ -30,7 +30,18 @@ const envSchema = z.object({
   // Object storage (S3-compatible) for email attachments. Defaults target the
   // bundled MinIO container for self-host; point them at any S3 provider for
   // managed deployments. `S3_FORCE_PATH_STYLE` must stay true for MinIO.
-  S3_ENDPOINT: z.string().url().default("http://localhost:9100"),
+  S3_ENDPOINT: z.preprocess(
+    (value) => {
+      if (value === undefined) {
+        return "http://localhost:9100";
+      }
+      if (value === "") {
+        return undefined;
+      }
+      return value;
+    },
+    z.string().url().optional()
+  ),
   S3_REGION: z.string().default("us-east-1"),
   S3_BUCKET: z.string().default("qqueue-attachments"),
   S3_ACCESS_KEY_ID: z.string().default("qqueue"),
