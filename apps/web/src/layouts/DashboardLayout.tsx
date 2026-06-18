@@ -153,7 +153,7 @@ export function DashboardLayout() {
     return (
       <>
         {showLogo ? (
-          <div className="flex items-center px-5 py-5">
+          <div className="flex items-center gap-3 px-5 py-5">
             <BrandWordmark />
           </div>
         ) : null}
@@ -161,7 +161,10 @@ export function DashboardLayout() {
         {user ? (
           <div className="px-3 pb-2">
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-xl border bg-background/70 px-3 py-2.5 text-left shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-semibold text-primary">
+                  {(currentOrganization?.name ?? "Q").slice(0, 1).toUpperCase()}
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">
                     Organization
@@ -206,7 +209,7 @@ export function DashboardLayout() {
           </div>
         ) : null}
 
-        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3">
           {navItems.map((item) => {
             const Icon = item.icon;
 
@@ -227,9 +230,9 @@ export function DashboardLayout() {
                       }))
                     }
                     className={cn(
-                      "flex w-full items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                      "flex w-full items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       groupActive
-                        ? "text-foreground"
+                        ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground"
                     )}
                   >
@@ -274,9 +277,9 @@ export function DashboardLayout() {
                 end={item.to === "/"}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    "flex items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isActive
-                      ? "bg-primary/10 text-primary"
+                      ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground"
                   )
                 }
@@ -288,23 +291,23 @@ export function DashboardLayout() {
           })}
         </nav>
 
-        <div className="border-t p-3">
-          <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 px-2 text-xs text-muted-foreground">
+        <div className="border-t bg-muted/20 p-3">
+          <div className="mb-3 grid grid-cols-3 gap-1 px-1 text-center text-xs text-muted-foreground">
             <NavLink
               to="/terms"
-              className="hover:text-foreground hover:underline"
+              className="rounded-md px-1.5 py-1 hover:bg-accent hover:text-foreground"
             >
               Terms
             </NavLink>
             <NavLink
               to="/privacy"
-              className="hover:text-foreground hover:underline"
+              className="rounded-md px-1.5 py-1 hover:bg-accent hover:text-foreground"
             >
               Privacy
             </NavLink>
             <NavLink
               to="/licensing"
-              className="hover:text-foreground hover:underline"
+              className="rounded-md px-1.5 py-1 hover:bg-accent hover:text-foreground"
             >
               Licensing
             </NavLink>
@@ -312,7 +315,7 @@ export function DashboardLayout() {
           {user ? (
             <div className="flex items-center gap-1">
               <DropdownMenu>
-                <DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
                     {initial}
                   </div>
@@ -359,16 +362,16 @@ export function DashboardLayout() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col gap-3 p-3 md:h-screen md:flex-row md:overflow-hidden">
+    <div className="flex min-h-screen flex-col gap-3 bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34rem)] p-3 md:h-screen md:flex-row md:overflow-hidden">
       {showSplash ? <DashboardSplash /> : null}
 
       {/* Desktop sidebar */}
-      <aside className="hidden flex-col rounded-2xl border bg-card shadow-sm md:flex md:h-full md:w-64 md:shrink-0">
+      <aside className="hidden flex-col overflow-hidden rounded-2xl border bg-card/95 shadow-sm shadow-slate-950/[0.04] md:flex md:h-full md:w-64 md:shrink-0">
         <SidebarBody />
       </aside>
 
       {/* Mobile top bar */}
-      <header className="flex items-center justify-between rounded-2xl border bg-card px-3 py-2.5 shadow-sm md:hidden">
+      <header className="flex items-center justify-between rounded-2xl border bg-card/95 px-3 py-2.5 shadow-sm md:hidden">
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
@@ -408,7 +411,7 @@ export function DashboardLayout() {
         </div>
       ) : null}
 
-      <main className="min-w-0 flex-1 overflow-y-auto rounded-2xl border bg-card shadow-sm md:h-full">
+      <main className="min-w-0 flex-1 overflow-y-auto rounded-2xl border bg-card/95 shadow-sm shadow-slate-950/[0.04] md:h-full">
         <Outlet />
       </main>
     </div>

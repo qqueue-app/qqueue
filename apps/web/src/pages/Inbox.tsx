@@ -26,16 +26,16 @@ import {
 } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
-import { Spinner } from "../components/ui/spinner.js";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table.js";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select.js";
+import { Spinner } from "../components/ui/spinner.js";
 import { Textarea } from "../components/ui/textarea.js";
+import { Switch } from "../components/ui/switch.js";
 
 type ConversationThread = {
   threadKey: string;
@@ -123,6 +123,7 @@ export function Inbox() {
   const { currentOrganizationId: organizationId } = useSession();
   const [accounts, setAccounts] = useState<InboxAccount[]>([]);
   const [messages, setMessages] = useState<InboundMessage[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
     null
   );
@@ -146,14 +147,30 @@ export function Inbox() {
     mailbox: "INBOX",
   });
 
-  const threads = useMemo(() => buildConversationThreads(messages), [messages]);
+  const selectedAccount = useMemo(
+    () => accounts.find((account) => account.id === selectedAccountId) ?? null,
+    [accounts, selectedAccountId]
+  );
+  const filteredMessages = useMemo(
+    () =>
+      selectedAccountId === "all"
+        ? messages
+        : messages.filter(
+            (message) => message.inboxAccountId === selectedAccountId
+          ),
+    [messages, selectedAccountId]
+  );
+  const threads = useMemo(
+    () => buildConversationThreads(filteredMessages),
+    [filteredMessages]
+  );
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.threadKey === selectedThreadKey) ?? null,
     [threads, selectedThreadKey]
   );
   const unreadCount = useMemo(
-    () => messages.filter((message) => !message.readAt).length,
-    [messages]
+    () => filteredMessages.filter((message) => !message.readAt).length,
+    [filteredMessages]
   );
 
   async function load() {
@@ -186,6 +203,15 @@ export function Inbox() {
   useEffect(() => {
     void load();
   }, [organizationId, readFilter]);
+
+  useEffect(() => {
+    if (
+      selectedAccountId !== "all" &&
+      !accounts.some((account) => account.id === selectedAccountId)
+    ) {
+      setSelectedAccountId("all");
+    }
+  }, [accounts, selectedAccountId]);
 
   useEffect(() => {
     if (threads.length === 0) {
@@ -294,35 +320,100 @@ export function Inbox() {
 
   return (
     <>
-      <PageHeader
-        title="Inbox"
-        description="Read synced IMAP conversations and reply from QQueue."
-        actions={
-          <Button
-            onClick={() => setDialogOpen(true)}
-            disabled={!organizationId}
-          >
-            <MailPlus className="h-4 w-4" />
-            Connect mailbox
-          </Button>
-        }
-      />
+      <div className="flex min-h-0 flex-col md:h-full">
+        <PageHeader
+          title="Inbox"
+          description="Read synced IMAP conversations and reply from QQueue."
+          actions={
+            <Button
+              onClick={() => setDialogOpen(true)}
+              disabled={!organizationId}
+            >
+              <MailPlus className="h-4 w-4" />
+              Connect mailbox
+            </Button>
+          }
+        />
 
-      <section className="space-y-6 p-6">
-        {loading ? (
-          <div className="flex min-h-60 items-center justify-center">
-            <Spinner />
-          </div>
-        ) : (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-            <Card className="p-4">
-              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <section className="min-h-0 flex-1 p-5 sm:p-6 xl:overflow-hidden">
+          {loading ? (
+            <div className="flex min-h-60 items-center justify-center">
+              <Spinner />
+            </div>
+          ) : (
+            <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
+              <Card className="flex min-h-[28rem] flex-col overflow-hidden xl:min-h-0">
+                <div className="shrink-0 space-y-3 border-b p-4">
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="inbox-mailbox-filter"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Mailbox
+                  </Label>
+                  <div className="flex gap-2">
+                    <Select
+                      value={selectedAccountId}
+                      onValueChange={setSelectedAccountId}
+                      disabled={accounts.length === 0}
+                    >
+                      <SelectTrigger id="inbox-mailbox-filter">
+                        <SelectValue placeholder="Select mailbox" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">
+                          All mailboxes ({accounts.length})
+                        </SelectItem>
+                        {accounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {account.name} ({account.email})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      disabled={!selectedAccount}
+                      onClick={() => {
+                        if (selectedAccount) void deleteAccount(selectedAccount);
+                      }}
+                      aria-label="Remove selected mailbox"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
                 <div>
                   <h2 className="text-base font-semibold">Conversations</h2>
                   <p className="text-sm text-muted-foreground">
-                    {messages.length} synced, {unreadCount} unread
+                    {filteredMessages.length} synced, {unreadCount} unread
                   </p>
                 </div>
+                {accounts.length === 0 ? (
+                  <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+                      <Plug className="h-4 w-4 shrink-0" />
+                      <span>No mailbox connected yet.</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDialogOpen(true)}
+                    >
+                      <MailPlus className="h-4 w-4" />
+                      Connect mailbox
+                    </Button>
+                  </div>
+                ) : selectedAccount ? (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <Badge variant="outline">{selectedAccount.status}</Badge>
+                    <Badge variant="secondary">{selectedAccount.mailbox}</Badge>
+                    <span>Synced {formatDate(selectedAccount.lastSyncedAt)}</span>
+                  </div>
+                ) : null}
                 <form
                   className="flex gap-2"
                   onSubmit={(event) => {
@@ -333,186 +424,157 @@ export function Inbox() {
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search"
-                    className="w-48"
+                    placeholder="Search inbox"
+                    className="min-w-0"
                   />
-                  <Button type="submit" variant="outline" size="icon">
+                  <Button type="submit" variant="outline" size="icon" aria-label="Search inbox">
                     <Search className="h-4 w-4" />
                   </Button>
                 </form>
-              </div>
-              <div className="mb-3 flex gap-2">
-                {(["all", "unread", "read"] as const).map((value) => (
-                  <Button
-                    key={value}
-                    type="button"
-                    size="sm"
-                    variant={readFilter === value ? "default" : "outline"}
-                    onClick={() => setReadFilter(value)}
-                  >
-                    {value[0].toUpperCase()}
-                    {value.slice(1)}
-                  </Button>
-                ))}
-              </div>
-              {threads.length === 0 ? (
-                <EmptyState
-                  icon={MailOpen}
-                  title="No conversations synced"
-                  description="Connected inboxes sync read-only replies from the worker."
-                />
-              ) : (
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Conversation</TableHead>
-                        <TableHead>Latest message</TableHead>
-                        <TableHead>Received</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {threads.map((thread) => {
-                        const selected = thread.threadKey === selectedThreadKey;
-                        return (
-                          <TableRow
-                            key={thread.threadKey}
-                            className={`cursor-pointer ${selected ? "bg-muted/50" : ""}`}
-                            onClick={() => void openThread(thread)}
-                          >
-                            <TableCell>
-                              <div className="font-medium">{thread.sender}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {thread.subject}
-                              </div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <Badge variant="outline">
-                                  {thread.messages.length} message
-                                  {thread.messages.length === 1 ? "" : "s"}
-                                </Badge>
-                                {thread.unreadCount > 0 ? (
-                                  <Badge variant="secondary">
-                                    {thread.unreadCount} unread
-                                  </Badge>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="max-w-lg truncate text-sm text-muted-foreground">
-                                {snippet(thread.latestMessage)}
-                              </div>
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-sm">
-                              {formatDate(thread.latestMessage.receivedAt)}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+                <div className="grid grid-cols-3 gap-1 rounded-lg border bg-muted/30 p-1">
+                  {(["all", "unread", "read"] as const).map((value) => (
+                    <Button
+                      key={value}
+                      type="button"
+                      size="sm"
+                      variant={readFilter === value ? "secondary" : "ghost"}
+                      onClick={() => setReadFilter(value)}
+                    >
+                      {value[0].toUpperCase()}
+                      {value.slice(1)}
+                    </Button>
+                  ))}
                 </div>
-              )}
-            </Card>
-
-            <div className="space-y-4">
-              <Card className="p-4">
-                <h2 className="mb-3 text-base font-semibold">Mailboxes</h2>
-                {accounts.length === 0 ? (
-                  <EmptyState
-                    icon={Plug}
-                    title="No mailbox connected"
-                    description="Connect an IMAP mailbox to sync replies."
-                  />
+              </div>
+                {threads.length === 0 ? (
+                  <div className="flex-1">
+                    <EmptyState
+                      icon={MailOpen}
+                      title="No conversations yet"
+                      description="Replies will appear here after your connected mailbox syncs."
+                    />
+                  </div>
                 ) : (
-                  <div className="space-y-3">
-                    {accounts.map((account) => (
-                      <div
-                        key={account.id}
-                        className="flex items-start justify-between gap-3 rounded-md border p-3"
+                  <div className="scrollbar-hidden min-h-0 flex-1 divide-y overflow-y-auto">
+                  {threads.map((thread) => {
+                    const selected = thread.threadKey === selectedThreadKey;
+                    return (
+                      <button
+                        key={thread.threadKey}
+                        type="button"
+                        className={`block w-full px-4 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+                          selected ? "bg-primary/10" : "bg-card"
+                        }`}
+                        onClick={() => void openThread(thread)}
                       >
-                        <div className="min-w-0">
-                          <div className="truncate font-medium">
-                            {account.name}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              {thread.unreadCount > 0 ? (
+                                <span className="h-2 w-2 rounded-full bg-primary" aria-hidden />
+                              ) : null}
+                              <span className="truncate text-sm font-semibold">
+                                {thread.sender}
+                              </span>
+                            </div>
+                            <div className="mt-1 truncate text-sm">
+                              {thread.subject}
+                            </div>
                           </div>
-                          <div className="truncate text-sm text-muted-foreground">
-                            {account.email}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <Badge variant="outline">{account.status}</Badge>
-                            <span>{account.mailbox}</span>
-                            <span>
-                              Synced {formatDate(account.lastSyncedAt)}
-                            </span>
-                          </div>
+                          <span className="shrink-0 text-[11px] text-muted-foreground">
+                            {formatDate(thread.latestMessage.receivedAt)}
+                          </span>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => void deleteAccount(account)}
-                          aria-label="Remove inbox account"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
+                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          {snippet(thread.latestMessage)}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <Badge variant="outline">
+                            {thread.messages.length} message
+                            {thread.messages.length === 1 ? "" : "s"}
+                          </Badge>
+                          {thread.unreadCount > 0 ? (
+                            <Badge variant="default">
+                              {thread.unreadCount} unread
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </button>
+                    );
+                  })}
                   </div>
                 )}
               </Card>
 
-              <Card className="p-4">
-                <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
-                  <Reply className="h-4 w-4" />
-                  Conversation
-                </h2>
+              <Card className="flex min-h-[32rem] flex-col overflow-hidden xl:min-h-0">
                 {selectedThread ? (
-                  <div className="space-y-4">
-                    <div>
-                      <div className="font-medium">{selectedThread.subject}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {selectedThread.sender}
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="shrink-0 border-b bg-muted/20 p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h2 className="truncate text-xl font-semibold tracking-tight">
+                          {selectedThread.subject}
+                        </h2>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Conversation with {selectedThread.sender}
+                        </p>
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1.5">
                         <Badge variant="outline">
                           {selectedThread.messages.length} message
                           {selectedThread.messages.length === 1 ? "" : "s"}
                         </Badge>
                         {selectedThread.unreadCount > 0 ? (
-                          <Badge variant="secondary">
-                            {selectedThread.unreadCount} unread
-                          </Badge>
+                          <Badge>{selectedThread.unreadCount} unread</Badge>
                         ) : null}
                       </div>
                     </div>
+                  </div>
 
-                    <div className="space-y-3">
-                      {selectedThread.messages.map((message) => (
-                        <div
-                          key={message.id}
-                          className="rounded-md border bg-muted/20 p-3"
-                        >
-                          <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                            <span>{senderLabel(message)}</span>
-                            <span>{formatDate(message.receivedAt)}</span>
+                  <div className="scrollbar-hidden min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+                    {selectedThread.messages.map((message) => (
+                      <article
+                        key={message.id}
+                        className="rounded-2xl border bg-background/70 p-4 shadow-sm"
+                      >
+                        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-semibold">
+                              {senderLabel(message)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatDate(message.receivedAt)}
+                            </div>
                           </div>
                           {message.emailJob ? (
-                            <Badge className="mb-2" variant="outline">
+                            <Badge variant="outline">
                               Reply to {message.emailJob.subject}
                             </Badge>
                           ) : null}
-                          <div className="whitespace-pre-wrap text-sm">
-                            {message.text || "This reply has no plain-text body."}
-                          </div>
                         </div>
-                      ))}
-                    </div>
+                        <div className="whitespace-pre-wrap text-sm leading-6">
+                          {message.text || "This reply has no plain-text body."}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
 
-                    <form className="space-y-3" onSubmit={submitReply}>
-                      <Textarea
-                        value={replyBody}
-                        onChange={(event) => setReplyBody(event.target.value)}
-                        placeholder={`Reply to ${selectedThread.latestMessage.fromEmail}`}
-                        rows={5}
-                      />
+                  <form
+                    className="shrink-0 border-t bg-card p-4"
+                    onSubmit={submitReply}
+                  >
+                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                      <Reply className="h-4 w-4 text-primary" />
+                      Reply
+                    </div>
+                    <Textarea
+                      value={replyBody}
+                      onChange={(event) => setReplyBody(event.target.value)}
+                      placeholder={`Reply to ${selectedThread.latestMessage.fromEmail}`}
+                      rows={5}
+                      className="resize-y"
+                    />
+                    <div className="mt-3 flex justify-end">
                       <Button
                         type="submit"
                         disabled={replying || !replyBody.trim()}
@@ -520,16 +582,21 @@ export function Inbox() {
                         {replying ? <Spinner /> : <Send className="h-4 w-4" />}
                         Send reply
                       </Button>
-                    </form>
+                    </div>
+                  </form>
                   </div>
                 ) : (
-                  <EmptyState icon={MailOpen} title="No conversation selected" />
+                  <EmptyState
+                    icon={MailOpen}
+                    title="Select a conversation"
+                    description="Choose a thread to read messages and reply."
+                  />
                 )}
               </Card>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
@@ -643,19 +710,24 @@ export function Inbox() {
                   required
                 />
               </div>
-              <label className="flex items-end gap-2 pb-2 text-sm">
-                <input
-                  type="checkbox"
+              <div className="flex items-end justify-between gap-3 rounded-xl border p-3">
+                <div>
+                  <Label>Use TLS</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Recommended for most IMAP mailboxes.
+                  </p>
+                </div>
+                <Switch
                   checked={form.secure}
-                  onChange={(event) =>
+                  onCheckedChange={(secure) =>
                     setForm((current) => ({
                       ...current,
-                      secure: event.target.checked,
+                      secure,
                     }))
                   }
+                  aria-label="Use TLS"
                 />
-                Use TLS
-              </label>
+              </div>
             </div>
             <DialogFooter>
               <Button type="submit" disabled={saving}>

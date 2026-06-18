@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Copy, KeyRound, LogOut, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, KeyRound, LogOut, RotateCcw, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
+import { EmptyState } from "../components/EmptyState.js";
 import { PageHeader } from "../components/PageHeader.js";
 import {
   api,
@@ -30,7 +31,6 @@ import {
   CardHeader,
   CardTitle
 } from "../components/ui/card.js";
-import { Checkbox } from "../components/ui/checkbox.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
 import { Separator } from "../components/ui/separator.js";
@@ -42,6 +42,7 @@ import {
   SelectValue
 } from "../components/ui/select.js";
 import { Spinner } from "../components/ui/spinner.js";
+import { Switch } from "../components/ui/switch.js";
 import {
   Table,
   TableBody,
@@ -405,11 +406,17 @@ export function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" description="Organization and developer settings." />
-      <section className="grid gap-6 p-6 lg:grid-cols-2">
+      <PageHeader
+        title="Settings"
+        description="Manage your organization, account access, API keys, and webhooks."
+      />
+      <section className="grid gap-6 p-5 sm:p-6 lg:grid-cols-2">
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>Organization</CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">
+              Choose the workspace you are configuring or create a new one.
+            </p>
           </CardHeader>
           <CardContent>
             <form onSubmit={createOrganization} className="space-y-4">
@@ -452,6 +459,9 @@ export function Settings() {
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>Account</CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">
+              Signed-in user and local API endpoint details.
+            </p>
           </CardHeader>
           <CardContent>
             <dl className="space-y-4 text-sm">
@@ -534,9 +544,12 @@ export function Settings() {
                 Loading API keys
               </div>
             ) : apiKeys.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No API keys for this organization yet.
-              </p>
+                <EmptyState
+                  icon={KeyRound}
+                  title="No API keys yet"
+                  description="Create a named key when an app needs to send email through QQueue."
+                  className="border bg-muted/20"
+                />
             ) : (
               <Table>
                 <TableHeader>
@@ -587,7 +600,13 @@ export function Settings() {
 
         <Card className="h-fit lg:col-span-2">
           <CardHeader>
-            <CardTitle>Webhook endpoints</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Webhook className="h-4 w-4" />
+              Webhook endpoints
+            </CardTitle>
+            <p className="text-sm leading-6 text-muted-foreground">
+              Send delivery events to your app as they happen.
+            </p>
           </CardHeader>
           <CardContent className="space-y-5">
             {createdWebhookSecret ? (
@@ -637,18 +656,19 @@ export function Settings() {
                 <Label>Events</Label>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   {outboundWebhookEvents.map((event) => (
-                    <label
+                    <div
                       key={event}
-                      className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                      className="flex items-center justify-between gap-3 rounded-xl border bg-background/60 px-3 py-2.5 text-sm"
                     >
-                      <Checkbox
+                      <span className="min-w-0 truncate">{event}</span>
+                      <Switch
                         checked={webhookEvents.includes(event)}
                         onCheckedChange={(checked) =>
                           toggleWebhookEvent(event, checked === true)
                         }
+                        aria-label={`Enable ${event}`}
                       />
-                      <span>{event}</span>
-                    </label>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -676,9 +696,12 @@ export function Settings() {
                 Loading webhook endpoints
               </div>
             ) : webhookEndpoints.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No webhook endpoints for this organization yet.
-              </p>
+                <EmptyState
+                  icon={Webhook}
+                  title="No webhook endpoints yet"
+                  description="Create an endpoint to receive delivery, bounce, and complaint events."
+                  className="border bg-muted/20"
+                />
             ) : (
               <Table>
                 <TableHeader>

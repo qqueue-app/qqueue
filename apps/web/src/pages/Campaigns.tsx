@@ -13,11 +13,18 @@ import {
   Send,
   Trash2
 } from "lucide-react";
-import cronstrue from "cronstrue";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import {
+  buildCron,
+  BROWSER_TIMEZONE,
+  describeCron,
+  emptyRecurrence,
+  parseCron,
+  ScheduleControls
+} from "../components/ScheduleControls.js";
 import {
   api,
   type Campaign,
@@ -31,11 +38,11 @@ import { Card } from "../components/ui/card.js";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle
 } from "../components/ui/dialog.js";
-import { Checkbox } from "../components/ui/checkbox.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
 import {
@@ -67,115 +74,6 @@ function statusVariant(status: string) {
   if (status === "SENDING") return "warning" as const;
   if (status === "CANCELLED") return "destructive" as const;
   return "secondary" as const;
-}
-
-const BROWSER_TIMEZONE =
-  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
-const TIMEZONES: string[] = (() => {
-  const supported = (
-    Intl as unknown as { supportedValuesOf?: (k: string) => string[] }
-  ).supportedValuesOf;
-  const list = supported ? supported("timeZone") : ["UTC"];
-  return list.includes(BROWSER_TIMEZONE)
-    ? list
-    : [BROWSER_TIMEZONE, ...list];
-})();
-
-// Sunday-first, matching the iPhone alarm layout (S M T W T F S).
-const WEEKDAYS = [
-  { value: "0", short: "S", label: "Sunday" },
-  { value: "1", short: "M", label: "Monday" },
-  { value: "2", short: "T", label: "Tuesday" },
-  { value: "3", short: "W", label: "Wednesday" },
-  { value: "4", short: "T", label: "Thursday" },
-  { value: "5", short: "F", label: "Friday" },
-  { value: "6", short: "S", label: "Saturday" }
-] as const;
-
-type RecurrencePreset = "daily" | "weekly" | "monthly" | "advanced";
-
-const emptyRecurrence = {
-  preset: "daily" as RecurrencePreset,
-  time: "09:00",
-  weekdays: ["1"] as string[],
-  dayOfMonth: "1",
-  cronExpression: "",
-  timezone: BROWSER_TIMEZONE
-};
-
-/** Build a 5-field cron expression from the recurrence form. */
-function buildCron(form: typeof emptyRecurrence): string {
-  if (form.preset === "advanced") {
-    return form.cronExpression.trim();
-  }
-  const [hours, minutes] = form.time.split(":");
-  const min = String(Number(minutes ?? 0));
-  const hr = String(Number(hours ?? 0));
-  if (form.preset === "daily") return `${min} ${hr} * * *`;
-  if (form.preset === "weekly") {
-    if (form.weekdays.length === 0) return "";
-    const days = [...form.weekdays]
-      .map(Number)
-      .sort((a, b) => a - b)
-      .join(",");
-    return `${min} ${hr} * * ${days}`;
-  }
-  return `${min} ${hr} ${form.dayOfMonth} * *`;
-}
-
-/**
- * Reverse of buildCron: turn a stored cron expression back into the recurrence
- * form. Falls back to "advanced" (raw cron) for shapes the presets can't model.
- */
-function parseCron(cron: string, timezone: string): typeof emptyRecurrence {
-  const advanced = {
-    ...emptyRecurrence,
-    preset: "advanced" as RecurrencePreset,
-    cronExpression: cron,
-    timezone
-  };
-
-  const fields = cron.trim().split(/\s+/);
-  if (fields.length !== 5) return advanced;
-  const [min, hr, dom, mon, dow] = fields;
-
-  const isPlainInt = (value: string) => /^\d+$/.test(value);
-  if (!isPlainInt(min) || !isPlainInt(hr) || mon !== "*") return advanced;
-  const time = `${hr.padStart(2, "0")}:${min.padStart(2, "0")}`;
-
-  if (dom === "*" && dow === "*") {
-    return { ...emptyRecurrence, preset: "daily", time, timezone };
-  }
-  if (dom === "*" && /^[0-6](,[0-6])*$/.test(dow)) {
-    return {
-      ...emptyRecurrence,
-      preset: "weekly",
-      time,
-      weekdays: dow.split(","),
-      timezone
-    };
-  }
-  if (isPlainInt(dom) && dow === "*") {
-    return {
-      ...emptyRecurrence,
-      preset: "monthly",
-      time,
-      dayOfMonth: dom,
-      timezone
-    };
-  }
-  return advanced;
-}
-
-/** Human-readable description of a cron expression, or null if unparseable. */
-function describeCron(cron: string): string | null {
-  if (!cron) return null;
-  try {
-    return cronstrue.toString(cron, { throwExceptionOnParseError: true });
-  } catch {
-    return null;
-  }
 }
 
 const STATUS_FILTERS = [
@@ -472,7 +370,7 @@ export function Campaigns() {
         }
       />
 
-      <section className="p-6">
+      <section className="p-5 sm:p-6">
         <Card className="overflow-hidden">
           {loading ? (
             <div className="space-y-3 p-5">
@@ -665,6 +563,9 @@ export function Campaigns() {
             <DialogTitle>
               {editingCampaign ? "Edit campaign" : "New campaign"}
             </DialogTitle>
+            <DialogDescription>
+              Choose the template and audience for this campaign draft.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={saveCampaign} className="space-y-4">
             <div className="space-y-2">
@@ -750,207 +651,20 @@ export function Campaigns() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Schedule campaign</DialogTitle>
+            <DialogDescription>
+              Pick a one-time send or set a recurring campaign cadence.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={schedule} className="space-y-4">
-            <label className="flex items-center gap-2.5 text-sm font-medium">
-              <Checkbox
-                checked={recurring}
-                onCheckedChange={(value) => setRecurring(value === true)}
-              />
-              Repeat on a schedule
-            </label>
-
-            {!recurring ? (
-              <div className="space-y-2">
-                <Label htmlFor="scheduledAt">Send at</Label>
-                <Input
-                  id="scheduledAt"
-                  type="datetime-local"
-                  value={scheduledAt}
-                  onChange={(event) => setScheduledAt(event.target.value)}
-                  required={!recurring}
-                />
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Frequency</Label>
-                  <Select
-                    value={recurrence.preset}
-                    onValueChange={(value) =>
-                      setRecurrence({
-                        ...recurrence,
-                        preset: value as RecurrencePreset
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="daily">Daily</SelectItem>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                      <SelectItem value="monthly">Monthly</SelectItem>
-                      <SelectItem value="advanced">
-                        Advanced (cron expression)
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {recurrence.preset === "advanced" ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="cronExpression">Cron expression</Label>
-                    <Input
-                      id="cronExpression"
-                      placeholder="0 9 * * 1"
-                      value={recurrence.cronExpression}
-                      onChange={(event) =>
-                        setRecurrence({
-                          ...recurrence,
-                          cronExpression: event.target.value
-                        })
-                      }
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {recurrence.preset === "weekly" ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label>Repeat on</Label>
-                          <div className="flex gap-1">
-                            {(
-                              [
-                                { label: "Weekdays", days: ["1", "2", "3", "4", "5"] },
-                                { label: "Weekend", days: ["0", "6"] },
-                                {
-                                  label: "Every day",
-                                  days: ["0", "1", "2", "3", "4", "5", "6"]
-                                }
-                              ] as const
-                            ).map((quick) => (
-                              <Button
-                                key={quick.label}
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 px-2 text-xs"
-                                onClick={() =>
-                                  setRecurrence({
-                                    ...recurrence,
-                                    weekdays: [...quick.days]
-                                  })
-                                }
-                              >
-                                {quick.label}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex gap-1.5">
-                          {WEEKDAYS.map((day) => {
-                            const selected = recurrence.weekdays.includes(
-                              day.value
-                            );
-                            return (
-                              <Button
-                                key={day.value}
-                                type="button"
-                                size="icon"
-                                variant={selected ? "default" : "outline"}
-                                className="h-9 w-9 rounded-full"
-                                aria-label={day.label}
-                                aria-pressed={selected}
-                                onClick={() =>
-                                  setRecurrence({
-                                    ...recurrence,
-                                    weekdays: selected
-                                      ? recurrence.weekdays.filter(
-                                          (value) => value !== day.value
-                                        )
-                                      : [...recurrence.weekdays, day.value]
-                                  })
-                                }
-                              >
-                                {day.short}
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {recurrence.preset === "monthly" ? (
-                        <div className="space-y-2">
-                          <Label htmlFor="dayOfMonth">Day of month</Label>
-                          <Input
-                            id="dayOfMonth"
-                            type="number"
-                            min={1}
-                            max={31}
-                            value={recurrence.dayOfMonth}
-                            onChange={(event) =>
-                              setRecurrence({
-                                ...recurrence,
-                                dayOfMonth: event.target.value
-                              })
-                            }
-                          />
-                        </div>
-                      ) : null}
-                      <div className="space-y-2">
-                        <Label htmlFor="time">Time</Label>
-                        <Input
-                          id="time"
-                          type="time"
-                          value={recurrence.time}
-                          onChange={(event) =>
-                            setRecurrence({
-                              ...recurrence,
-                              time: event.target.value
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <select
-                    id="timezone"
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={recurrence.timezone}
-                    onChange={(event) =>
-                      setRecurrence({
-                        ...recurrence,
-                        timezone: event.target.value
-                      })
-                    }
-                  >
-                    {TIMEZONES.map((tz) => (
-                      <option key={tz} value={tz}>
-                        {tz}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                  {describeCron(buildCron(recurrence)) ? (
-                    <span>
-                      {describeCron(buildCron(recurrence))} ({recurrence.timezone})
-                    </span>
-                  ) : (
-                    <span className="text-destructive">
-                      Enter a valid cron expression.
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+            <ScheduleControls
+              scheduledAt={scheduledAt}
+              onScheduledAtChange={setScheduledAt}
+              recurring={recurring}
+              onRecurringChange={setRecurring}
+              recurrence={recurrence}
+              onRecurrenceChange={setRecurrence}
+              recurringHelp="Keep this campaign sending on a regular cadence."
+            />
 
             <DialogFooter>
               <Button type="submit" disabled={saving}>
