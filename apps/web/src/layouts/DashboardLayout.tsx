@@ -46,6 +46,10 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   children?: NavChild[];
+  // Only shown to OWNER/ADMIN members; the matching API routes are restricted to
+  // those roles via requireOrgRole, so showing the link to MEMBERs would only
+  // lead to a 403.
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -67,7 +71,12 @@ const navItems: NavItem[] = [
     ],
   },
   { to: "/deliverability", label: "Deliverability", icon: Gauge },
-  { to: "/queue-operations", label: "Queue Operations", icon: ListRestart },
+  {
+    to: "/queue-operations",
+    label: "Queue Operations",
+    icon: ListRestart,
+    adminOnly: true,
+  },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
@@ -100,6 +109,12 @@ export function DashboardLayout() {
   } = useSession();
   const userEmail = user?.email;
   const initial = userEmail?.[0]?.toUpperCase() ?? "?";
+  const isOrgAdmin =
+    currentOrganization?.role === "OWNER" ||
+    currentOrganization?.role === "ADMIN";
+  const visibleNavItems = navItems.filter(
+    (item) => !item.adminOnly || isOrgAdmin
+  );
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -210,7 +225,7 @@ export function DashboardLayout() {
         ) : null}
 
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
 
             if (item.children) {

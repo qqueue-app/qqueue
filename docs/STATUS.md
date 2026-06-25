@@ -281,7 +281,8 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Stable `{ id, status }` response and machine-readable error codes exist.
 - [x] Transactional API docs and SDK examples exist.
 - [x] Redis-backed rate limiting on the send endpoint.
-- [~] Idempotency keys and usage tracking are not yet implemented.
+- [x] Idempotency keys (`Idempotency-Key` header) prevent duplicate sends on
+  retry; usage tracking is not yet implemented.
 
 ### Tracking and Webhooks
 
@@ -380,7 +381,7 @@ End-to-end, the app can currently support a self-hosted operator who:
 - [ ] Organization invitation flow
 - [ ] Member management UI
 - [ ] Usage metrics dashboard
-- [ ] Transactional send idempotency keys
+- [x] Transactional send idempotency keys
 - [ ] Provider-specific inbound webhook adapters
 - [ ] Expanded SDK functionality beyond `sendEmail`
 

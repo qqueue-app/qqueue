@@ -1,4 +1,5 @@
 import type { InputJsonValue } from "@prisma/client/runtime/library";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { injectTracking } from "@qqueue/email-engine";
 import type {
   EmailOrigin,
@@ -61,6 +62,41 @@ function parseScheduledAt(value: string | undefined) {
   return scheduledAt;
 }
 
+type EmailJobRow = Awaited<ReturnType<typeof prisma.emailJob.create>>;
+
+/**
+ * Create an EmailJob, transparently handling idempotency-key replays. If a
+ * concurrent request already created a job for the same
+ * (organizationId, idempotencyKey), the unique constraint trips (P2002); we
+ * recover by returning the existing job flagged as a replay so the caller skips
+ * re-enqueuing or re-sending.
+ */
+async function createEmailJob(
+  data: Parameters<typeof prisma.emailJob.create>[0]["data"],
+  organizationId: string,
+  idempotencyKey: string | null
+): Promise<{ job: EmailJobRow; replayed: boolean }> {
+  try {
+    return { job: await prisma.emailJob.create({ data }), replayed: false };
+  } catch (error) {
+    if (
+      idempotencyKey &&
+      error instanceof PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      const existing = await prisma.emailJob.findUnique({
+        where: {
+          organizationId_idempotencyKey: { organizationId, idempotencyKey }
+        }
+      });
+      if (existing) {
+        return { job: existing, replayed: true };
+      }
+    }
+    throw error;
+  }
+}
+
 /**
  * Internal send options. `origin`/`createdByUserId` are not part of the public
  * API schema: the transactional endpoint leaves them unset (defaults to
@@ -70,12 +106,34 @@ function parseScheduledAt(value: string | undefined) {
 export type TransactionalSendInput = SendEmailInput & {
   origin?: EmailOrigin;
   createdByUserId?: string | null;
+  // Client-supplied retry key (from the `Idempotency-Key` header). When set, a
+  // repeat send with the same key for the same org returns the original job.
+  idempotencyKey?: string | null;
 };
 
 export const transactionalEmailService = {
   async send(
     input: TransactionalSendInput
   ): Promise<TransactionalSendResponse> {
+    const idempotencyKey = input.idempotencyKey?.trim() || null;
+
+    // Idempotency replay: a retry with a key we've already seen for this org
+    // returns the original job without doing any work or sending again.
+    if (idempotencyKey) {
+      const existing = await prisma.emailJob.findUnique({
+        where: {
+          organizationId_idempotencyKey: {
+            organizationId: input.organizationId,
+            idempotencyKey
+          }
+        },
+        select: { id: true, status: true }
+      });
+      if (existing) {
+        return { id: existing.id, status: existing.status };
+      }
+    }
+
     const smtpConnection = await prisma.sMTPConnection.findFirst({
       where: {
         organizationId: input.organizationId,
@@ -128,8 +186,8 @@ export const transactionalEmailService = {
     // record a SUPPRESSED job (not a failure, not delivered) and stop before
     // enqueuing or sending.
     if (await suppressionService.isSuppressed(input.organizationId, input.to)) {
-      const suppressed = await prisma.emailJob.create({
-        data: {
+      const { job: suppressed } = await createEmailJob(
+        {
           organizationId: input.organizationId,
           smtpConnectionId: smtpConnection.id,
           templateId: template?.id,
@@ -139,6 +197,7 @@ export const transactionalEmailService = {
           replyTo: input.replyTo,
           inReplyTo: input.inReplyTo,
           references: input.references ?? [],
+          idempotencyKey,
           origin,
           createdByUserId: input.createdByUserId,
           subject,
@@ -146,15 +205,17 @@ export const transactionalEmailService = {
           text,
           variables: input.variables as InputJsonValue | undefined,
           status: "SUPPRESSED"
-        }
-      });
+        },
+        input.organizationId,
+        idempotencyKey
+      );
       return { id: suppressed.id, status: suppressed.status };
     }
 
     // Send later: queue the email for a future time instead of sending inline.
     if (scheduledAt) {
-      const queuedJob = await prisma.emailJob.create({
-        data: {
+      const { job: queuedJob, replayed } = await createEmailJob(
+        {
           organizationId: input.organizationId,
           smtpConnectionId: smtpConnection.id,
           templateId: template?.id,
@@ -164,6 +225,7 @@ export const transactionalEmailService = {
           replyTo: input.replyTo,
           inReplyTo: input.inReplyTo,
           references: input.references ?? [],
+          idempotencyKey,
           origin,
           createdByUserId: input.createdByUserId,
           subject,
@@ -178,8 +240,14 @@ export const transactionalEmailService = {
               type: "QUEUED"
             }
           }
-        }
-      });
+        },
+        input.organizationId,
+        idempotencyKey
+      );
+
+      if (replayed) {
+        return { id: queuedJob.id, status: queuedJob.status };
+      }
 
       await attachmentService.linkToJob(
         input.attachmentIds,
@@ -207,8 +275,8 @@ export const transactionalEmailService = {
       return { id: queuedJob.id, status: queuedJob.status };
     }
 
-    const emailJob = await prisma.emailJob.create({
-      data: {
+    const { job: emailJob, replayed } = await createEmailJob(
+      {
         organizationId: input.organizationId,
         smtpConnectionId: smtpConnection.id,
         templateId: template?.id,
@@ -218,6 +286,7 @@ export const transactionalEmailService = {
         replyTo: input.replyTo,
         inReplyTo: input.inReplyTo,
         references: input.references ?? [],
+        idempotencyKey,
         origin,
         createdByUserId: input.createdByUserId,
         subject,
@@ -231,8 +300,14 @@ export const transactionalEmailService = {
             type: "QUEUED"
           }
         }
-      }
-    });
+      },
+      input.organizationId,
+      idempotencyKey
+    );
+
+    if (replayed) {
+      return { id: emailJob.id, status: emailJob.status };
+    }
 
     await attachmentService.linkToJob(
       input.attachmentIds,

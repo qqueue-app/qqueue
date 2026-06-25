@@ -1,4 +1,4 @@
-import { nextCronRun } from "./cron.js";
+import { nextCronRun } from "@qqueue/shared";
 import { prisma } from "./prisma.js";
 
 /**

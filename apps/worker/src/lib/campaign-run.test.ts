@@ -4,7 +4,8 @@ import { settleRunIfComplete } from "./campaign-run.js";
 
 const FIXED_NEXT = new Date("2026-02-01T00:00:00.000Z");
 
-vi.mock("./cron.js", () => ({
+vi.mock("@qqueue/shared", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@qqueue/shared")>()),
   nextCronRun: vi.fn(() => FIXED_NEXT)
 }));
 

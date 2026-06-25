@@ -5,7 +5,7 @@ import type {
   CampaignScheduleInput,
   CampaignUpdateInput
 } from "@qqueue/shared";
-import { nextCronRun } from "../../lib/cron.js";
+import { nextCronRun } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { campaignProcessingQueue } from "../../queues/campaign-processing.queue.js";

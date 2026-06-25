@@ -426,6 +426,12 @@ model EmailJob {
   messageId        String?
   inReplyTo        String?
   references       String[]          @default([])
+  // Optional client-supplied idempotency key (from the `Idempotency-Key` header
+  // on a transactional send). A retry with the same (organizationId,
+  // idempotencyKey) returns the original job instead of sending again. NULL is
+  // unconstrained (Postgres treats NULLs as distinct), so campaign/manual sends
+  // that don't supply a key are unaffected.
+  idempotencyKey   String?
   scheduledAt      DateTime?
   sentAt           DateTime?
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -439,6 +445,7 @@ model EmailJob {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
+  @@unique([organizationId, idempotencyKey])
   @@index([messageId])
   @@index([organizationId, origin])
 }

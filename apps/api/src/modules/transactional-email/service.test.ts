@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { prismaMock } from "../../test/prisma-mock.js";
 import { HttpError } from "../../lib/http-error.js";
 
@@ -419,5 +420,82 @@ describe("transactionalEmailService.send", () => {
 
     const failUpdate = prismaMock.emailJob.update.mock.calls.at(-1)?.[0];
     expect(failUpdate?.data.status).toBe("FAILED");
+  });
+
+  it("replays a prior job for a repeated idempotency key without sending again", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      id: "job_existing",
+      status: "SENT"
+    } as never);
+
+    const result = await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      idempotencyKey: "key-1"
+    });
+
+    expect(result).toEqual({ id: "job_existing", status: "SENT" });
+    // Short-circuits before any work: no SMTP lookup, no job created, no send.
+    expect(prismaMock.sMTPConnection.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.emailJob.create).not.toHaveBeenCalled();
+    expect(providerSend).not.toHaveBeenCalled();
+  });
+
+  it("stores the idempotency key on a first-time send", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(null as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({ id: "job_1" } as never);
+    prismaMock.emailJob.update.mockResolvedValue({
+      id: "job_1",
+      status: "SENT"
+    } as never);
+    providerSend.mockResolvedValue({
+      messageId: "m",
+      provider: "smtp",
+      accepted: ["x@y.com"],
+      rejected: []
+    });
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      idempotencyKey: "key-1"
+    });
+
+    expect(prismaMock.emailJob.create.mock.calls[0][0].data.idempotencyKey).toBe(
+      "key-1"
+    );
+    expect(providerSend).toHaveBeenCalledOnce();
+  });
+
+  it("recovers from a concurrent duplicate (P2002) without a second send", async () => {
+    prismaMock.emailJob.findUnique
+      .mockResolvedValueOnce(null as never) // pre-check: key not seen yet
+      .mockResolvedValueOnce({
+        id: "job_race",
+        status: "PROCESSING"
+      } as never); // lookup after the unique-constraint conflict
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockRejectedValue(
+      new PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "6.x"
+      })
+    );
+
+    const result = await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      idempotencyKey: "key-1"
+    });
+
+    expect(result).toEqual({ id: "job_race", status: "PROCESSING" });
+    expect(providerSend).not.toHaveBeenCalled();
   });
 });

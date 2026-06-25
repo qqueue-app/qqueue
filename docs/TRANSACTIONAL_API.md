@@ -43,6 +43,25 @@ Successful sends return `202 Accepted` with a compact job reference:
 
 Scheduled sends return the same shape with `status: "QUEUED"`.
 
+## Idempotency
+
+To make a send safe to retry (e.g. after a network timeout), pass a unique
+`Idempotency-Key` header:
+
+```sh
+curl -s -X POST http://localhost:4000/api/v1/transactional-email/send \
+  -H "Authorization: Bearer qq_live_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 5f3c1b9e-1a2b-4c3d-8e9f-0a1b2c3d4e5f" \
+  -d '{ "to": "recipient@example.com", "subject": "Welcome", "html": "<p>Hi</p>" }'
+```
+
+A repeat request with the same key for the same organization returns the
+**original** job reference instead of sending a second copy. Keys are scoped per
+organization, are at most 255 characters, and should be unique per logical send
+(a UUID per message works well). Reuse a key only when you intend it to refer to
+the same message.
+
 ## Templates
 
 Use `templateId` with `variables` to render a saved template:

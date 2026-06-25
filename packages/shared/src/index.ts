@@ -11,6 +11,27 @@ export function isValidCron(value: string): boolean {
   }
 }
 
+/**
+ * Next fire time for a cron expression in the given timezone, or null when the
+ * expression cannot be parsed. Shared by the API (campaign scheduling) and the
+ * worker (recurring campaign runs) so both agree on the next-run calculation.
+ */
+export function nextCronRun(
+  cronExpression: string,
+  timezone?: string | null,
+  from: Date = new Date()
+): Date | null {
+  try {
+    const interval = CronExpressionParser.parse(cronExpression, {
+      currentDate: from,
+      tz: timezone ?? "UTC"
+    });
+    return interval.next().toDate();
+  } catch {
+    return null;
+  }
+}
+
 /** True when `value` is an IANA timezone the runtime recognises. */
 export function isValidTimezone(value: string): boolean {
   try {

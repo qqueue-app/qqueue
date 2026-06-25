@@ -76,8 +76,8 @@ yet**. See the [Cloud boundary](CLOUD_BOUNDARY.md).
 ## What are the known limitations?
 
 Not yet implemented: organization invitations, member-management UI, a usage
-metrics dashboard, transactional idempotency keys, provider-specific inbound
-webhook adapters, and SDK methods beyond `sendEmail`. There is no email
+metrics dashboard, provider-specific inbound webhook adapters, and SDK methods
+beyond `sendEmail`. There is no email
 verification or MFA yet. All managed-cloud/commercial features are unstarted.
 See [STATUS.md](STATUS.md) for the full audit.
 
