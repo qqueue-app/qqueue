@@ -1,4 +1,4 @@
-# QQueue Repo Context
+# CLAUDE.md
 
 QQueue is a TypeScript monorepo for a self-hosted email platform. It is intentionally early-stage: keep changes scaffold-friendly, avoid overbuilding, and leave TODOs where product behavior is not ready yet.
 
