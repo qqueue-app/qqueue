@@ -168,7 +168,7 @@ export function QueueOperations() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Queue Operations"
+        title="Background jobs"
         description="Inspect queued, processing, and failed background jobs."
         actions={
           <Button type="button" variant="outline" onClick={load}>
@@ -190,7 +190,7 @@ export function QueueOperations() {
             <EmptyState
               icon={ShieldAlert}
               title="Access restricted"
-              description="Queue operations are available to organization owners and admins only. Ask an owner or admin if you need access."
+              description="Background jobs are available to organization owners and admins only. Ask an owner or admin if you need access."
             />
           </CardContent>
         </Card>

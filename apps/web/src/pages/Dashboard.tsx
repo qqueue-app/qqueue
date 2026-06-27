@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
+import { GetStartedCard } from "../components/GetStartedCard.js";
 import { api, type DashboardSummary } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
@@ -75,7 +76,7 @@ function statusVariant(status: string) {
 function setupItems(summary: DashboardSummary | null) {
   return [
     {
-      label: "SMTP connection",
+      label: "Sending account",
       ready: Boolean(summary?.setup.hasSmtpConnection),
       href: "/smtp-connections"
     },
@@ -155,7 +156,7 @@ export function Dashboard() {
         icon: FileText
       },
       {
-        label: "SMTP connections",
+        label: "Sending accounts",
         value: summary?.counts.smtpConnections ?? 0,
         detail: summary?.defaultSmtpConnection
           ? `Default: ${summary.defaultSmtpConnection.name}`
@@ -165,6 +166,13 @@ export function Dashboard() {
     ],
     [summary]
   );
+
+  // A brand-new org sees a guided first-send flow instead of the (all-zero)
+  // stat grid and setup checklist. Sending the first email graduates them to
+  // the full dashboard.
+  const hasSent = (summary?.recentEmailJobs?.length ?? 0) > 0;
+  const showOnboarding =
+    !loading && Boolean(organizationId) && Boolean(summary) && !hasSent;
 
   return (
     <>
@@ -199,7 +207,10 @@ export function Dashboard() {
           </Alert>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {showOnboarding ? (
+          <GetStartedCard summary={summary} />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {cards.map((card) => {
             const Icon = card.icon;
             return (
@@ -235,9 +246,17 @@ export function Dashboard() {
               </Card>
             );
           })}
-        </div>
+          </div>
+        )}
 
-        <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+        <div
+          className={
+            showOnboarding
+              ? "grid gap-4"
+              : "grid gap-4 xl:grid-cols-[360px_1fr]"
+          }
+        >
+          {!showOnboarding ? (
           <Card>
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-3">
@@ -277,6 +296,7 @@ export function Dashboard() {
               </div>
             </CardContent>
           </Card>
+          ) : null}
 
           <Card>
             <CardContent className="p-0">
@@ -326,58 +346,6 @@ export function Dashboard() {
                   icon={Send}
                   title="No email jobs yet"
                   description="Send your first email to see it here."
-                />
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4">
-          <Card>
-            <CardContent className="p-0">
-              <div className="border-b p-5">
-                <h2 className="font-semibold">Recent events</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Queue and delivery events recorded by the API.
-                </p>
-              </div>
-              {loading ? (
-                <div className="space-y-3 p-5">
-                  {[0, 1, 2].map((index) => (
-                    <Skeleton key={index} className="h-12 w-full" />
-                  ))}
-                </div>
-              ) : summary?.recentEvents.length ? (
-                <div className="divide-y">
-                  {summary.recentEvents.map((event) => (
-                    <div key={event.id} className="flex gap-3 p-4">
-                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                        <Mail className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={statusVariant(event.type)}>
-                            {event.type}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDate(event.occurredAt)}
-                          </span>
-                        </div>
-                        <div className="mt-1 truncate text-sm font-medium">
-                          {event.emailJob.subject}
-                        </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {event.emailJob.toEmail}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  icon={Mail}
-                  title="No events recorded yet"
-                  description="Queue and delivery events will appear here."
                 />
               )}
             </CardContent>

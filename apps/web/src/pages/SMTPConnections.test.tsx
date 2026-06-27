@@ -44,7 +44,7 @@ describe("SMTPConnections", () => {
     mockedApi.listSMTPConnections.mockResolvedValue([]);
     render(<SMTPConnections />);
     expect(
-      await screen.findByText("No SMTP connections yet")
+      await screen.findByText("No sending accounts yet")
     ).toBeInTheDocument();
   });
 
@@ -62,7 +62,7 @@ describe("SMTPConnections", () => {
     mockedApi.listSMTPConnections.mockResolvedValue([]);
     mockedApi.createSMTPConnection.mockResolvedValue({ id: "s2" });
     render(<SMTPConnections />);
-    await screen.findByText("No SMTP connections yet");
+    await screen.findByText("No sending accounts yet");
     await user.click(
       screen.getAllByRole("button", { name: /New connection/i })[0]
     );
@@ -78,7 +78,7 @@ describe("SMTPConnections", () => {
       expect(mockedApi.createSMTPConnection).toHaveBeenCalled()
     );
     expect(toast.success).toHaveBeenCalledWith(
-      "SMTP connection verified and saved."
+      "Sending account verified and saved."
     );
   });
 
@@ -118,7 +118,7 @@ describe("SMTPConnections", () => {
     const user = userEvent.setup();
     mockedApi.listSMTPConnections.mockResolvedValue([]);
     render(<SMTPConnections />);
-    await screen.findByText("No SMTP connections yet");
+    await screen.findByText("No sending accounts yet");
     await user.click(
       screen.getAllByRole("button", { name: /New connection/i })[0]
     );

@@ -110,7 +110,7 @@ export function Segments() {
       setSegments(await api.listSegments(organizationId));
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Unable to load segments"
+        error instanceof Error ? error.message : "Unable to load smart lists"
       );
     } finally {
       setLoading(false);
@@ -169,12 +169,12 @@ export function Segments() {
     setSaving(true);
     try {
       await api.createSegment({ organizationId, name, rules });
-      toast.success("Segment saved.");
+      toast.success("Smart list saved.");
       setDialogOpen(false);
       await load();
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Unable to save segment"
+        error instanceof Error ? error.message : "Unable to save smart list"
       );
     } finally {
       setSaving(false);
@@ -186,7 +186,7 @@ export function Segments() {
     setDeleting(true);
     try {
       await api.deleteSegment(deleteTarget.id);
-      toast.success("Segment deleted.");
+      toast.success("Smart list deleted.");
       setDeleteTarget(null);
       await load();
     } catch (error) {
@@ -199,12 +199,12 @@ export function Segments() {
   return (
     <>
       <PageHeader
-        title="Segments"
-        description="Dynamic audiences that re-resolve to matching contacts every time a campaign sends."
+        title="Smart lists"
+        description="Audiences that update themselves — contacts are re-matched every time a campaign sends."
         actions={
           <Button onClick={openDialog} disabled={!organizationId}>
             <Plus className="h-4 w-4" />
-            New segment
+            New smart list
           </Button>
         }
       />
@@ -220,8 +220,8 @@ export function Segments() {
           ) : segments.length === 0 ? (
             <EmptyState
               icon={Filter}
-              title="No segments yet"
-              description="Create a rule-based segment to target a campaign at contacts matching tags, status, or email domain."
+              title="No smart lists yet"
+              description="Create a smart list to target a campaign at contacts matching tags, status, or email domain."
             />
           ) : (
             <Table>
@@ -243,7 +243,7 @@ export function Segments() {
                           size="icon"
                           className="text-muted-foreground hover:text-destructive"
                           onClick={() => setDeleteTarget(segment)}
-                          aria-label="Delete segment"
+                          aria-label="Delete smart list"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -260,10 +260,10 @@ export function Segments() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New segment</DialogTitle>
+            <DialogTitle>New smart list</DialogTitle>
             <DialogDescription>
               Contacts matching these rules are resolved fresh each time a
-              campaign targeting this segment sends.
+              campaign targeting this smart list sends.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submit} className="space-y-4">
@@ -424,7 +424,7 @@ export function Segments() {
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? <Spinner /> : null}
-                Save segment
+                Save smart list
               </Button>
             </DialogFooter>
           </form>
@@ -434,7 +434,7 @@ export function Segments() {
       <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete segment?"
+        title="Delete smart list?"
         description={`${deleteTarget?.name} will no longer be available to target. Campaigns already sent are unaffected.`}
         confirmLabel="Delete"
         loading={deleting}

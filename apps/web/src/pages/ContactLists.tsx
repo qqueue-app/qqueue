@@ -180,7 +180,7 @@ export function ContactLists() {
   return (
     <>
       <PageHeader
-        title="Contact lists"
+        title="Lists"
         description="Group contacts into audiences for your campaigns."
         actions={
           <Button type="button" onClick={openCreateList} disabled={!organizationId}>

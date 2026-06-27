@@ -201,6 +201,9 @@ interface ScheduleControlsProps {
   scheduleLabel?: string;
   recurringDisabled?: boolean;
   recurringHelp?: string;
+  // Hide the recurring controls entirely (e.g. on one-off Compose sends, where
+  // recurrence isn't supported yet). Defaults to shown.
+  showRecurring?: boolean;
   className?: string;
 }
 
@@ -216,6 +219,7 @@ export function ScheduleControls({
   scheduleLabel = "Schedule for later",
   recurringDisabled = false,
   recurringHelp = "Send this again on a predictable rhythm.",
+  showRecurring = true,
   className
 }: ScheduleControlsProps) {
   const scheduleVisible = scheduleEnabled ?? !recurring;
@@ -251,16 +255,18 @@ export function ScheduleControls({
         </div>
       ) : null}
 
-      <ToggleRow
-        icon={Repeat}
-        title="Repeat on a schedule"
-        description={recurringHelp}
-        checked={recurring}
-        onCheckedChange={onRecurringChange}
-        disabled={recurringDisabled}
-      />
+      {showRecurring ? (
+        <ToggleRow
+          icon={Repeat}
+          title="Repeat on a schedule"
+          description={recurringHelp}
+          checked={recurring}
+          onCheckedChange={onRecurringChange}
+          disabled={recurringDisabled}
+        />
+      ) : null}
 
-      {recurring ? (
+      {showRecurring && recurring ? (
         <div className="space-y-3 rounded-xl border bg-muted/20 p-3">
           <div className="space-y-2">
             <Label>Frequency</Label>

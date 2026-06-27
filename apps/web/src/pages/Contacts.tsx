@@ -403,7 +403,7 @@ export function Contacts() {
         <Card className="p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="flex-1 space-y-2">
-              <Label htmlFor="filter-tags">Filter by tags (segment)</Label>
+              <Label htmlFor="filter-tags">Filter by tags</Label>
               <Input
                 id="filter-tags"
                 placeholder="vip, newsletter (comma separated)"

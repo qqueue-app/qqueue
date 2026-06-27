@@ -4,6 +4,7 @@ import {
   FileText,
   Paperclip,
   Pencil,
+  Plus,
   Save,
   Search,
   Send,
@@ -255,6 +256,9 @@ export function EmailStudio() {
     [selectedLists]
   );
 
+  const totalRecipients =
+    toEmails.length + ccEmails.length + bccEmails.length + listMemberEstimate;
+
   const load = useCallback(async () => {
     if (!organizationId) {
       setLoading(false);
@@ -311,16 +315,28 @@ export function EmailStudio() {
     setPreview(null);
   }
 
-  function applyTemplate() {
-    if (templateId === NO_TEMPLATE) {
+  function selectTemplate(value: string) {
+    setTemplateId(value);
+    if (value === NO_TEMPLATE) {
       return;
     }
-    const template = templates.find((item) => item.id === templateId);
+    const template = templates.find((item) => item.id === value);
     if (!template) {
       return;
     }
-    // Load a working copy into the composer. The original template row is never
-    // written back to, so edits here never alter the saved template.
+    // Loading a template overwrites the composer, so confirm first if the user
+    // has already started writing. The original template row is never written
+    // back to, so edits here never alter the saved template.
+    const hasContent =
+      subject.trim() !== "" || html.replace(/<[^>]*>/g, "").trim() !== "";
+    if (
+      hasContent &&
+      !window.confirm(
+        "Replace the current subject and message with this template?"
+      )
+    ) {
+      return;
+    }
     setSubject(template.subject);
     setHtml(template.html);
     toast.success(`Loaded "${template.name}".`);
@@ -570,9 +586,9 @@ export function EmailStudio() {
         toast.error("Enter a valid schedule.");
         return;
       }
-      // TODO: Persist recurring manual sends once Email Studio has a recurring
+      // TODO: Persist recurring manual sends once Compose has a recurring
       // draft/job model. Campaign recurrence is currently campaign-only.
-      toast.error("Recurring Email Studio sends are not wired yet.");
+      toast.error("Recurring one-off sends aren't wired up yet.");
       return;
     }
     if (scheduleForLater) {
@@ -638,8 +654,8 @@ export function EmailStudio() {
   return (
     <>
       <PageHeader
-        title="Email Studio"
-        description="Compose, preview, and send a manual email through your delivery pipeline."
+        title="Compose"
+        description="Write, preview, and send a one-off email through your delivery pipeline."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -676,9 +692,9 @@ export function EmailStudio() {
             <div className="space-y-5">
               {noSmtp ? (
                 <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                  <p className="font-medium">No SMTP connection yet</p>
+                  <p className="font-medium">No sending account yet</p>
                   <p className="mt-1">
-                    Add an SMTP connection before you can send email.
+                    Add a sending account before you can send email.
                   </p>
                 </Card>
               ) : null}
@@ -702,7 +718,7 @@ export function EmailStudio() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={DEFAULT_SMTP}>
-                          Default SMTP connection
+                          Default sending account
                         </SelectItem>
                         {smtpConnections.map((connection) => (
                           <SelectItem key={connection.id} value={connection.id}>
@@ -753,22 +769,26 @@ export function EmailStudio() {
                     Add list
                   </Button>
                   {!showCc ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setShowCc(true)}
-                      className="text-muted-foreground hover:text-foreground"
                     >
-                      Add Cc
-                    </button>
+                      <Plus className="h-4 w-4" />
+                      Cc
+                    </Button>
                   ) : null}
                   {!showBcc ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setShowBcc(true)}
-                      className="text-muted-foreground hover:text-foreground"
                     >
-                      Add Bcc
-                    </button>
+                      <Plus className="h-4 w-4" />
+                      Bcc
+                    </Button>
                   ) : null}
                 </div>
 
@@ -889,38 +909,15 @@ export function EmailStudio() {
               </Card>
 
               <Card className="space-y-4 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-base font-semibold">Composer</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Write in compose mode, then preview the rendered email.
+                      Write your message, then switch to Preview to see the
+                      rendered email.
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Select value={templateId} onValueChange={setTemplateId}>
-                      <SelectTrigger className="w-56" aria-label="Template">
-                        <SelectValue placeholder="Start from a template" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
-                        {templates.map((template) => (
-                          <SelectItem key={template.id} value={template.id}>
-                            {template.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={applyTemplate}
-                      disabled={templateId === NO_TEMPLATE}
-                    >
-                      Load template
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-1 rounded-md border p-0.5">
+                  <div className="flex shrink-0 items-center gap-1 rounded-md border p-0.5">
                     <Button
                       type="button"
                       variant={mode === "compose" ? "secondary" : "ghost"}
@@ -940,6 +937,25 @@ export function EmailStudio() {
                       Preview
                     </Button>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select value={templateId} onValueChange={selectTemplate}>
+                    <SelectTrigger
+                      className="w-full sm:w-72"
+                      aria-label="Template"
+                    >
+                      <SelectValue placeholder="Start from a template" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
+                      {templates.map((template) => (
+                        <SelectItem key={template.id} value={template.id}>
+                          {template.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {mode === "compose" ? (
@@ -1009,64 +1025,73 @@ export function EmailStudio() {
             </div>
 
             <div className="space-y-5 xl:sticky xl:top-6 xl:self-start">
-              <Card className="space-y-4 p-5">
-                <div>
-                  <h2 className="text-sm font-semibold">Recipient summary</h2>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    A quick check before sending.
+              <Card className="space-y-3 p-5">
+                <h2 className="text-sm font-semibold">Recipients</h2>
+                {totalRecipients === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No recipients yet — add people in the To field above.
                   </p>
-                </div>
-                <dl className="space-y-1.5 text-sm">
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Direct (To)</dt>
-                    <dd>{toEmails.length}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">From lists (approx.)</dt>
-                    <dd>{listMemberEstimate}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Cc</dt>
-                    <dd>{ccEmails.length}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Bcc</dt>
-                    <dd>{bccEmails.length}</dd>
-                  </div>
-                </dl>
-                <p className="text-xs text-muted-foreground">
-                  Duplicate addresses are removed automatically when you send.
-                </p>
+                ) : (
+                  <>
+                    <div className="text-2xl font-semibold tracking-tight">
+                      {listMemberEstimate > 0 ? "~" : ""}
+                      {totalRecipients}
+                      <span className="ml-1.5 text-sm font-normal text-muted-foreground">
+                        {totalRecipients === 1 ? "recipient" : "recipients"}
+                      </span>
+                    </div>
+                    <dl className="space-y-1.5 text-sm">
+                      {toEmails.length > 0 ? (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">To</dt>
+                          <dd>{toEmails.length}</dd>
+                        </div>
+                      ) : null}
+                      {listMemberEstimate > 0 ? (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">
+                            From lists (approx.)
+                          </dt>
+                          <dd>{listMemberEstimate}</dd>
+                        </div>
+                      ) : null}
+                      {ccEmails.length > 0 ? (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">Cc</dt>
+                          <dd>{ccEmails.length}</dd>
+                        </div>
+                      ) : null}
+                      {bccEmails.length > 0 ? (
+                        <div className="flex justify-between">
+                          <dt className="text-muted-foreground">Bcc</dt>
+                          <dd>{bccEmails.length}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                    <p className="text-xs text-muted-foreground">
+                      Duplicates are removed automatically when you send.
+                    </p>
+                  </>
+                )}
               </Card>
 
               <Card className="space-y-4 p-5">
                 <div>
                   <h2 className="text-sm font-semibold">Send options</h2>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Send now, schedule for later, or prepare a repeat schedule.
+                    Send now, or schedule it for later.
                   </p>
                 </div>
                 <ScheduleControls
                   scheduleEnabled={scheduleForLater}
-                  onScheduleEnabledChange={(enabled) => {
-                    setScheduleForLater(enabled);
-                    if (enabled) {
-                      setRecurring(false);
-                    }
-                  }}
+                  onScheduleEnabledChange={setScheduleForLater}
                   scheduledAt={scheduledAt}
                   onScheduledAtChange={setScheduledAt}
                   recurring={recurring}
-                  onRecurringChange={(enabled) => {
-                    setRecurring(enabled);
-                    if (enabled) {
-                      setScheduleForLater(false);
-                      setScheduledAt("");
-                    }
-                  }}
+                  onRecurringChange={setRecurring}
                   recurrence={recurrence}
                   onRecurrenceChange={setRecurrence}
-                  recurringHelp="Recurring manual sends are not active yet; this prepares the schedule details."
+                  showRecurring={false}
                 />
 
                 <Button
@@ -1075,11 +1100,7 @@ export function EmailStudio() {
                   disabled={sending || noSmtp || !organizationId}
                 >
                   {sending ? <Spinner /> : <Send className="h-4 w-4" />}
-                  {recurring
-                    ? "Save schedule"
-                    : scheduleForLater
-                      ? "Schedule email"
-                      : "Send email"}
+                  {scheduleForLater ? "Schedule email" : "Send email"}
                 </Button>
                 {lastSavedAt ? (
                   <p className="text-center text-xs text-muted-foreground">

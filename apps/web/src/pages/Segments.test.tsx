@@ -98,7 +98,7 @@ describe("Segments", () => {
     render(<Segments />);
     await screen.findByText("VIP customers");
 
-    await user.click(screen.getByRole("button", { name: /new segment/i }));
+    await user.click(screen.getByRole("button", { name: /new smart list/i }));
     await user.type(screen.getByLabelText("Name"), "Newsletter");
     await user.type(screen.getByLabelText("Tag values"), "newsletter");
 
@@ -111,7 +111,7 @@ describe("Segments", () => {
     );
     expect(await screen.findByText(/42 matching contact/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /save segment/i }));
+    await user.click(screen.getByRole("button", { name: /save smart list/i }));
     await waitFor(() =>
       expect(mockedApi.createSegment).toHaveBeenCalledWith({
         organizationId: "org_1",

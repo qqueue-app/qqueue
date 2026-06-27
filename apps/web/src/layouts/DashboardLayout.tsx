@@ -2,16 +2,14 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  LayoutDashboard,
+  Home,
   Inbox,
   PenSquare,
-  Server,
   Users,
-  ShieldBan,
+  List,
+  Sparkles,
   FileText,
   Megaphone,
-  ListRestart,
-  Gauge,
   Settings as SettingsIcon,
   LogOut,
   Check,
@@ -36,48 +34,85 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu.js";
 
+// Only shown to OWNER/ADMIN members; the matching API routes are restricted to
+// those roles via requireOrgRole, so showing the link to MEMBERs would only
+// lead to a 403.
 interface NavChild {
   to: string;
   label: string;
-}
-
-interface NavItem {
-  to: string;
-  label: string;
-  icon: LucideIcon;
-  children?: NavChild[];
-  // Only shown to OWNER/ADMIN members; the matching API routes are restricted to
-  // those roles via requireOrgRole, so showing the link to MEMBERs would only
-  // lead to a 403.
   adminOnly?: boolean;
 }
 
-const navItems: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/email-studio", label: "Email Studio", icon: PenSquare },
-  { to: "/inbox", label: "Inbox", icon: Inbox },
-  { to: "/smtp-connections", label: "SMTP Connections", icon: Server },
-  { to: "/contacts", label: "Contacts", icon: Users },
-  { to: "/suppressions", label: "Suppressions", icon: ShieldBan },
-  { to: "/templates", label: "Templates", icon: FileText },
+interface NavLeaf {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  // Force exact-match active styling (NavLink `end`). Defaults on for "/" and
+  // any "/campaigns*" leaf so sibling routes that share the prefix don't all
+  // light up at once.
+  end?: boolean;
+  adminOnly?: boolean;
+}
+
+interface NavGroup {
+  label: string;
+  icon: LucideIcon;
+  children: NavChild[];
+}
+
+type NavItem = NavLeaf | NavGroup;
+
+interface NavSection {
+  heading?: string;
+  items: NavItem[];
+}
+
+function isGroup(item: NavItem): item is NavGroup {
+  return "children" in item;
+}
+
+// Nav is organised by job-to-be-done so everyday tasks lead and the technical
+// plumbing (sending accounts, deliverability, suppression list, job queue) is
+// tucked into a single collapsed Settings group instead of competing for
+// attention at the top level. See docs/DECISIONS.md.
+const navSections: NavSection[] = [
   {
-    to: "/campaigns",
-    label: "Campaigns",
-    icon: Megaphone,
-    children: [
-      { to: "/campaigns", label: "All campaigns" },
-      { to: "/campaigns/lists", label: "Contact lists" },
-      { to: "/campaigns/segments", label: "Segments" },
+    items: [
+      { to: "/", label: "Home", icon: Home },
+      { to: "/email-studio", label: "Compose", icon: PenSquare },
+      { to: "/inbox", label: "Inbox", icon: Inbox },
     ],
   },
-  { to: "/deliverability", label: "Deliverability", icon: Gauge },
   {
-    to: "/queue-operations",
-    label: "Queue Operations",
-    icon: ListRestart,
-    adminOnly: true,
+    heading: "Audience",
+    items: [
+      { to: "/contacts", label: "Contacts", icon: Users },
+      { to: "/campaigns/lists", label: "Lists", icon: List },
+      { to: "/campaigns/segments", label: "Smart lists", icon: Sparkles },
+    ],
   },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
+  {
+    heading: "Campaigns",
+    items: [
+      { to: "/templates", label: "Templates", icon: FileText },
+      { to: "/campaigns", label: "Campaigns", icon: Megaphone },
+    ],
+  },
+  {
+    items: [
+      {
+        label: "Settings",
+        icon: SettingsIcon,
+        children: [
+          { to: "/smtp-connections", label: "Sending accounts" },
+          { to: "/deliverability", label: "Sending health" },
+          { to: "/suppressions", label: "Blocked addresses" },
+          { to: "/queue-operations", label: "Background jobs", adminOnly: true },
+          { to: "/settings", label: "Organization" },
+        ],
+      },
+    ],
+  },
 ];
 
 const SPLASH_STORAGE_KEY = "qqueue.dashboard-splash-seen";
@@ -112,9 +147,22 @@ export function DashboardLayout() {
   const isOrgAdmin =
     currentOrganization?.role === "OWNER" ||
     currentOrganization?.role === "ADMIN";
-  const visibleNavItems = navItems.filter(
-    (item) => !item.adminOnly || isOrgAdmin
-  );
+  const visibleSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items
+        .map((item): NavItem | null => {
+          if (isGroup(item)) {
+            const children = item.children.filter(
+              (child) => !child.adminOnly || isOrgAdmin
+            );
+            return children.length ? { ...item, children } : null;
+          }
+          return !item.adminOnly || isOrgAdmin ? item : null;
+        })
+        .filter((item): item is NavItem => item !== null),
+    }))
+    .filter((section) => section.items.length > 0);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -138,16 +186,22 @@ export function DashboardLayout() {
     return () => window.clearTimeout(timeoutId);
   }, [showSplash]);
 
-  // Auto-expand a nav group when the current route lives inside it.
+  // Auto-expand a nav group when the current route lives inside one of its
+  // children.
   useEffect(() => {
-    navItems.forEach((item) => {
-      if (
-        item.children &&
-        (location.pathname === item.to ||
-          location.pathname.startsWith(`${item.to}/`))
-      ) {
-        setOpenGroups((current) => ({ ...current, [item.label]: true }));
-      }
+    navSections.forEach((section) => {
+      section.items.forEach((item) => {
+        if (
+          isGroup(item) &&
+          item.children.some(
+            (child) =>
+              location.pathname === child.to ||
+              location.pathname.startsWith(`${child.to}/`)
+          )
+        ) {
+          setOpenGroups((current) => ({ ...current, [item.label]: true }));
+        }
+      });
     });
   }, [location.pathname]);
 
@@ -224,86 +278,109 @@ export function DashboardLayout() {
           </div>
         ) : null}
 
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-3">
-          {visibleNavItems.map((item) => {
-            const Icon = item.icon;
+        <nav className="flex flex-1 flex-col overflow-y-auto px-3 pb-3">
+          {visibleSections.map((section, sectionIndex) => (
+            <div
+              key={section.heading ?? `section-${sectionIndex}`}
+              className={cn(
+                "flex flex-col gap-1",
+                sectionIndex > 0 &&
+                  (section.heading
+                    ? "mt-4"
+                    : "mt-3 border-t border-border/60 pt-3")
+              )}
+            >
+              {section.heading ? (
+                <div className="px-3 pb-0.5 text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  {section.heading}
+                </div>
+              ) : null}
 
-            if (item.children) {
-              const groupActive =
-                location.pathname === item.to ||
-                location.pathname.startsWith(`${item.to}/`);
-              const open = openGroups[item.label] ?? groupActive;
+              {section.items.map((item) => {
+                const Icon = item.icon;
 
-              return (
-                <div key={item.to}>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setOpenGroups((current) => ({
-                        ...current,
-                        [item.label]: !open,
-                      }))
+                if (isGroup(item)) {
+                  const groupActive = item.children.some(
+                    (child) =>
+                      location.pathname === child.to ||
+                      location.pathname.startsWith(`${child.to}/`)
+                  );
+                  const open = openGroups[item.label] ?? groupActive;
+
+                  return (
+                    <div key={item.label}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOpenGroups((current) => ({
+                            ...current,
+                            [item.label]: !open,
+                          }))
+                        }
+                        className={cn(
+                          "flex w-full items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          groupActive
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                        )}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="flex-1 text-left">{item.label}</span>
+                        <ChevronRight
+                          className={cn(
+                            "h-4 w-4 shrink-0 transition-transform",
+                            open && "rotate-90"
+                          )}
+                        />
+                      </button>
+                      {open ? (
+                        <div className="mt-0.5 flex flex-col gap-0.5 pl-7">
+                          {item.children.map((child) => (
+                            <NavLink
+                              key={child.to}
+                              to={child.to}
+                              end
+                              className={({ isActive }) =>
+                                cn(
+                                  "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                                  isActive
+                                    ? "bg-primary/10 text-primary"
+                                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                                )
+                              }
+                            >
+                              {child.label}
+                            </NavLink>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                }
+
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={
+                      item.end ?? (item.to === "/" || item.to.startsWith("/campaigns"))
                     }
-                    className={cn(
-                      "flex w-full items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      groupActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                    )}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        isActive
+                          ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      )
+                    }
                   >
                     <Icon className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 text-left">{item.label}</span>
-                    <ChevronRight
-                      className={cn(
-                        "h-4 w-4 shrink-0 transition-transform",
-                        open && "rotate-90"
-                      )}
-                    />
-                  </button>
-                  {open ? (
-                    <div className="mt-0.5 flex flex-col gap-0.5 pl-7">
-                      {item.children.map((child) => (
-                        <NavLink
-                          key={child.to}
-                          to={child.to}
-                          end
-                          className={({ isActive }) =>
-                            cn(
-                              "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                              isActive
-                                ? "bg-primary/10 text-primary"
-                                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                            )
-                          }
-                        >
-                          {child.label}
-                        </NavLink>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            }
-
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                  )
-                }
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                {item.label}
-              </NavLink>
-            );
-          })}
+                    {item.label}
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="border-t bg-muted/20 p-3">

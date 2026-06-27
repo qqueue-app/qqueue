@@ -128,8 +128,8 @@ export function Deliverability() {
   return (
     <>
       <PageHeader
-        title="Deliverability"
-        description="Sending health over the last 30 days, plus auto-suppression and throttle controls."
+        title="Sending health"
+        description="How your email is landing over the last 30 days, plus auto-blocking and rate-limit controls."
       />
 
       <section className="space-y-6 p-6">

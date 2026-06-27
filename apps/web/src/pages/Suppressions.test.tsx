@@ -53,9 +53,9 @@ describe("Suppressions", () => {
     render(<Suppressions />);
     await screen.findByText("blocked@example.com");
 
-    await user.click(screen.getByRole("button", { name: /suppress address/i }));
+    await user.click(screen.getByRole("button", { name: /^block address$/i }));
     await user.type(screen.getByLabelText("Email"), "new@example.com");
-    await user.click(screen.getByRole("button", { name: /^suppress$/i }));
+    await user.click(screen.getByRole("button", { name: /^block$/i }));
 
     await waitFor(() =>
       expect(mockedApi.addSuppression).toHaveBeenCalledWith({
@@ -64,6 +64,6 @@ describe("Suppressions", () => {
         reason: "MANUAL"
       })
     );
-    expect(toast.success).toHaveBeenCalledWith("Address suppressed.");
+    expect(toast.success).toHaveBeenCalledWith("Address blocked.");
   });
 });

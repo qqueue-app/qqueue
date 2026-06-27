@@ -141,7 +141,7 @@ describe("EmailStudio", () => {
   it("warns and disables sending when there is no SMTP connection", async () => {
     setup({ withSmtp: false });
     renderStudio();
-    expect(await screen.findByText("No SMTP connection yet")).toBeInTheDocument();
+    expect(await screen.findByText("No sending account yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Send email/i })).toBeDisabled();
   });
 
@@ -210,7 +210,7 @@ describe("EmailStudio", () => {
     ]);
   });
 
-  it("adds a repeat schedule option without sending a recurring manual email", async () => {
+  it("offers one-time scheduling but not recurring on a one-off send", async () => {
     const user = userEvent.setup();
     setup();
     renderStudio();
@@ -218,35 +218,16 @@ describe("EmailStudio", () => {
       expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
     );
 
-    await user.click(screen.getByLabelText("Repeat on a schedule"));
-    expect(screen.getByText("Frequency")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save schedule" })).toBeInTheDocument();
-
-    await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
-    await user.type(screen.getByLabelText("Subject"), "Hi");
-    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
-    await user.click(screen.getByRole("button", { name: "Save schedule" }));
-
-    expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith(
-      "Recurring Email Studio sends are not wired yet."
-    );
-  });
-
-  it("keeps one-time and repeat schedules mutually exclusive", async () => {
-    const user = userEvent.setup();
-    setup();
-    renderStudio();
-    await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
-    );
+    // Recurring isn't supported for one-off Compose sends, so it's hidden.
+    expect(
+      screen.queryByLabelText("Repeat on a schedule")
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByLabelText("Schedule for later"));
     expect(screen.getByLabelText("Scheduled time")).toBeInTheDocument();
-
-    await user.click(screen.getByLabelText("Repeat on a schedule"));
-    expect(screen.queryByLabelText("Scheduled time")).not.toBeInTheDocument();
-    expect(screen.getByText("Frequency")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Schedule email/i })
+    ).toBeInTheDocument();
   });
 
   it("loads a template into the composer without mutating it", async () => {
@@ -257,8 +238,8 @@ describe("EmailStudio", () => {
 
     await user.click(screen.getByRole("combobox", { name: "Template" }));
     await user.click(await screen.findByRole("option", { name: "Welcome" }));
-    await user.click(screen.getByRole("button", { name: "Load template" }));
 
+    // Selecting a template now loads it immediately (no separate button).
     expect(screen.getByLabelText("Subject")).toHaveValue("Welcome aboard");
     // Loading a template never writes back to it.
     expect(mockedApi.updateEmailDraft).not.toHaveBeenCalledWith(

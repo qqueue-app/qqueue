@@ -85,19 +85,37 @@ describe("Dashboard", () => {
     // setup health badge: 3 of 4 ready
     expect(screen.getByText("3/4 ready")).toBeInTheDocument();
     expect(screen.getByText("Default: Primary")).toBeInTheDocument();
-    // event badge
-    expect(screen.getByText("DELIVERED")).toBeInTheDocument();
   });
 
-  it("shows empty states when there are no jobs or events", async () => {
+  it("shows the empty state when there are no jobs", async () => {
     mockedApi.dashboardSummary.mockResolvedValue({
       ...summary,
-      recentEmailJobs: [],
-      recentEvents: []
+      recentEmailJobs: []
     });
     renderDashboard();
     expect(await screen.findByText("No email jobs yet")).toBeInTheDocument();
-    expect(screen.getByText("No events recorded yet")).toBeInTheDocument();
+  });
+
+  it("shows the first-run guide and hides setup health until an email is sent", async () => {
+    mockedApi.dashboardSummary.mockResolvedValue({
+      ...summary,
+      recentEmailJobs: []
+    });
+    renderDashboard();
+    expect(
+      await screen.findByText("Connect a sending account")
+    ).toBeInTheDocument();
+    // the guide replaces the setup-health checklist for brand-new orgs
+    expect(screen.queryByText("Setup health")).not.toBeInTheDocument();
+  });
+
+  it("hides the first-run guide once an email has been sent", async () => {
+    mockedApi.dashboardSummary.mockResolvedValue(summary);
+    renderDashboard();
+    await screen.findByText("3/4 ready");
+    expect(
+      screen.queryByText("Connect a sending account")
+    ).not.toBeInTheDocument();
   });
 
   it("shows the no-organization alert and skips the API call", async () => {

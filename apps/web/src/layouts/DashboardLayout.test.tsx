@@ -41,6 +41,10 @@ function renderLayout(initial = "/") {
           <Route index element={<div>Home page</div>} />
           <Route path="campaigns" element={<div>Campaigns page</div>} />
           <Route path="campaigns/lists" element={<div>Lists page</div>} />
+          <Route
+            path="smtp-connections"
+            element={<div>Sending accounts page</div>}
+          />
         </Route>
       </Routes>
     </MemoryRouter>
@@ -59,26 +63,25 @@ describe("DashboardLayout", () => {
   it("renders the sidebar nav and the routed outlet", () => {
     renderLayout("/");
     // nav labels appear (desktop + mobile sidebars both render)
-    expect(screen.getAllByText("Dashboard").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Home").length).toBeGreaterThan(0);
     expect(screen.getByText("Home page")).toBeInTheDocument();
   });
 
-  it("expands the campaigns group and shows children when on a child route", () => {
-    renderLayout("/campaigns/lists");
-    expect(screen.getAllByText("All campaigns").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Contact lists").length).toBeGreaterThan(0);
-    expect(screen.getByText("Lists page")).toBeInTheDocument();
+  it("expands the settings group and shows children when on a child route", () => {
+    renderLayout("/smtp-connections");
+    expect(screen.getAllByText("Sending accounts").length).toBeGreaterThan(0);
+    expect(screen.getByText("Sending accounts page")).toBeInTheDocument();
   });
 
-  it("toggles the campaigns nav group on click", async () => {
+  it("toggles the settings nav group on click", async () => {
     const user = userEvent.setup();
     renderLayout("/");
-    // groups collapsed initially on "/"; click to expand
-    const campaignsButtons = screen.getAllByRole("button", {
-      name: /Campaigns/
+    // the settings group is collapsed initially on "/"; click to expand
+    const settingsButtons = screen.getAllByRole("button", {
+      name: /Settings/
     });
-    await user.click(campaignsButtons[0]);
-    expect(screen.getAllByText("All campaigns").length).toBeGreaterThan(0);
+    await user.click(settingsButtons[0]);
+    expect(screen.getAllByText("Sending accounts").length).toBeGreaterThan(0);
   });
 
   it("opens the org switcher and switches organization", async () => {

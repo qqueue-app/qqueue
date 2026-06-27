@@ -90,13 +90,13 @@ export function Suppressions() {
     setSaving(true);
     try {
       await api.addSuppression({ organizationId, email, reason: "MANUAL" });
-      toast.success("Address suppressed.");
+      toast.success("Address blocked.");
       setDialogOpen(false);
       setEmail("");
       await load();
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Unable to add suppression"
+        error instanceof Error ? error.message : "Unable to block address"
       );
     } finally {
       setSaving(false);
@@ -108,7 +108,7 @@ export function Suppressions() {
     setDeleting(true);
     try {
       await api.deleteSuppression(deleteTarget.id);
-      toast.success("Suppression removed. This address can be emailed again.");
+      toast.success("Address unblocked. It can be emailed again.");
       setDeleteTarget(null);
       await load();
     } catch (error) {
@@ -121,8 +121,8 @@ export function Suppressions() {
   return (
     <>
       <PageHeader
-        title="Suppressions"
-        description="Addresses that are never sent to, across every send."
+        title="Blocked addresses"
+        description="Addresses QQueue will never email, across every send. Bounces, complaints, and unsubscribes land here automatically."
         actions={
           <Button
             onClick={() => {
@@ -132,7 +132,7 @@ export function Suppressions() {
             disabled={!organizationId}
           >
             <Plus className="h-4 w-4" />
-            Suppress address
+            Block address
           </Button>
         }
       />
@@ -148,7 +148,7 @@ export function Suppressions() {
           ) : suppressions.length === 0 ? (
             <EmptyState
               icon={ShieldBan}
-              title="Nothing suppressed"
+              title="Nothing blocked"
               description="Bounces, complaints, and unsubscribes land here automatically. You can also add an address manually."
             />
           ) : (
@@ -183,7 +183,7 @@ export function Suppressions() {
                           size="icon"
                           className="text-muted-foreground hover:text-destructive"
                           onClick={() => setDeleteTarget(suppression)}
-                          aria-label="Remove suppression"
+                          aria-label="Unblock address"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -200,7 +200,7 @@ export function Suppressions() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Suppress an address</DialogTitle>
+            <DialogTitle>Block an address</DialogTitle>
             <DialogDescription>
               The address will be skipped on every campaign, transactional, and
               manual send until you remove it.
@@ -227,7 +227,7 @@ export function Suppressions() {
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? <Spinner /> : null}
-                Suppress
+                Block
               </Button>
             </DialogFooter>
           </form>
@@ -237,9 +237,9 @@ export function Suppressions() {
       <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Remove suppression?"
+        title="Unblock this address?"
         description={`${deleteTarget?.email} will be eligible to receive email again.`}
-        confirmLabel="Remove"
+        confirmLabel="Unblock"
         loading={deleting}
         onConfirm={confirmDelete}
       />

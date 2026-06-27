@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   MailOpen,
   MailPlus,
   Plug,
@@ -36,6 +37,7 @@ import {
 import { Spinner } from "../components/ui/spinner.js";
 import { Textarea } from "../components/ui/textarea.js";
 import { Switch } from "../components/ui/switch.js";
+import { cn } from "../lib/utils.js";
 
 type ConversationThread = {
   threadKey: string;
@@ -127,6 +129,10 @@ export function Inbox() {
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
     null
   );
+  // On narrow screens the list and reading pane share one column, so we show
+  // one at a time: the list until the user taps a thread, then the reading
+  // pane (with a Back control). The desktop two-pane layout ignores this.
+  const [mobileShowDetail, setMobileShowDetail] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -216,6 +222,7 @@ export function Inbox() {
   useEffect(() => {
     if (threads.length === 0) {
       setSelectedThreadKey(null);
+      setMobileShowDetail(false);
       return;
     }
 
@@ -277,6 +284,7 @@ export function Inbox() {
 
   async function openThread(thread: ConversationThread) {
     setSelectedThreadKey(thread.threadKey);
+    setMobileShowDetail(true);
     if (!organizationId) return;
 
     const unreadMessages = thread.messages.filter((message) => !message.readAt);
@@ -309,7 +317,7 @@ export function Inbox() {
         text: replyBody,
       });
       setReplyBody("");
-      toast.success("Reply queued.");
+      toast.success("Reply sent.");
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to reply.");
@@ -323,14 +331,14 @@ export function Inbox() {
       <div className="flex min-h-0 flex-col md:h-full">
         <PageHeader
           title="Inbox"
-          description="Read synced IMAP conversations and reply from QQueue."
+          description="Read replies to your emails and respond — all in one place."
           actions={
             <Button
               onClick={() => setDialogOpen(true)}
               disabled={!organizationId}
             >
               <MailPlus className="h-4 w-4" />
-              Connect mailbox
+              Connect an inbox
             </Button>
           }
         />
@@ -342,14 +350,19 @@ export function Inbox() {
             </div>
           ) : (
             <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
-              <Card className="flex min-h-[28rem] flex-col overflow-hidden xl:min-h-0">
+              <Card
+                className={cn(
+                  "min-h-[28rem] flex-col overflow-hidden xl:flex xl:min-h-0",
+                  mobileShowDetail ? "hidden" : "flex"
+                )}
+              >
                 <div className="shrink-0 space-y-3 border-b p-4">
                 <div className="space-y-2">
                   <Label
                     htmlFor="inbox-mailbox-filter"
                     className="text-xs text-muted-foreground"
                   >
-                    Mailbox
+                    Account
                   </Label>
                   <div className="flex gap-2">
                     <Select
@@ -358,11 +371,11 @@ export function Inbox() {
                       disabled={accounts.length === 0}
                     >
                       <SelectTrigger id="inbox-mailbox-filter">
-                        <SelectValue placeholder="Select mailbox" />
+                        <SelectValue placeholder="Select account" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">
-                          All mailboxes ({accounts.length})
+                          All inboxes ({accounts.length})
                         </SelectItem>
                         {accounts.map((account) => (
                           <SelectItem key={account.id} value={account.id}>
@@ -380,7 +393,7 @@ export function Inbox() {
                       onClick={() => {
                         if (selectedAccount) void deleteAccount(selectedAccount);
                       }}
-                      aria-label="Remove selected mailbox"
+                      aria-label="Remove this inbox"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -396,7 +409,7 @@ export function Inbox() {
                   <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
                       <Plug className="h-4 w-4 shrink-0" />
-                      <span>No mailbox connected yet.</span>
+                      <span>No inbox connected yet.</span>
                     </div>
                     <Button
                       type="button"
@@ -404,7 +417,7 @@ export function Inbox() {
                       onClick={() => setDialogOpen(true)}
                     >
                       <MailPlus className="h-4 w-4" />
-                      Connect mailbox
+                      Connect an inbox
                     </Button>
                   </div>
                 ) : selectedAccount ? (
@@ -451,7 +464,7 @@ export function Inbox() {
                     <EmptyState
                       icon={MailOpen}
                       title="No conversations yet"
-                      description="Replies will appear here after your connected mailbox syncs."
+                      description="Replies will appear here once your inbox finishes syncing."
                     />
                   </div>
                 ) : (
@@ -506,10 +519,23 @@ export function Inbox() {
                 )}
               </Card>
 
-              <Card className="flex min-h-[32rem] flex-col overflow-hidden xl:min-h-0">
+              <Card
+                className={cn(
+                  "min-h-[32rem] flex-col overflow-hidden xl:flex xl:min-h-0",
+                  mobileShowDetail ? "flex" : "hidden"
+                )}
+              >
                 {selectedThread ? (
                   <div className="flex min-h-0 flex-1 flex-col">
                     <div className="shrink-0 border-b bg-muted/20 p-5">
+                    <button
+                      type="button"
+                      onClick={() => setMobileShowDetail(false)}
+                      className="mb-3 -ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground xl:hidden"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      All conversations
+                    </button>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h2 className="truncate text-xl font-semibold tracking-tight">
@@ -601,9 +627,11 @@ export function Inbox() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Connect mailbox</DialogTitle>
+            <DialogTitle>Connect an inbox</DialogTitle>
             <DialogDescription>
-              QQueue verifies the IMAP login and opens the mailbox read-only.
+              We check the connection and open your inbox read-only — QQueue
+              never sends or deletes from it. You can usually find these details
+              listed under IMAP in your email provider settings.
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={submitAccount}>
@@ -639,9 +667,10 @@ export function Inbox() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="inbox-host">IMAP host</Label>
+                <Label htmlFor="inbox-host">Mail server</Label>
                 <Input
                   id="inbox-host"
+                  placeholder="imap.gmail.com"
                   value={form.host}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -651,6 +680,9 @@ export function Inbox() {
                   }
                   required
                 />
+                <p className="text-xs text-muted-foreground">
+                  Your incoming (IMAP) mail server.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="inbox-port">Port</Label>
@@ -697,7 +729,7 @@ export function Inbox() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="inbox-mailbox">Mailbox</Label>
+                <Label htmlFor="inbox-mailbox">Folder</Label>
                 <Input
                   id="inbox-mailbox"
                   value={form.mailbox}
@@ -709,12 +741,15 @@ export function Inbox() {
                   }
                   required
                 />
+                <p className="text-xs text-muted-foreground">
+                  Which folder to read. Usually INBOX.
+                </p>
               </div>
               <div className="flex items-end justify-between gap-3 rounded-xl border p-3">
                 <div>
-                  <Label>Use TLS</Label>
+                  <Label>Secure connection (TLS)</Label>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Recommended for most IMAP mailboxes.
+                    Recommended — leave this on for most providers.
                   </p>
                 </div>
                 <Switch
@@ -725,7 +760,7 @@ export function Inbox() {
                       secure,
                     }))
                   }
-                  aria-label="Use TLS"
+                  aria-label="Secure connection (TLS)"
                 />
               </div>
             </div>

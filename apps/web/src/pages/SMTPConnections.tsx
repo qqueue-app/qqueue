@@ -125,7 +125,7 @@ export function SMTPConnections() {
         if (form.username) payload.username = form.username;
         if (form.password) payload.password = form.password;
         await api.updateSMTPConnection(editing.id, payload);
-        toast.success("SMTP connection verified and updated.");
+        toast.success("Sending account verified and updated.");
       } else {
         await api.createSMTPConnection({
           organizationId,
@@ -139,7 +139,7 @@ export function SMTPConnections() {
           fromName: form.fromName || undefined,
           isDefault: form.isDefault
         });
-        toast.success("SMTP connection verified and saved.");
+        toast.success("Sending account verified and saved.");
       }
       setDialogOpen(false);
       await load();
@@ -155,7 +155,7 @@ export function SMTPConnections() {
     setDeleting(true);
     try {
       await api.deleteSMTPConnection(deleteTarget.id);
-      toast.success("SMTP connection deleted.");
+      toast.success("Sending account deleted.");
       setDeleteTarget(null);
       await load();
     } catch (error) {
@@ -168,8 +168,8 @@ export function SMTPConnections() {
   return (
     <>
       <PageHeader
-        title="SMTP Connections"
-        description="Manage SMTP credentials for Mailcow-compatible and generic SMTP sending."
+        title="Sending accounts"
+        description="The mailboxes QQueue sends from. Connect one to start sending email (works with Mailcow and any standard SMTP server)."
         actions={
           <Button onClick={openCreate} disabled={!organizationId}>
             <Plus className="h-4 w-4" />
@@ -192,8 +192,8 @@ export function SMTPConnections() {
           <Card>
             <EmptyState
               icon={Server}
-              title="No SMTP connections yet"
-              description="Add your first connection to start sending email."
+              title="No sending accounts yet"
+              description="Add your first account to start sending email."
               action={
                 <Button onClick={openCreate} disabled={!organizationId} variant="outline">
                   <Plus className="h-4 w-4" />
@@ -250,7 +250,7 @@ export function SMTPConnections() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {editing ? "Edit SMTP connection" : "New SMTP connection"}
+              {editing ? "Edit sending account" : "New sending account"}
             </DialogTitle>
             <DialogDescription>
               {editing
@@ -388,8 +388,8 @@ export function SMTPConnections() {
       <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete SMTP connection?"
-        description={`"${deleteTarget?.name}" will be permanently removed. Emails using it as default will need another connection.`}
+        title="Delete sending account?"
+        description={`"${deleteTarget?.name}" will be permanently removed. Emails using it as default will need another account.`}
         confirmLabel="Delete"
         loading={deleting}
         onConfirm={confirmDelete}
