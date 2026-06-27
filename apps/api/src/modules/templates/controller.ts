@@ -1,5 +1,9 @@
 import type { Request, Response } from "express";
-import { templateSchema } from "@qqueue/shared";
+import {
+  templatePreviewSchema,
+  templateSchema,
+  templateTestSendSchema
+} from "@qqueue/shared";
 import { templateService } from "./service.js";
 
 export const templateController = {
@@ -41,5 +45,29 @@ export const templateController = {
   async delete(req: Request, res: Response) {
     await templateService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
+  },
+
+  async clone(req: Request, res: Response) {
+    const template = await templateService.clone(
+      String(req.params.id),
+      req.userId!
+    );
+    res.status(201).json({ data: template });
+  },
+
+  async preview(req: Request, res: Response) {
+    const input = templatePreviewSchema.parse(req.body);
+    const result = await templateService.preview(input, req.userId!);
+    res.json({ data: result });
+  },
+
+  async testSend(req: Request, res: Response) {
+    const input = templateTestSendSchema.parse(req.body);
+    const result = await templateService.testSend(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.status(202).json({ data: result });
   }
 };

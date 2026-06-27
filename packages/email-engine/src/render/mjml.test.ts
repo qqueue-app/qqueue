@@ -62,15 +62,23 @@ describe("renderMjml", () => {
 });
 
 describe("wrapHtmlInMjml / renderHtmlAsEmailSafe", () => {
-  it("wraps body HTML in a branded MJML document", () => {
+  it("wraps body HTML in an email-safe card with no default branding", () => {
     const doc = wrapHtmlInMjml("<p>Body</p>");
     expect(doc).toContain("<mjml>");
-    // Author HTML survives verbatim inside the branded body card.
+    // Author HTML survives verbatim inside the body card.
     expect(doc).toContain(
       `<mj-raw><div class="qq-body"><p>Body</p></div></mj-raw>`
     );
-    // Default branding renders the wordmark/footer.
-    expect(doc).toContain("QQueue");
+    // No vendor name is injected when no branding is supplied.
+    expect(doc).not.toContain("QQueue");
+    // With no header/footer, only the body card section remains.
+    expect(doc).not.toContain("&copy;");
+  });
+
+  it("renders a brand header and copyright footer only when opted in", () => {
+    const doc = wrapHtmlInMjml("<p>Hi</p>", { brandName: "Acme" });
+    expect(doc).toContain("Acme");
+    expect(doc).toContain("&copy; Acme");
   });
 
   it("applies custom branding (brand name + accent + unsubscribe)", () => {

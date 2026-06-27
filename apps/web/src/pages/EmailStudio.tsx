@@ -1,9 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Eye,
   FileText,
   Paperclip,
-  Pencil,
   Plus,
   Save,
   Search,
@@ -15,7 +13,6 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { EmailPreviewFrame } from "../components/EmailPreviewFrame.js";
 import { RichTextEditor } from "../components/editor/RichTextEditor.js";
 import {
   buildCron,
@@ -29,7 +26,6 @@ import {
   type ContactList,
   type EmailAttachment,
   type EmailDraft,
-  type EmailPreviewResult,
   type ManualEmailDeliveryStatus,
   type RecipientDelivery,
   type SMTPConnection,
@@ -218,7 +214,6 @@ export function EmailStudio() {
     useState<ManualEmailDeliveryStatus | null>(null);
 
   // UI state.
-  const [mode, setMode] = useState<"compose" | "preview">("compose");
   const [sending, setSending] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [listPickerOpen, setListPickerOpen] = useState(false);
@@ -231,10 +226,6 @@ export function EmailStudio() {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-
-  // Preview.
-  const [previewing, setPreviewing] = useState(false);
-  const [preview, setPreview] = useState<EmailPreviewResult | null>(null);
 
   const hasContent =
     subject.trim() !== "" ||
@@ -311,8 +302,6 @@ export function EmailStudio() {
     setRecurrence(emptyRecurrence);
     setDraftId(null);
     setLastSavedAt(null);
-    setMode("compose");
-    setPreview(null);
   }
 
   function selectTemplate(value: string) {
@@ -504,8 +493,6 @@ export function EmailStudio() {
     setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
     setTemplateId(draft.templateId ?? NO_TEMPLATE);
     setLastSavedAt(draft.updatedAt);
-    setMode("compose");
-    setPreview(null);
     setDeliveryStatus(null);
     setDraftsOpen(false);
     toast.success("Draft loaded.");
@@ -527,36 +514,6 @@ export function EmailStudio() {
       toast.error(
         error instanceof Error ? error.message : "Unable to delete draft"
       );
-    }
-  }
-
-  function previewPayload() {
-    return {
-      organizationId: organizationId!,
-      subject,
-      html,
-      to: toEmails,
-      cc: ccEmails,
-      bcc: bccEmails,
-      listIds: selectedListIds
-    };
-  }
-
-  async function runPreview() {
-    if (!organizationId) {
-      return;
-    }
-    setMode("preview");
-    setPreviewing(true);
-    try {
-      setPreview(await api.previewEmail(previewPayload()));
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to generate preview"
-      );
-      setMode("compose");
-    } finally {
-      setPreviewing(false);
     }
   }
 
@@ -655,7 +612,7 @@ export function EmailStudio() {
     <>
       <PageHeader
         title="Compose"
-        description="Write, preview, and send a one-off email through your delivery pipeline."
+        description="Write and send a one-off email through your delivery pipeline."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -909,34 +866,12 @@ export function EmailStudio() {
               </Card>
 
               <Card className="space-y-4 p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold">Composer</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Write your message, then switch to Preview to see the
-                      rendered email.
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1 rounded-md border p-0.5">
-                    <Button
-                      type="button"
-                      variant={mode === "compose" ? "secondary" : "ghost"}
-                      size="sm"
-                      onClick={() => setMode("compose")}
-                    >
-                      <Pencil className="h-4 w-4" />
-                      Compose
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={mode === "preview" ? "secondary" : "ghost"}
-                      size="sm"
-                      onClick={runPreview}
-                    >
-                      <Eye className="h-4 w-4" />
-                      Preview
-                    </Button>
-                  </div>
+                <div>
+                  <h2 className="text-base font-semibold">Composer</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Write your message and send it through your delivery
+                    pipeline.
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -958,69 +893,12 @@ export function EmailStudio() {
                   </Select>
                 </div>
 
-                {mode === "compose" ? (
-                  <RichTextEditor
-                    value={html}
-                    onChange={setHtml}
-                    placeholder="Write your email…"
-                    showVariables={false}
-                  />
-                ) : previewing ? (
-                  <div className="space-y-3">
-                    <Skeleton className="h-6 w-48" />
-                    <Skeleton className="h-40 w-full" />
-                  </div>
-                ) : preview ? (
-                  // An inbox-style preview window: a header strip with the
-                  // subject + recipients, then the rendered email on a tinted
-                  // backdrop so the branded message card floats like it will in
-                  // a real client.
-                  <div className="overflow-hidden rounded-lg border shadow-sm">
-                    <div className="border-b bg-muted/30 px-4 py-3">
-                      <p className="font-medium leading-snug">
-                        {preview.subject || (
-                          <span className="text-muted-foreground">
-                            (no subject)
-                          </span>
-                        )}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {preview.recipients.total} recipient
-                        {preview.recipients.total === 1 ? "" : "s"}
-                        {preview.recipients.to.length
-                          ? ` · To: ${preview.recipients.to.join(", ")}`
-                          : ""}
-                        {preview.recipients.cc.length
-                          ? ` · Cc: ${preview.recipients.cc.join(", ")}`
-                          : ""}
-                        {preview.recipients.bcc.length
-                          ? ` · Bcc: ${preview.recipients.bcc.length} hidden`
-                          : ""}
-                      </p>
-                      {attachments.length > 0 ? (
-                        <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                          <Paperclip className="h-3.5 w-3.5" />
-                          {attachments
-                            .map((attachment) => attachment.filename)
-                            .join(", ")}
-                        </p>
-                      ) : null}
-                    </div>
-                    {/* Render in a sandboxed iframe: the preview HTML is a full
-                        email-safe document whose styles must not leak into the
-                        dashboard (which previously blanked the page). */}
-                    <EmailPreviewFrame
-                      html={preview.html}
-                      title="Email preview"
-                      data-testid="preview-body"
-                      className="rounded-none border-0 bg-[#eef2f1]"
-                    />
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Nothing to preview yet.
-                  </p>
-                )}
+                <RichTextEditor
+                  value={html}
+                  onChange={setHtml}
+                  placeholder="Write your email…"
+                  showVariables={false}
+                />
               </Card>
             </div>
 

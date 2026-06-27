@@ -205,14 +205,26 @@ export interface DeliverabilityAlerts {
   }>;
 }
 
+export interface TemplateVariable {
+  name: string;
+  label?: string | null;
+  defaultValue?: string | null;
+  required?: boolean;
+}
+
 export interface Template {
   id: string;
   organizationId: string;
   name: string;
+  description?: string | null;
+  category?: string | null;
+  tags?: string[];
   subject: string;
   html: string;
   mjml?: string | null;
   text?: string | null;
+  variables?: TemplateVariable[] | null;
+  previewData?: Record<string, string> | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -931,6 +943,10 @@ export const api = {
     );
   },
 
+  getTemplate(id: string) {
+    return request<Template>(`/api/v1/templates/${id}`);
+  },
+
   createTemplate(input: Record<string, unknown>) {
     return request<Template>("/api/v1/templates", {
       method: "POST",
@@ -947,6 +963,41 @@ export const api = {
 
   deleteTemplate(id: string) {
     return request<void>(`/api/v1/templates/${id}`, { method: "DELETE" });
+  },
+
+  cloneTemplate(id: string) {
+    return request<Template>(`/api/v1/templates/${id}/clone`, {
+      method: "POST",
+    });
+  },
+
+  previewTemplate(input: {
+    organizationId: string;
+    subject?: string;
+    html?: string;
+    templateId?: string;
+    variables?: TemplateVariable[] | null;
+    data?: Record<string, string>;
+  }) {
+    return request<{ subject: string; html: string }>(
+      "/api/v1/templates/preview",
+      { method: "POST", body: JSON.stringify(input) }
+    );
+  },
+
+  testSendTemplate(
+    id: string,
+    input: {
+      organizationId: string;
+      to?: string;
+      data?: Record<string, string>;
+      smtpConnectionId?: string;
+    }
+  ) {
+    return request<{ id: string; status: string }>(
+      `/api/v1/templates/${id}/test`,
+      { method: "POST", body: JSON.stringify(input) }
+    );
   },
 
   listCampaigns(organizationId: string) {

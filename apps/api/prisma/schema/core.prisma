@@ -303,6 +303,13 @@ model Template {
   id             String       @id @default(cuid())
   organizationId String
   name           String
+  // Short human description shown on template cards. Optional.
+  description    String?
+  // Free-text grouping (e.g. "Onboarding", "Newsletter"). Optional; used for
+  // filtering in the dashboard.
+  category       String?
+  // Free-form tags for filtering. Defaults to an empty list.
+  tags           String[]     @default([])
   subject        String
   // Compiled, email-safe HTML (the artifact actually sent). When a template is
   // authored with MJML, `html` is the mjml2html output of `mjml`.
@@ -312,6 +319,11 @@ model Template {
   // intentionally deferred).
   mjml           String?
   text           String?
+  // Managed variable definitions: [{ name, label, defaultValue, required }].
+  // Drives the variables panel and supplies preview/test-send fallback values.
+  variables      Json?
+  // Saved sample data ({ varName: value }) so previews are reproducible.
+  previewData    Json?
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaigns      Campaign[]
   emailJobs      EmailJob[]

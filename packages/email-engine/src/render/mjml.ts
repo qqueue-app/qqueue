@@ -72,11 +72,14 @@ export async function renderMjml(
 /**
 /** Branding applied to the email-safe layout. All fields are optional. */
 export interface EmailBranding {
-  /** Brand/product name shown in the header and footer. Defaults to "QQueue". */
+  /**
+   * Brand/product name shown in the header wordmark and footer copyright. When
+   * omitted, NO header or copyright line is rendered (no default vendor name).
+   */
   brandName?: string;
   /** Absolute URL to a logo image. When set, replaces the text wordmark. */
   logoUrl?: string;
-  /** Accent colour (links, header rule) as a CSS colour. Defaults to moss green. */
+  /** Accent colour (links, blockquote rule) as a CSS colour. Defaults to moss green. */
   accentColor?: string;
   /** Small print shown under the footer (e.g. a postal address). */
   footerNote?: string;
@@ -84,12 +87,11 @@ export interface EmailBranding {
   unsubscribeUrl?: string;
 }
 
-const DEFAULT_BRANDING: Required<
-  Pick<EmailBranding, "brandName" | "accentColor">
-> = {
-  brandName: "QQueue",
-  accentColor: "#2e7d63"
-};
+// Only the link/accent colour has a default. The brand wordmark and copyright
+// footer are intentionally NOT defaulted: outbound mail from a self-hosted
+// install must never be stamped with "QQueue" (or any vendor name) unless the
+// sender explicitly opts in via `branding`.
+const DEFAULT_ACCENT = "#2e7d63";
 
 function escapeHtml(value: string): string {
   return value
@@ -100,37 +102,76 @@ function escapeHtml(value: string): string {
 }
 
 /**
- * Wrap arbitrary body HTML (e.g. editor/template output) in a branded, email-safe
- * MJML document: a header with the brand wordmark/logo, the body inside a padded
- * white card on a tinted page background, and a footer. The author's HTML is
- * passed through verbatim inside an `<mj-raw>` block so its own markup survives;
- * the surrounding scaffold supplies the email-safe table/column structure plus
- * typography defaults that make plain editor output look intentional.
+ * Wrap arbitrary body HTML (e.g. editor/template output) in an email-safe MJML
+ * document: the body inside a padded white card on a tinted page background. The
+ * author's HTML is passed through verbatim inside an `<mj-raw>` block so its own
+ * markup survives; the surrounding scaffold supplies the email-safe table/column
+ * structure plus typography defaults that make plain editor output look
+ * intentional.
+ *
+ * A brand header and a copyright/unsubscribe footer are added ONLY when the
+ * caller supplies the corresponding `branding` fields — by default the document
+ * contains nothing but the sender's own content (no vendor name is injected).
  */
 export function wrapHtmlInMjml(
   bodyHtml: string,
   branding: EmailBranding = {}
 ): string {
-  const brandName = branding.brandName?.trim() || DEFAULT_BRANDING.brandName;
-  const accent = branding.accentColor?.trim() || DEFAULT_BRANDING.accentColor;
-  const safeBrand = escapeHtml(brandName);
+  const brandName = branding.brandName?.trim();
+  const accent = branding.accentColor?.trim() || DEFAULT_ACCENT;
+  const safeBrand = brandName ? escapeHtml(brandName) : "";
 
-  const header = branding.logoUrl
+  // Header is opt-in: rendered only when a logo or brand name is supplied.
+  const headerInner = branding.logoUrl
     ? `<mj-image src="${branding.logoUrl}" alt="${safeBrand}" align="center" width="160px" padding="0" />`
-    : `<mj-text align="center" font-size="22px" font-weight="700" letter-spacing="-0.01em" color="${accent}" padding="0">${safeBrand}</mj-text>`;
+    : brandName
+      ? `<mj-text align="center" font-size="22px" font-weight="700" letter-spacing="-0.01em" color="${accent}" padding="0">${safeBrand}</mj-text>`
+      : "";
 
+  const header = headerInner
+    ? [
+        `    <mj-section padding="28px 0 12px">`,
+        "      <mj-column>",
+        `        ${headerInner}`,
+        "      </mj-column>",
+        "    </mj-section>"
+      ].join("\n")
+    : "";
+
+  // Footer is opt-in: only a sender-supplied copyright/note and/or an
+  // unsubscribe link. No vendor branding is ever added by default.
   const footerLines = [
-    `&copy; ${safeBrand}`,
+    brandName ? `&copy; ${safeBrand}` : null,
     branding.footerNote ? escapeHtml(branding.footerNote) : null
   ]
     .filter(Boolean)
     .join("<br />");
+
+  const footerText = footerLines
+    ? `<mj-text align="center" font-size="12px" color="#9aa5b1" line-height="1.5" padding="0">${footerLines}</mj-text>`
+    : "";
 
   const unsubscribe = branding.unsubscribeUrl
     ? `<mj-text align="center" font-size="12px" color="#9aa5b1" padding="8px 0 0">` +
       `<a href="${branding.unsubscribeUrl}" style="color:#9aa5b1;text-decoration:underline;">Unsubscribe</a>` +
       `</mj-text>`
     : "";
+
+  const footer =
+    footerText || unsubscribe
+      ? [
+          `    <mj-section padding="16px 0 28px">`,
+          "      <mj-column>",
+          `        ${footerText}`,
+          `        ${unsubscribe}`,
+          "      </mj-column>",
+          "    </mj-section>"
+        ].join("\n")
+      : "";
+
+  // Card padding adapts so the body isn't crammed against the top/bottom when
+  // there's no header/footer section to provide breathing room.
+  const cardPadding = header || footer ? "36px 40px" : "40px";
 
   return [
     "<mjml>",
@@ -150,25 +191,18 @@ export function wrapHtmlInMjml(
     "    </mj-style>",
     "  </mj-head>",
     `  <mj-body background-color="#eef2f1">`,
-    `    <mj-section padding="28px 0 12px">`,
-    "      <mj-column>",
-    `        ${header}`,
-    "      </mj-column>",
-    "    </mj-section>",
-    `    <mj-section background-color="#ffffff" border-radius="14px" padding="36px 40px">`,
+    header,
+    `    <mj-section background-color="#ffffff" border-radius="14px" padding="${cardPadding}">`,
     "      <mj-column>",
     `        <mj-raw><div class="qq-body">${bodyHtml}</div></mj-raw>`,
     "      </mj-column>",
     "    </mj-section>",
-    `    <mj-section padding="16px 0 28px">`,
-    "      <mj-column>",
-    `        <mj-text align="center" font-size="12px" color="#9aa5b1" line-height="1.5" padding="0">${footerLines}</mj-text>`,
-    `        ${unsubscribe}`,
-    "      </mj-column>",
-    "    </mj-section>",
+    footer,
     "  </mj-body>",
     "</mjml>"
-  ].join("\n");
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 /**

@@ -194,16 +194,40 @@ export interface InboundMessage {
   } | null;
 }
 
+/** A managed personalization variable surfaced in the template editor. */
+export interface TemplateVariable {
+  /** Token name used in `{{name}}`. */
+  name: string;
+  /** Human label shown in the variables panel. */
+  label?: string | null;
+  /** Value substituted when a send/preview supplies no value for this var. */
+  defaultValue?: string | null;
+  /** When true, the editor warns if no value is provided at send time. */
+  required?: boolean;
+}
+
 export interface Template {
   id: string;
   organizationId: string;
   name: string;
+  /** Short human description shown on template cards. */
+  description?: string | null;
+  /** Free-text grouping (e.g. "Onboarding") used for dashboard filtering. */
+  category?: string | null;
+  /** Free-form tags for filtering. */
+  tags?: string[];
   subject: string;
   /** Compiled, email-safe HTML (the artifact actually sent). */
   html: string;
   /** MJML source when authored through the MJML render layer; null otherwise. */
   mjml?: string | null;
   text?: string | null;
+  /** Managed variable definitions driving the editor's variables panel. */
+  variables?: TemplateVariable[] | null;
+  /** Saved sample data ({ varName: value }) so previews are reproducible. */
+  previewData?: Record<string, string> | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Campaign {
@@ -660,16 +684,257 @@ export type ContactActivityQueryInput = z.infer<
   typeof contactActivityQuerySchema
 >;
 
+export const templateVariableSchema = z.object({
+  name: z
+    .string()
+    .min(1)
+    .regex(
+      /^[\w.-]+$/,
+      "Variable names may only contain letters, numbers, dots, hyphens, and underscores"
+    ),
+  label: z.string().optional().nullable(),
+  defaultValue: z.string().optional().nullable(),
+  required: z.boolean().optional(),
+});
+
 export const templateSchema = z.object({
   organizationId: z.string().min(1),
   name: z.string().min(1),
+  description: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
+  tags: z.array(z.string().min(1)).optional(),
   subject: z.string().min(1),
   html: z.string().min(1),
-  mjml: z.string().optional(),
-  text: z.string().optional(),
+  mjml: z.string().optional().nullable(),
+  text: z.string().optional().nullable(),
+  variables: z.array(templateVariableSchema).optional().nullable(),
+  previewData: z.record(z.string()).optional().nullable(),
 });
 
 export type TemplateInput = z.infer<typeof templateSchema>;
+export type TemplateVariableInput = z.infer<typeof templateVariableSchema>;
+
+/**
+ * Render a template (subject + body) with sample/real data, returning
+ * email-safe HTML. `tracking` is opt-in so dashboard previews don't rewrite
+ * links into click-tracking URLs.
+ */
+export const templatePreviewSchema = z.object({
+  organizationId: z.string().min(1),
+  subject: z.string().optional(),
+  html: z.string().optional(),
+  text: z.string().optional().nullable(),
+  variables: z.array(templateVariableSchema).optional().nullable(),
+  /** Sample values keyed by variable name. */
+  data: z.record(z.string()).optional(),
+  /** When omitted, the saved template (by id) supplies subject/html. */
+  templateId: z.string().optional(),
+});
+
+export type TemplatePreviewInput = z.infer<typeof templatePreviewSchema>;
+
+export interface TemplatePreviewResult {
+  subject: string;
+  html: string;
+}
+
+export const templateTestSendSchema = z.object({
+  organizationId: z.string().min(1),
+  /** Recipient for the test; defaults to the authenticated user server-side. */
+  to: emailAddressSchema.optional(),
+  /** Sample values keyed by variable name. */
+  data: z.record(z.string()).optional(),
+  smtpConnectionId: z.string().optional(),
+});
+
+export type TemplateTestSendInput = z.infer<typeof templateTestSendSchema>;
+
+// Matches `{{ variableName }}` with optional surrounding whitespace; the name
+// may contain letters, numbers, dots, hyphens, and underscores.
+const VARIABLE_TOKEN = /\{\{\s*([\w.-]+)\s*\}\}/g;
+
+/**
+ * Collect the distinct variable names referenced as `{{name}}` across the given
+ * strings, preserving first-seen order. Browser-safe (no `node:*`). Used by both
+ * the dashboard variables panel and the API to reconcile declared vs. used vars.
+ */
+export function extractVariables(...sources: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  for (const source of sources) {
+    if (!source) {
+      continue;
+    }
+    for (const match of source.matchAll(VARIABLE_TOKEN)) {
+      seen.add(match[1]);
+    }
+  }
+  return [...seen];
+}
+
+/**
+ * Substitute `{{name}}` tokens with values from `data`. Unknown/empty values
+ * render as an empty string. This is the single substitution implementation
+ * shared by previews and the send pipeline.
+ */
+export function applyVariables(
+  value: string | null | undefined,
+  data: Record<string, unknown> | undefined
+): string {
+  if (!value) {
+    return "";
+  }
+  if (!data) {
+    return value;
+  }
+  return value.replace(VARIABLE_TOKEN, (_match, key: string) => {
+    const variable = data[key];
+    return variable === undefined || variable === null ? "" : String(variable);
+  });
+}
+
+/**
+ * Build the effective substitution map for a render: declared variable defaults
+ * first, then caller-supplied data overrides. Empty/blank overrides fall back to
+ * the default so a half-filled preview still shows sensible placeholder text.
+ */
+export function resolveVariableData(
+  variables: TemplateVariable[] | null | undefined,
+  data: Record<string, string> | undefined
+): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const variable of variables ?? []) {
+    if (variable.defaultValue != null && variable.defaultValue !== "") {
+      resolved[variable.name] = variable.defaultValue;
+    }
+  }
+  for (const [key, val] of Object.entries(data ?? {})) {
+    if (val !== "" && val != null) {
+      resolved[key] = val;
+    }
+  }
+  return resolved;
+}
+
+/** Built-in starter templates offered in the "New template" gallery. */
+export interface StarterTemplate {
+  key: string;
+  name: string;
+  description: string;
+  category: string;
+  subject: string;
+  html: string;
+  variables: TemplateVariable[];
+}
+
+export const STARTER_TEMPLATES: StarterTemplate[] = [
+  {
+    key: "blank",
+    name: "Blank",
+    description: "Start from an empty canvas.",
+    category: "Basic",
+    subject: "",
+    html: "<p></p>",
+    variables: [],
+  },
+  {
+    key: "welcome",
+    name: "Welcome",
+    description: "Greet a new user and point them to a first action.",
+    category: "Onboarding",
+    subject: "Welcome to {{company}}, {{firstName}}!",
+    html: [
+      "<h1>Welcome aboard, {{firstName}} 👋</h1>",
+      "<p>We're thrilled to have you at {{company}}. Your account is ready to go.</p>",
+      "<p>To get the most out of it, start by setting up your first project.</p>",
+      '<p><a href="{{ctaUrl}}">Get started</a></p>',
+      "<p>If you have any questions, just reply to this email — we're here to help.</p>",
+      "<p>— The {{company}} team</p>",
+    ].join("\n"),
+    variables: [
+      { name: "firstName", label: "First name", defaultValue: "there" },
+      { name: "company", label: "Company", defaultValue: "QQueue" },
+      {
+        name: "ctaUrl",
+        label: "Call-to-action URL",
+        defaultValue: "https://example.com/start",
+      },
+    ],
+  },
+  {
+    key: "newsletter",
+    name: "Newsletter",
+    description: "A simple update with a heading, body, and sign-off.",
+    category: "Newsletter",
+    subject: "{{company}} news — {{month}}",
+    html: [
+      "<h1>What's new at {{company}}</h1>",
+      "<p>Hi {{firstName}}, here's the latest from us this month.</p>",
+      "<h2>Highlight of the month</h2>",
+      "<p>Share your most important update here. Keep it short and skimmable.</p>",
+      '<p><a href="{{ctaUrl}}">Read more</a></p>',
+      "<hr />",
+      "<p>Thanks for reading,<br />The {{company}} team</p>",
+    ].join("\n"),
+    variables: [
+      { name: "firstName", label: "First name", defaultValue: "there" },
+      { name: "company", label: "Company", defaultValue: "QQueue" },
+      { name: "month", label: "Month", defaultValue: "this month" },
+      {
+        name: "ctaUrl",
+        label: "Call-to-action URL",
+        defaultValue: "https://example.com",
+      },
+    ],
+  },
+  {
+    key: "password-reset",
+    name: "Password reset",
+    description: "Transactional reset link with a clear call to action.",
+    category: "Transactional",
+    subject: "Reset your {{company}} password",
+    html: [
+      "<h1>Reset your password</h1>",
+      "<p>Hi {{firstName}}, we received a request to reset your password.</p>",
+      '<p><a href="{{resetUrl}}">Choose a new password</a></p>',
+      "<p>This link expires in 30 minutes. If you didn't request a reset, you can safely ignore this email.</p>",
+      "<p>— The {{company}} team</p>",
+    ].join("\n"),
+    variables: [
+      { name: "firstName", label: "First name", defaultValue: "there" },
+      { name: "company", label: "Company", defaultValue: "QQueue" },
+      {
+        name: "resetUrl",
+        label: "Reset URL",
+        defaultValue: "https://example.com/reset",
+        required: true,
+      },
+    ],
+  },
+  {
+    key: "announcement",
+    name: "Announcement",
+    description: "Launch or feature announcement with a prominent button.",
+    category: "Marketing",
+    subject: "Introducing {{feature}}",
+    html: [
+      "<h1>Say hello to {{feature}}</h1>",
+      "<p>Hi {{firstName}}, we just shipped something we think you'll love.</p>",
+      "<p>Describe what's new and why it matters in a sentence or two.</p>",
+      '<p><a href="{{ctaUrl}}">Try it now</a></p>',
+      "<p>— The {{company}} team</p>",
+    ].join("\n"),
+    variables: [
+      { name: "firstName", label: "First name", defaultValue: "there" },
+      { name: "company", label: "Company", defaultValue: "QQueue" },
+      { name: "feature", label: "Feature name", defaultValue: "our new feature" },
+      {
+        name: "ctaUrl",
+        label: "Call-to-action URL",
+        defaultValue: "https://example.com",
+      },
+    ],
+  },
+];
 
 // A campaign targets a static contact list OR a dynamic segment, never both.
 const campaignTargetExclusive = (

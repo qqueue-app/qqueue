@@ -68,6 +68,11 @@ const Templates = lazy(() =>
     default: module.Templates,
   }))
 );
+const TemplateEditor = lazy(() =>
+  import("../pages/TemplateEditor.js").then((module) => ({
+    default: module.TemplateEditor,
+  }))
+);
 const Suppressions = lazy(() =>
   import("../pages/Suppressions.js").then((module) => ({
     default: module.Suppressions,
@@ -119,6 +124,8 @@ export function AppRoutes() {
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/suppressions" element={<Suppressions />} />
           <Route path="/templates" element={<Templates />} />
+          <Route path="/templates/new" element={<TemplateEditor />} />
+          <Route path="/templates/:id/edit" element={<TemplateEditor />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/lists" element={<ContactLists />} />
           <Route path="/campaigns/segments" element={<Segments />} />

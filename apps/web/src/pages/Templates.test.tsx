@@ -1,37 +1,30 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
-const session = vi.hoisted(() => ({ current: { currentOrganizationId: "org_1" } }));
-vi.mock("../lib/session-context.js", () => ({ useSession: () => session.current }));
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return { ...actual, useNavigate: () => navigate };
+});
+
+const session = vi.hoisted(() => ({
+  current: { currentOrganizationId: "org_1" }
+}));
+vi.mock("../lib/session-context.js", () => ({
+  useSession: () => session.current
+}));
 
 vi.mock("../lib/api.js", () => ({
   api: {
     listTemplates: vi.fn(),
-    createTemplate: vi.fn(),
-    updateTemplate: vi.fn(),
+    cloneTemplate: vi.fn(),
     deleteTemplate: vi.fn()
   }
-}));
-
-// Stub the rich text editor with a simple textarea so we can drive `onChange`.
-vi.mock("../components/editor/RichTextEditor.js", () => ({
-  RichTextEditor: ({
-    value,
-    onChange
-  }: {
-    value: string;
-    onChange: (html: string) => void;
-  }) => (
-    <textarea
-      aria-label="body-editor"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  )
 }));
 
 import { Templates } from "./Templates.js";
@@ -44,9 +37,19 @@ const template = {
   organizationId: "org_1",
   name: "Welcome",
   subject: "Hi {{firstName}}",
+  category: "Onboarding",
+  tags: ["greeting"],
   html: "<p>Hello</p>",
   text: "Hello"
 };
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <Templates />
+    </MemoryRouter>
+  );
+}
 
 describe("Templates", () => {
   beforeEach(() => {
@@ -56,76 +59,55 @@ describe("Templates", () => {
 
   it("shows the empty state", async () => {
     mockedApi.listTemplates.mockResolvedValue([]);
-    render(<Templates />);
+    renderPage();
     expect(await screen.findByText("No templates yet")).toBeInTheDocument();
   });
 
-  it("renders existing templates", async () => {
+  it("renders existing templates with category and tags", async () => {
     mockedApi.listTemplates.mockResolvedValue([template]);
-    render(<Templates />);
+    renderPage();
     expect(await screen.findByText("Welcome")).toBeInTheDocument();
     expect(screen.getByText("Hi {{firstName}}")).toBeInTheDocument();
+    expect(screen.getByText("greeting")).toBeInTheDocument();
   });
 
-  it("rejects an empty body on create", async () => {
+  it("opens the starter gallery and navigates to the editor", async () => {
     const user = userEvent.setup();
     mockedApi.listTemplates.mockResolvedValue([]);
-    render(<Templates />);
+    renderPage();
     await screen.findByText("No templates yet");
     await user.click(
       screen.getAllByRole("button", { name: /New template/i })[0]
     );
     const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText("Name"), "T");
-    await user.type(within(dialog).getByLabelText("Subject"), "S");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create template" })
-    );
+    await user.click(within(dialog).getByText("Welcome"));
+    expect(navigate).toHaveBeenCalledWith("/templates/new?starter=welcome");
+  });
+
+  it("filters templates by search term", async () => {
+    const user = userEvent.setup();
+    mockedApi.listTemplates.mockResolvedValue([
+      template,
+      { ...template, id: "t2", name: "Receipt", subject: "Your receipt" }
+    ]);
+    renderPage();
+    await screen.findByText("Welcome");
+    await user.type(screen.getByPlaceholderText("Search templates…"), "receipt");
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("The email body cannot be empty.")
+      expect(screen.queryByText("Welcome")).not.toBeInTheDocument()
     );
-    expect(mockedApi.createTemplate).not.toHaveBeenCalled();
+    expect(screen.getByText("Receipt")).toBeInTheDocument();
   });
 
-  it("creates a template with a body", async () => {
-    const user = userEvent.setup();
-    mockedApi.listTemplates.mockResolvedValue([]);
-    mockedApi.createTemplate.mockResolvedValue({ id: "t2" });
-    render(<Templates />);
-    await screen.findByText("No templates yet");
-    await user.click(
-      screen.getAllByRole("button", { name: /New template/i })[0]
-    );
-    const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText("Name"), "T");
-    await user.type(within(dialog).getByLabelText("Subject"), "S");
-    await user.type(
-      within(dialog).getByLabelText("body-editor"),
-      "<p>Body</p>"
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: "Create template" })
-    );
-    await waitFor(() => expect(mockedApi.createTemplate).toHaveBeenCalled());
-    expect(toast.success).toHaveBeenCalledWith("Template saved.");
-  });
-
-  it("edits an existing template", async () => {
+  it("duplicates a template", async () => {
     const user = userEvent.setup();
     mockedApi.listTemplates.mockResolvedValue([template]);
-    mockedApi.updateTemplate.mockResolvedValue({ id: "t1" });
-    render(<Templates />);
+    mockedApi.cloneTemplate.mockResolvedValue({ id: "t2" });
+    renderPage();
     await screen.findByText("Welcome");
-    await user.click(screen.getByLabelText("Edit template"));
-    const dialog = await screen.findByRole("dialog");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Save changes" })
-    );
+    await user.click(screen.getByLabelText("Duplicate template"));
     await waitFor(() =>
-      expect(mockedApi.updateTemplate).toHaveBeenCalledWith(
-        "t1",
-        expect.objectContaining({ name: "Welcome" })
-      )
+      expect(mockedApi.cloneTemplate).toHaveBeenCalledWith("t1")
     );
   });
 
@@ -133,7 +115,7 @@ describe("Templates", () => {
     const user = userEvent.setup();
     mockedApi.listTemplates.mockResolvedValue([template]);
     mockedApi.deleteTemplate.mockResolvedValue(undefined);
-    render(<Templates />);
+    renderPage();
     await screen.findByText("Welcome");
     await user.click(screen.getByLabelText("Delete template"));
     await user.click(await screen.findByRole("button", { name: "Delete" }));
@@ -144,7 +126,7 @@ describe("Templates", () => {
 
   it("toasts on load failure", async () => {
     mockedApi.listTemplates.mockRejectedValue(new Error("fail"));
-    render(<Templates />);
+    renderPage();
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("fail"));
   });
 });

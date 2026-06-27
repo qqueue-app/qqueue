@@ -324,23 +324,4 @@ describe("EmailStudio", () => {
     expect(within(panel).getByText("rcpt@x.com")).toBeInTheDocument();
     expect(within(panel).getByText("delivered")).toBeInTheDocument();
   });
-
-  it("generates a preview through the shared render pipeline", async () => {
-    const user = userEvent.setup();
-    setup();
-    renderStudio();
-    await waitFor(() => expect(mockedApi.listSMTPConnections).toHaveBeenCalled());
-
-    await user.type(screen.getByLabelText("Subject"), "Hi");
-    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
-    await user.click(screen.getByRole("button", { name: /Preview/i }));
-
-    await waitFor(() => expect(mockedApi.previewEmail).toHaveBeenCalled());
-    // The preview is rendered inside a sandboxed iframe so the email's own
-    // styles cannot leak into the dashboard; assert on its srcdoc document.
-    expect(await screen.findByTestId("preview-body")).toHaveAttribute(
-      "srcdoc",
-      expect.stringContaining("rendered body")
-    );
-  });
 });

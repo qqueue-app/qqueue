@@ -2,6 +2,10 @@ import { useEffect } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
+import TextAlign from "@tiptap/extension-text-align";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Color } from "@tiptap/extension-color";
+import Image from "@tiptap/extension-image";
 import {
   Bold,
   Italic,
@@ -13,6 +17,13 @@ import {
   ListOrdered,
   Quote,
   Link as LinkIcon,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Palette,
+  Image as ImageIcon,
+  MousePointerClick,
+  Minus,
   Braces,
   Undo,
   Redo
@@ -28,8 +39,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { CtaButton } from "./button-extension";
 
 const DEFAULT_VARIABLES = ["firstName", "lastName", "email"];
+
+// Email-friendly text colours offered in the colour picker.
+const TEXT_COLORS = [
+  { label: "Default", value: null },
+  { label: "Slate", value: "#1f2933" },
+  { label: "Muted", value: "#627d98" },
+  { label: "Green", value: "#2e7d63" },
+  { label: "Blue", value: "#2563eb" },
+  { label: "Red", value: "#dc2626" },
+  { label: "Amber", value: "#d97706" }
+];
 
 interface RichTextEditorProps {
   value: string;
@@ -68,6 +91,46 @@ function ToolbarButton({
     >
       {children}
     </button>
+  );
+}
+
+function ColorMenu({ editor }: { editor: Editor }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          aria-label="Text colour"
+          title="Text colour"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-4"
+        >
+          <Palette />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuLabel>Text colour</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {TEXT_COLORS.map((color) => (
+          <DropdownMenuItem
+            key={color.label}
+            onSelect={() => {
+              if (color.value) {
+                editor.chain().focus().setColor(color.value).run();
+              } else {
+                editor.chain().focus().unsetColor().run();
+              }
+            }}
+          >
+            <span
+              className="mr-2 inline-block h-3.5 w-3.5 rounded-full border"
+              style={{ backgroundColor: color.value ?? "transparent" }}
+            />
+            {color.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -131,7 +194,15 @@ export function RichTextEditor({
       }),
       Placeholder.configure({
         placeholder: placeholder ?? "Write your email…"
-      })
+      }),
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      TextStyle,
+      Color,
+      Image.configure({
+        inline: false,
+        HTMLAttributes: { style: "max-width:100%;height:auto" }
+      }),
+      CtaButton
     ],
     content: value,
     editorProps: {
@@ -174,6 +245,25 @@ export function RichTextEditor({
       .run();
   }
 
+  function insertImage() {
+    const url = window.prompt("Image URL", "https://");
+    if (url) {
+      editor!.chain().focus().setImage({ src: url }).run();
+    }
+  }
+
+  function insertButton() {
+    const label = window.prompt("Button text", "Get started");
+    if (!label) {
+      return;
+    }
+    const href = window.prompt("Button URL", "https://");
+    if (!href) {
+      return;
+    }
+    editor!.chain().focus().setCtaButton({ label, href }).run();
+  }
+
   return (
     <div
       className={cn(
@@ -210,6 +300,7 @@ export function RichTextEditor({
         >
           <Strikethrough />
         </ToolbarButton>
+        <ColorMenu editor={editor} />
 
         <Separator orientation="vertical" className="mx-1 h-6" />
 
@@ -252,12 +343,47 @@ export function RichTextEditor({
         >
           <Quote />
         </ToolbarButton>
+
+        <Separator orientation="vertical" className="mx-1 h-6" />
+
         <ToolbarButton
-          label="Link"
-          active={editor.isActive("link")}
-          onClick={setLink}
+          label="Align left"
+          active={editor.isActive({ textAlign: "left" })}
+          onClick={() => editor.chain().focus().setTextAlign("left").run()}
         >
+          <AlignLeft />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Align centre"
+          active={editor.isActive({ textAlign: "center" })}
+          onClick={() => editor.chain().focus().setTextAlign("center").run()}
+        >
+          <AlignCenter />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Align right"
+          active={editor.isActive({ textAlign: "right" })}
+          onClick={() => editor.chain().focus().setTextAlign("right").run()}
+        >
+          <AlignRight />
+        </ToolbarButton>
+
+        <Separator orientation="vertical" className="mx-1 h-6" />
+
+        <ToolbarButton label="Link" active={editor.isActive("link")} onClick={setLink}>
           <LinkIcon />
+        </ToolbarButton>
+        <ToolbarButton label="Image" onClick={insertImage}>
+          <ImageIcon />
+        </ToolbarButton>
+        <ToolbarButton label="Button" onClick={insertButton}>
+          <MousePointerClick />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Divider"
+          onClick={() => editor.chain().focus().setHorizontalRule().run()}
+        >
+          <Minus />
         </ToolbarButton>
 
         <Separator orientation="vertical" className="mx-1 h-6" />
