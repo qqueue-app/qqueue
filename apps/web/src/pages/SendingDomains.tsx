@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   AtSign,
+  AlertTriangle,
   Copy,
   Globe,
   Pencil,
   Plus,
   ShieldCheck,
+  Star,
   Trash2
 } from "lucide-react";
 import { toast } from "sonner";
@@ -68,6 +70,12 @@ const emptyIdentityForm: IdentityForm = {
   isDefault: false
 };
 
+function formatTimestamp(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
+}
+
 export function SendingDomains() {
   const { currentOrganizationId: organizationId } = useSession();
   const [domains, setDomains] = useState<SendingDomain[]>([]);
@@ -95,6 +103,7 @@ export function SendingDomains() {
   const [identityForm, setIdentityForm] =
     useState<IdentityForm>(emptyIdentityForm);
   const [savingIdentity, setSavingIdentity] = useState(false);
+  const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null);
   const [deleteIdentityTarget, setDeleteIdentityTarget] =
     useState<SenderIdentity | null>(null);
   const [deletingIdentity, setDeletingIdentity] = useState(false);
@@ -265,6 +274,21 @@ export function SendingDomains() {
     }
   }
 
+  async function setDefaultIdentity(identity: SenderIdentity) {
+    setSettingDefaultId(identity.id);
+    try {
+      await api.updateSenderIdentity(identity.id, { isDefault: true });
+      toast.success(`${identity.fromEmail} is now the default sender.`);
+      await load();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to set default."
+      );
+    } finally {
+      setSettingDefaultId(null);
+    }
+  }
+
   async function confirmDeleteIdentity() {
     if (!deleteIdentityTarget) return;
     setDeletingIdentity(true);
@@ -280,7 +304,6 @@ export function SendingDomains() {
     }
   }
 
-  const domainsById = new Map(domains.map((d) => [d.id, d]));
   const connectionsById = new Map(connections.map((c) => [c.id, c]));
 
   return (
@@ -373,7 +396,9 @@ export function SendingDomains() {
                             ) : (
                               <ShieldCheck className="h-4 w-4" />
                             )}
-                            Verify now
+                            {domain.dkimStatus === "PENDING"
+                              ? "Verify now"
+                              : "Re-verify"}
                           </Button>
                         </>
                       ) : null}
@@ -398,6 +423,12 @@ export function SendingDomains() {
                       </Button>
                     </div>
                   </div>
+                  {domain.dkimMode === "MANAGED" ? (
+                    <DomainStatusNote
+                      domain={domain}
+                      onShowDns={() => setExpandedId(domain.id)}
+                    />
+                  ) : null}
                   {domain.dkimMode === "MANAGED" &&
                   expandedId === domain.id &&
                   domain.dnsRecords ? (
@@ -409,85 +440,115 @@ export function SendingDomains() {
           )}
         </div>
 
-        {/* Sender identities */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-muted-foreground">
-              Sender identities
-            </h2>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => openCreateIdentity()}
-              disabled={!organizationId || domains.length === 0}
-            >
-              <Plus className="h-4 w-4" />
-              New identity
-            </Button>
-          </div>
+        {/* Sender identities, grouped by their sending domain. */}
+        <div className="space-y-4">
+          <h2 className="text-sm font-semibold text-muted-foreground">
+            Sender identities
+          </h2>
           {loading ? (
             <Card>
               <CardContent className="p-5">
                 <Skeleton className="h-5 w-48" />
               </CardContent>
             </Card>
-          ) : identities.length === 0 ? (
+          ) : domains.length === 0 ? (
             <Card>
               <EmptyState
                 icon={AtSign}
                 title="No sender identities yet"
-                description={
-                  domains.length === 0
-                    ? "Add a sending domain first, then create an identity under it."
-                    : "Add an identity like noreply@ and bind it to a sending account."
-                }
+                description="Add a sending domain first, then create an identity under it."
               />
             </Card>
           ) : (
-            identities.map((identity) => {
-              const domain = domainsById.get(identity.sendingDomainId);
-              const connection = connectionsById.get(identity.smtpConnectionId);
+            domains.map((domain) => {
+              const domainIdentities = identities.filter(
+                (identity) => identity.sendingDomainId === domain.id
+              );
               return (
-                <Card key={identity.id}>
-                  <CardContent className="flex flex-wrap items-start justify-between gap-3 p-5">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-semibold">
-                          {identity.fromName} &lt;{identity.fromEmail}&gt;
-                        </h3>
-                        {identity.isDefault ? <Badge>Default</Badge> : null}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {domain ? `${domain.domain} · ` : ""}
-                        via {connection?.name ?? "unknown account"}
-                        {identity.replyTo
-                          ? ` · reply-to ${identity.replyTo}`
-                          : ""}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => openEditIdentity(identity)}
-                        aria-label="Edit identity"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeleteIdentityTarget(identity)}
-                        aria-label="Delete identity"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div key={domain.id} className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-medium">{domain.domain}</h3>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openCreateIdentity(domain)}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add identity
+                    </Button>
+                  </div>
+                  {domainIdentities.length === 0 ? (
+                    <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                      No sender identities on this domain yet.
+                    </p>
+                  ) : (
+                    domainIdentities.map((identity) => {
+                      const connection = connectionsById.get(
+                        identity.smtpConnectionId
+                      );
+                      return (
+                        <Card key={identity.id}>
+                          <CardContent className="flex flex-wrap items-start justify-between gap-3 p-5">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="font-semibold">
+                                  {identity.fromName} &lt;{identity.fromEmail}&gt;
+                                </h4>
+                                {identity.isDefault ? (
+                                  <Badge>Default</Badge>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                via {connection?.name ?? "unknown account"}
+                                {identity.replyTo
+                                  ? ` · reply-to ${identity.replyTo}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              {identity.isDefault ? null : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setDefaultIdentity(identity)}
+                                  disabled={settingDefaultId === identity.id}
+                                  aria-label="Set as default sender identity"
+                                  title="Set as default"
+                                >
+                                  {settingDefaultId === identity.id ? (
+                                    <Spinner />
+                                  ) : (
+                                    <Star className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openEditIdentity(identity)}
+                                aria-label="Edit identity"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="text-muted-foreground hover:text-destructive"
+                                onClick={() => setDeleteIdentityTarget(identity)}
+                                aria-label="Delete identity"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })
+                  )}
+                </div>
               );
             })
           )}
@@ -756,6 +817,61 @@ export function SendingDomains() {
   );
 }
 
+function DomainStatusNote({
+  domain,
+  onShowDns
+}: {
+  domain: SendingDomain;
+  onShowDns: () => void;
+}) {
+  const lastChecked = formatTimestamp(domain.lastCheckedAt);
+
+  if (domain.dkimStatus === "FAILED") {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+        <div>
+          <p className="font-medium text-destructive">DKIM record not found</p>
+          <p className="mt-0.5 text-muted-foreground">
+            We couldn&apos;t find the DKIM record in DNS
+            {lastChecked ? ` (last checked ${lastChecked})` : ""}. Publish the
+            records below — DNS changes can take a while to propagate — then
+            re-verify.
+          </p>
+          <Button
+            type="button"
+            variant="link"
+            className="mt-1 h-auto p-0 text-sm"
+            onClick={onShowDns}
+          >
+            Show DNS records
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (domain.dkimStatus === "PENDING") {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Awaiting verification — publish the DNS records and click Verify now
+        {lastChecked ? ` · last checked ${lastChecked}` : ""}.
+      </p>
+    );
+  }
+
+  if (domain.dkimStatus === "VERIFIED") {
+    const verifiedAt = formatTimestamp(domain.verifiedAt);
+    return (
+      <p className="text-sm text-success">
+        DKIM verified{verifiedAt ? ` · ${verifiedAt}` : ""}.
+      </p>
+    );
+  }
+
+  return null;
+}
+
 function DnsRecordsPanel({
   records
 }: {
@@ -809,6 +925,15 @@ function DnsRecordsPanel({
           </div>
         </div>
       ))}
+      <p className="text-xs text-muted-foreground">
+        DMARC is optional but recommended. Start with{" "}
+        <code className="text-[0.7rem]">p=none</code> to monitor without
+        affecting delivery, then tighten to{" "}
+        <code className="text-[0.7rem]">quarantine</code> or{" "}
+        <code className="text-[0.7rem]">reject</code> once DKIM and SPF are
+        passing. Point <code className="text-[0.7rem]">rua=</code> at a mailbox
+        you watch for aggregate reports.
+      </p>
     </div>
   );
 }
