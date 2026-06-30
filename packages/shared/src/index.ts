@@ -152,6 +152,43 @@ export interface DomainThrottle {
 
 export type InboxAccountStatus = "ACTIVE" | "DISABLED";
 
+// DKIM signing strategy for a sending domain. EXTERNAL trusts the upstream mail
+// server/relay to sign (Mailcow, SES, Mailgun, Postmark); MANAGED has QQueue
+// generate keys and sign itself (bare Postfix/Exim).
+export type DkimMode = "EXTERNAL" | "MANAGED";
+
+// DNS verification state of a sending domain. EXTERNAL-mode domains are "NA".
+export type DkimStatus = "VERIFIED" | "PENDING" | "FAILED" | "NA";
+
+export interface SendingDomain {
+  id: string;
+  organizationId: string;
+  domain: string;
+  dkimMode: DkimMode;
+  dkimSelector?: string | null;
+  /** Public key only; the private key is never returned to clients. */
+  dkimPublicKey?: string | null;
+  dkimStatus: DkimStatus;
+  spfNote?: string | null;
+  verifiedAt?: string | null;
+  lastCheckedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SenderIdentity {
+  id: string;
+  organizationId: string;
+  sendingDomainId: string;
+  fromName: string;
+  fromEmail: string;
+  smtpConnectionId: string;
+  replyTo?: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface InboxAccount {
   id: string;
   organizationId: string;
@@ -1310,4 +1347,66 @@ export const smtpConnectionUpdateSchema = smtpConnectionSchema.partial();
 
 export type SMTPConnectionUpdateInput = z.infer<
   typeof smtpConnectionUpdateSchema
+>;
+
+// Bare hostname (no scheme/path), lowercased. Mirrors the validation used for
+// recipient-domain throttles so a sending domain like "acme.com" is accepted but
+// "https://acme.com" or "noreply@acme.com" is not.
+const sendingDomainNameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .refine(
+    (value) => /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value),
+    "Must be a valid domain (e.g. acme.com)"
+  );
+
+export const dkimModeSchema = z.enum(["EXTERNAL", "MANAGED"]);
+
+export const sendingDomainSchema = z.object({
+  organizationId: z.string().min(1),
+  domain: sendingDomainNameSchema,
+  // EXTERNAL is the default/recommended path (most self-hosted users are on
+  // Mailcow or a relay that already signs DKIM).
+  dkimMode: dkimModeSchema.default("EXTERNAL"),
+  // Free-text reminder for external mode, e.g. "configured in Mailcow".
+  spfNote: z.string().trim().max(500).optional(),
+});
+
+export type SendingDomainInput = z.infer<typeof sendingDomainSchema>;
+
+export const sendingDomainUpdateSchema = z
+  .object({
+    spfNote: z.string().trim().max(500).nullish(),
+  })
+  .refine((input) => Object.keys(input).length > 0, {
+    message: "At least one field is required",
+  });
+
+export type SendingDomainUpdateInput = z.infer<
+  typeof sendingDomainUpdateSchema
+>;
+
+export const senderIdentitySchema = z.object({
+  organizationId: z.string().min(1),
+  sendingDomainId: z.string().min(1),
+  fromName: z.string().trim().min(1),
+  fromEmail: emailAddressSchema,
+  smtpConnectionId: z.string().min(1),
+  replyTo: emailAddressSchema.optional(),
+  isDefault: z.boolean().optional(),
+});
+
+export type SenderIdentityInput = z.infer<typeof senderIdentitySchema>;
+
+export const senderIdentityUpdateSchema = senderIdentitySchema
+  .omit({ organizationId: true, sendingDomainId: true, fromEmail: true })
+  .partial()
+  .extend({ replyTo: emailAddressSchema.nullish() })
+  .refine((input) => Object.keys(input).length > 0, {
+    message: "At least one field is required",
+  });
+
+export type SenderIdentityUpdateInput = z.infer<
+  typeof senderIdentityUpdateSchema
 >;

@@ -110,6 +110,26 @@ enum InboxAccountStatus {
   DISABLED
 }
 
+// How DKIM signing is handled for a sending domain.
+//   EXTERNAL — the upstream mail server or relay (Mailcow, SES, Mailgun,
+//     Postmark, …) already signs DKIM; QQueue trusts it and signs nothing.
+//   MANAGED  — there is no upstream signer (bare Postfix/Exim); QQueue generates
+//     the keypair and signs outbound mail itself.
+enum DkimMode {
+  EXTERNAL
+  MANAGED
+}
+
+// DNS verification state of a sending domain's DKIM/SPF records. EXTERNAL-mode
+// domains are NA (nothing for QQueue to verify); MANAGED-mode domains move
+// PENDING → VERIFIED/FAILED as the verification worker checks DNS.
+enum DkimStatus {
+  VERIFIED
+  PENDING
+  FAILED
+  NA
+}
+
 model User {
   id                  String               @id @default(cuid())
   email               String               @unique
@@ -153,6 +173,8 @@ model Organization {
   emailAttachments  EmailAttachment[]
   inboxAccounts     InboxAccount[]
   inboundMessages   InboundMessage[]
+  sendingDomains    SendingDomain[]
+  senderIdentities  SenderIdentity[]
   emailEvents       EmailEvent[]
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
@@ -191,8 +213,64 @@ model SMTPConnection {
   isDefault         Boolean      @default(false)
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   emailJobs         EmailJob[]
+  senderIdentities  SenderIdentity[]
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+}
+
+// A domain an organization sends mail From (e.g. acme.com). Decouples the
+// visible From address from the single authenticating SMTP credential so users
+// can send as noreply@ without a real mailbox behind it. `dkimMode` decides
+// whether QQueue signs DKIM itself (MANAGED) or trusts the upstream server/relay
+// (EXTERNAL). Managed-mode key material is encrypted with the same scheme as
+// SMTP secrets (lib/crypto). See docs — Sending Domains & Sender Identities.
+model SendingDomain {
+  id                      String           @id @default(cuid())
+  organizationId          String
+  domain                  String
+  dkimMode                DkimMode         @default(EXTERNAL)
+  // Managed mode only: DKIM selector and keypair. Private key is encrypted at
+  // rest (reuses lib/crypto, like SMTPConnection secrets). Null for external.
+  dkimSelector            String?
+  dkimPrivateKeyEncrypted String?
+  dkimPublicKey           String?
+  dkimStatus              DkimStatus       @default(NA)
+  // Free-text reminder for external mode, e.g. "configured in Mailcow".
+  spfNote                 String?
+  verifiedAt              DateTime?
+  lastCheckedAt           DateTime?
+  organization            Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  identities              SenderIdentity[]
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  @@unique([organizationId, domain])
+  @@index([organizationId])
+}
+
+// A concrete From identity (fromName + fromEmail) under a SendingDomain, bound
+// to the SMTP credential that actually transports it. Every send surface picks a
+// SenderIdentity instead of free-typing a From address, so sends are restricted
+// to registered, domain-backed identities.
+model SenderIdentity {
+  id               String         @id @default(cuid())
+  organizationId   String
+  sendingDomainId  String
+  fromName         String
+  fromEmail        String
+  smtpConnectionId String
+  replyTo          String?
+  isDefault        Boolean        @default(false)
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sendingDomain    SendingDomain  @relation(fields: [sendingDomainId], references: [id], onDelete: Cascade)
+  smtpConnection   SMTPConnection @relation(fields: [smtpConnectionId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([organizationId, fromEmail])
+  @@index([organizationId])
+  @@index([sendingDomainId])
+  @@index([smtpConnectionId])
 }
 
 model Contact {

@@ -303,6 +303,37 @@ export interface SMTPConnection {
   isDefault: boolean;
 }
 
+export type DkimMode = "EXTERNAL" | "MANAGED";
+export type DkimStatus = "VERIFIED" | "PENDING" | "FAILED" | "NA";
+
+export interface SendingDomain {
+  id: string;
+  organizationId: string;
+  domain: string;
+  dkimMode: DkimMode;
+  dkimSelector?: string | null;
+  dkimPublicKey?: string | null;
+  dkimStatus: DkimStatus;
+  spfNote?: string | null;
+  verifiedAt?: string | null;
+  lastCheckedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SenderIdentity {
+  id: string;
+  organizationId: string;
+  sendingDomainId: string;
+  fromName: string;
+  fromEmail: string;
+  smtpConnectionId: string;
+  replyTo?: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ApiKey {
   id: string;
   organizationId: string;
@@ -699,6 +730,58 @@ export const api = {
 
   deleteSMTPConnection(id: string) {
     return request<void>(`/api/v1/smtp-connections/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  listSendingDomains(organizationId: string) {
+    return request<SendingDomain[]>(
+      `/api/v1/sending-domains?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createSendingDomain(input: Record<string, unknown>) {
+    return request<SendingDomain>("/api/v1/sending-domains", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateSendingDomain(id: string, input: Record<string, unknown>) {
+    return request<SendingDomain>(`/api/v1/sending-domains/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteSendingDomain(id: string) {
+    return request<void>(`/api/v1/sending-domains/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  listSenderIdentities(organizationId: string) {
+    return request<SenderIdentity[]>(
+      `/api/v1/sender-identities?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createSenderIdentity(input: Record<string, unknown>) {
+    return request<SenderIdentity>("/api/v1/sender-identities", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateSenderIdentity(id: string, input: Record<string, unknown>) {
+    return request<SenderIdentity>(`/api/v1/sender-identities/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+
+  deleteSenderIdentity(id: string) {
+    return request<void>(`/api/v1/sender-identities/${id}`, {
       method: "DELETE",
     });
   },
