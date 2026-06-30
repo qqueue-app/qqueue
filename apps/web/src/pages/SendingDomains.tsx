@@ -258,7 +258,7 @@ export function SendingDomains() {
     <>
       <PageHeader
         title="Sending Domains"
-        description="Register the domains you send From, then add sender identities (like noreply@) backed by an SMTP credential."
+        description="Register the domains you send From, then add sender identities (like noreply@) backed by a sending account."
         actions={
           <Button onClick={openWizard} disabled={!organizationId}>
             <Plus className="h-4 w-4" />
@@ -373,7 +373,7 @@ export function SendingDomains() {
                 description={
                   domains.length === 0
                     ? "Add a sending domain first, then create an identity under it."
-                    : "Add an identity like noreply@ and bind it to an SMTP credential."
+                    : "Add an identity like noreply@ and bind it to a sending account."
                 }
               />
             </Card>
@@ -393,7 +393,7 @@ export function SendingDomains() {
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {domain ? `${domain.domain} · ` : ""}
-                        via {connection?.name ?? "unknown SMTP"}
+                        via {connection?.name ?? "unknown account"}
                         {identity.replyTo
                           ? ` · reply-to ${identity.replyTo}`
                           : ""}
@@ -608,7 +608,7 @@ export function SendingDomains() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="identity-smtp">SMTP connection</Label>
+              <Label htmlFor="identity-smtp">Sending account</Label>
               <Select
                 value={identityForm.smtpConnectionId}
                 onValueChange={(value) =>
@@ -616,7 +616,7 @@ export function SendingDomains() {
                 }
               >
                 <SelectTrigger id="identity-smtp">
-                  <SelectValue placeholder="Select an SMTP connection" />
+                  <SelectValue placeholder="Select a sending account" />
                 </SelectTrigger>
                 <SelectContent>
                   {connections.map((connection) => (
@@ -628,8 +628,8 @@ export function SendingDomains() {
               </Select>
               {connections.length === 0 ? (
                 <p className="text-xs text-warning">
-                  Add an SMTP connection first — an identity needs a credential to
-                  send through.
+                  Add a sending account first — an identity needs one to send
+                  through.
                 </p>
               ) : null}
             </div>
