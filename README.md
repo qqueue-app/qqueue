@@ -65,17 +65,54 @@ For a VPS, use the **[Deploy guide](docs/DEPLOY.md)**, then work through the
 
 ## Local Development
 
-From the repository root:
+### Prerequisites
+
+- **Node.js 20+**
+- **[pnpm](https://pnpm.io) 9** (`corepack enable` will install the pinned
+  `pnpm@9.15.0`)
+- **Docker** (for the bundled Postgres, Redis, and MinIO services)
+
+### Clone to running, step by step
+
+Run each step from the repository root. This is the full sequence — a fresh
+clone is up and running after step 5.
 
 ```sh
-cp .env.example .env
+# 1. Clone the repo
+git clone https://github.com/<your-org>/qqueue.git
+cd qqueue
+
+# 2. Install all workspace dependencies
 pnpm install
+
+# 3. Create your env file (defaults work as-is for local dev)
+cp .env.example .env
+
+# 4. Start Postgres, Redis, and MinIO
 docker compose up -d
+
+# 5. Generate the Prisma client, apply migrations, and start everything
 pnpm db:generate
+pnpm db:migrate
 pnpm dev
 ```
 
-Run individual apps:
+`pnpm dev` uses Turborepo to start the API, web dashboard, and worker together.
+The `db:migrate` step is required on a fresh clone — it creates every table
+(users, organizations, SMTP connections, templates, contacts, campaigns, email
+jobs/events, and more). Skipping it leaves you with an empty database.
+
+> The default `.env` values work out of the box with the bundled Docker
+> services. The placeholder `JWT_*`, `ENCRYPTION_KEY`, and `TRACKING_SECRET`
+> secrets are fine locally but **must** be regenerated for production with
+> `openssl rand -hex 32`.
+
+After `pnpm dev`, create your first account at
+`http://localhost:5173/register` — registration creates your user and first
+organization. The full walkthrough (account → SMTP connection → first email)
+lives in the **[Quickstart](docs/QUICKSTART.md)**.
+
+### Running apps individually
 
 ```sh
 pnpm --filter @qqueue/api dev
@@ -83,12 +120,18 @@ pnpm --filter @qqueue/web dev
 pnpm --filter @qqueue/worker dev
 ```
 
-Default local URLs:
+The worker is required for **scheduled** emails and **campaigns**. Immediate
+transactional sends go out inline from the API, but keep the worker running so
+queued/scheduled work and webhook deliveries are processed.
+
+### Default local URLs
 
 - API: `http://localhost:4000`
 - Health check: `http://localhost:4000/health`
 - API v1: `http://localhost:4000/api/v1`
 - Web: `http://localhost:5173`
+- MinIO console: `http://localhost:9101` (user `qqueue` / password
+  `qqueue-secret`)
 
 ## Phase 1 Setup Flow
 
