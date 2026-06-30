@@ -174,6 +174,11 @@ export interface SendingDomain {
   lastCheckedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * DNS records to publish — present only for managed-mode domains (null for
+   * external). Computed by the API from the stored selector + public key.
+   */
+  dnsRecords?: SendingDomainDnsRecords | null;
 }
 
 export interface SenderIdentity {
@@ -1410,3 +1415,92 @@ export const senderIdentityUpdateSchema = senderIdentitySchema
 export type SenderIdentityUpdateInput = z.infer<
   typeof senderIdentityUpdateSchema
 >;
+
+// ---- Managed DKIM DNS helpers ---------------------------------------------
+// Shared by the API (renders copy-paste DNS instructions) and the verification
+// worker (compares the published record against the stored key). Pure string
+// logic only — keypair generation lives in the API (node:crypto) and DNS
+// lookups in the worker (node:dns).
+
+export interface DkimDnsRecord {
+  host: string;
+  type: "TXT";
+  value: string;
+}
+
+/** The DNS records to publish for a managed-mode sending domain. */
+export interface SendingDomainDnsRecords {
+  dkim: DkimDnsRecord;
+  spf: DkimDnsRecord;
+  dmarc: DkimDnsRecord;
+}
+
+/** Hostname the DKIM public-key TXT record lives at. */
+export function dkimDnsHost(selector: string, domain: string): string {
+  return `${selector}._domainkey.${domain}`;
+}
+
+/** Base64 SPKI body of a PEM public key, with header/footer/whitespace removed. */
+function pemPublicKeyBody(publicKeyPem: string): string {
+  return publicKeyPem
+    .replace(/-----BEGIN [^-]+-----/g, "")
+    .replace(/-----END [^-]+-----/g, "")
+    .replace(/\s+/g, "");
+}
+
+/** Value of the DKIM TXT record advertising a managed domain's public key. */
+export function dkimTxtValue(publicKeyPem: string): string {
+  return `v=DKIM1; k=rsa; p=${pemPublicKeyBody(publicKeyPem)}`;
+}
+
+/** Extract the `p=` public-key body from a published DKIM TXT record, or null. */
+export function parseDkimTxtPublicKey(txtRecord: string): string | null {
+  const match = txtRecord
+    .replace(/\s+/g, "")
+    .match(/(?:^|;)p=([A-Za-z0-9+/=]*)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * True when a published DKIM TXT record advertises the expected public key.
+ * Compares only the `p=` body so cosmetic differences (spacing, attribute
+ * order, the optional k=/v= tags) don't cause false negatives.
+ */
+export function dkimRecordMatches(
+  txtRecord: string,
+  publicKeyPem: string
+): boolean {
+  const published = parseDkimTxtPublicKey(txtRecord);
+  const expected = parseDkimTxtPublicKey(dkimTxtValue(publicKeyPem));
+  return published !== null && expected !== null && published === expected;
+}
+
+/**
+ * The DKIM/SPF/DMARC records to show for a managed domain. SPF and DMARC are
+ * instructional: the sending IP varies per self-hosted deployment (there is no
+ * universal include like a hosted ESP), and DMARC is recommended, not required.
+ */
+export function buildSendingDomainDnsRecords(
+  selector: string,
+  domain: string,
+  publicKeyPem: string
+): SendingDomainDnsRecords {
+  return {
+    dkim: {
+      host: dkimDnsHost(selector, domain),
+      type: "TXT",
+      value: dkimTxtValue(publicKeyPem)
+    },
+    spf: {
+      host: domain,
+      type: "TXT",
+      // Template — replace YOUR_SERVER_IP with the IP your mail server sends from.
+      value: "v=spf1 ip4:YOUR_SERVER_IP ~all"
+    },
+    dmarc: {
+      host: `_dmarc.${domain}`,
+      type: "TXT",
+      value: `v=DMARC1; p=none; rua=mailto:dmarc@${domain}`
+    }
+  };
+}

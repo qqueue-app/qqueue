@@ -12,6 +12,11 @@ import {
   createListFromSegmentSchema,
   cronExpressionSchema,
   csvImportSchema,
+  buildSendingDomainDnsRecords,
+  dkimDnsHost,
+  dkimRecordMatches,
+  dkimTxtValue,
+  parseDkimTxtPublicKey,
   compileSegmentRules,
   segmentFilterSchema,
   segmentSchema,
@@ -850,5 +855,51 @@ describe("emailDraftSchema", () => {
     expect(
       emailDraftUpdateSchema.safeParse({ subject: "Updated" }).success
     ).toBe(true);
+  });
+});
+
+describe("managed DKIM DNS helpers", () => {
+  const publicKeyPem =
+    "-----BEGIN PUBLIC KEY-----\nMFwwDQYJABCDEF1234567890\n-----END PUBLIC KEY-----";
+
+  it("builds the DKIM host from selector and domain", () => {
+    expect(dkimDnsHost("qqueue", "acme.com")).toBe(
+      "qqueue._domainkey.acme.com"
+    );
+  });
+
+  it("builds a TXT value with the PEM body stripped of headers/whitespace", () => {
+    expect(dkimTxtValue(publicKeyPem)).toBe(
+      "v=DKIM1; k=rsa; p=MFwwDQYJABCDEF1234567890"
+    );
+  });
+
+  it("parses the p= body back out of a published record", () => {
+    expect(parseDkimTxtPublicKey("v=DKIM1; k=rsa; p=ABC123")).toBe("ABC123");
+    expect(parseDkimTxtPublicKey("v=spf1 ~all")).toBeNull();
+  });
+
+  it("matches a published record regardless of spacing/attribute order", () => {
+    expect(dkimRecordMatches(dkimTxtValue(publicKeyPem), publicKeyPem)).toBe(
+      true
+    );
+    expect(
+      dkimRecordMatches("k=rsa;p=MFwwDQYJABCDEF1234567890;v=DKIM1", publicKeyPem)
+    ).toBe(true);
+    expect(dkimRecordMatches("v=DKIM1; k=rsa; p=WRONGKEY", publicKeyPem)).toBe(
+      false
+    );
+  });
+
+  it("builds DKIM/SPF/DMARC records for a managed domain", () => {
+    const records = buildSendingDomainDnsRecords(
+      "qqueue",
+      "acme.com",
+      publicKeyPem
+    );
+    expect(records.dkim.host).toBe("qqueue._domainkey.acme.com");
+    expect(records.spf.host).toBe("acme.com");
+    expect(records.dmarc.host).toBe("_dmarc.acme.com");
+    expect(records.dmarc.value).toContain("v=DMARC1");
   });
 });

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   AtSign,
+  Copy,
   Globe,
   Pencil,
   Plus,
@@ -15,6 +16,7 @@ import {
   api,
   type SenderIdentity,
   type SendingDomain,
+  type SendingDomainDnsRecords,
   type SMTPConnection
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
@@ -79,6 +81,8 @@ export function SendingDomains() {
   const [domainName, setDomainName] = useState("");
   const [spfNote, setSpfNote] = useState("");
   const [savingDomain, setSavingDomain] = useState(false);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteDomainTarget, setDeleteDomainTarget] =
     useState<SendingDomain | null>(null);
   const [deletingDomain, setDeletingDomain] = useState(false);
@@ -136,16 +140,25 @@ export function SendingDomains() {
       toast.error("Select an organization in Settings first.");
       return;
     }
+    const managed = step === "managed";
     setSavingDomain(true);
     try {
-      await api.createSendingDomain({
+      const created = await api.createSendingDomain({
         organizationId,
         domain: domainName,
-        dkimMode: "EXTERNAL",
+        dkimMode: managed ? "MANAGED" : "EXTERNAL",
         spfNote: spfNote.trim() || undefined
       });
-      toast.success("Sending domain added.");
+      toast.success(
+        managed
+          ? "Domain added. Publish the DNS records below, then verify."
+          : "Sending domain added."
+      );
       setWizardOpen(false);
+      // Managed domains have DNS records to act on — expand the new card.
+      if (managed) {
+        setExpandedId(created.id);
+      }
       await load();
     } catch (error) {
       toast.error(
@@ -153,6 +166,22 @@ export function SendingDomains() {
       );
     } finally {
       setSavingDomain(false);
+    }
+  }
+
+  async function verifyDomain(domain: SendingDomain) {
+    setVerifyingId(domain.id);
+    try {
+      await api.verifySendingDomain(domain.id);
+      toast.success("Verification queued — checking DNS now.");
+      // The worker updates status asynchronously; reload shortly after.
+      window.setTimeout(() => {
+        void load();
+      }, 2500);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to verify.");
+    } finally {
+      setVerifyingId(null);
     }
   }
 
@@ -303,40 +332,77 @@ export function SendingDomains() {
           ) : (
             domains.map((domain) => (
               <Card key={domain.id}>
-                <CardContent className="flex flex-wrap items-start justify-between gap-3 p-5">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold">{domain.domain}</h3>
-                      <DkimBadge domain={domain} />
+                <CardContent className="space-y-3 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold">{domain.domain}</h3>
+                        <DkimBadge domain={domain} />
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {domain.dkimMode === "EXTERNAL"
+                          ? "DKIM signed upstream by your mail server or relay."
+                          : "DKIM signed by QQueue."}
+                        {domain.spfNote ? ` · ${domain.spfNote}` : ""}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {domain.dkimMode === "EXTERNAL"
-                        ? "DKIM signed upstream by your mail server or relay."
-                        : "DKIM signed by QQueue."}
-                      {domain.spfNote ? ` · ${domain.spfNote}` : ""}
-                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {domain.dkimMode === "MANAGED" ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setExpandedId(
+                                expandedId === domain.id ? null : domain.id
+                              )
+                            }
+                          >
+                            {expandedId === domain.id ? "Hide DNS" : "DNS records"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => verifyDomain(domain)}
+                            disabled={verifyingId === domain.id}
+                          >
+                            {verifyingId === domain.id ? (
+                              <Spinner />
+                            ) : (
+                              <ShieldCheck className="h-4 w-4" />
+                            )}
+                            Verify now
+                          </Button>
+                        </>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openCreateIdentity(domain)}
+                        aria-label="Add sender identity"
+                      >
+                        <AtSign className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeleteDomainTarget(domain)}
+                        aria-label="Delete domain"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => openCreateIdentity(domain)}
-                      aria-label="Add sender identity"
-                    >
-                      <AtSign className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => setDeleteDomainTarget(domain)}
-                      aria-label="Delete domain"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {domain.dkimMode === "MANAGED" &&
+                  expandedId === domain.id &&
+                  domain.dnsRecords ? (
+                    <DnsRecordsPanel records={domain.dnsRecords} />
+                  ) : null}
                 </CardContent>
               </Card>
             ))
@@ -474,7 +540,7 @@ export function SendingDomains() {
             </div>
           ) : null}
 
-          {step === "external" ? (
+          {step === "external" || step === "managed" ? (
             <form onSubmit={submitDomain} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="domain">Domain</Label>
@@ -486,21 +552,30 @@ export function SendingDomains() {
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="spfNote">Reminder (optional)</Label>
-                <Textarea
-                  id="spfNote"
-                  rows={2}
-                  placeholder="e.g. noreply@ alias and SPF configured in Mailcow"
-                  value={spfNote}
-                  onChange={(e) => setSpfNote(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Make sure addresses like noreply@ are configured as an alias or
-                  in your relay&apos;s allowed send-as list. QQueue does not enforce
-                  this — it&apos;s a note for your team.
-                </p>
-              </div>
+              {step === "managed" ? (
+                <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
+                  QQueue will generate an RSA-2048 DKIM keypair and show you the
+                  DNS records to publish. After you add them at your DNS host,
+                  click <span className="font-medium">Verify now</span> on the
+                  domain to confirm.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="spfNote">Reminder (optional)</Label>
+                  <Textarea
+                    id="spfNote"
+                    rows={2}
+                    placeholder="e.g. noreply@ alias and SPF configured in Mailcow"
+                    value={spfNote}
+                    onChange={(e) => setSpfNote(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Make sure addresses like noreply@ are configured as an alias
+                    or in your relay&apos;s allowed send-as list. QQueue does not
+                    enforce this — it&apos;s a note for your team.
+                  </p>
+                </div>
+              )}
               <DialogFooter>
                 <Button
                   type="button"
@@ -511,34 +586,10 @@ export function SendingDomains() {
                 </Button>
                 <Button type="submit" disabled={savingDomain}>
                   {savingDomain ? <Spinner /> : null}
-                  Add domain
+                  {step === "managed" ? "Generate keys & add" : "Add domain"}
                 </Button>
               </DialogFooter>
             </form>
-          ) : null}
-
-          {step === "managed" ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm">
-                <p className="font-medium text-warning">
-                  Managed DKIM signing isn&apos;t available yet.
-                </p>
-                <p className="mt-1 text-muted-foreground">
-                  Server-side key generation, DNS instructions, and verification
-                  are planned for an upcoming release. For now, if your server or
-                  relay can sign DKIM, choose the first option instead.
-                </p>
-              </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setStep("choose")}
-                >
-                  Back
-                </Button>
-              </DialogFooter>
-            </div>
           ) : null}
         </DialogContent>
       </Dialog>
@@ -702,6 +753,63 @@ export function SendingDomains() {
         onConfirm={confirmDeleteIdentity}
       />
     </>
+  );
+}
+
+function DnsRecordsPanel({
+  records
+}: {
+  records: SendingDomainDnsRecords;
+}) {
+  const rows = [
+    { label: "DKIM (required)", record: records.dkim },
+    { label: "SPF (replace YOUR_SERVER_IP)", record: records.spf },
+    { label: "DMARC (recommended)", record: records.dmarc }
+  ];
+
+  async function copy(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Copied to clipboard.");
+    } catch {
+      toast.error("Couldn't copy — select and copy manually.");
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+      <p className="text-xs text-muted-foreground">
+        Add these TXT records at your DNS host, then click Verify now. DNS
+        changes can take a while to propagate.
+      </p>
+      {rows.map(({ label, record }) => (
+        <div key={record.host} className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium">{label}</span>
+            <span className="text-xs text-muted-foreground">{record.type}</span>
+          </div>
+          <div className="rounded-md border bg-background p-2">
+            <code className="block break-all text-xs text-muted-foreground">
+              {record.host}
+            </code>
+          </div>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1 rounded-md border bg-background p-2">
+              <code className="block break-all text-xs">{record.value}</code>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => copy(record.value)}
+              aria-label={`Copy ${label} value`}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

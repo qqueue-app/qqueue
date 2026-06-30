@@ -306,6 +306,18 @@ export interface SMTPConnection {
 export type DkimMode = "EXTERNAL" | "MANAGED";
 export type DkimStatus = "VERIFIED" | "PENDING" | "FAILED" | "NA";
 
+export interface DkimDnsRecord {
+  host: string;
+  type: "TXT";
+  value: string;
+}
+
+export interface SendingDomainDnsRecords {
+  dkim: DkimDnsRecord;
+  spf: DkimDnsRecord;
+  dmarc: DkimDnsRecord;
+}
+
 export interface SendingDomain {
   id: string;
   organizationId: string;
@@ -319,6 +331,8 @@ export interface SendingDomain {
   lastCheckedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  // Present only for managed-mode domains; null for external.
+  dnsRecords?: SendingDomainDnsRecords | null;
 }
 
 export interface SenderIdentity {
@@ -758,6 +772,13 @@ export const api = {
     return request<void>(`/api/v1/sending-domains/${id}`, {
       method: "DELETE",
     });
+  },
+
+  verifySendingDomain(id: string) {
+    return request<{ status: string }>(
+      `/api/v1/sending-domains/${id}/verify`,
+      { method: "POST" }
+    );
   },
 
   listSenderIdentities(organizationId: string) {

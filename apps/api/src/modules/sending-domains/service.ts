@@ -1,11 +1,16 @@
-import type {
-  SendingDomainInput,
-  SendingDomainUpdateInput
+import {
+  buildSendingDomainDnsRecords,
+  type SendingDomainInput,
+  type SendingDomainUpdateInput
 } from "@qqueue/shared";
+import { encryptSecret } from "../../lib/crypto.js";
+import { generateManagedDkim } from "../../lib/dkim.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { dkimVerificationQueue } from "../../queues/dkim-verification.queue.js";
 
-// Public shape: never expose the encrypted private key to clients.
+// Public shape: never expose the encrypted private key to clients. The selector
+// and public key are returned so the API can compute DNS instructions.
 const sendingDomainSelect = {
   id: true,
   organizationId: true,
@@ -21,6 +26,33 @@ const sendingDomainSelect = {
   updatedAt: true
 };
 
+type SendingDomainRow = {
+  dkimMode: string;
+  dkimSelector: string | null;
+  dkimPublicKey: string | null;
+  domain: string;
+};
+
+// Attach copy-paste DNS records for managed-mode domains; external domains have
+// nothing for the operator to publish, so dnsRecords is null.
+function withDnsRecords<T extends SendingDomainRow>(domain: T) {
+  if (
+    domain.dkimMode === "MANAGED" &&
+    domain.dkimSelector &&
+    domain.dkimPublicKey
+  ) {
+    return {
+      ...domain,
+      dnsRecords: buildSendingDomainDnsRecords(
+        domain.dkimSelector,
+        domain.domain,
+        domain.dkimPublicKey
+      )
+    };
+  }
+  return { ...domain, dnsRecords: null };
+}
+
 // Resolve a sending domain the caller is allowed to touch, or throw 404. Routes
 // addressed by id rely on this membership scoping rather than requireOrgMembership.
 async function findOwned(id: string, userId: string) {
@@ -34,45 +66,60 @@ async function findOwned(id: string, userId: string) {
 }
 
 export const sendingDomainService = {
-  list(organizationId: string) {
-    return prisma.sendingDomain.findMany({
+  async list(organizationId: string) {
+    const domains = await prisma.sendingDomain.findMany({
       where: { organizationId },
       select: sendingDomainSelect,
       orderBy: { createdAt: "desc" }
     });
+    return domains.map(withDnsRecords);
   },
 
   async get(id: string, userId: string) {
     await findOwned(id, userId);
-    return prisma.sendingDomain.findUnique({
+    const domain = await prisma.sendingDomain.findUnique({
       where: { id },
       select: sendingDomainSelect
     });
+    return domain ? withDnsRecords(domain) : null;
   },
 
   async create(input: SendingDomainInput) {
-    // Sprint 1 ships EXTERNAL mode only (trust the upstream server/relay to sign
-    // DKIM). MANAGED mode requires server-side keypair generation + DNS
-    // verification, which arrives in a later sprint; reject it clearly until then.
-    if (input.dkimMode === "MANAGED") {
-      throw new HttpError(
-        400,
-        "Managed DKIM signing is not available yet. Choose external mode if your mail server or relay already signs DKIM for this domain."
-      );
-    }
+    const base = {
+      organizationId: input.organizationId,
+      domain: input.domain,
+      spfNote: input.spfNote ?? null
+    };
+
+    // MANAGED mode: QQueue owns signing, so generate the keypair now, store the
+    // private key encrypted (same scheme as SMTP secrets), and start PENDING
+    // until DNS verification confirms the public key is published. EXTERNAL mode
+    // trusts the upstream server/relay, so there is nothing to verify (NA).
+    const data =
+      input.dkimMode === "MANAGED"
+        ? (() => {
+            const keypair = generateManagedDkim();
+            return {
+              ...base,
+              dkimMode: "MANAGED" as const,
+              dkimSelector: keypair.selector,
+              dkimPrivateKeyEncrypted: encryptSecret(keypair.privateKey),
+              dkimPublicKey: keypair.publicKey,
+              dkimStatus: "PENDING" as const
+            };
+          })()
+        : {
+            ...base,
+            dkimMode: "EXTERNAL" as const,
+            dkimStatus: "NA" as const
+          };
 
     try {
-      return await prisma.sendingDomain.create({
-        data: {
-          organizationId: input.organizationId,
-          domain: input.domain,
-          dkimMode: "EXTERNAL",
-          // Nothing for QQueue to verify in external mode.
-          dkimStatus: "NA",
-          spfNote: input.spfNote ?? null
-        },
+      const created = await prisma.sendingDomain.create({
+        data,
         select: sendingDomainSelect
       });
+      return withDnsRecords(created);
     } catch (error) {
       throw mapDuplicateDomain(error);
     }
@@ -80,11 +127,36 @@ export const sendingDomainService = {
 
   async update(id: string, userId: string, input: SendingDomainUpdateInput) {
     await findOwned(id, userId);
-    return prisma.sendingDomain.update({
+    const updated = await prisma.sendingDomain.update({
       where: { id },
       data: { spfNote: input.spfNote ?? null },
       select: sendingDomainSelect
     });
+    return withDnsRecords(updated);
+  },
+
+  // Enqueue an on-demand DNS recheck for a managed domain. The worker performs
+  // the actual lookup and updates dkimStatus/lastCheckedAt asynchronously.
+  async verify(id: string, userId: string) {
+    const domain = await findOwned(id, userId);
+    if (domain.dkimMode !== "MANAGED") {
+      throw new HttpError(
+        400,
+        "Only managed-DKIM domains are verified by QQueue."
+      );
+    }
+
+    await dkimVerificationQueue.add(
+      "verify-dkim",
+      { sendingDomainId: id },
+      {
+        jobId: `dkim-${id}-${Date.now()}`,
+        attempts: 3,
+        backoff: { type: "exponential", delay: 30_000 }
+      }
+    );
+
+    return { status: "queued" as const };
   },
 
   async delete(id: string, userId: string) {

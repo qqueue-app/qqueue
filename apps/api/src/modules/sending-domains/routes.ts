@@ -8,4 +8,5 @@ sendingDomainRouter.get("/", requireOrgMembership, sendingDomainController.list)
 sendingDomainRouter.post("/", requireOrgMembership, sendingDomainController.create);
 sendingDomainRouter.get("/:id", sendingDomainController.get);
 sendingDomainRouter.put("/:id", sendingDomainController.update);
+sendingDomainRouter.post("/:id/verify", sendingDomainController.verify);
 sendingDomainRouter.delete("/:id", sendingDomainController.delete);

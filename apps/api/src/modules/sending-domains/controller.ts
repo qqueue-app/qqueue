@@ -41,6 +41,14 @@ export const sendingDomainController = {
     res.json({ data: domain });
   },
 
+  async verify(req: Request, res: Response) {
+    const result = await sendingDomainService.verify(
+      String(req.params.id),
+      req.userId!
+    );
+    res.status(202).json({ data: result });
+  },
+
   async delete(req: Request, res: Response) {
     await sendingDomainService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
