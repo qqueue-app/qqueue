@@ -12,6 +12,7 @@ import { settleRunIfComplete } from "../lib/campaign-run.js";
 import { decryptSecret } from "../lib/crypto.js";
 import { enqueueLatestWebhookDeliveries } from "../lib/outbound-webhooks.js";
 import { prisma } from "../lib/prisma.js";
+import { dkimSignOptionsFor, formatFrom } from "../lib/sender.js";
 import {
   addSuppression,
   isSuppressed,
@@ -22,21 +23,18 @@ import type { EmailSendingJob } from "../queues/email-sending.queue.js";
 
 const PAUSE_RETRY_DELAY_MS = 30_000;
 
-function formatFrom(connection: { fromEmail: string; fromName: string | null }) {
-  if (!connection.fromName) {
-    return connection.fromEmail;
-  }
-
-  return `${connection.fromName} <${connection.fromEmail}>`;
-}
-
 export function startEmailSendingWorker() {
   return new Worker<EmailSendingJob>(
     "email-sending",
     async (job, token) => {
       const emailJob = await prisma.emailJob.findUnique({
         where: { id: job.data.emailJobId },
-        include: { smtpConnection: true, campaign: { select: { status: true } } }
+        include: {
+          smtpConnection: true,
+          // The From + DKIM derive from the chosen identity when present.
+          senderIdentity: { include: { sendingDomain: true } },
+          campaign: { select: { status: true } }
+        }
       });
 
       if (!emailJob || emailJob.status === "CANCELLED") {
@@ -115,17 +113,22 @@ export function startEmailSendingWorker() {
             : undefined;
 
         const result = await provider.send({
-          from: formatFrom(emailJob.smtpConnection),
+          // From comes from the sender identity when the job has one; otherwise
+          // the SMTP connection's From (legacy). Reply-to falls back to the
+          // identity's default. DKIM signs only managed, verified domains.
+          from: formatFrom(emailJob.senderIdentity ?? emailJob.smtpConnection),
           to: emailJob.toEmail,
           cc: emailJob.cc.length ? emailJob.cc : undefined,
           bcc: emailJob.bcc.length ? emailJob.bcc : undefined,
-          replyTo: emailJob.replyTo ?? undefined,
+          replyTo:
+            emailJob.replyTo ?? emailJob.senderIdentity?.replyTo ?? undefined,
           inReplyTo: emailJob.inReplyTo ?? undefined,
           references: emailJob.references.length ? emailJob.references : undefined,
           subject: emailJob.subject,
           html, // tracking already injected above
           text: emailJob.text ?? undefined,
           headers,
+          dkim: dkimSignOptionsFor(emailJob.senderIdentity?.sendingDomain),
           attachments
         });
 

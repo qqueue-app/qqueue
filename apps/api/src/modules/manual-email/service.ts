@@ -141,6 +141,7 @@ export const manualEmailService = {
       cc: recipients.cc.length ? recipients.cc : undefined,
       bcc: recipients.bcc.length ? recipients.bcc : undefined,
       replyTo: input.replyTo,
+      senderIdentityId: input.senderIdentityId,
       smtpConnectionId: input.smtpConnectionId,
       templateId: input.templateId,
       subject: input.subject,

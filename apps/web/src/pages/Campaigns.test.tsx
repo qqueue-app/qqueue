@@ -14,6 +14,7 @@ vi.mock("../lib/api.js", () => ({
     listCampaigns: vi.fn(),
     listTemplates: vi.fn(),
     listContactLists: vi.fn(),
+    listSenderIdentities: vi.fn(),
     createCampaign: vi.fn(),
     updateCampaign: vi.fn(),
     duplicateCampaign: vi.fn(),
@@ -57,6 +58,7 @@ function setup(campaigns: Record<string, unknown>[]) {
   mockedApi.listCampaigns.mockResolvedValue(campaigns);
   mockedApi.listTemplates.mockResolvedValue(templates);
   mockedApi.listContactLists.mockResolvedValue(lists);
+  mockedApi.listSenderIdentities.mockResolvedValue([]);
 }
 
 function renderCampaigns() {

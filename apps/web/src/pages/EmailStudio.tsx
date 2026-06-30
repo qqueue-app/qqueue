@@ -28,7 +28,7 @@ import {
   type EmailDraft,
   type ManualEmailDeliveryStatus,
   type RecipientDelivery,
-  type SMTPConnection,
+  type SenderIdentity,
   type Template
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
@@ -56,7 +56,7 @@ import {
   SelectValue
 } from "../components/ui/select.js";
 
-const DEFAULT_SMTP = "__default__";
+const DEFAULT_SENDER = "__default__";
 const NO_TEMPLATE = "__none__";
 const AUTOSAVE_DELAY_MS = 2000;
 
@@ -184,13 +184,13 @@ export function EmailStudio() {
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [smtpConnections, setSMTPConnections] = useState<SMTPConnection[]>([]);
+  const [senderIdentities, setSenderIdentities] = useState<SenderIdentity[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
 
   // Composer state.
-  const [smtpConnectionId, setSMTPConnectionId] = useState(DEFAULT_SMTP);
+  const [senderIdentityId, setSenderIdentityId] = useState(DEFAULT_SENDER);
   const [templateId, setTemplateId] = useState(NO_TEMPLATE);
   const [subject, setSubject] = useState("");
   const [html, setHtml] = useState("");
@@ -257,16 +257,16 @@ export function EmailStudio() {
     }
     setLoading(true);
     try {
-      const [templateData, smtpData, contactData, listData, draftData] =
+      const [templateData, identityData, contactData, listData, draftData] =
         await Promise.all([
           api.listTemplates(organizationId),
-          api.listSMTPConnections(organizationId),
+          api.listSenderIdentities(organizationId),
           api.listContacts(organizationId),
           api.listContactLists(organizationId),
           api.listEmailDrafts(organizationId)
         ]);
       setTemplates(templateData);
-      setSMTPConnections(smtpData);
+      setSenderIdentities(identityData);
       setContacts(contactData);
       setContactLists(listData);
       setDrafts(draftData);
@@ -284,7 +284,7 @@ export function EmailStudio() {
   }, [load]);
 
   function resetComposer() {
-    setSMTPConnectionId(DEFAULT_SMTP);
+    setSenderIdentityId(DEFAULT_SENDER);
     setTemplateId(NO_TEMPLATE);
     setSubject("");
     setHtml("");
@@ -404,8 +404,8 @@ export function EmailStudio() {
           bcc: bccEmails,
           listIds: selectedListIds,
           replyTo: replyTo || undefined,
-          smtpConnectionId:
-            smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
+          senderIdentityId:
+            senderIdentityId === DEFAULT_SENDER ? undefined : senderIdentityId,
           templateId: templateId === NO_TEMPLATE ? undefined : templateId
         };
         let saved: EmailDraft;
@@ -440,7 +440,7 @@ export function EmailStudio() {
       bccEmails,
       selectedListIds,
       replyTo,
-      smtpConnectionId,
+      senderIdentityId,
       templateId,
       draftId
     ]
@@ -466,7 +466,7 @@ export function EmailStudio() {
     bccEmails,
     selectedListIds,
     replyTo,
-    smtpConnectionId,
+    senderIdentityId,
     templateId
   ]);
 
@@ -490,7 +490,7 @@ export function EmailStudio() {
     setSelectedListIds(draft.listIds ?? []);
     setReplyTo(draft.replyTo ?? "");
     setAttachments(draft.attachments ?? []);
-    setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
+    setSenderIdentityId(draft.senderIdentityId ?? DEFAULT_SENDER);
     setTemplateId(draft.templateId ?? NO_TEMPLATE);
     setLastSavedAt(draft.updatedAt);
     setDeliveryStatus(null);
@@ -570,8 +570,8 @@ export function EmailStudio() {
         bcc: bccEmails.length ? bccEmails : undefined,
         listIds: selectedListIds.length ? selectedListIds : undefined,
         replyTo: replyTo || undefined,
-        smtpConnectionId:
-          smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
+        senderIdentityId:
+          senderIdentityId === DEFAULT_SENDER ? undefined : senderIdentityId,
         templateId: templateId === NO_TEMPLATE ? undefined : templateId,
         subject,
         html,
@@ -606,7 +606,7 @@ export function EmailStudio() {
     }
   }
 
-  const noSmtp = !loading && smtpConnections.length === 0;
+  const noSender = !loading && senderIdentities.length === 0;
 
   return (
     <>
@@ -647,11 +647,12 @@ export function EmailStudio() {
         ) : (
           <form onSubmit={send} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="space-y-5">
-              {noSmtp ? (
+              {noSender ? (
                 <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                  <p className="font-medium">No sending account yet</p>
+                  <p className="font-medium">No sender identity yet</p>
                   <p className="mt-1">
-                    Add a sending account before you can send email.
+                    Add a sender identity under Sending Domains to choose who this
+                    email is from.
                   </p>
                 </Card>
               ) : null}
@@ -667,21 +668,21 @@ export function EmailStudio() {
                   <div className="space-y-2">
                     <Label htmlFor="from">From</Label>
                     <Select
-                      value={smtpConnectionId}
-                      onValueChange={setSMTPConnectionId}
+                      value={senderIdentityId}
+                      onValueChange={setSenderIdentityId}
                     >
                       <SelectTrigger id="from">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={DEFAULT_SMTP}>
-                          Default sending account
+                        <SelectItem value={DEFAULT_SENDER}>
+                          Default sender identity
                         </SelectItem>
-                        {smtpConnections.map((connection) => (
-                          <SelectItem key={connection.id} value={connection.id}>
-                            {connection.fromName
-                              ? `${connection.fromName} <${connection.fromEmail}>`
-                              : connection.fromEmail}
+                        {senderIdentities.map((identity) => (
+                          <SelectItem key={identity.id} value={identity.id}>
+                            {identity.fromName
+                              ? `${identity.fromName} <${identity.fromEmail}>`
+                              : identity.fromEmail}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -975,7 +976,7 @@ export function EmailStudio() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={sending || noSmtp || !organizationId}
+                  disabled={sending || noSender || !organizationId}
                 >
                   {sending ? <Spinner /> : <Send className="h-4 w-4" />}
                   {scheduleForLater ? "Schedule email" : "Send email"}

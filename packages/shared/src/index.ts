@@ -703,6 +703,7 @@ export type InboundMessageQueryInput = z.infer<
 export const inboundMessageReplySchema = z
   .object({
     organizationId: z.string().min(1),
+    senderIdentityId: z.string().min(1).optional(),
     smtpConnectionId: z.string().min(1).optional(),
     subject: z.string().min(1),
     html: z.string().optional(),
@@ -786,6 +787,7 @@ export const templateTestSendSchema = z.object({
   to: emailAddressSchema.optional(),
   /** Sample values keyed by variable name. */
   data: z.record(z.string()).optional(),
+  senderIdentityId: z.string().optional(),
   smtpConnectionId: z.string().optional(),
 });
 
@@ -999,6 +1001,7 @@ export const campaignSchema = z
     templateId: z.string().min(1).optional(),
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
+    senderIdentityId: z.string().min(1).optional(),
     scheduledAt: z.string().datetime().optional(),
   })
   .superRefine(campaignTargetExclusive);
@@ -1011,6 +1014,7 @@ export const campaignUpdateSchema = z
     templateId: z.string().min(1).optional(),
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
+    senderIdentityId: z.string().min(1).nullish(),
     scheduledAt: z.string().datetime().optional(),
   })
   .superRefine(campaignTargetExclusive);
@@ -1127,6 +1131,7 @@ export const sendEmailSchema = z.object({
   cc: z.array(emailAddressSchema).optional(),
   bcc: z.array(emailAddressSchema).optional(),
   replyTo: emailAddressSchema.optional(),
+  senderIdentityId: z.string().min(1).optional(),
   smtpConnectionId: z.string().min(1).optional(),
   templateId: z.string().min(1).optional(),
   subject: z.string().min(1).optional(),
@@ -1164,6 +1169,7 @@ export const manualEmailSendSchema = z
     contactIds: z.array(z.string().min(1)).optional(),
     listIds: z.array(z.string().min(1)).optional(),
     replyTo: emailAddressSchema.optional(),
+    senderIdentityId: z.string().min(1).optional(),
     smtpConnectionId: z.string().min(1).optional(),
     templateId: z.string().min(1).optional(),
     subject: z.string().min(1),
@@ -1259,6 +1265,7 @@ export const emailDraftSchema = z.object({
   contactIds: z.array(z.string().min(1)).optional(),
   listIds: z.array(z.string().min(1)).optional(),
   replyTo: z.string().optional(),
+  senderIdentityId: z.string().optional(),
   smtpConnectionId: z.string().optional(),
   templateId: z.string().optional(),
   variables: z.record(z.unknown()).optional(),
@@ -1438,6 +1445,19 @@ export interface SendingDomainDnsRecords {
 /** Hostname the DKIM public-key TXT record lives at. */
 export function dkimDnsHost(selector: string, domain: string): string {
   return `${selector}._domainkey.${domain}`;
+}
+
+/**
+ * Whether QQueue should DKIM-sign a message for a sending domain: only managed
+ * domains whose DNS is verified. External domains trust the upstream
+ * server/relay; pending/failed managed domains aren't signed yet. The single
+ * decision both send sites (API inline send + worker) make at send time.
+ */
+export function shouldSignManagedDkim(
+  dkimMode: DkimMode,
+  dkimStatus: DkimStatus
+): boolean {
+  return dkimMode === "MANAGED" && dkimStatus === "VERIFIED";
 }
 
 /** Base64 SPKI body of a PEM public key, with header/footer/whitespace removed. */

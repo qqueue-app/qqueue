@@ -29,6 +29,7 @@ import {
   api,
   type Campaign,
   type ContactList,
+  type SenderIdentity,
   type Template
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
@@ -63,10 +64,15 @@ import {
   TableRow
 } from "../components/ui/table.js";
 
+// Sentinel for "use the org default sender identity" — Radix Select can't use
+// an empty-string item value.
+const DEFAULT_SENDER = "__default__";
+
 const emptyCampaignForm = {
   name: "",
   templateId: "",
-  contactListId: ""
+  contactListId: "",
+  senderIdentityId: DEFAULT_SENDER
 };
 
 function statusVariant(status: string) {
@@ -112,6 +118,7 @@ export function Campaigns() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
+  const [senderIdentities, setSenderIdentities] = useState<SenderIdentity[]>([]);
   const [loading, setLoading] = useState(true);
   const [campaignDialogOpen, setCampaignDialogOpen] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
@@ -139,14 +146,17 @@ export function Campaigns() {
     }
     setLoading(true);
     try {
-      const [nextCampaigns, nextTemplates, nextLists] = await Promise.all([
-        api.listCampaigns(organizationId),
-        api.listTemplates(organizationId),
-        api.listContactLists(organizationId)
-      ]);
+      const [nextCampaigns, nextTemplates, nextLists, nextIdentities] =
+        await Promise.all([
+          api.listCampaigns(organizationId),
+          api.listTemplates(organizationId),
+          api.listContactLists(organizationId),
+          api.listSenderIdentities(organizationId)
+        ]);
       setCampaigns(nextCampaigns);
       setTemplates(nextTemplates);
       setContactLists(nextLists);
+      setSenderIdentities(nextIdentities);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to load campaigns"
@@ -188,7 +198,8 @@ export function Campaigns() {
     setCampaignForm({
       name: campaign.name,
       templateId: campaign.templateId ?? "",
-      contactListId: campaign.contactListId ?? ""
+      contactListId: campaign.contactListId ?? "",
+      senderIdentityId: campaign.senderIdentityId ?? DEFAULT_SENDER
     });
     setCampaignDialogOpen(true);
   }
@@ -207,13 +218,21 @@ export function Campaigns() {
 
     setSaving(true);
     try {
+      const senderIdentityId =
+        campaignForm.senderIdentityId === DEFAULT_SENDER
+          ? null
+          : campaignForm.senderIdentityId;
       if (editingCampaign) {
-        await api.updateCampaign(editingCampaign.id, campaignForm);
+        await api.updateCampaign(editingCampaign.id, {
+          ...campaignForm,
+          senderIdentityId
+        });
         toast.success("Campaign updated.");
       } else {
         await api.createCampaign({
           organizationId,
-          ...campaignForm
+          ...campaignForm,
+          senderIdentityId: senderIdentityId ?? undefined
         });
         toast.success("Campaign draft created.");
       }
@@ -620,6 +639,31 @@ export function Campaigns() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>From</Label>
+              <Select
+                value={campaignForm.senderIdentityId}
+                onValueChange={(value) =>
+                  setCampaignForm({ ...campaignForm, senderIdentityId: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select sender" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_SENDER}>
+                    Default sender identity
+                  </SelectItem>
+                  {senderIdentities.map((identity) => (
+                    <SelectItem key={identity.id} value={identity.id}>
+                      {identity.fromName
+                        ? `${identity.fromName} <${identity.fromEmail}>`
+                        : identity.fromEmail}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <DialogFooter>
               <Button

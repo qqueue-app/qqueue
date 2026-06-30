@@ -12,7 +12,12 @@ import {
 import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
 import { PageHeader } from "../components/PageHeader.js";
-import { api, type InboxAccount, type InboundMessage } from "../lib/api.js";
+import {
+  api,
+  type InboxAccount,
+  type InboundMessage,
+  type SenderIdentity
+} from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
@@ -121,10 +126,16 @@ function buildConversationThreads(messages: InboundMessage[]) {
     }));
 }
 
+// Sentinel for "use the org default sender identity" in the reply picker —
+// Radix Select can't use an empty-string item value.
+const REPLY_DEFAULT_SENDER = "__default__";
+
 export function Inbox() {
   const { currentOrganizationId: organizationId } = useSession();
   const [accounts, setAccounts] = useState<InboxAccount[]>([]);
   const [messages, setMessages] = useState<InboundMessage[]>([]);
+  const [senderIdentities, setSenderIdentities] = useState<SenderIdentity[]>([]);
+  const [replyIdentityId, setReplyIdentityId] = useState(REPLY_DEFAULT_SENDER);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
     null
@@ -187,16 +198,18 @@ export function Inbox() {
 
     setLoading(true);
     try {
-      const [nextAccounts, nextMessages] = await Promise.all([
+      const [nextAccounts, nextMessages, nextIdentities] = await Promise.all([
         api.listInboxAccounts(organizationId),
         api.listInboundMessages({
           organizationId,
           q: search || undefined,
           read: readFilter,
         }),
+        api.listSenderIdentities(organizationId),
       ]);
       setAccounts(nextAccounts);
       setMessages(nextMessages.data);
+      setSenderIdentities(nextIdentities);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to load inbox"
@@ -313,6 +326,10 @@ export function Inbox() {
     try {
       await api.replyToInboundMessage(selectedThread.latestMessage.id, {
         organizationId,
+        senderIdentityId:
+          replyIdentityId === REPLY_DEFAULT_SENDER
+            ? undefined
+            : replyIdentityId,
         subject: selectedThread.latestMessage.subject || "(no subject)",
         text: replyBody,
       });
@@ -589,9 +606,33 @@ export function Inbox() {
                     className="shrink-0 border-t bg-card p-4"
                     onSubmit={submitReply}
                   >
-                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                      <Reply className="h-4 w-4 text-primary" />
-                      Reply
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <Reply className="h-4 w-4 text-primary" />
+                        Reply
+                      </div>
+                      {senderIdentities.length > 0 ? (
+                        <Select
+                          value={replyIdentityId}
+                          onValueChange={setReplyIdentityId}
+                        >
+                          <SelectTrigger className="h-8 w-auto min-w-[12rem] text-xs">
+                            <SelectValue placeholder="From" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={REPLY_DEFAULT_SENDER}>
+                              Default sender identity
+                            </SelectItem>
+                            {senderIdentities.map((identity) => (
+                              <SelectItem key={identity.id} value={identity.id}>
+                                {identity.fromName
+                                  ? `${identity.fromName} <${identity.fromEmail}>`
+                                  : identity.fromEmail}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : null}
                     </div>
                     <Textarea
                       value={replyBody}

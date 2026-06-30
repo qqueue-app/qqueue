@@ -51,7 +51,9 @@ afterEach(() => {
 });
 
 describe("transactionalEmailService.send", () => {
-  it("throws 404 when no smtp connection is found", async () => {
+  it("throws 404 when nothing is configured to send from", async () => {
+    // No sender identity and no SMTP connection (default lookups both miss).
+    prismaMock.senderIdentity.findFirst.mockResolvedValue(null);
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
     await expect(
       transactionalEmailService.send({
@@ -60,7 +62,7 @@ describe("transactionalEmailService.send", () => {
         subject: "Hi",
         html: "<p>Hi</p>"
       })
-    ).rejects.toThrow("SMTP connection not found");
+    ).rejects.toThrow("No sender identity or SMTP connection configured");
   });
 
   it("throws 404 when the referenced template is missing", async () => {

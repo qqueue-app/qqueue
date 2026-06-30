@@ -5,6 +5,12 @@ export interface QQueueClientOptions {
 
 export interface PublicSendEmailInput {
   to: string;
+  /**
+   * Send as a registered sender identity (preferred). Determines the From
+   * address, the transporting account, and DKIM signing. Takes precedence over
+   * `smtpConnectionId`; when neither is set, the org's default is used.
+   */
+  senderIdentityId?: string;
   smtpConnectionId?: string;
   templateId?: string;
   subject?: string;

@@ -16,7 +16,7 @@ vi.mock("../lib/session-context.js", () => ({
 vi.mock("../lib/api.js", () => ({
   api: {
     listTemplates: vi.fn(),
-    listSMTPConnections: vi.fn(),
+    listSenderIdentities: vi.fn(),
     listContacts: vi.fn(),
     listContactLists: vi.fn(),
     listEmailDrafts: vi.fn(),
@@ -53,16 +53,17 @@ import { api } from "../lib/api.js";
 
 const mockedApi = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
-const smtp = [
+const identities = [
   {
-    id: "s1",
+    id: "id1",
     organizationId: "org_1",
-    name: "Primary",
-    host: "smtp.x",
-    port: 587,
-    secure: false,
+    sendingDomainId: "d1",
+    fromName: "Acme",
     fromEmail: "from@x.com",
-    isDefault: true
+    smtpConnectionId: "s1",
+    isDefault: true,
+    createdAt: "now",
+    updatedAt: "now"
   }
 ];
 
@@ -90,9 +91,9 @@ const lists = [
   }
 ];
 
-function setup({ withSmtp = true } = {}) {
+function setup({ withSender = true } = {}) {
   mockedApi.listTemplates.mockResolvedValue(templates);
-  mockedApi.listSMTPConnections.mockResolvedValue(withSmtp ? smtp : []);
+  mockedApi.listSenderIdentities.mockResolvedValue(withSender ? identities : []);
   mockedApi.listContacts.mockResolvedValue(contacts);
   mockedApi.listContactLists.mockResolvedValue(lists);
   mockedApi.listEmailDrafts.mockResolvedValue([]);
@@ -138,10 +139,10 @@ describe("EmailStudio", () => {
     session.current = { currentOrganizationId: "org_1" };
   });
 
-  it("warns and disables sending when there is no SMTP connection", async () => {
-    setup({ withSmtp: false });
+  it("warns and disables sending when there is no sender identity", async () => {
+    setup({ withSender: false });
     renderStudio();
-    expect(await screen.findByText("No sending account yet")).toBeInTheDocument();
+    expect(await screen.findByText("No sender identity yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Send email/i })).toBeDisabled();
   });
 
@@ -150,7 +151,7 @@ describe("EmailStudio", () => {
     setup();
     renderStudio();
     await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
+      expect(mockedApi.listSenderIdentities).toHaveBeenCalled()
     );
 
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
@@ -215,7 +216,7 @@ describe("EmailStudio", () => {
     setup();
     renderStudio();
     await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
+      expect(mockedApi.listSenderIdentities).toHaveBeenCalled()
     );
 
     // Recurring isn't supported for one-off Compose sends, so it's hidden.
@@ -253,7 +254,7 @@ describe("EmailStudio", () => {
     setup();
     renderStudio();
     await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
+      expect(mockedApi.listSenderIdentities).toHaveBeenCalled()
     );
 
     const file = new File(["pdf-bytes"], "doc.pdf", {
@@ -289,7 +290,7 @@ describe("EmailStudio", () => {
     setup();
     renderStudio();
     await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
+      expect(mockedApi.listSenderIdentities).toHaveBeenCalled()
     );
 
     const file = new File(["pdf-bytes"], "doc.pdf", {
@@ -311,7 +312,7 @@ describe("EmailStudio", () => {
     setup();
     renderStudio();
     await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
+      expect(mockedApi.listSenderIdentities).toHaveBeenCalled()
     );
 
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");

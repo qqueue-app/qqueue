@@ -249,6 +249,7 @@ export interface EmailDraft {
   contactIds: string[];
   listIds: string[];
   replyTo?: string | null;
+  senderIdentityId?: string | null;
   smtpConnectionId?: string | null;
   templateId?: string | null;
   variables?: Record<string, unknown>;
@@ -436,6 +437,7 @@ export interface Campaign {
   nextRunAt?: string | null;
   templateId?: string | null;
   contactListId?: string | null;
+  senderIdentityId?: string | null;
   template?: { id: string; name: string; subject: string } | null;
   contactList?: {
     id: string;
@@ -1324,6 +1326,7 @@ export const api = {
     id: string,
     input: {
       organizationId: string;
+      senderIdentityId?: string;
       smtpConnectionId?: string;
       subject: string;
       html?: string;
