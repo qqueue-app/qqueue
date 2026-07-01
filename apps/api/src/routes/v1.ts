@@ -15,8 +15,6 @@ import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { segmentRouter } from "../modules/segments/routes.js";
-import { senderIdentityRouter } from "../modules/sender-identities/routes.js";
-import { sendingDomainRouter } from "../modules/sending-domains/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
 import { suppressionRouter } from "../modules/suppressions/routes.js";
 import { templateRouter } from "../modules/templates/routes.js";
@@ -48,10 +46,6 @@ v1Router.use("/api-keys", apiKeyRouter);
 v1Router.use("/organizations", organizationRouter);
 v1Router.use("/queue-operations", queueOperationsRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
-// Sending domains decouple the From address from the SMTP credential; sender
-// identities are the concrete From addresses every send surface picks from.
-v1Router.use("/sending-domains", sendingDomainRouter);
-v1Router.use("/sender-identities", senderIdentityRouter);
 v1Router.use("/contacts", contactRouter);
 v1Router.use("/contact-lists", contactListRouter);
 // Dynamic, rule-tree segments resolved to contacts at send time.

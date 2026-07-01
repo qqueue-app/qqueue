@@ -21,19 +21,6 @@ export interface SendEmailPayload {
   /** Extra raw headers (e.g. List-Unsubscribe). Forwarded to Nodemailer as-is. */
   headers?: Record<string, string>;
   attachments?: EmailAttachment[];
-  /**
-   * Per-message DKIM signing. Set only for managed-mode sending domains whose
-   * DNS is verified; omitted otherwise so QQueue trusts the upstream
-   * server/relay to sign. Forwarded as Nodemailer's per-message `dkim` option.
-   */
-  dkim?: DkimSignOptions;
-}
-
-export interface DkimSignOptions {
-  domainName: string;
-  keySelector: string;
-  /** PKCS#8 PEM private key. */
-  privateKey: string;
 }
 
 export interface SendEmailResult {

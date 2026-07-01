@@ -105,7 +105,6 @@ const navSections: NavSection[] = [
         icon: SettingsIcon,
         children: [
           { to: "/smtp-connections", label: "Sending accounts" },
-          { to: "/sending-domains", label: "Sending domains" },
           { to: "/deliverability", label: "Sending health" },
           { to: "/suppressions", label: "Blocked addresses" },
           { to: "/queue-operations", label: "Background jobs", adminOnly: true },

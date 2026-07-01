@@ -9,11 +9,6 @@ import type {
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
-import {
-  dkimSignOptionsFor,
-  formatSenderFrom,
-  resolveSender
-} from "../../lib/sender.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 import { attachmentService } from "../attachments/service.js";
 import { smtpConnectionService } from "../smtp-connections/service.js";
@@ -32,6 +27,14 @@ function renderVariables(
     const variable = variables[key];
     return variable === undefined || variable === null ? "" : String(variable);
   });
+}
+
+function formatFrom(connection: { fromEmail: string; fromName: string | null }) {
+  if (!connection.fromName) {
+    return connection.fromEmail;
+  }
+
+  return `${connection.fromName} <${connection.fromEmail}>`;
 }
 
 function parseScheduledAt(value: string | undefined) {
@@ -131,16 +134,21 @@ export const transactionalEmailService = {
       }
     }
 
-    // Resolve who we send as: an explicit sender identity, an explicit SMTP
-    // connection (legacy), or the org default of either. From + DKIM derive from
-    // this. Throws a clear error when nothing is configured to send from.
-    const sender = await resolveSender(input.organizationId, {
-      senderIdentityId: input.senderIdentityId,
-      smtpConnectionId: input.smtpConnectionId
+    const smtpConnection = await prisma.sMTPConnection.findFirst({
+      where: {
+        organizationId: input.organizationId,
+        id: input.smtpConnectionId,
+        ...(input.smtpConnectionId ? {} : { isDefault: true })
+      }
     });
-    // The identity's reply-to is a default; an explicit replyTo on the request
-    // wins.
-    const replyTo = input.replyTo ?? sender.replyTo ?? undefined;
+
+    if (!smtpConnection) {
+      throw new HttpError(
+        404,
+        "SMTP connection not found",
+        "missing_smtp_connection"
+      );
+    }
 
     const template = input.templateId
       ? await prisma.template.findFirst({
@@ -181,13 +189,12 @@ export const transactionalEmailService = {
       const { job: suppressed } = await createEmailJob(
         {
           organizationId: input.organizationId,
-          smtpConnectionId: sender.smtpConnection.id,
-          senderIdentityId: sender.senderIdentityId,
+          smtpConnectionId: smtpConnection.id,
           templateId: template?.id,
           toEmail: input.to,
           cc: input.cc ?? [],
           bcc: input.bcc ?? [],
-          replyTo,
+          replyTo: input.replyTo,
           inReplyTo: input.inReplyTo,
           references: input.references ?? [],
           idempotencyKey,
@@ -210,13 +217,12 @@ export const transactionalEmailService = {
       const { job: queuedJob, replayed } = await createEmailJob(
         {
           organizationId: input.organizationId,
-          smtpConnectionId: sender.smtpConnection.id,
-          senderIdentityId: sender.senderIdentityId,
+          smtpConnectionId: smtpConnection.id,
           templateId: template?.id,
           toEmail: input.to,
           cc: input.cc ?? [],
           bcc: input.bcc ?? [],
-          replyTo,
+          replyTo: input.replyTo,
           inReplyTo: input.inReplyTo,
           references: input.references ?? [],
           idempotencyKey,
@@ -272,13 +278,12 @@ export const transactionalEmailService = {
     const { job: emailJob, replayed } = await createEmailJob(
       {
         organizationId: input.organizationId,
-        smtpConnectionId: sender.smtpConnection.id,
-        senderIdentityId: sender.senderIdentityId,
+        smtpConnectionId: smtpConnection.id,
         templateId: template?.id,
         toEmail: input.to,
         cc: input.cc ?? [],
         bcc: input.bcc ?? [],
-        replyTo,
+        replyTo: input.replyTo,
         inReplyTo: input.inReplyTo,
         references: input.references ?? [],
         idempotencyKey,
@@ -317,16 +322,15 @@ export const transactionalEmailService = {
     });
 
     try {
-      const provider = smtpConnectionService.getProviderForConnection(
-        sender.smtpConnection
-      );
+      const provider =
+        smtpConnectionService.getProviderForConnection(smtpConnection);
       const attachments = await attachmentService.loadForJob(emailJob.id);
       const result = await provider.send({
-        from: formatSenderFrom(sender),
+        from: formatFrom(smtpConnection),
         to: input.to,
         cc: input.cc,
         bcc: input.bcc,
-        replyTo,
+        replyTo: input.replyTo,
         inReplyTo: input.inReplyTo,
         references: input.references,
         subject,
@@ -336,9 +340,6 @@ export const transactionalEmailService = {
           secret: env.TRACKING_SECRET
         }),
         text,
-        // Sign DKIM only for managed, DNS-verified sending domains; otherwise
-        // omit and trust the upstream server/relay.
-        dkim: dkimSignOptionsFor(sender),
         attachments
       });
 

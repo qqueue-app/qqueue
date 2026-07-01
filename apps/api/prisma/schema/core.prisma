@@ -110,26 +110,6 @@ enum InboxAccountStatus {
   DISABLED
 }
 
-// How DKIM signing is handled for a sending domain.
-//   EXTERNAL — the upstream mail server or relay (Mailcow, SES, Mailgun,
-//     Postmark, …) already signs DKIM; QQueue trusts it and signs nothing.
-//   MANAGED  — there is no upstream signer (bare Postfix/Exim); QQueue generates
-//     the keypair and signs outbound mail itself.
-enum DkimMode {
-  EXTERNAL
-  MANAGED
-}
-
-// DNS verification state of a sending domain's DKIM/SPF records. EXTERNAL-mode
-// domains are NA (nothing for QQueue to verify); MANAGED-mode domains move
-// PENDING → VERIFIED/FAILED as the verification worker checks DNS.
-enum DkimStatus {
-  VERIFIED
-  PENDING
-  FAILED
-  NA
-}
-
 model User {
   id                  String               @id @default(cuid())
   email               String               @unique
@@ -173,8 +153,6 @@ model Organization {
   emailAttachments  EmailAttachment[]
   inboxAccounts     InboxAccount[]
   inboundMessages   InboundMessage[]
-  sendingDomains    SendingDomain[]
-  senderIdentities  SenderIdentity[]
   emailEvents       EmailEvent[]
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
@@ -213,67 +191,8 @@ model SMTPConnection {
   isDefault         Boolean      @default(false)
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   emailJobs         EmailJob[]
-  senderIdentities  SenderIdentity[]
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
-}
-
-// A domain an organization sends mail From (e.g. acme.com). Decouples the
-// visible From address from the single authenticating SMTP credential so users
-// can send as noreply@ without a real mailbox behind it. `dkimMode` decides
-// whether QQueue signs DKIM itself (MANAGED) or trusts the upstream server/relay
-// (EXTERNAL). Managed-mode key material is encrypted with the same scheme as
-// SMTP secrets (lib/crypto). See docs — Sending Domains & Sender Identities.
-model SendingDomain {
-  id                      String           @id @default(cuid())
-  organizationId          String
-  domain                  String
-  dkimMode                DkimMode         @default(EXTERNAL)
-  // Managed mode only: DKIM selector and keypair. Private key is encrypted at
-  // rest (reuses lib/crypto, like SMTPConnection secrets). Null for external.
-  dkimSelector            String?
-  dkimPrivateKeyEncrypted String?
-  dkimPublicKey           String?
-  dkimStatus              DkimStatus       @default(NA)
-  // Free-text reminder for external mode, e.g. "configured in Mailcow".
-  spfNote                 String?
-  verifiedAt              DateTime?
-  lastCheckedAt           DateTime?
-  organization            Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  identities              SenderIdentity[]
-  createdAt               DateTime         @default(now())
-  updatedAt               DateTime         @updatedAt
-
-  @@unique([organizationId, domain])
-  @@index([organizationId])
-}
-
-// A concrete From identity (fromName + fromEmail) under a SendingDomain, bound
-// to the SMTP credential that actually transports it. Every send surface picks a
-// SenderIdentity instead of free-typing a From address, so sends are restricted
-// to registered, domain-backed identities.
-model SenderIdentity {
-  id               String         @id @default(cuid())
-  organizationId   String
-  sendingDomainId  String
-  fromName         String
-  fromEmail        String
-  smtpConnectionId String
-  replyTo          String?
-  isDefault        Boolean        @default(false)
-  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sendingDomain    SendingDomain  @relation(fields: [sendingDomainId], references: [id], onDelete: Cascade)
-  smtpConnection   SMTPConnection @relation(fields: [smtpConnectionId], references: [id], onDelete: Cascade)
-  emailJobs        EmailJob[]
-  campaigns        Campaign[]
-  emailDrafts      EmailDraft[]
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-
-  @@unique([organizationId, fromEmail])
-  @@index([organizationId])
-  @@index([sendingDomainId])
-  @@index([smtpConnectionId])
 }
 
 model Contact {
@@ -422,10 +341,6 @@ model Campaign {
   // A campaign targets a static contact list OR a dynamic segment (resolved at
   // send time). Exactly one is set; enforced by the API, not the schema.
   segmentId       String?
-  // The sender identity (From address + sending account) the fan-out uses. When
-  // null, the worker falls back to the org's default sender identity, then the
-  // default SMTP connection (legacy campaigns predating sender identities).
-  senderIdentityId String?
   name            String
   status          CampaignStatus    @default(DRAFT)
   scheduledAt     DateTime?
@@ -445,14 +360,11 @@ model Campaign {
   template        Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
   contactList     ContactList?      @relation(fields: [contactListId], references: [id], onDelete: SetNull)
   segment         Segment?          @relation(fields: [segmentId], references: [id], onDelete: SetNull)
-  senderIdentity  SenderIdentity?   @relation(fields: [senderIdentityId], references: [id], onDelete: SetNull)
   variants        CampaignVariant[]
   emailJobs       EmailJob[]
   runs            CampaignRun[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
-
-  @@index([senderIdentityId])
 }
 
 // A subject-line variant for a campaign's A/B test. The body comes from the
@@ -503,10 +415,6 @@ model EmailJob {
   id               String            @id @default(cuid())
   organizationId   String
   smtpConnectionId String?
-  // The sender identity chosen at send time. When set, From + DKIM derive from
-  // it (and smtpConnectionId mirrors the identity's account). Null for legacy
-  // sends, which fall back to the SMTP connection's fromEmail/fromName.
-  senderIdentityId String?
   templateId       String?
   campaignId       String?
   campaignRunId    String?
@@ -540,7 +448,6 @@ model EmailJob {
   sentAt           DateTime?
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   smtpConnection   SMTPConnection?   @relation(fields: [smtpConnectionId], references: [id], onDelete: SetNull)
-  senderIdentity   SenderIdentity?   @relation(fields: [senderIdentityId], references: [id], onDelete: SetNull)
   template         Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
   campaign         Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   campaignRun      CampaignRun?      @relation(fields: [campaignRunId], references: [id], onDelete: SetNull)
@@ -553,7 +460,6 @@ model EmailJob {
   @@unique([organizationId, idempotencyKey])
   @@index([messageId])
   @@index([organizationId, origin])
-  @@index([senderIdentityId])
 }
 
 // Email Studio composer drafts. Org- and user-scoped, editable until sent. A
@@ -566,7 +472,6 @@ model EmailDraft {
   organizationId   String
   createdByUserId  String
   smtpConnectionId String?
-  senderIdentityId String?
   templateId       String?
   subject          String            @default("")
   html             String?
@@ -579,13 +484,11 @@ model EmailDraft {
   replyTo          String?
   variables        Json?
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  senderIdentity   SenderIdentity?   @relation(fields: [senderIdentityId], references: [id], onDelete: SetNull)
   attachments      EmailAttachment[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
   @@index([organizationId, createdByUserId])
-  @@index([senderIdentityId])
 }
 
 // Email attachment metadata. The blob itself lives in S3-compatible object

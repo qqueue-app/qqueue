@@ -152,48 +152,6 @@ export interface DomainThrottle {
 
 export type InboxAccountStatus = "ACTIVE" | "DISABLED";
 
-// DKIM signing strategy for a sending domain. EXTERNAL trusts the upstream mail
-// server/relay to sign (Mailcow, SES, Mailgun, Postmark); MANAGED has QQueue
-// generate keys and sign itself (bare Postfix/Exim).
-export type DkimMode = "EXTERNAL" | "MANAGED";
-
-// DNS verification state of a sending domain. EXTERNAL-mode domains are "NA".
-export type DkimStatus = "VERIFIED" | "PENDING" | "FAILED" | "NA";
-
-export interface SendingDomain {
-  id: string;
-  organizationId: string;
-  domain: string;
-  dkimMode: DkimMode;
-  dkimSelector?: string | null;
-  /** Public key only; the private key is never returned to clients. */
-  dkimPublicKey?: string | null;
-  dkimStatus: DkimStatus;
-  spfNote?: string | null;
-  verifiedAt?: string | null;
-  lastCheckedAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  /**
-   * DNS records to publish — present only for managed-mode domains (null for
-   * external). Computed by the API from the stored selector + public key.
-   */
-  dnsRecords?: SendingDomainDnsRecords | null;
-}
-
-export interface SenderIdentity {
-  id: string;
-  organizationId: string;
-  sendingDomainId: string;
-  fromName: string;
-  fromEmail: string;
-  smtpConnectionId: string;
-  replyTo?: string | null;
-  isDefault: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface InboxAccount {
   id: string;
   organizationId: string;
@@ -703,7 +661,6 @@ export type InboundMessageQueryInput = z.infer<
 export const inboundMessageReplySchema = z
   .object({
     organizationId: z.string().min(1),
-    senderIdentityId: z.string().min(1).optional(),
     smtpConnectionId: z.string().min(1).optional(),
     subject: z.string().min(1),
     html: z.string().optional(),
@@ -787,7 +744,6 @@ export const templateTestSendSchema = z.object({
   to: emailAddressSchema.optional(),
   /** Sample values keyed by variable name. */
   data: z.record(z.string()).optional(),
-  senderIdentityId: z.string().optional(),
   smtpConnectionId: z.string().optional(),
 });
 
@@ -1001,7 +957,6 @@ export const campaignSchema = z
     templateId: z.string().min(1).optional(),
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
-    senderIdentityId: z.string().min(1).optional(),
     scheduledAt: z.string().datetime().optional(),
   })
   .superRefine(campaignTargetExclusive);
@@ -1014,7 +969,6 @@ export const campaignUpdateSchema = z
     templateId: z.string().min(1).optional(),
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
-    senderIdentityId: z.string().min(1).nullish(),
     scheduledAt: z.string().datetime().optional(),
   })
   .superRefine(campaignTargetExclusive);
@@ -1131,7 +1085,6 @@ export const sendEmailSchema = z.object({
   cc: z.array(emailAddressSchema).optional(),
   bcc: z.array(emailAddressSchema).optional(),
   replyTo: emailAddressSchema.optional(),
-  senderIdentityId: z.string().min(1).optional(),
   smtpConnectionId: z.string().min(1).optional(),
   templateId: z.string().min(1).optional(),
   subject: z.string().min(1).optional(),
@@ -1169,7 +1122,6 @@ export const manualEmailSendSchema = z
     contactIds: z.array(z.string().min(1)).optional(),
     listIds: z.array(z.string().min(1)).optional(),
     replyTo: emailAddressSchema.optional(),
-    senderIdentityId: z.string().min(1).optional(),
     smtpConnectionId: z.string().min(1).optional(),
     templateId: z.string().min(1).optional(),
     subject: z.string().min(1),
@@ -1265,7 +1217,6 @@ export const emailDraftSchema = z.object({
   contactIds: z.array(z.string().min(1)).optional(),
   listIds: z.array(z.string().min(1)).optional(),
   replyTo: z.string().optional(),
-  senderIdentityId: z.string().optional(),
   smtpConnectionId: z.string().optional(),
   templateId: z.string().optional(),
   variables: z.record(z.unknown()).optional(),
@@ -1360,167 +1311,3 @@ export const smtpConnectionUpdateSchema = smtpConnectionSchema.partial();
 export type SMTPConnectionUpdateInput = z.infer<
   typeof smtpConnectionUpdateSchema
 >;
-
-// Bare hostname (no scheme/path), lowercased. Mirrors the validation used for
-// recipient-domain throttles so a sending domain like "acme.com" is accepted but
-// "https://acme.com" or "noreply@acme.com" is not.
-const sendingDomainNameSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .refine(
-    (value) => /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value),
-    "Must be a valid domain (e.g. acme.com)"
-  );
-
-export const dkimModeSchema = z.enum(["EXTERNAL", "MANAGED"]);
-
-export const sendingDomainSchema = z.object({
-  organizationId: z.string().min(1),
-  domain: sendingDomainNameSchema,
-  // EXTERNAL is the default/recommended path (most self-hosted users are on
-  // Mailcow or a relay that already signs DKIM).
-  dkimMode: dkimModeSchema.default("EXTERNAL"),
-  // Free-text reminder for external mode, e.g. "configured in Mailcow".
-  spfNote: z.string().trim().max(500).optional(),
-});
-
-export type SendingDomainInput = z.infer<typeof sendingDomainSchema>;
-
-export const sendingDomainUpdateSchema = z
-  .object({
-    spfNote: z.string().trim().max(500).nullish(),
-  })
-  .refine((input) => Object.keys(input).length > 0, {
-    message: "At least one field is required",
-  });
-
-export type SendingDomainUpdateInput = z.infer<
-  typeof sendingDomainUpdateSchema
->;
-
-export const senderIdentitySchema = z.object({
-  organizationId: z.string().min(1),
-  sendingDomainId: z.string().min(1),
-  fromName: z.string().trim().min(1),
-  fromEmail: emailAddressSchema,
-  smtpConnectionId: z.string().min(1),
-  replyTo: emailAddressSchema.optional(),
-  isDefault: z.boolean().optional(),
-});
-
-export type SenderIdentityInput = z.infer<typeof senderIdentitySchema>;
-
-export const senderIdentityUpdateSchema = senderIdentitySchema
-  .omit({ organizationId: true, sendingDomainId: true, fromEmail: true })
-  .partial()
-  .extend({ replyTo: emailAddressSchema.nullish() })
-  .refine((input) => Object.keys(input).length > 0, {
-    message: "At least one field is required",
-  });
-
-export type SenderIdentityUpdateInput = z.infer<
-  typeof senderIdentityUpdateSchema
->;
-
-// ---- Managed DKIM DNS helpers ---------------------------------------------
-// Shared by the API (renders copy-paste DNS instructions) and the verification
-// worker (compares the published record against the stored key). Pure string
-// logic only — keypair generation lives in the API (node:crypto) and DNS
-// lookups in the worker (node:dns).
-
-export interface DkimDnsRecord {
-  host: string;
-  type: "TXT";
-  value: string;
-}
-
-/** The DNS records to publish for a managed-mode sending domain. */
-export interface SendingDomainDnsRecords {
-  dkim: DkimDnsRecord;
-  spf: DkimDnsRecord;
-  dmarc: DkimDnsRecord;
-}
-
-/** Hostname the DKIM public-key TXT record lives at. */
-export function dkimDnsHost(selector: string, domain: string): string {
-  return `${selector}._domainkey.${domain}`;
-}
-
-/**
- * Whether QQueue should DKIM-sign a message for a sending domain: only managed
- * domains whose DNS is verified. External domains trust the upstream
- * server/relay; pending/failed managed domains aren't signed yet. The single
- * decision both send sites (API inline send + worker) make at send time.
- */
-export function shouldSignManagedDkim(
-  dkimMode: DkimMode,
-  dkimStatus: DkimStatus
-): boolean {
-  return dkimMode === "MANAGED" && dkimStatus === "VERIFIED";
-}
-
-/** Base64 SPKI body of a PEM public key, with header/footer/whitespace removed. */
-function pemPublicKeyBody(publicKeyPem: string): string {
-  return publicKeyPem
-    .replace(/-----BEGIN [^-]+-----/g, "")
-    .replace(/-----END [^-]+-----/g, "")
-    .replace(/\s+/g, "");
-}
-
-/** Value of the DKIM TXT record advertising a managed domain's public key. */
-export function dkimTxtValue(publicKeyPem: string): string {
-  return `v=DKIM1; k=rsa; p=${pemPublicKeyBody(publicKeyPem)}`;
-}
-
-/** Extract the `p=` public-key body from a published DKIM TXT record, or null. */
-export function parseDkimTxtPublicKey(txtRecord: string): string | null {
-  const match = txtRecord
-    .replace(/\s+/g, "")
-    .match(/(?:^|;)p=([A-Za-z0-9+/=]*)/);
-  return match ? match[1] : null;
-}
-
-/**
- * True when a published DKIM TXT record advertises the expected public key.
- * Compares only the `p=` body so cosmetic differences (spacing, attribute
- * order, the optional k=/v= tags) don't cause false negatives.
- */
-export function dkimRecordMatches(
-  txtRecord: string,
-  publicKeyPem: string
-): boolean {
-  const published = parseDkimTxtPublicKey(txtRecord);
-  const expected = parseDkimTxtPublicKey(dkimTxtValue(publicKeyPem));
-  return published !== null && expected !== null && published === expected;
-}
-
-/**
- * The DKIM/SPF/DMARC records to show for a managed domain. SPF and DMARC are
- * instructional: the sending IP varies per self-hosted deployment (there is no
- * universal include like a hosted ESP), and DMARC is recommended, not required.
- */
-export function buildSendingDomainDnsRecords(
-  selector: string,
-  domain: string,
-  publicKeyPem: string
-): SendingDomainDnsRecords {
-  return {
-    dkim: {
-      host: dkimDnsHost(selector, domain),
-      type: "TXT",
-      value: dkimTxtValue(publicKeyPem)
-    },
-    spf: {
-      host: domain,
-      type: "TXT",
-      // Template — replace YOUR_SERVER_IP with the IP your mail server sends from.
-      value: "v=spf1 ip4:YOUR_SERVER_IP ~all"
-    },
-    dmarc: {
-      host: `_dmarc.${domain}`,
-      type: "TXT",
-      value: `v=DMARC1; p=none; rua=mailto:dmarc@${domain}`
-    }
-  };
-}

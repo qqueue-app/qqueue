@@ -30,6 +30,3 @@ vi.mock("../queues/campaign-processing.queue.js", () => ({
 vi.mock("../queues/webhook-delivery.queue.js", () => ({
   webhookDeliveryQueue: queueStub()
 }));
-vi.mock("../queues/dkim-verification.queue.js", () => ({
-  dkimVerificationQueue: queueStub()
-}));
