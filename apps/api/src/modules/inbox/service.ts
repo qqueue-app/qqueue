@@ -305,7 +305,6 @@ export const inboxService = {
         organizationId: input.organizationId,
         to: [message.fromEmail],
         replyTo: message.inboxAccount.email,
-        senderIdentityId: input.senderIdentityId,
         smtpConnectionId: input.smtpConnectionId,
         subject: replySubject(input.subject),
         html: input.html,

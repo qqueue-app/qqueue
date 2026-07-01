@@ -1,12 +1,10 @@
 import { prisma } from "./lib/prisma.js";
 import { campaignProcessingQueue } from "./queues/campaign-processing.queue.js";
-import { dkimVerificationQueue } from "./queues/dkim-verification.queue.js";
 import { emailSendingQueue } from "./queues/email-sending.queue.js";
 import { inboxSyncQueue } from "./queues/inbox-sync.queue.js";
 import { webhookDeliveryQueue } from "./queues/webhook-delivery.queue.js";
 import { env } from "./config/env.js";
 import { startCampaignProcessingWorker } from "./workers/campaign-processing.worker.js";
-import { startDkimVerificationWorker } from "./workers/dkim-verification.worker.js";
 import { startEmailSendingWorker } from "./workers/email-sending.worker.js";
 import { startInboxSyncWorker } from "./workers/inbox-sync.worker.js";
 import { startWebhookDeliveryWorker } from "./workers/webhook-delivery.worker.js";
@@ -133,36 +131,15 @@ async function scheduleInboxSync() {
   );
 }
 
-// Daily recheck of every managed sending domain's DKIM DNS record. Catches
-// records that propagate after the user's first "Verify now", and re-confirms
-// previously verified domains. Runs at 03:00 UTC; on-demand verifies are
-// enqueued separately by the API.
-async function scheduleDkimRecheck() {
-  await dkimVerificationQueue.upsertJobScheduler(
-    "dkim-daily-recheck",
-    { pattern: "0 3 * * *", tz: "UTC" },
-    {
-      name: "verify-dkim",
-      data: {},
-      opts: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 30_000 },
-      },
-    }
-  );
-}
-
 const workers = [
   startEmailSendingWorker(),
   startCampaignProcessingWorker(),
   startWebhookDeliveryWorker(),
   startInboxSyncWorker(),
-  startDkimVerificationWorker(),
 ];
 
 await recoverQueuedWork();
 await scheduleInboxSync();
-await scheduleDkimRecheck();
 
 for (const worker of workers) {
   worker.on("completed", (job) => {

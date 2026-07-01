@@ -249,7 +249,6 @@ export interface EmailDraft {
   contactIds: string[];
   listIds: string[];
   replyTo?: string | null;
-  senderIdentityId?: string | null;
   smtpConnectionId?: string | null;
   templateId?: string | null;
   variables?: Record<string, unknown>;
@@ -302,51 +301,6 @@ export interface SMTPConnection {
   fromEmail: string;
   fromName?: string | null;
   isDefault: boolean;
-}
-
-export type DkimMode = "EXTERNAL" | "MANAGED";
-export type DkimStatus = "VERIFIED" | "PENDING" | "FAILED" | "NA";
-
-export interface DkimDnsRecord {
-  host: string;
-  type: "TXT";
-  value: string;
-}
-
-export interface SendingDomainDnsRecords {
-  dkim: DkimDnsRecord;
-  spf: DkimDnsRecord;
-  dmarc: DkimDnsRecord;
-}
-
-export interface SendingDomain {
-  id: string;
-  organizationId: string;
-  domain: string;
-  dkimMode: DkimMode;
-  dkimSelector?: string | null;
-  dkimPublicKey?: string | null;
-  dkimStatus: DkimStatus;
-  spfNote?: string | null;
-  verifiedAt?: string | null;
-  lastCheckedAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  // Present only for managed-mode domains; null for external.
-  dnsRecords?: SendingDomainDnsRecords | null;
-}
-
-export interface SenderIdentity {
-  id: string;
-  organizationId: string;
-  sendingDomainId: string;
-  fromName: string;
-  fromEmail: string;
-  smtpConnectionId: string;
-  replyTo?: string | null;
-  isDefault: boolean;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface ApiKey {
@@ -437,7 +391,6 @@ export interface Campaign {
   nextRunAt?: string | null;
   templateId?: string | null;
   contactListId?: string | null;
-  senderIdentityId?: string | null;
   template?: { id: string; name: string; subject: string } | null;
   contactList?: {
     id: string;
@@ -746,65 +699,6 @@ export const api = {
 
   deleteSMTPConnection(id: string) {
     return request<void>(`/api/v1/smtp-connections/${id}`, {
-      method: "DELETE",
-    });
-  },
-
-  listSendingDomains(organizationId: string) {
-    return request<SendingDomain[]>(
-      `/api/v1/sending-domains?organizationId=${encodeURIComponent(organizationId)}`
-    );
-  },
-
-  createSendingDomain(input: Record<string, unknown>) {
-    return request<SendingDomain>("/api/v1/sending-domains", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
-  },
-
-  updateSendingDomain(id: string, input: Record<string, unknown>) {
-    return request<SendingDomain>(`/api/v1/sending-domains/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(input),
-    });
-  },
-
-  deleteSendingDomain(id: string) {
-    return request<void>(`/api/v1/sending-domains/${id}`, {
-      method: "DELETE",
-    });
-  },
-
-  verifySendingDomain(id: string) {
-    return request<{ status: string }>(
-      `/api/v1/sending-domains/${id}/verify`,
-      { method: "POST" }
-    );
-  },
-
-  listSenderIdentities(organizationId: string) {
-    return request<SenderIdentity[]>(
-      `/api/v1/sender-identities?organizationId=${encodeURIComponent(organizationId)}`
-    );
-  },
-
-  createSenderIdentity(input: Record<string, unknown>) {
-    return request<SenderIdentity>("/api/v1/sender-identities", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
-  },
-
-  updateSenderIdentity(id: string, input: Record<string, unknown>) {
-    return request<SenderIdentity>(`/api/v1/sender-identities/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(input),
-    });
-  },
-
-  deleteSenderIdentity(id: string) {
-    return request<void>(`/api/v1/sender-identities/${id}`, {
       method: "DELETE",
     });
   },
@@ -1326,7 +1220,6 @@ export const api = {
     id: string,
     input: {
       organizationId: string;
-      senderIdentityId?: string;
       smtpConnectionId?: string;
       subject: string;
       html?: string;

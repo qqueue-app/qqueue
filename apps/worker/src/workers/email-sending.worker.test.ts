@@ -165,56 +165,6 @@ describe("email-sending worker", () => {
     expect(prismaMock.emailJob.update).not.toHaveBeenCalled();
   });
 
-  it("uses the sender identity's From and signs DKIM for a managed verified domain", async () => {
-    prismaMock.emailJob.findUnique.mockResolvedValue({
-      ...baseEmailJob,
-      senderIdentity: {
-        fromEmail: "noreply@acme.com",
-        fromName: "Acme",
-        replyTo: "support@acme.com",
-        sendingDomain: {
-          domain: "acme.com",
-          dkimMode: "MANAGED",
-          dkimStatus: "VERIFIED",
-          dkimSelector: "qqueue",
-          dkimPrivateKeyEncrypted: "pk-enc"
-        }
-      }
-    } as never);
-    send.mockResolvedValue({
-      messageId: "m1",
-      accepted: ["to@example.com"],
-      rejected: []
-    });
-
-    await run(makeJob());
-
-    expect(send).toHaveBeenCalledTimes(1);
-    const payload = send.mock.calls[0][0];
-    expect(payload.from).toBe("Acme <noreply@acme.com>");
-    expect(payload.replyTo).toBe("support@acme.com");
-    expect(payload.dkim).toEqual({
-      domainName: "acme.com",
-      keySelector: "qqueue",
-      privateKey: "dec:pk-enc"
-    });
-  });
-
-  it("does not sign DKIM for a legacy job without a sender identity", async () => {
-    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
-    send.mockResolvedValue({
-      messageId: "m2",
-      accepted: ["to@example.com"],
-      rejected: []
-    });
-
-    await run(makeJob());
-
-    const payload = send.mock.calls[0][0];
-    expect(payload.from).toBe("Sender <from@example.com>");
-    expect(payload.dkim).toBeUndefined();
-  });
-
   it("does nothing for a CANCELLED job", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,

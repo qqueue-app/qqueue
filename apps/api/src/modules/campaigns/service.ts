@@ -35,18 +35,7 @@ async function assertCampaignRelations(input: {
   templateId?: string | null;
   contactListId?: string | null;
   segmentId?: string | null;
-  senderIdentityId?: string | null;
 }) {
-  if (input.senderIdentityId) {
-    const identity = await prisma.senderIdentity.findFirst({
-      where: { id: input.senderIdentityId, organizationId: input.organizationId },
-      select: { id: true }
-    });
-    if (!identity) {
-      throw new HttpError(404, "Sender identity not found");
-    }
-  }
-
   if (input.templateId) {
     const template = await prisma.template.findFirst({
       where: { id: input.templateId, organizationId: input.organizationId },
@@ -135,7 +124,6 @@ export const campaignService = {
         templateId: input.templateId,
         contactListId: input.contactListId,
         segmentId: input.segmentId,
-        senderIdentityId: input.senderIdentityId,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
       },
       include: campaignInclude
@@ -153,8 +141,7 @@ export const campaignService = {
       organizationId: existing.organizationId,
       templateId: input.templateId,
       contactListId: input.contactListId,
-      segmentId: input.segmentId,
-      senderIdentityId: input.senderIdentityId
+      segmentId: input.segmentId
     });
 
     // Targeting a segment clears any existing contact list and vice versa, so a
@@ -172,7 +159,6 @@ export const campaignService = {
         name: input.name,
         templateId: input.templateId,
         ...targetUpdate,
-        senderIdentityId: input.senderIdentityId,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
       },
       include: campaignInclude

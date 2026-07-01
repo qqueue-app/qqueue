@@ -190,29 +190,12 @@ export function startCampaignProcessingWorker() {
 
       const template = campaign.template;
 
-      // Resolve who the campaign sends as: its chosen sender identity (From +
-      // DKIM resolved per-job at send time), or the org's default SMTP
-      // connection for legacy campaigns without an identity.
-      const senderIdentity = campaign.senderIdentityId
-        ? await prisma.senderIdentity.findFirst({
-            where: {
-              id: campaign.senderIdentityId,
-              organizationId: campaign.organizationId
-            },
-            select: { id: true, smtpConnectionId: true }
-          })
-        : null;
+      const smtpConnection = await prisma.sMTPConnection.findFirst({
+        where: { organizationId: campaign.organizationId, isDefault: true },
+        select: { id: true }
+      });
 
-      const smtpConnectionId =
-        senderIdentity?.smtpConnectionId ??
-        (
-          await prisma.sMTPConnection.findFirst({
-            where: { organizationId: campaign.organizationId, isDefault: true },
-            select: { id: true }
-          })
-        )?.id;
-
-      if (!smtpConnectionId) {
+      if (!smtpConnection) {
         throw new Error("Default SMTP connection not found");
       }
 
@@ -265,8 +248,7 @@ export function startCampaignProcessingWorker() {
         const variables = contactVariables(contact);
         return {
           organizationId: campaign.organizationId,
-          smtpConnectionId,
-          senderIdentityId: senderIdentity?.id ?? null,
+          smtpConnectionId: smtpConnection.id,
           templateId: campaign.templateId,
           campaignId: campaign.id,
           campaignRunId: run.id,
