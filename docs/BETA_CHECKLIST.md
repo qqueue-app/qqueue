@@ -49,6 +49,11 @@ Treat every box as "verified", not "configured" — actually exercise each path.
 - [ ] Credentials are stored encrypted (they are, via `ENCRYPTION_KEY`).
 - [ ] Sending mailbox is dedicated to QQueue and not rate-limited by the upstream
       provider for your expected volume. See [Mailcow setup](MAILCOW_SETUP.md).
+- [ ] At least one **sender identity** exists and one is marked the organization
+      **default**, so send surfaces have a From to use.
+- [ ] Sending domains are created. **MANAGED** domains show `DkimStatus`
+      **VERIFIED** (DNS TXT published and verified), or **EXTERNAL** domains have
+      upstream SPF/DKIM/DMARC published (status `NA`).
 
 ## 5. Tracking domain
 

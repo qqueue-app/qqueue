@@ -7,7 +7,8 @@ of self-hosting and the convenience of managed email infrastructure.
 
 The QQueue Core platform is open source and licensed under AGPL-3.0. It
 provides the building blocks for email delivery, campaigns, transactional
-messaging, queues, workers, templates, contacts, and SMTP integrations.
+messaging, queues, workers, templates, contacts, SMTP integrations, and sender
+identities backed by sending domains with managed DKIM signing.
 
 QQueue Cloud extends the core platform with managed services and advanced
 operational tooling, including billing, subscription management, deliverability
@@ -22,7 +23,8 @@ but can also be used by teams that want a fully managed hosted email platform.
 **QQueue is now an early self-hosted beta candidate.** The core platform is
 feature-complete enough to run end-to-end on your own infrastructure: it
 contains implemented core API modules, a React dashboard, BullMQ workers, Prisma
-migrations, SMTP sending, open/click tracking, transactional API keys, outbound
+migrations, SMTP sending, sender identities and sending domains with managed
+DKIM signing, open/click tracking, transactional API keys, outbound
 webhooks, password reset emails, Redis-backed rate limiting, a queue operations
 dashboard, an SDK package, deployment files, Docker-backed smoke tests, CI
 checks, and open-core licensing guardrails.
@@ -195,7 +197,9 @@ curl -s http://localhost:4000/api/v1/contacts \
   }'
 ```
 
-Send one email using either direct content or a template:
+Send one email using either direct content or a template. The send can target a
+`senderIdentityId` to pick who it sends as; if omitted, the existing
+`smtpConnectionId` / org-default flow still applies.
 
 ```sh
 curl -s http://localhost:4000/api/v1/transactional-email/send \

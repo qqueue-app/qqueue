@@ -244,7 +244,8 @@ reuses the existing queue, SMTP providers, tracking, and analytics. A thin
 `manual-email` API module sits in front of that call to (1) resolve manual
 addresses, individual contacts, and whole contact lists into a deduplicated
 recipient set, and (2) render the editor body through the MJML email-safe layer.
-`SendEmail.tsx` remains for quick single-recipient sends.
+(The original single-recipient `SendEmail.tsx` page was later retired; the
+`/send-email` route now redirects to Email Studio.)
 
 A manual send is modeled as **one message** addressed to one or more `To`
 recipients plus `CC`/`BCC` (not per-recipient fan-out), which is the correct
@@ -434,3 +435,44 @@ ticketing metadata.
 If QQueue later needs Jira, Linear, GitHub, Zendesk, or other ticketing
 integrations, those should be separate integration workflows rather than fields
 or panels in the core inbox.
+
+## Decouple the From Identity from the SMTP Credential (Sender Identities + Sending Domains, Phase F)
+
+Until Phase F, a send's From address came straight from the chosen
+`SMTPConnection` (`fromEmail`/`fromName`), tightly coupling *who the mail appears
+to be from* to *which credential authenticates the transport*. Phase F splits
+these into two models:
+
+- **`SendingDomain`** — a domain the org sends from, carrying a DKIM mode:
+  - `EXTERNAL`: the upstream relay (Mailcow, SES, a provider) signs DKIM. QQueue
+    never signs; `DkimStatus` is `NA`.
+  - `MANAGED`: QQueue generates an RSA-2048 keypair (selector `qqueue`), stores
+    the private key encrypted, signs each message in-process via Nodemailer's
+    `dkim` option, and surfaces the DNS records to publish. A verification worker
+    resolves the published TXT record and moves the domain
+    `PENDING → VERIFIED/FAILED`, with a daily recheck. **Only `MANAGED` +
+    `VERIFIED` domains are signed.**
+- **`SenderIdentity`** — a concrete From (`fromName` + `fromEmail`) under a
+  sending domain, bound to the `SMTPConnection` that transports it. One identity
+  per org can be the default; UI send surfaces pick an identity instead of
+  free-typing a From address.
+
+**RSA-2048, not 4096:** a 4096-bit public key can overflow the 255-character DNS
+TXT string limit and interoperates less reliably, so 2048 is the pragmatic DKIM
+default.
+
+**One resolution path, two call sites.** `resolveSender`
+(`apps/api/src/lib/sender.ts`) applies a fixed precedence — explicit
+`senderIdentityId` → explicit `smtpConnectionId` → org default identity → org
+default SMTP connection — and persists the resolved `senderIdentityId` on the
+`EmailJob`. `dkimSignOptionsFor` derives the DKIM options from the identity's
+sending domain. The worker (`apps/worker/src/lib/sender.ts`, used by
+`email-sending.worker.ts`) re-applies the same `dkimSignOptionsFor` at send time,
+so queued campaign, manual, and scheduled jobs sign identically to inline
+transactional sends. The pure DNS/record helpers (`shouldSignManagedDkim`,
+`buildSendingDomainDnsRecords`, `dkimDnsHost`, `dkimTxtValue`) live in
+`@qqueue/shared`; only the RSA keygen is server-side (`apps/api/src/lib/dkim.ts`).
+
+This keeps DKIM signing an AGPL-core capability (not cloud-only) and means no
+send path re-derives From headers or DKIM options — the invariant called out in
+`CLAUDE.md`.

@@ -193,8 +193,8 @@ standard `DATABASE_URL`/`REDIS_*`/`APP_URL`/`*_ORIGIN`:
 ## Docs
 
 - **Orientation:** `README.md`, `docs/STATUS.md` (live state),
-  `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` (the *why*
-  behind design choices), and the phase plans (`docs/PHASE_*_PLAN.md`).
+  `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, and `docs/DECISIONS.md` (the *why*
+  behind design choices).
 - **Operate / deploy:** `docs/DEPLOY.md`, `docs/MAILCOW_SETUP.md`,
   `docs/SMTP_PROVIDER_GUIDE.md`, `docs/TROUBLESHOOTING.md`, `docs/FAQ.md`.
 - **Onboarding / usage:** `docs/QUICKSTART.md`, `docs/FIRST_USER_EXPERIENCE.md`,

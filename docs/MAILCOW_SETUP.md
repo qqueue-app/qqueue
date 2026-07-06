@@ -14,7 +14,8 @@ Mailcow-specific provider is required for the current self-hosted flow.
 
 ## Recommended SMTP Settings
 
-In QQueue, open **SMTP Connections** and create a connection:
+In QQueue, open **Sending accounts** (the SMTP connections screen) and create a
+connection:
 
 - **Name:** `Mailcow`
 - **Host:** your Mailcow hostname, for example `mail.example.com`
@@ -29,12 +30,22 @@ In QQueue, open **SMTP Connections** and create a connection:
 Port `465` can also work with **Secure** enabled if your Mailcow deployment is
 configured for implicit TLS SMTP.
 
+## Sending Domain (DKIM Mode)
+
+If you add a **sending domain** for Mailcow-relayed mail, create it in
+**EXTERNAL** DKIM mode. Mailcow signs DKIM itself, so you publish **Mailcow's**
+DKIM key in DNS (alongside SPF and DMARC) and let Mailcow do the signing. The
+domain's status will show `NA`, which is expected for EXTERNAL mode.
+
+Do **not** use **MANAGED** mode for Mailcow-relayed mail — that would have QQueue
+sign with its own key and bypass Mailcow's signer.
+
 ## Setup Flow
 
 1. Confirm Mailcow can send from the mailbox using another SMTP client.
 2. In QQueue, create the SMTP connection with the settings above.
 3. QQueue verifies the connection before saving it.
-4. Send a test transactional email from **Send Email**.
+4. Send a test transactional email from **Compose** (Email Studio).
 5. Check Mailcow logs if verification or delivery fails.
 
 ## Common Failures

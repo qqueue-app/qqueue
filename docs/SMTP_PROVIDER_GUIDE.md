@@ -16,7 +16,7 @@ settings for common providers.
 
 ## Creating a connection
 
-In the dashboard, open **SMTP Connections → New connection** and fill in:
+In the dashboard, open **Sending accounts → New connection** and fill in:
 
 | Field | Notes |
 | --- | --- |
@@ -42,6 +42,29 @@ Test any connection from the API with:
 ```sh
 curl -s -X POST http://localhost:4000/api/v1/smtp-connections/SMTP_ID/test
 ```
+
+---
+
+## Sender identities and sending domains
+
+SMTP connections still transport the mail, but they now sit **beneath** sender
+identities and sending domains. A **sending domain** controls the visible
+From-domain and how DKIM is handled; a **sender identity** is a concrete From
+(name + email) under that domain, which UI send surfaces pick instead of
+free-typing an address.
+
+Which DKIM mode to use depends on who signs:
+
+- **Provider-signed DKIM (SES, Postmark, Resend, Brevo, and most relays)** — add
+  the sending domain in **EXTERNAL** mode. The provider signs; publish the
+  provider's DKIM key (see [Deliverability basics](#deliverability-basics)).
+  QQueue won't double-sign, and the domain's status stays `NA`.
+- **QQueue-managed DKIM** — use **MANAGED** mode. QQueue generates the keypair,
+  shows the DNS TXT record to publish, and moves the domain to `VERIFIED` once
+  you verify it. QQueue then signs DKIM for that domain in-process.
+
+Then add sender identities (name + email) under the domain and bind each to the
+SMTP connection that transports it.
 
 ---
 

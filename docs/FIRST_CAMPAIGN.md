@@ -29,8 +29,8 @@ curl -s http://localhost:4000/api/v1/contacts \
 
 ## 2. Create a list and add the contact
 
-**Campaigns → Contact lists → New list.** Create a list (e.g. "Newsletter") and
-add your contact to it. The list is the audience for the campaign.
+**Lists → New list.** Create a list (e.g. "Newsletter") and add your contact to
+it. The list is the audience for the campaign.
 
 ## 3. Create a template
 
@@ -47,7 +47,9 @@ Available per-contact variables include `{{firstName}}`, `{{lastName}}`, and
 ## 4. Create the campaign
 
 **Campaigns → New campaign.** Select the **template** from step 3 and the
-**contact list** from step 2, and name the campaign. It starts as a `DRAFT`.
+**list** from step 2, and name the campaign. You can also pick a **sender
+identity** for the From address; if its sending domain is MANAGED and VERIFIED,
+QQueue signs DKIM for the campaign's sends too. It starts as a `DRAFT`.
 
 ## 5. Send it
 

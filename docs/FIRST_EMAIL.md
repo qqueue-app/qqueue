@@ -17,11 +17,12 @@ connection** marked as default. See the
 ## Option A — Send from the dashboard
 
 1. Open the dashboard (`http://localhost:5173` in local dev) and sign in.
-2. Go to **Send Email**.
-3. Choose your **SMTP connection**, enter a recipient, a subject, and a body
-   (or pick a saved template).
+2. Go to **Compose** (Email Studio).
+3. Pick a **sender identity** (or, if you haven't set any up, a **sending
+   account** — the SMTP connection) for the From address, enter a recipient, a
+   subject, and a body (or pick a saved template).
 4. Send, then watch it appear in the **Dashboard** activity feed. Scheduled
-   sends show up under **Queue Operations**.
+   sends show up under **Background jobs** (Queue Operations).
 
 Check the recipient inbox to confirm delivery.
 
@@ -60,6 +61,11 @@ later, add an ISO `scheduledAt` in the future:
   "scheduledAt": "2026-07-01T09:00:00.000Z" }
 ```
 
+To send as a specific identity, pass an optional `senderIdentityId` (or
+`smtpConnectionId`). If you omit both, QQueue falls back to your org's default
+sender identity, then to the default SMTP connection — so existing SMTP-only
+calls keep working unchanged.
+
 To render a saved template instead of inline content, pass `templateId` and
 `variables` — see [FIRST_CAMPAIGN.md](FIRST_CAMPAIGN.md) for templates and the
 full [Transactional API](TRANSACTIONAL_API.md) reference for error codes and
@@ -89,8 +95,9 @@ const email = await qqueue.sendEmail({
 console.log(email.id, email.status);
 ```
 
-The SDK currently exposes `sendEmail` only. On failure it throws a `QQueueError`
-with `.status` and an optional `.code`.
+The SDK currently exposes `sendEmail` only; its payload also accepts an optional
+`senderIdentityId` or `smtpConnectionId` (same fallback as the API). On failure
+it throws a `QQueueError` with `.status` and an optional `.code`.
 
 ---
 

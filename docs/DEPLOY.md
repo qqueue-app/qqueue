@@ -242,8 +242,8 @@ Registration creates your user, the first organization, and gives your user the
 
 ## 7. Connect SMTP
 
-In the dashboard, go to **SMTP Connections** and create a connection for the
-mailbox or provider you want QQueue to send through.
+In the dashboard, go to **Sending accounts** (the SMTP connections screen) and
+create a connection for the mailbox or provider you want QQueue to send through.
 
 For a standard submission server, common settings are:
 
@@ -265,7 +265,36 @@ the server with:
 nc -vz smtp.example.com 587
 ```
 
-## 8. Send and Track a Test Email
+## 8. Add a Sending Domain and Sender Identity (recommended)
+
+An SMTP connection is enough to send, but a **sending domain** and **sender
+identity** give you control over the visible From address and DKIM. This is
+backward compatible — existing SMTP connections keep working — but recommended
+before sending to real recipients.
+
+- A **sending domain** decouples the From-domain recipients see from the SMTP
+  credential that authenticates the send.
+- A **sender identity** is a concrete From (name + email) under a sending domain,
+  bound to the SMTP connection that transports it. UI send surfaces pick a sender
+  identity instead of free-typing a From address, and one identity can be the
+  organization default.
+
+In the dashboard, go to **Sending domains** and add your domain in one of two
+DKIM modes:
+
+- **EXTERNAL** — the upstream relay (Mailcow, SES, etc.) signs DKIM. QQueue never
+  signs, and the domain's status stays `NA`. Use this when your provider already
+  handles DKIM.
+- **MANAGED** — QQueue generates an RSA-2048 keypair (selector `qqueue`), signs
+  DKIM in-process, and shows the DNS **TXT** records to publish. Publish them,
+  then run **Verify**; the domain moves `PENDING → VERIFIED` (a worker rechecks
+  DNS daily). QQueue only signs DKIM for `MANAGED` domains once they are
+  `VERIFIED`.
+
+Then create a sender identity under the domain, bind it to the SMTP connection
+that should transport it, and mark one identity the organization default.
+
+## 9. Send and Track a Test Email
 
 After SMTP is connected:
 

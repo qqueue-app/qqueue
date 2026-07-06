@@ -110,9 +110,9 @@ curl -s http://localhost:4000/api/v1/auth/register \
   }'
 ```
 
-## 8. Add an SMTP connection
+## 8. Add a sending account (SMTP connection)
 
-In the dashboard, go to **SMTP Connections → New connection** and enter your
+In the dashboard, go to **Sending accounts → New connection** and enter your
 mail server details (host, port, username, password, from address). QQueue
 verifies the credentials before saving and encrypts them at rest with
 `ENCRYPTION_KEY`. Mark it **default** so it's used automatically.
@@ -140,11 +140,21 @@ curl -s http://localhost:4000/api/v1/smtp-connections \
   }'
 ```
 
-## 9. Send your first test email
+## 9. (Optional) Add a sending domain and sender identity
 
-In the dashboard, open **Send Email**, choose your SMTP connection, fill in a
-recipient, subject, and body, and send. Watch it move through the
-**Dashboard** activity feed (and **Queue Operations** if it was scheduled).
+To decouple your visible From-address from that single SMTP credential, go to
+**Sending domains → New domain** and add a domain, then create a **sender
+identity** (a concrete From name + email) under it. Pick a DKIM mode:
+**EXTERNAL** (your upstream relay signs DKIM) or **MANAGED** (QQueue generates a
+keypair, shows you the DNS TXT records to publish, verifies them, and signs DKIM
+itself). You can skip this and keep sending straight from the SMTP account.
+
+## 10. Send your first test email
+
+In the dashboard, open **Compose** (Email Studio), pick a sender identity (or
+your sending account), fill in a recipient, subject, and body, and send. Watch
+it move through the **Dashboard** activity feed (and **Background jobs** if it
+was scheduled).
 
 Via the transactional API, create an API key first (**Settings → API keys**),
 then:
