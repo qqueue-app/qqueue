@@ -11,6 +11,50 @@ SMTP/Redis/network error.
 
 ---
 
+## Setup (`pnpm setup` and the first-run wizard)
+
+**Symptom: setup says Postgres/Redis/MinIO is "not reachable".**
+
+- The Docker services aren't running. Say yes when setup offers to start them,
+  or run `docker compose up -d` yourself and re-run `pnpm setup`. If Docker
+  itself fails, make sure Docker Desktop (or the docker daemon) is running.
+- You pointed setup at a hosted service and the host/port or connection string
+  has a typo. Re-run `pnpm setup` and re-enter it — the previous value is
+  offered as the default so you can correct it. Provider-specific connection
+  details: [Managed infrastructure](MANAGED_INFRASTRUCTURE.md).
+- A hosted Redis needs its password and TLS: set `REDIS_PASSWORD` and
+  `REDIS_TLS=true` in `.env`.
+
+**Symptom: migrations fail during setup.**
+
+- Postgres is reachable but the credentials or database name are wrong —
+  check `DATABASE_URL` in `.env`.
+- On a hosted Postgres, make sure the connection string keeps
+  `?sslmode=require` and (for Supabase) uses the session pooler, not the
+  transaction pooler.
+- Fix the cause, then run `pnpm db:migrate` directly (or re-run `pnpm setup`).
+
+**Symptom: the browser doesn't show the setup wizard.**
+
+- The wizard only appears while the instance has **zero users**. If an account
+  already exists, sign in and visit `/setup` to resume an unfinished wizard,
+  or use **Settings → Instance** for the registration policy.
+- The API isn't running or isn't reachable from the web app — check
+  `http://localhost:4000/health` (dev) or `https://<your-domain>/health`.
+
+**Symptom: the wizard's sending-account step keeps failing.**
+
+- Saving *is* the connection test: QQueue performs a real SMTP handshake
+  before storing anything. The error shown is the mail server's actual
+  response — see [SMTP connection failures](#smtp-connection-failures) below
+  for the common host/port/TLS combinations.
+
+**Symptom: `/register` says registration is closed.**
+
+- The instance admin chose "invite only" (the default) during setup. An
+  instance admin can open registration under **Settings → Instance**, or
+  create accounts on request. There is no self-service invite flow yet.
+
 ## SMTP connection failures
 
 **Symptoms:** Creating an SMTP connection fails verification; transactional

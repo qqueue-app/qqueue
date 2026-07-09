@@ -4,7 +4,7 @@ This guide takes you from a fresh clone to sending your first test email on your
 own machine. It targets local development; for a production launch follow the
 [VPS Deploy guide](DEPLOY.md) and then the [Beta Launch Checklist](BETA_CHECKLIST.md).
 
-**Time:** ~10 minutes. **You need:** Node.js 20+, [pnpm](https://pnpm.io), and
+**Time:** ~5 minutes. **You need:** Node.js 20+, [pnpm](https://pnpm.io), and
 Docker (for Postgres, Redis, and MinIO), plus SMTP credentials for a mailbox
 you can send from (see [Mailcow setup](MAILCOW_SETUP.md) if you run Mailcow).
 
@@ -25,49 +25,39 @@ QQueue is a pnpm + Turborepo monorepo. Install everything from the root:
 pnpm install
 ```
 
-## 3. Copy the environment file
+## 3. Run the guided setup
 
 ```sh
-cp .env.example .env
+pnpm setup
 ```
 
-Open `.env` and review the values. For local development the defaults work as-is
-with the bundled Docker services, but you should at least skim:
+The setup walks you through everything in plain language: it creates your
+`.env`, generates all the secret keys (you never have to touch them), checks
+that Postgres, Redis, and MinIO are running (and offers to start them with
+Docker if not), and applies database migrations. Safe to re-run any time — it
+never overwrites values you've already configured.
 
-- `DATABASE_URL` — points at the local Postgres (`localhost:5432`).
-- `REDIS_HOST` / `REDIS_PORT` — local Redis (`localhost:6379`).
-- `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ENCRYPTION_KEY`, `TRACKING_SECRET`
-  — fine to leave as the dev placeholders locally; **regenerate all of them for
-  production** with `openssl rand -hex 32`.
-- `APP_URL` — public base URL for open/click tracking links (the API in dev).
-- `PUBLIC_APP_URL` — public base URL of the web dashboard, used to build
-  password-reset links. Defaults to the local Vite server in dev.
+Prefer a hosted database or queue instead of the bundled Docker containers?
+Grab free-tier services first (Neon for Postgres, Upstash for Redis) — see
+[Managed infrastructure](MANAGED_INFRASTRUCTURE.md) — and paste the connection
+details when setup asks.
 
-## 4. Start Postgres, Redis, and MinIO
-
-The repo ships a `docker-compose.yml` with Postgres, Redis, and MinIO for
-attachment storage:
+<details>
+<summary>Manual route (what <code>pnpm setup</code> automates)</summary>
 
 ```sh
-docker compose up -d
-```
-
-Confirm the containers are running with `docker compose ps`.
-
-## 5. Run database migrations
-
-Generate the Prisma client and apply migrations:
-
-```sh
+cp .env.example .env      # then generate secrets: openssl rand -hex 32
+docker compose up -d      # postgres, redis, minio
 pnpm db:generate
 pnpm db:migrate
 ```
 
-`db:migrate` runs `prisma migrate` for the API package and creates all tables
-(users, organizations, SMTP connections, templates, contacts, campaigns,
-email jobs/events, password reset tokens, and more).
+Every variable is explained in
+[Environment variables](ENVIRONMENT_VARIABLES.md).
 
-## 6. Start the API, web app, and worker
+</details>
+
+## 4. Start the API, web app, and worker
 
 ```sh
 pnpm dev
@@ -92,10 +82,22 @@ pnpm --filter @qqueue/worker dev
 > transactional sends go out inline from the API, but keep the worker running so
 > queued/scheduled work and webhook deliveries are processed.
 
-## 7. Create your first account
+## 5. Complete the setup wizard
 
-Open `http://localhost:5173/register` and sign up. Registration creates your
-**user**, your first **organization** (you become its `OWNER`), and signs you in.
+Open `http://localhost:5173`. On a fresh install QQueue routes you straight
+into a short **setup wizard** that:
+
+1. Creates your **administrator account** and first **organization**.
+2. Connects a **sending account** — the SMTP mailbox QQueue sends from. The
+   connection is tested before it's saved, and the credentials are encrypted
+   at rest. (Using Mailcow? [Exact settings here](MAILCOW_SETUP.md).)
+3. Asks whether other people may **register** on your server (default: invite
+   only — you can change this later in Settings → Instance).
+4. Optionally sends you a **test email** to prove the pipeline works
+   end to end.
+
+If you close the tab mid-wizard, sign in and visit `/setup` (or follow the
+"Finish server setup" nudge on the Dashboard) to resume where you left off.
 
 Prefer the API? Register with curl — the response includes `organization.id`:
 
@@ -110,17 +112,7 @@ curl -s http://localhost:4000/api/v1/auth/register \
   }'
 ```
 
-## 8. Add a sending account (SMTP connection)
-
-In the dashboard, go to **Sending accounts → New connection** and enter your
-mail server details (host, port, username, password, from address). QQueue
-verifies the credentials before saving and encrypts them at rest with
-`ENCRYPTION_KEY`. Mark it **default** so it's used automatically.
-
-Using Mailcow? Follow [docs/MAILCOW_SETUP.md](MAILCOW_SETUP.md) for the exact
-host/port/TLS settings.
-
-Via the API instead:
+And add a sending account:
 
 ```sh
 curl -s http://localhost:4000/api/v1/smtp-connections \
@@ -140,21 +132,11 @@ curl -s http://localhost:4000/api/v1/smtp-connections \
   }'
 ```
 
-## 9. (Optional) Add a sending domain and sender identity
+## 6. Send your first real email
 
-To decouple your visible From-address from that single SMTP credential, go to
-**Sending domains → New domain** and add a domain, then create a **sender
-identity** (a concrete From name + email) under it. Pick a DKIM mode:
-**EXTERNAL** (your upstream relay signs DKIM) or **MANAGED** (QQueue generates a
-keypair, shows you the DNS TXT records to publish, verifies them, and signs DKIM
-itself). You can skip this and keep sending straight from the SMTP account.
-
-## 10. Send your first test email
-
-In the dashboard, open **Compose** (Email Studio), pick a sender identity (or
-your sending account), fill in a recipient, subject, and body, and send. Watch
-it move through the **Dashboard** activity feed (and **Background jobs** if it
-was scheduled).
+In the dashboard, open **Compose** (Email Studio), pick your sending account,
+fill in a recipient, subject, and body, and send. Watch it move through the
+**Dashboard** activity feed (and **Background jobs** if it was scheduled).
 
 Via the transactional API, create an API key first (**Settings → API keys**),
 then:
@@ -179,6 +161,10 @@ A `202 Accepted` with a job id means it was sent (or queued, for a future
 
 - [Transactional API](TRANSACTIONAL_API.md) — API keys, the SDK, webhook
   signing, and retries.
+- [Environment variables](ENVIRONMENT_VARIABLES.md) — every `.env` setting in
+  plain language.
+- [Managed infrastructure](MANAGED_INFRASTRUCTURE.md) — hosted Postgres,
+  Redis, and storage instead of the bundled containers.
 - [Deploy on a VPS](DEPLOY.md) — production Docker Compose setup for
   self-hosting QQueue.
 - [Beta launch checklist](BETA_CHECKLIST.md) — everything to verify before a

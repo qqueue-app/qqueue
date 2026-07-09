@@ -1,7 +1,8 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "../lib/api.js";
+import { fetchSetupStatus } from "../lib/setup-status.js";
 import { useSession } from "../lib/session-context.js";
 import { BrandMark } from "../components/BrandMark.js";
 import { Button } from "../components/ui/button.js";
@@ -42,6 +43,28 @@ export function Login({ mode }: LoginProps) {
   const isRegister = mode === "register";
   const isForgot = mode === "forgot";
   const isReset = mode === "reset";
+
+  // Registration can be closed by the instance admin. The server enforces
+  // this with a 403; hiding the form here is just honest UX.
+  const [registrationClosed, setRegistrationClosed] = useState(false);
+  useEffect(() => {
+    if (!isRegister) {
+      return;
+    }
+    let cancelled = false;
+    fetchSetupStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setRegistrationClosed(!status.allowPublicRegistration);
+        }
+      })
+      .catch(() => {
+        // API unreachable — show the form; submitting will surface the error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isRegister]);
 
   function validate(): boolean {
     const next: FieldErrors = {};
@@ -121,6 +144,35 @@ export function Login({ mode }: LoginProps) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (isRegister && registrationClosed) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-md">
+          <div className="mb-6 flex items-center justify-center gap-2.5">
+            <BrandMark className="h-10 w-10" />
+            <span className="text-xl font-semibold tracking-tight">
+              QQueue
+            </span>
+          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl">Registration is closed</CardTitle>
+              <CardDescription>
+                This QQueue server is invite only. Ask your administrator for
+                an account.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button className="w-full" onClick={() => navigate("/login")}>
+                Back to sign in
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    );
   }
 
   return (

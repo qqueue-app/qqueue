@@ -9,6 +9,12 @@ launch — it does not describe shipped features.
 **Scope of the trial run:** [Quickstart](QUICKSTART.md) → add SMTP →
 [first email](FIRST_EMAIL.md) → [first campaign](FIRST_CAMPAIGN.md).
 
+> **Status update:** several findings below have since shipped — `pnpm setup`
+> (finding 1, plus plain-language env explanations per finding 3), the
+> first-run `/setup` web wizard with a resumable flow and closable public
+> registration (finding 6), and the Settings → Instance configuration health
+> view. The findings are kept as originally written for context.
+
 ---
 
 ## 1. Installation friction

@@ -1,5 +1,6 @@
 import { Redis } from "ioredis";
 import { env } from "../config/env.js";
+import { redisConnection } from "../config/redis.js";
 import { prisma } from "./prisma.js";
 
 const WINDOW_MS = 60_000;
@@ -7,8 +8,7 @@ const WINDOW_MS = 60_000;
 // A dedicated Redis client for the throttle counters. Separate from BullMQ's
 // connection so command traffic doesn't interfere with queue operations.
 export const throttleRedis = new Redis({
-  host: env.REDIS_HOST,
-  port: env.REDIS_PORT,
+  ...redisConnection,
   maxRetriesPerRequest: null,
   lazyConnect: true
 });

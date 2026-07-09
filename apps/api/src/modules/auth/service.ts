@@ -4,6 +4,10 @@ import type { Prisma } from "@prisma/client";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { hashPassword, verifyPassword } from "../../lib/crypto.js";
+import {
+  getInstanceSettings,
+  setInstanceSettings
+} from "../../lib/instance-settings.js";
 import { prisma } from "../../lib/prisma.js";
 import { createAuthTokens, verifyRefreshToken } from "../../lib/tokens.js";
 import { smtpConnectionService } from "../smtp-connections/service.js";
@@ -84,11 +88,26 @@ export const authService = {
     const passwordHash = await hashPassword(input.password);
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Bootstrap exception: a fresh install (zero users) can always register
+      // its first user, who becomes the instance admin. After that, an
+      // instance admin must have left public registration open.
+      const isFirstUser = (await tx.user.count()) === 0;
+      if (!isFirstUser) {
+        const settings = await getInstanceSettings();
+        if (!settings.allowPublicRegistration) {
+          throw new HttpError(
+            403,
+            "Registration is closed on this instance. Ask an administrator for an account."
+          );
+        }
+      }
+
       const user = await tx.user.create({
         data: {
           email: input.email,
           name: input.name,
-          passwordHash
+          passwordHash,
+          isInstanceAdmin: isFirstUser
         }
       });
 
@@ -103,6 +122,12 @@ export const authService = {
           }
         }
       });
+
+      if (isFirstUser) {
+        // Lock registration until the setup wizard records the admin's
+        // explicit choice, so strangers can't register mid-setup.
+        await setInstanceSettings({ allowPublicRegistration: false }, tx);
+      }
 
       return { user, organization };
     });

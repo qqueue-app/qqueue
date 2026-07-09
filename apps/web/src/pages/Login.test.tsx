@@ -19,12 +19,14 @@ vi.mock("../lib/api.js", () => ({
     login: vi.fn(),
     register: vi.fn(),
     requestPasswordReset: vi.fn(),
-    resetPassword: vi.fn()
+    resetPassword: vi.fn(),
+    setupStatus: vi.fn()
   }
 }));
 
 import { Login } from "./Login.js";
 import { api } from "../lib/api.js";
+import { invalidateSetupStatus } from "../lib/setup-status.js";
 import { SessionProvider } from "../lib/session-context.js";
 
 const mockedApi = api as unknown as {
@@ -32,6 +34,7 @@ const mockedApi = api as unknown as {
   register: ReturnType<typeof vi.fn>;
   requestPasswordReset: ReturnType<typeof vi.fn>;
   resetPassword: ReturnType<typeof vi.fn>;
+  setupStatus: ReturnType<typeof vi.fn>;
 };
 
 function renderLogin(mode: "login" | "register" = "login") {
@@ -48,6 +51,12 @@ describe("Login", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
+    invalidateSetupStatus();
+    mockedApi.setupStatus.mockResolvedValue({
+      needsSetup: false,
+      setupCompleted: true,
+      allowPublicRegistration: true
+    });
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -64,6 +73,19 @@ describe("Login", () => {
     expect(screen.getByText("Create your account")).toBeInTheDocument();
     expect(screen.getByLabelText("Name (optional)")).toBeInTheDocument();
     expect(screen.getByLabelText("Organization (optional)")).toBeInTheDocument();
+  });
+
+  it("replaces the register form when registration is closed", async () => {
+    mockedApi.setupStatus.mockResolvedValue({
+      needsSetup: false,
+      setupCompleted: true,
+      allowPublicRegistration: false
+    });
+    renderLogin("register");
+    expect(
+      await screen.findByText("Registration is closed")
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
   });
 
   it("validates an invalid email", async () => {

@@ -39,6 +39,10 @@ For a VPS, use the **[Deploy guide](docs/DEPLOY.md)**, then work through the
 ## Documentation
 
 - [Quickstart](docs/QUICKSTART.md) — clone to first sent email, locally.
+- [Environment variables](docs/ENVIRONMENT_VARIABLES.md) — every `.env`
+  setting explained in plain language.
+- [Managed infrastructure](docs/MANAGED_INFRASTRUCTURE.md) — hosted Postgres,
+  Redis, and storage (Neon, Upstash, R2) instead of the bundled containers.
 - [Deploy on a VPS](docs/DEPLOY.md) — production Docker Compose setup with
   Caddy, API, worker, Postgres, Redis, and MinIO.
 - [Mailcow SMTP setup](docs/MAILCOW_SETUP.md) — connect a Mailcow mail server.
@@ -77,7 +81,7 @@ For a VPS, use the **[Deploy guide](docs/DEPLOY.md)**, then work through the
 ### Clone to running, step by step
 
 Run each step from the repository root. This is the full sequence — a fresh
-clone is up and running after step 5.
+clone is up and running after step 4.
 
 ```sh
 # 1. Clone the repo
@@ -87,32 +91,38 @@ cd qqueue
 # 2. Install all workspace dependencies
 pnpm install
 
-# 3. Create your env file (defaults work as-is for local dev)
-cp .env.example .env
+# 3. Guided setup: creates .env, generates secrets, starts Docker services,
+#    applies migrations — explaining each value in plain language
+pnpm setup
 
-# 4. Start Postgres, Redis, and MinIO
-docker compose up -d
-
-# 5. Generate the Prisma client, apply migrations, and start everything
-pnpm db:generate
-pnpm db:migrate
+# 4. Start everything
 pnpm dev
 ```
 
 `pnpm dev` uses Turborepo to start the API, web dashboard, and worker together.
-The `db:migrate` step is required on a fresh clone — it creates every table
-(users, organizations, SMTP connections, templates, contacts, campaigns, email
-jobs/events, and more). Skipping it leaves you with an empty database.
+`pnpm setup` is safe to re-run any time — it never overwrites values you've
+already configured. Every env value it touches is explained in
+[docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md), and hosted
+alternatives to the bundled Docker services (Neon, Upstash, R2) are covered in
+[docs/MANAGED_INFRASTRUCTURE.md](docs/MANAGED_INFRASTRUCTURE.md).
 
-> The default `.env` values work out of the box with the bundled Docker
-> services. The placeholder `JWT_*`, `ENCRYPTION_KEY`, and `TRACKING_SECRET`
-> secrets are fine locally but **must** be regenerated for production with
-> `openssl rand -hex 32`.
+<details>
+<summary>Manual route (what <code>pnpm setup</code> automates)</summary>
 
-After `pnpm dev`, create your first account at
-`http://localhost:5173/register` — registration creates your user and first
-organization. The full walkthrough (account → SMTP connection → first email)
-lives in the **[Quickstart](docs/QUICKSTART.md)**.
+```sh
+cp .env.example .env      # then regenerate secrets: openssl rand -hex 32
+docker compose up -d      # postgres, redis, minio
+pnpm db:generate
+pnpm db:migrate
+```
+
+</details>
+
+After `pnpm dev`, open `http://localhost:5173` — a fresh install routes you
+into a short **setup wizard** that creates your admin account and first
+organization, connects a verified sending account (SMTP), and sets your
+registration policy. The full walkthrough lives in the
+**[Quickstart](docs/QUICKSTART.md)**.
 
 ### Running apps individually
 

@@ -9,6 +9,15 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().min(1),
   REDIS_HOST: z.string().default("localhost"),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
+  // Optional auth/TLS for hosted Redis (e.g. Upstash); must match the API.
+  REDIS_PASSWORD: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  REDIS_TLS: z.preprocess(
+    (value) => (value === "" || value === undefined ? "false" : value),
+    z.enum(["true", "false"]).transform((value) => value === "true")
+  ),
   // Absolute public base URL for tracking links; must match the API's APP_URL.
   APP_URL: z.string().url().default("http://localhost:4000"),
   // HMAC secret for signing tracking tokens; must match the API's TRACKING_SECRET.

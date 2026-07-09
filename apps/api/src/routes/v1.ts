@@ -11,10 +11,12 @@ import { deliverabilityRouter } from "../modules/deliverability/routes.js";
 import { domainThrottleRouter } from "../modules/domain-throttles/routes.js";
 import { emailDraftRouter } from "../modules/email-drafts/routes.js";
 import { inboxRouter } from "../modules/inbox/routes.js";
+import { instanceSettingsRouter } from "../modules/instance-settings/routes.js";
 import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { segmentRouter } from "../modules/segments/routes.js";
+import { setupRouter } from "../modules/setup/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
 import { suppressionRouter } from "../modules/suppressions/routes.js";
 import { templateRouter } from "../modules/templates/routes.js";
@@ -27,6 +29,11 @@ export const v1Router = Router();
 
 // Public auth endpoints (register/login/refresh).
 v1Router.use("/auth", authRouter);
+
+// First-run setup: public status probe + admin-only completion (the wizard
+// runs before any org exists, so this sits outside requireAuth and applies
+// auth per-route).
+v1Router.use("/setup", setupRouter);
 
 // Public analytics endpoints: open/click pixels hit by mail clients and ESP
 // bounce webhooks, none of which carry an access token.
@@ -44,6 +51,8 @@ v1Router.use(requireAuth);
 v1Router.use("/dashboard", dashboardRouter);
 v1Router.use("/api-keys", apiKeyRouter);
 v1Router.use("/organizations", organizationRouter);
+// Install-scope settings (registration policy, env status) — instance admins only.
+v1Router.use("/instance-settings", instanceSettingsRouter);
 v1Router.use("/queue-operations", queueOperationsRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
 v1Router.use("/contacts", contactRouter);

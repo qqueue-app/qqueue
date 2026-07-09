@@ -15,6 +15,9 @@ vi.mock("../smtp-connections/service.js", () => ({
 }));
 
 const { authService } = await import("./service.js");
+const { invalidateInstanceSettingsCache } = await import(
+  "../../lib/instance-settings.js"
+);
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 
@@ -33,10 +36,12 @@ const smtpConnection = {
 
 beforeEach(() => {
   providerSend.mockClear();
+  invalidateInstanceSettingsCache();
 });
 
 describe("authService.register", () => {
   it("creates the user and org in a transaction and returns tokens", async () => {
+    prismaMock.user.count.mockResolvedValue(0);
     prismaMock.user.create.mockResolvedValue({
       id: "user_1",
       email: "a@b.com",
@@ -67,6 +72,7 @@ describe("authService.register", () => {
   });
 
   it("defaults the organization name when none is given", async () => {
+    prismaMock.user.count.mockResolvedValue(0);
     prismaMock.user.create.mockResolvedValue({
       id: "user_1",
       email: "a@b.com",
@@ -82,6 +88,93 @@ describe("authService.register", () => {
 
     const call = prismaMock.organization.create.mock.calls[0][0];
     expect(call.data.name).toBe("a@b.com's organization");
+  });
+
+  it("makes the first user instance admin and locks registration until setup", async () => {
+    prismaMock.user.count.mockResolvedValue(0);
+    prismaMock.user.create.mockResolvedValue({
+      id: "user_1",
+      email: "first@b.com",
+      name: null,
+      createdAt: now
+    } as never);
+    prismaMock.organization.create.mockResolvedValue({
+      id: "org_1",
+      name: "Acme"
+    } as never);
+
+    await authService.register({
+      email: "first@b.com",
+      password: "password123"
+    });
+
+    const createCall = prismaMock.user.create.mock.calls[0][0];
+    expect(createCall.data.isInstanceAdmin).toBe(true);
+    expect(prismaMock.instanceSetting.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { key: "allowPublicRegistration" },
+        create: { key: "allowPublicRegistration", value: false }
+      })
+    );
+  });
+
+  it("rejects registration when users exist and the instance is closed", async () => {
+    prismaMock.user.count.mockResolvedValue(1);
+    prismaMock.instanceSetting.findMany.mockResolvedValue([
+      { key: "allowPublicRegistration", value: false, updatedAt: now }
+    ] as never);
+
+    await expect(
+      authService.register({ email: "b@b.com", password: "password123" })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(prismaMock.user.create).not.toHaveBeenCalled();
+  });
+
+  it("allows registration when users exist and the instance is open", async () => {
+    prismaMock.user.count.mockResolvedValue(1);
+    prismaMock.instanceSetting.findMany.mockResolvedValue([
+      { key: "allowPublicRegistration", value: true, updatedAt: now }
+    ] as never);
+    prismaMock.user.create.mockResolvedValue({
+      id: "user_2",
+      email: "b@b.com",
+      name: null,
+      createdAt: now
+    } as never);
+    prismaMock.organization.create.mockResolvedValue({
+      id: "org_2",
+      name: "b@b.com's organization"
+    } as never);
+
+    const result = await authService.register({
+      email: "b@b.com",
+      password: "password123"
+    });
+
+    expect(result.user.id).toBe("user_2");
+    const createCall = prismaMock.user.create.mock.calls[0][0];
+    expect(createCall.data.isInstanceAdmin).toBe(false);
+  });
+
+  it("keeps registration open on existing installs with no settings rows", async () => {
+    // Pre-onboarding databases have no InstanceSetting rows at all; the
+    // absent-row default must stay "open" so upgrades change nothing.
+    prismaMock.user.count.mockResolvedValue(5);
+    prismaMock.instanceSetting.findMany.mockResolvedValue([] as never);
+    prismaMock.user.create.mockResolvedValue({
+      id: "user_6",
+      email: "c@b.com",
+      name: null,
+      createdAt: now
+    } as never);
+    prismaMock.organization.create.mockResolvedValue({
+      id: "org_6",
+      name: "c@b.com's organization"
+    } as never);
+
+    await expect(
+      authService.register({ email: "c@b.com", password: "password123" })
+    ).resolves.toMatchObject({ user: { id: "user_6" } });
   });
 });
 

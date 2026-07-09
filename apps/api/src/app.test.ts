@@ -85,6 +85,7 @@ describe("health + cors + json", () => {
 
 describe("auth routes", () => {
   it("registers a user (201)", async () => {
+    prismaMock.user.count.mockResolvedValue(0);
     prismaMock.user.create.mockResolvedValue({
       id: "user_1",
       email: "a@b.com",

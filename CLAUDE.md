@@ -20,11 +20,11 @@ to `CAMPAIGN | TRANSACTIONAL | MANUAL` and `createdByUserId` where relevant). Do
 reference example: it resolves recipients then delegates to
 `transactionalEmailService.send`.
 
-Every send also resolves *who it sends as* via `apps/api/src/lib/sender.ts`:
-`resolveSender` picks a sender identity → explicit SMTP connection → org default,
-and `dkimSignOptionsFor` decides whether to sign DKIM. Set
-`EmailJob.senderIdentityId` and let these helpers derive the From header and DKIM
-options — don't re-derive them per send path.
+Every send resolves *who it sends as* from the SMTP connection: an explicit
+`smtpConnectionId` on the request, else the org's default connection (see
+`transactionalEmailService.send`). Don't hand-build From headers per send path.
+(Sending Domains / Sender Identities / managed DKIM were removed from core in
+`bcb3475` — don't resurrect them without a fresh decision.)
 
 ## Licensing boundary (important)
 
@@ -48,14 +48,16 @@ Check this before building something — most of the platform already exists.
   support; manual sends via **Email Studio** (multi-`To`/CC/BCC, contact + list
   pickers, template apply, Tiptap editor, MJML preview, drafts, attachments,
   schedule-for-later, per-recipient delivery status). UI send surfaces pick a
-  **sender identity** rather than free-typing a From address.
-- **Sender identity** — **sending domains** decouple the visible From-domain from
-  the single authenticating SMTP credential, with `EXTERNAL` vs `MANAGED` DKIM
-  modes; managed mode generates an RSA-2048 keypair, signs DKIM in-process,
-  surfaces the DNS records to publish, and a verification worker moves the domain
-  `PENDING → VERIFIED/FAILED`. **Sender identities** are concrete From
-  (name+email) records under a domain, bound to the SMTP account that transports
-  them; one can be the org default.
+  **sending account** (SMTP connection) rather than free-typing a From address.
+- **First-run onboarding** — `pnpm setup` CLI (plain-language guided `.env`
+  creation: secret generation, infra reachability checks, migrations); a
+  one-time `/setup` web wizard gated on zero users (admin account → verified
+  sending account → registration policy → optional test email), resumable via
+  `setupCompletedAt`; DB-backed `InstanceSetting` key-value store with env
+  fallback (`apps/api/src/lib/instance-settings.ts`); registration gating
+  (`allowPublicRegistration`, default closed after setup, bootstrap exception
+  while zero users exist); `User.isInstanceAdmin` + Settings "Instance" card
+  (registration toggle, env health view).
 - **Audience** — contacts (tags, status, CSV import/export, activity timeline);
   contact lists (explicit `ContactListMember` join with `source`); dynamic
   **segments** (rule tree resolved at send time; preview + materialize to a
@@ -80,14 +82,15 @@ Not built: org invitations / member-management UI, billing/usage metering
 
 - Package manager: pnpm (`pnpm@9.15.0`). Runtime: Node.js.
 - Root scripts (`package.json`): `pnpm dev`, `build`, `lint`, `typecheck`,
-  `test`, `format`, `db:generate`, `db:migrate`, `test:smoke:docker`,
-  `coverage`, `cloud:boundary`, `license:audit`.
+  `test`, `format`, `setup` (guided first-run config), `db:generate`,
+  `db:migrate`, `test:smoke:docker`, `coverage`, `cloud:boundary`,
+  `license:audit`.
 
 ## Apps
 
 - `apps/api` — Express API. Route/controller/service separation per module under
-  `apps/api/src/modules/*` (auth, organizations, smtp-connections,
-  sending-domains, sender-identities, contacts, contact-lists, templates,
+  `apps/api/src/modules/*` (auth, setup, instance-settings, organizations,
+  smtp-connections, contacts, contact-lists, templates,
   campaigns, transactional-email, manual-email, email-drafts, attachments,
   api-keys, webhooks, tracking, unsubscribe, suppressions, segments,
   domain-throttles, deliverability, queue-operations, dashboard, inbox). Entry
@@ -95,7 +98,7 @@ Not built: org invitations / member-management UI, billing/usage metering
   Prisma client `src/lib/prisma.ts`; v1 router `src/routes/v1.ts`; health
   `src/routes/health.ts`. Prisma schema split under `prisma/schema/*.prisma`:
   `core.prisma` (AGPL — all product models: `Organization`, `SMTPConnection`,
-  `SendingDomain`/`SenderIdentity` (+ `DkimMode`/`DkimStatus` enums),
+  `User` (with `isInstanceAdmin`), `InstanceSetting` (key-value instance config),
   `Contact`/`ContactList`/`ContactListMember`, `Suppression`/`SuppressionPolicy`,
   `DomainThrottle`, `Template`, `Campaign`/`CampaignVariant`/`CampaignRun`,
   `Segment`, `EmailJob`/`EmailEvent`/`EmailDraft`/`EmailAttachment`,
@@ -110,14 +113,15 @@ Not built: org invitations / member-management UI, billing/usage metering
   `src/pages/*` (`Dashboard`, `EmailStudio`, `Campaigns`/`CampaignAnalytics`,
   `Contacts`, `ContactLists`, `Templates`/`TemplateEditor`, `Segments`,
   `Suppressions`, `Deliverability`, `Inbox`, `SMTPConnections`,
-  `SendingDomains`, `QueueOperations`, `Settings`, public `Legal`/`Login`);
+  `QueueOperations`, `Settings`, chrome-free `Setup` wizard, public
+  `Legal`/`Login`); first-run gate `src/components/SetupGate.tsx` (memoized
+  status fetch in `src/lib/setup-status.ts`);
   Tiptap editor primitives in `src/components/editor/*` (`RichTextEditor`,
   `TemplatePreview`, `VariablesPanel`, CTA `button-extension`, `starters`,
   `variables` extract/apply); session in `src/lib/session*.ts(x)`.
 - `apps/worker` — BullMQ workers. Entry `src/index.ts`; queues `src/queues/*`;
   workers `src/workers/*` (campaign-processing, email-sending, webhook-delivery,
-  inbox-sync, dkim-verification); startup recovery re-enqueues queued/scheduled
-  work and schedules the daily managed-DKIM DNS recheck.
+  inbox-sync); startup recovery re-enqueues queued/scheduled work.
 - `apps/cloud` — **proprietary** managed-cloud boundary (billing, usage-limits,
   workspaces). Scaffold only; no production cloud behavior yet.
 
@@ -125,10 +129,9 @@ Not built: org invitations / member-management UI, billing/usage metering
 
 - `packages/shared` — domain types + Zod schemas; **also consumed by the browser
   (`apps/web`)**, so keep it free of `node:*`-only code (no `node:crypto`, no
-  filesystem). Cron/timezone helpers (`isValidCron`, `nextCronRun`) and the pure
-  DKIM helpers (`shouldSignManagedDkim`, DNS-record builders/parsers like
-  `dkimDnsHost`/`dkimTxtValue`/`buildSendingDomainDnsRecords`) live here — actual
-  RSA keygen stays server-side in `apps/api/src/lib/dkim.ts`.
+  filesystem). Cron/timezone helpers (`isValidCron`, `nextCronRun`) and the
+  instance-settings contracts (`INSTANCE_SETTING_KEYS`, `setupCompleteSchema`,
+  `instanceSettingsUpdateSchema`, `SetupStatus`) live here.
 - `packages/email-engine` — provider abstraction (`EmailProvider`), Nodemailer
   SMTP provider (per-message DKIM signing via the `dkim` send option), MJML
   email-safe render layer, tracking URL/token helpers, bounce classification,
@@ -136,7 +139,7 @@ Not built: org invitations / member-management UI, billing/usage metering
 - `packages/storage` — S3-compatible object-storage client (AWS S3 v3 SDK; works
   against MinIO) for attachment blobs; metadata stays in Postgres.
 - `packages/sdk` — MIT-licensed TypeScript SDK (currently wraps the transactional
-  send endpoint only; `sendEmail` accepts `senderIdentityId` or `smtpConnectionId`).
+  send endpoint only; `sendEmail` accepts an optional `smtpConnectionId`).
 
 ## Related Repositories
 
@@ -146,15 +149,16 @@ Not built: org invitations / member-management UI, billing/usage metering
 ## Local Development
 
 ```sh
-cp .env.example .env
 pnpm install
-docker compose up -d        # postgres, redis, minio
-pnpm db:generate
+pnpm setup     # guided: .env + secrets + docker compose up + migrations
 pnpm dev
 ```
 
-Default URLs: API `http://localhost:4000` (health `/health`), Web
-`http://localhost:5173`.
+`pnpm setup` (`scripts/setup.ts`, Node builtins only) is idempotent — it never
+overwrites configured values. Manual route: `cp .env.example .env`,
+`docker compose up -d`, `pnpm db:generate`, `pnpm db:migrate`. Default URLs:
+API `http://localhost:4000` (health `/health`), Web `http://localhost:5173`.
+A fresh install routes the web app into the `/setup` wizard (zero users).
 
 ## Configuration
 
@@ -182,11 +186,15 @@ standard `DATABASE_URL`/`REDIS_*`/`APP_URL`/`*_ORIGIN`:
   delivery. New send paths must respect suppressions — don't route around them.
 - Transactional sends dedupe on the `Idempotency-Key` header; preserve that for
   any externally-retried send surface.
-- Resolve the From identity through `resolveSender` and DKIM through
-  `dkimSignOptionsFor` (`apps/api/src/lib/sender.ts`); don't hand-build From
-  headers or DKIM options in a new send path. QQueue only signs DKIM for
-  `MANAGED`, `VERIFIED` sending domains — leave `EXTERNAL` domains to the upstream
-  relay.
+- Instance-scope runtime settings go through
+  `apps/api/src/lib/instance-settings.ts` (DB rows with env/default fallback,
+  short TTL cache) — don't read the `InstanceSetting` table directly. Endpoints
+  that change instance behavior require `User.isInstanceAdmin`
+  (`middleware/require-instance-admin.ts`), which is distinct from org OWNER.
+- Registration has a bootstrap exception: while zero users exist it is always
+  allowed (the first user becomes instance admin and registration locks until
+  the wizard records the admin's choice). Preserve this when touching
+  `authService.register`.
 - Prisma migrations are committed and additive; verify against a throwaway
   Postgres and confirm `prisma migrate diff` reports no drift.
 
@@ -195,10 +203,14 @@ standard `DATABASE_URL`/`REDIS_*`/`APP_URL`/`*_ORIGIN`:
 - **Orientation:** `README.md`, `docs/STATUS.md` (live state),
   `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, and `docs/DECISIONS.md` (the *why*
   behind design choices).
-- **Operate / deploy:** `docs/DEPLOY.md`, `docs/MAILCOW_SETUP.md`,
+- **Operate / deploy:** `docs/DEPLOY.md`, `docs/ENVIRONMENT_VARIABLES.md`,
+  `docs/MANAGED_INFRASTRUCTURE.md`, `docs/MAILCOW_SETUP.md`,
   `docs/SMTP_PROVIDER_GUIDE.md`, `docs/TROUBLESHOOTING.md`, `docs/FAQ.md`.
 - **Onboarding / usage:** `docs/QUICKSTART.md`, `docs/FIRST_USER_EXPERIENCE.md`,
   `docs/FIRST_EMAIL.md`, `docs/FIRST_CAMPAIGN.md`, `docs/TRANSACTIONAL_API.md`.
+  Setup docs are authored here and copied to `../qqueue-landing-page`
+  (`src/content/docs/<slug>.md` + a `docsNav` entry) — keep both in sync when
+  editing them.
 - **Boundary / legal:** `docs/CLOUD_BOUNDARY.md`, `docs/LICENSING.md`,
   `docs/DEPENDENCY_LICENSES.md`, `docs/CONTRIBUTING.md`, `docs/legal/*`.
 

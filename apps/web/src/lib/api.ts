@@ -14,6 +14,31 @@ export interface Organization {
   createdAt: string;
 }
 
+export interface SetupStatus {
+  needsSetup: boolean;
+  setupCompleted: boolean;
+  allowPublicRegistration: boolean;
+}
+
+export interface InstanceSettings {
+  allowPublicRegistration: boolean;
+  setupCompletedAt: string | null;
+}
+
+export interface InstanceEnvStatus {
+  database: { ok: boolean };
+  redis: { ok: boolean; host: string; port: number };
+  storage: { endpoint: string; bucket: string };
+  secrets: { webhookSecretConfigured: boolean };
+  urls: { appUrl: string; publicAppUrl: string; webOrigin: string | null };
+  tunables: {
+    softBounceThreshold: number;
+    softBounceWindowDays: number;
+    defaultDomainMaxPerMinute: number;
+    attachmentMaxBytes: number;
+  };
+}
+
 export interface OrganizationMember {
   id: string;
   organizationId: string;
@@ -666,6 +691,32 @@ export const api = {
     });
   },
 
+  setupStatus() {
+    return request<SetupStatus>("/api/v1/setup/status");
+  },
+
+  completeSetup(input: { allowPublicRegistration: boolean }) {
+    return request<{ setupCompletedAt: string }>("/api/v1/setup/complete", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  getInstanceSettings() {
+    return request<InstanceSettings>("/api/v1/instance-settings");
+  },
+
+  updateInstanceSettings(input: { allowPublicRegistration?: boolean }) {
+    return request<InstanceSettings>("/api/v1/instance-settings", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+
+  instanceEnvStatus() {
+    return request<InstanceEnvStatus>("/api/v1/instance-settings/env-status");
+  },
+
   listOrganizations() {
     return request<Organization[]>("/api/v1/organizations");
   },
@@ -675,6 +726,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+
+  updateOrganization(id: string, input: { name: string }) {
+    return request<Organization>(
+      `/api/v1/organizations/${encodeURIComponent(id)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }
+    );
   },
 
   listSMTPConnections(organizationId: string) {

@@ -18,6 +18,7 @@
     "cloud:boundary": "node scripts/check-cloud-boundary.mjs",
     "license:audit": "node scripts/check-dependency-licenses.mjs",
     "format": "prettier --write .",
+    "setup": "tsx scripts/setup.ts",
     "db:generate": "pnpm --filter @qqueue/api prisma:generate",
     "db:migrate": "pnpm --filter @qqueue/api prisma:migrate"
   },
