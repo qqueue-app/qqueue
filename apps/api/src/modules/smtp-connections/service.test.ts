@@ -104,6 +104,22 @@ describe("smtpConnectionService.create", () => {
       "SMTP verification failed"
     );
   });
+
+  it("maps recognized verification failures to actionable messages", async () => {
+    verify.mockRejectedValue(
+      Object.assign(
+        new Error("Invalid login: 535 5.7.8 Error: authentication failed"),
+        { code: "EAUTH", responseCode: 535 }
+      )
+    );
+
+    await expect(
+      smtpConnectionService.create(createInput)
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringContaining("rejected the username or password")
+    });
+  });
 });
 
 describe("smtpConnectionService.update", () => {

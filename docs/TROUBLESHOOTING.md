@@ -45,9 +45,10 @@ SMTP/Redis/network error.
 **Symptom: the wizard's sending-account step keeps failing.**
 
 - Saving *is* the connection test: QQueue performs a real SMTP handshake
-  before storing anything. The error shown is the mail server's actual
-  response — see [SMTP connection failures](#smtp-connection-failures) below
-  for the common host/port/TLS combinations.
+  before storing anything. The error shown explains what went wrong in plain
+  language, with the mail server's actual response in parentheses — see
+  [SMTP connection failures](#smtp-connection-failures) below for the common
+  host/port/TLS combinations.
 
 **Symptom: `/register` says registration is closed.**
 
@@ -62,7 +63,10 @@ sends return `502 smtp_failure`; jobs land in **Failed** with an SMTP error.
 
 - **Wrong host/port/TLS combination.** Port `587` uses STARTTLS → set
   `secure: false`. Port `465` uses implicit TLS → set `secure: true`. A mismatch
-  causes immediate connection or handshake errors.
+  causes immediate connection or handshake errors — `secure: true` against a
+  STARTTLS port fails with the OpenSSL error
+  `SSL routines:ssl3_get_record:wrong version number`, and `secure: false`
+  against port `465` times out waiting for the greeting.
 - **Bad credentials.** QQueue verifies credentials on save; a failure here means
   the username/password were rejected. Confirm them with an external client
   (`swaks`, `openssl s_client`, or your mail UI).

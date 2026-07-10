@@ -13,6 +13,11 @@ import {
   fetchSetupStatus,
   invalidateSetupStatus,
 } from "../lib/setup-status.js";
+import {
+  clearSetupDraft,
+  getSetupDraft,
+  saveSetupDraft,
+} from "../lib/setup-draft.js";
 import { useSession } from "../lib/session-context.js";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert.js";
 import { Button } from "../components/ui/button.js";
@@ -58,15 +63,21 @@ export function Setup() {
   const { user, currentOrganizationId, isAuthenticated, setSession } =
     useSession();
 
+  // Per-tab draft so a refresh or navigation doesn't lose typed fields. Read
+  // once per mount; passwords are never part of it.
+  const [draft] = useState(getSetupDraft);
+
   const [step, setStep] = useState<SetupStep>("resolving");
   const [loadError, setLoadError] = useState(false);
   const [resuming, setResuming] = useState(false);
 
   // Account step state.
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(draft.account?.email ?? "");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [organizationName, setOrganizationName] = useState("");
+  const [name, setName] = useState(draft.account?.name ?? "");
+  const [organizationName, setOrganizationName] = useState(
+    draft.account?.organizationName ?? ""
+  );
   const [accountError, setAccountError] = useState<string | null>(null);
   const [creatingAccount, setCreatingAccount] = useState(false);
 
@@ -78,8 +89,9 @@ export function Setup() {
   );
 
   // Policy + finish state.
-  const [allowPublicRegistration, setAllowPublicRegistration] =
-    useState(false);
+  const [allowPublicRegistration, setAllowPublicRegistration] = useState(
+    draft.allowPublicRegistration ?? false
+  );
   const [sendingTest, setSendingTest] = useState(false);
   const [testSent, setTestSent] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -90,11 +102,14 @@ export function Setup() {
       .then(async (status) => {
         if (cancelled) return;
         if (status.setupCompleted) {
+          clearSetupDraft();
           navigate("/", { replace: true });
           return;
         }
         if (status.needsSetup) {
-          setStep("welcome");
+          // Zero users: the only drafted step that can be valid is the account
+          // form. Anything else is stale (e.g. the database was reset).
+          setStep(draft.step === "account" ? "account" : "welcome");
           return;
         }
         // An admin exists but the wizard never finished. Resume it for the
@@ -114,7 +129,7 @@ export function Setup() {
               setSmtpConnection(
                 connections.find((c) => c.isDefault) ?? connections[0]
               );
-              setStep("policy");
+              setStep(draft.step === "test-email" ? "test-email" : "policy");
               return;
             }
           } catch {
@@ -134,6 +149,30 @@ export function Setup() {
       cancelled = true;
     };
   }, []);
+
+  // Draft persistence. The step guards matter: they keep a resume mount
+  // (whose fields start empty) from clobbering sections that a committed
+  // step already cleared.
+  useEffect(() => {
+    if (
+      step === "account" ||
+      step === "smtp" ||
+      step === "policy" ||
+      step === "test-email"
+    ) {
+      saveSetupDraft({ step });
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (step !== "account") return;
+    saveSetupDraft({ account: { email, name, organizationName } });
+  }, [step, email, name, organizationName]);
+
+  useEffect(() => {
+    if (step !== "policy" && step !== "test-email") return;
+    saveSetupDraft({ allowPublicRegistration });
+  }, [step, allowPublicRegistration]);
 
   async function createAccount(event: FormEvent) {
     event.preventDefault();
@@ -168,6 +207,8 @@ export function Setup() {
         ],
       });
       invalidateSetupStatus();
+      // The account is committed server-side; only its draft section retires.
+      saveSetupDraft({ account: undefined });
       setStep("smtp");
     } catch (error) {
       setAccountError(
@@ -201,6 +242,7 @@ export function Setup() {
       });
       setSmtpConnection(connection);
       toast.success("Sending account verified and saved.");
+      saveSetupDraft({ smtp: undefined });
       setStep("policy");
     } catch (error) {
       setSmtpError(
@@ -254,11 +296,29 @@ export function Setup() {
       }
     }
     invalidateSetupStatus();
+    clearSetupDraft();
     setCompleting(false);
     setStep("done");
   }
 
   const stepIndex = STEP_LABELS.findIndex((s) => s.key === step);
+
+  // "Restored" means the draft holds something the user actually typed — a
+  // section of empty strings (an echo of an untouched form) shows no hint.
+  const accountDraftRestored = Boolean(
+    draft.account &&
+      (draft.account.email ||
+        draft.account.name ||
+        draft.account.organizationName)
+  );
+  const smtpDraftRestored = Boolean(
+    draft.smtp &&
+      Object.values(draft.smtp).some(
+        (value) => typeof value === "string" && value.trim() !== ""
+      )
+  );
+  const draftRestoredHint =
+    "We restored your draft — re-enter the password to continue.";
 
   return (
     <main className="flex min-h-screen items-start justify-center bg-background px-4 py-10">
@@ -368,6 +428,11 @@ export function Setup() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {accountDraftRestored ? (
+                <p className="mb-4 text-sm text-muted-foreground">
+                  {draftRestoredHint}
+                </p>
+              ) : null}
               <form className="space-y-4" onSubmit={createAccount} noValidate>
                 <div className="space-y-2">
                   <Label htmlFor="setup-email">Email</Label>
@@ -450,12 +515,36 @@ export function Setup() {
                   <AlertDescription>{smtpError}</AlertDescription>
                 </Alert>
               ) : null}
+              {smtpDraftRestored ? (
+                <p className="mb-4 text-sm text-muted-foreground">
+                  {draftRestoredHint}
+                </p>
+              ) : null}
               <SMTPConnectionForm
                 initial={{
                   ...emptySMTPConnectionForm,
                   name: "Default sending account",
+                  // A drafted name may override the default; the password and
+                  // isDefault spreads after it always win.
+                  ...draft.smtp,
+                  password: "",
                   isDefault: true,
                 }}
+                onChange={(values) =>
+                  // Persist an explicit allow-list — the password (or any
+                  // future sensitive field) must never reach storage.
+                  saveSetupDraft({
+                    smtp: {
+                      name: values.name,
+                      host: values.host,
+                      port: values.port,
+                      secure: values.secure,
+                      username: values.username,
+                      fromEmail: values.fromEmail,
+                      fromName: values.fromName,
+                    },
+                  })
+                }
                 onSubmit={saveSmtp}
                 footer={
                   <div className="flex justify-end pt-2">

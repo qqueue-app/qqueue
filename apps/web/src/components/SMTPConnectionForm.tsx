@@ -15,6 +15,18 @@ export interface SMTPConnectionFormValues {
   isDefault: boolean;
 }
 
+// Well-known submission ports imply the TLS mode: 465 is implicit TLS,
+// 587/25 (and the common dev/relay ports) start plaintext and upgrade via
+// STARTTLS. Typing one of these syncs the Secure TLS checkbox; the user can
+// still override it afterward.
+const PORT_SECURE_DEFAULTS: Record<string, boolean> = {
+  "25": false,
+  "465": true,
+  "587": false,
+  "1025": false,
+  "2525": false,
+};
+
 export const emptySMTPConnectionForm: SMTPConnectionFormValues = {
   name: "",
   host: "",
@@ -37,6 +49,8 @@ interface SMTPConnectionFormProps {
    */
   footer: ReactNode;
   onSubmit: (values: SMTPConnectionFormValues) => void | Promise<void>;
+  /** Observe every field edit — used by the setup wizard to persist drafts. */
+  onChange?: (values: SMTPConnectionFormValues) => void;
 }
 
 /**
@@ -50,10 +64,17 @@ export function SMTPConnectionForm({
   editing = false,
   footer,
   onSubmit,
+  onChange,
 }: SMTPConnectionFormProps) {
   const [form, setForm] = useState<SMTPConnectionFormValues>(
     initial ?? emptySMTPConnectionForm
   );
+
+  function update(patch: Partial<SMTPConnectionFormValues>) {
+    const next = { ...form, ...patch };
+    setForm(next);
+    onChange?.(next);
+  }
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -67,7 +88,7 @@ export function SMTPConnectionForm({
         <Input
           id="name"
           value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          onChange={(e) => update({ name: e.target.value })}
           required
         />
       </div>
@@ -78,7 +99,7 @@ export function SMTPConnectionForm({
             id="host"
             placeholder="smtp.example.com"
             value={form.host}
-            onChange={(e) => setForm({ ...form, host: e.target.value })}
+            onChange={(e) => update({ host: e.target.value })}
             required
           />
         </div>
@@ -88,7 +109,12 @@ export function SMTPConnectionForm({
             id="port"
             inputMode="numeric"
             value={form.port}
-            onChange={(e) => setForm({ ...form, port: e.target.value })}
+            onChange={(e) => {
+              const port = e.target.value;
+              const secure = PORT_SECURE_DEFAULTS[port];
+              // One patch so onChange observers see the synced pair atomically.
+              update(secure === undefined ? { port } : { port, secure });
+            }}
             required
           />
         </div>
@@ -103,7 +129,7 @@ export function SMTPConnectionForm({
             autoComplete="off"
             placeholder={editing ? "Keep current" : ""}
             value={form.username}
-            onChange={(e) => setForm({ ...form, username: e.target.value })}
+            onChange={(e) => update({ username: e.target.value })}
             required={!editing}
           />
         </div>
@@ -117,7 +143,7 @@ export function SMTPConnectionForm({
             autoComplete="new-password"
             placeholder={editing ? "Keep current" : ""}
             value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            onChange={(e) => update({ password: e.target.value })}
             required={!editing}
           />
         </div>
@@ -130,7 +156,7 @@ export function SMTPConnectionForm({
             type="email"
             placeholder="hello@example.com"
             value={form.fromEmail}
-            onChange={(e) => setForm({ ...form, fromEmail: e.target.value })}
+            onChange={(e) => update({ fromEmail: e.target.value })}
             required
           />
         </div>
@@ -139,22 +165,28 @@ export function SMTPConnectionForm({
           <Input
             id="fromName"
             value={form.fromName}
-            onChange={(e) => setForm({ ...form, fromName: e.target.value })}
+            onChange={(e) => update({ fromName: e.target.value })}
           />
         </div>
       </div>
       <div className="flex flex-wrap gap-5">
-        <label
-          htmlFor="smtp-secure"
-          className="flex items-center gap-2.5 text-sm font-medium"
-        >
-          <Checkbox
-            id="smtp-secure"
-            checked={form.secure}
-            onCheckedChange={(checked) => setForm({ ...form, secure: checked })}
-          />
-          Secure TLS
-        </label>
+        <div className="space-y-1.5">
+          <label
+            htmlFor="smtp-secure"
+            className="flex items-center gap-2.5 text-sm font-medium"
+          >
+            <Checkbox
+              id="smtp-secure"
+              checked={form.secure}
+              onCheckedChange={(checked) => update({ secure: checked })}
+            />
+            Secure TLS
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Turn on for port 465 (implicit TLS). Leave off for 587 or 25 —
+            those upgrade automatically with STARTTLS.
+          </p>
+        </div>
         <label
           htmlFor="smtp-default"
           className="flex items-center gap-2.5 text-sm font-medium"
@@ -162,9 +194,7 @@ export function SMTPConnectionForm({
           <Checkbox
             id="smtp-default"
             checked={form.isDefault}
-            onCheckedChange={(checked) =>
-              setForm({ ...form, isDefault: checked })
-            }
+            onCheckedChange={(checked) => update({ isDefault: checked })}
           />
           Use as default sender
         </label>
