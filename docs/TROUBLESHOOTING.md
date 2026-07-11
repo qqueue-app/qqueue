@@ -71,7 +71,11 @@ sends return `502 smtp_failure`; jobs land in **Failed** with an SMTP error.
   the username/password were rejected. Confirm them with an external client
   (`swaks`, `openssl s_client`, or your mail UI).
 - **Firewall / egress blocked.** Many hosts block outbound `25`/`465`/`587`.
-  Test from the server: `nc -vz smtp.example.com 587`.
+  Corporate endpoint security (CrowdStrike, Zscaler, and similar) often kills
+  plaintext-start SMTP on `587`/`25` specifically — the symptom is
+  `Connection closed` before any server response, even though a plain TCP
+  connect succeeds. Port `465` usually passes because it's encrypted from the
+  first byte. Test from the server: `nc -vz smtp.example.com 587`.
 - **`SECRET_DECRYPTION` error on send.** The stored credentials can't be
   decrypted — usually because `ENCRYPTION_KEY` changed since the connection was
   saved. Re-create the SMTP connection with the current key. Never rotate

@@ -58,6 +58,17 @@ describe("describeSmtpVerifyError", () => {
     expect(result).toContain('Turn on "Secure TLS"');
   });
 
+  it("points at firewalls when the connection closes on other ports", () => {
+    const result = describeSmtpVerifyError(new Error("Connection closed"), {
+      host,
+      port: 587,
+      secure: false
+    });
+
+    expect(result).toContain("firewall or security software");
+    expect(result).toContain("port 465");
+  });
+
   it("maps refused connections with the host and port", () => {
     const result = describeSmtpVerifyError(
       nodemailerError("connect ECONNREFUSED 127.0.0.1:2525", "ESOCKET"),

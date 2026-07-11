@@ -42,6 +42,13 @@ export function describeSmtpVerifyError(
     return `Port 465 expects a secure connection from the start. Turn on "Secure TLS" and try again.${detail}`;
   }
 
+  // A socket that opens but closes without an SMTP response is the fingerprint
+  // of a firewall or endpoint-security filter killing plaintext-start SMTP.
+  // Port 465 usually passes because it's encrypted from the first byte.
+  if (message.includes("Connection closed")) {
+    return `The connection was closed before the mail server responded — a firewall or security software on this machine or network may be blocking SMTP on port ${ctx.port}. Try port 465 with "Secure TLS" turned on.${detail}`;
+  }
+
   if (code === "EAUTH") {
     return `The mail server rejected the username or password. Re-enter the credentials for this mailbox — some providers require an app-specific password.${detail}`;
   }
