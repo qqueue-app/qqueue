@@ -109,7 +109,7 @@ services:
         "migrate",
         "deploy",
         "--schema",
-        "apps/api/prisma/schema.prisma"
+        "apps/api/prisma/schema"
       ]
     depends_on:
       postgres:
