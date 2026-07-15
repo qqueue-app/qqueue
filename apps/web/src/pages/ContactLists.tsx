@@ -48,6 +48,7 @@ export function ContactLists() {
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  const [contactSearch, setContactSearch] = useState("");
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -58,6 +59,32 @@ export function ContactLists() {
       list.name.toLowerCase().includes(query)
     );
   }, [contactLists, search]);
+
+  const filteredContacts = useMemo(() => {
+    const query = contactSearch.trim().toLowerCase();
+    if (!query) {
+      return contacts;
+    }
+    return contacts.filter((contact) =>
+      [contact.email, contact.firstName, contact.lastName]
+        .filter(Boolean)
+        .some((field) => field!.toLowerCase().includes(query))
+    );
+  }, [contacts, contactSearch]);
+
+  const allFilteredSelected =
+    filteredContacts.length > 0 &&
+    filteredContacts.every((contact) => selectedContactIds.includes(contact.id));
+
+  function toggleSelectAll() {
+    const filteredIds = filteredContacts.map((contact) => contact.id);
+    setSelectedContactIds((current) => {
+      if (allFilteredSelected) {
+        return current.filter((id) => !filteredIds.includes(id));
+      }
+      return Array.from(new Set([...current, ...filteredIds]));
+    });
+  }
 
   async function load() {
     if (!organizationId) {
@@ -98,6 +125,7 @@ export function ContactLists() {
     setListName("");
     setListDescription("");
     setSelectedContactIds([]);
+    setContactSearch("");
     setListDialogOpen(true);
   }
 
@@ -106,6 +134,7 @@ export function ContactLists() {
     setListName(list.name);
     setListDescription(list.description ?? "");
     setSelectedContactIds(list.contacts?.map((contact) => contact.id) ?? []);
+    setContactSearch("");
     setListDialogOpen(true);
   }
 
@@ -116,6 +145,7 @@ export function ContactLists() {
       setListName("");
       setListDescription("");
       setSelectedContactIds([]);
+      setContactSearch("");
     }
   }
 
@@ -146,6 +176,7 @@ export function ContactLists() {
       setListName("");
       setListDescription("");
       setSelectedContactIds([]);
+      setContactSearch("");
       await load();
     } catch (error) {
       toast.error(
@@ -378,27 +409,83 @@ export function ContactLists() {
                   {selectedContactIds.length} selected
                 </span>
               </div>
-              <div className="max-h-64 space-y-1 overflow-auto rounded-md border p-2">
-                {contacts.length === 0 ? (
+              {contacts.length === 0 ? (
+                <div className="rounded-md border p-2">
                   <p className="px-1 py-2 text-sm text-muted-foreground">
                     No contacts available yet.
                   </p>
-                ) : (
-                  contacts.map((contact) => (
-                    <label
-                      key={contact.id}
-                      className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/60"
-                    >
-                      <Checkbox
-                        checked={selectedContactIds.includes(contact.id)}
-                        onCheckedChange={() => toggleContact(contact.id)}
-                        aria-label={`Select ${contact.email}`}
+                </div>
+              ) : (
+                <div className="rounded-md border">
+                  <div className="border-b p-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder="Search contacts by name or email…"
+                        value={contactSearch}
+                        onChange={(event) => setContactSearch(event.target.value)}
+                        className="h-9 pl-8"
                       />
-                      <span className="truncate">{contact.email}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between border-b px-2 py-1.5">
+                    <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium">
+                      <Checkbox
+                        checked={allFilteredSelected}
+                        onCheckedChange={toggleSelectAll}
+                        disabled={filteredContacts.length === 0}
+                        aria-label={
+                          allFilteredSelected
+                            ? "Clear all contacts"
+                            : "Select all contacts"
+                        }
+                      />
+                      {allFilteredSelected ? "Clear all" : "Select all"}
+                      {contactSearch.trim() ? " matching" : ""}
                     </label>
-                  ))
-                )}
-              </div>
+                    <span className="text-xs text-muted-foreground">
+                      {filteredContacts.length} of {contacts.length}
+                    </span>
+                  </div>
+                  <div className="max-h-56 space-y-1 overflow-auto p-2">
+                    {filteredContacts.length === 0 ? (
+                      <p className="px-1 py-2 text-sm text-muted-foreground">
+                        No contacts match “{contactSearch}”.
+                      </p>
+                    ) : (
+                      filteredContacts.map((contact) => {
+                        const name = [contact.firstName, contact.lastName]
+                          .filter(Boolean)
+                          .join(" ");
+                        return (
+                          <label
+                            key={contact.id}
+                            className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/60"
+                          >
+                            <Checkbox
+                              checked={selectedContactIds.includes(contact.id)}
+                              onCheckedChange={() => toggleContact(contact.id)}
+                              aria-label={`Select ${contact.email}`}
+                            />
+                            <span className="min-w-0 truncate">
+                              {name ? (
+                                <>
+                                  {name}{" "}
+                                  <span className="text-muted-foreground">
+                                    {contact.email}
+                                  </span>
+                                </>
+                              ) : (
+                                contact.email
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button
