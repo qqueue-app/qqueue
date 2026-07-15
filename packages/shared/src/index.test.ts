@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   abTestConfigSchema,
+  applyVariables,
   campaignRecurrenceSchema,
   campaignSchema,
   campaignScheduleSchema,
@@ -22,6 +23,7 @@ import {
   emailDraftSchema,
   emailDraftUpdateSchema,
   emailPreviewSchema,
+  extractVariables,
   isValidCron,
   isValidTimezone,
   loginSchema,
@@ -31,6 +33,7 @@ import {
   outboundWebhookEventNameSchema,
   refreshSchema,
   registerSchema,
+  resolveVariableData,
   sendEmailSchema,
   smtpConnectionSchema,
   smtpConnectionUpdateSchema,
@@ -809,6 +812,94 @@ describe("abTestConfigSchema", () => {
         ]
       }).success
     ).toBe(false);
+  });
+
+  it("flags each missing required field when enabled", () => {
+    const result = abTestConfigSchema.safeParse({ enabled: true });
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const paths = result.error.issues.map((issue) => issue.path.join("."));
+    expect(paths).toContain("percent");
+    expect(paths).toContain("metric");
+    expect(paths).toContain("windowMin");
+    expect(paths).toContain("variants");
+  });
+});
+
+describe("extractVariables", () => {
+  it("collects distinct tokens across sources in first-seen order", () => {
+    expect(
+      extractVariables("Hi {{name}}", "{{name}} — order {{id}}", "{{id}}")
+    ).toEqual(["name", "id"]);
+  });
+
+  it("ignores null/undefined/empty sources and returns [] when none match", () => {
+    expect(extractVariables(null, undefined, "", "no tokens here")).toEqual([]);
+  });
+});
+
+describe("applyVariables", () => {
+  it("returns an empty string for null/undefined/empty input", () => {
+    expect(applyVariables(null, { a: "x" })).toBe("");
+    expect(applyVariables(undefined, { a: "x" })).toBe("");
+    expect(applyVariables("", { a: "x" })).toBe("");
+  });
+
+  it("returns the value unchanged when no data is supplied", () => {
+    expect(applyVariables("Hi {{name}}", undefined)).toBe("Hi {{name}}");
+  });
+
+  it("substitutes known tokens with their values", () => {
+    expect(applyVariables("Hi {{name}}, order {{id}}", { name: "Ada", id: 42 })).toBe(
+      "Hi Ada, order 42"
+    );
+  });
+
+  it("renders unknown, undefined, or null values as empty strings", () => {
+    expect(
+      applyVariables("[{{missing}}][{{u}}][{{n}}]", { u: undefined, n: null })
+    ).toBe("[][][]");
+  });
+});
+
+describe("resolveVariableData", () => {
+  it("seeds the map from declared defaults", () => {
+    expect(
+      resolveVariableData([{ name: "greeting", defaultValue: "Hello" }], undefined)
+    ).toEqual({ greeting: "Hello" });
+  });
+
+  it("skips declared variables with null or empty defaults", () => {
+    expect(
+      resolveVariableData(
+        [
+          { name: "a", defaultValue: "" },
+          { name: "b", defaultValue: null },
+          { name: "c" }
+        ],
+        undefined
+      )
+    ).toEqual({});
+  });
+
+  it("lets non-empty caller data override defaults", () => {
+    expect(
+      resolveVariableData([{ name: "name", defaultValue: "Friend" }], {
+        name: "Ada"
+      })
+    ).toEqual({ name: "Ada" });
+  });
+
+  it("falls back to the default when the override is empty", () => {
+    expect(
+      resolveVariableData([{ name: "name", defaultValue: "Friend" }], { name: "" })
+    ).toEqual({ name: "Friend" });
+  });
+
+  it("handles null variables and data without throwing", () => {
+    expect(resolveVariableData(null, undefined)).toEqual({});
   });
 });
 

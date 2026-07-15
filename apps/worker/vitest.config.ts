@@ -29,7 +29,10 @@ export default defineConfig({
         "src/lib/prisma.ts",
         "src/lib/storage.ts",
         "src/queues/**",
-        "src/test/**"
+        "src/test/**",
+        // Thin BullMQ wiring (constructs a Worker, delegates to a lib fn);
+        // no branching logic to unit-test. See src/index.ts / src/queues.
+        "src/workers/inbox-sync.worker.ts"
       ],
       thresholds: {
         lines: 85,
