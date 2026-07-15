@@ -7,14 +7,30 @@ import { cn } from "../lib/utils.js";
 
 interface GetStartedCardProps {
   summary: DashboardSummary | null;
+  /** False while the first-run /setup wizard was started but never finished. */
+  instanceSetupCompleted?: boolean;
 }
 
 // First-run guide shown on the dashboard until the org has sent its first
 // email. It collapses full setup into the shortest path to a first send: a
 // recipient and a template are optional because Compose lets you type an
 // address and write inline, so the only hard prerequisite is a sending account.
-export function GetStartedCard({ summary }: GetStartedCardProps) {
+export function GetStartedCard({
+  summary,
+  instanceSetupCompleted = true
+}: GetStartedCardProps) {
   const steps = [
+    ...(instanceSetupCompleted
+      ? []
+      : [
+          {
+            title: "Finish server setup",
+            description:
+              "Pick your registration policy and confirm sending works — it takes a minute.",
+            done: false,
+            cta: { label: "Resume setup", to: "/setup" }
+          }
+        ]),
     {
       title: "Connect a sending account",
       description:

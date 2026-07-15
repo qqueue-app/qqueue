@@ -5,15 +5,17 @@
 QQueue is a feature-complete self-hosted beta candidate undergoing launch
 preparation. The repository contains an implemented TypeScript monorepo with an
 Express API, React dashboard, BullMQ worker processes, Prisma/PostgreSQL data
-model, Redis queues, SMTP sending, tracking, transactional API keys, outbound
-webhooks, an MIT-licensed SDK package, tests, deployment files, and open-core
-licensing guardrails.
+model, Redis queues, SMTP sending, sender identities and sending domains with
+managed DKIM signing, tracking, transactional API keys, outbound webhooks, an
+MIT-licensed SDK package, tests, deployment files, and open-core licensing
+guardrails.
 
 Following the Beta Polish + Launch Prep Sprint, QQueue now includes:
 
 - Authentication
 - Organizations
 - SMTP connections
+- Sender identities and sending domains (EXTERNAL/MANAGED DKIM)
 - Contacts (with tags + created date in the UI)
 - Contact lists (with descriptions and membership management)
 - Templates (with preview and MJML-aware source)
@@ -79,6 +81,7 @@ refactor that precedes the larger UI work.
 - Authentication
 - Organizations
 - SMTP Connections
+- Sender Identities and Sending Domains (managed DKIM)
 - Contacts
 - Contact Lists
 - Templates
@@ -105,7 +108,9 @@ operational and abuse-control gaps from the original audit have been closed.
 
 - `apps/api`: Express API. It owns HTTP routing, auth/session tokens, password
   reset, organization access checks, Prisma access, product modules,
-  transactional sends, the `manual-email` module (Email Studio send + preview +
+  sender-identity and sending-domain management (with managed-DKIM keypair
+  generation and DNS verification), transactional sends, the `manual-email`
+  module (Email Studio send + preview +
   per-recipient delivery status), `email-drafts` module (composer drafts), and
   `attachments` module (upload/download/delete to object storage), tracking
   endpoints, inbound ESP webhook normalization, queue operations endpoints,
@@ -113,30 +118,37 @@ operational and abuse-control gaps from the original audit have been closed.
   reuses `transactionalEmailService.send` rather than introducing a parallel
   path.
 - `apps/web`: Vite React dashboard. It includes login/register, password reset,
-  dashboard, Email Studio (manual composer), one-off send, SMTP connections,
-  contacts, contact lists, templates, campaigns, campaign analytics, queue
-  operations, settings/API keys/webhooks, and legal pages.
+  dashboard, Compose (Email Studio), inbox, contacts, lists, smart lists
+  (segments), templates, campaigns, campaign analytics, sending accounts (SMTP
+  connections), sending domains, sending health (deliverability), blocked
+  addresses (suppressions), background jobs (queue operations),
+  settings/API keys/webhooks, and public legal pages.
 - `apps/worker`: BullMQ workers. It processes campaign fan-out jobs, email
-  sending jobs, outbound webhook delivery jobs, inbox sync jobs, and startup
-  recovery for queued work.
+  sending jobs, outbound webhook delivery jobs, inbox sync jobs, managed-DKIM
+  domain verification jobs (with a daily recheck), and startup recovery for
+  queued work.
 - `apps/cloud`: proprietary managed-cloud boundary scaffold. It currently
   contains package metadata, README, and a commercial license draft, but no
   production cloud behavior.
 - `packages/shared`: shared TypeScript domain types and Zod schemas for auth,
   organizations, contacts, lists, templates, campaigns, transactional sends, API
-  keys, webhooks, SMTP connections, cron validation, and timezones.
+  keys, webhooks, SMTP connections, sender identities and sending domains, cron
+  validation, timezones, and the pure DKIM DNS-record helpers.
 - `packages/email-engine`: email provider abstraction, Nodemailer-backed SMTP
-  provider, tracking URL/token helpers, the MJML email-safe render layer, and
-  explicit placeholder provider classes for Mailcow/SES/Resend/Brevo/Postmark.
+  provider (with per-message DKIM signing), tracking URL/token helpers, the MJML
+  email-safe render layer, and explicit placeholder provider classes for
+  Mailcow/SES/Resend/Brevo/Postmark.
 - `packages/storage`: shared S3-compatible object-storage client (AWS S3 v3
   SDK; works against MinIO) used by the API and worker for attachment blobs.
 - `packages/sdk`: MIT-licensed TypeScript SDK package. It currently wraps the
   public transactional email send endpoint.
 - `apps/api/prisma`: PostgreSQL schema and migrations for users,
-  organizations, SMTP connections, contacts (with `tags`), contact lists,
+  organizations, SMTP connections, sending domains and sender identities
+  (`DkimMode`/`DkimStatus`), contacts (with `tags`), contact lists,
   explicit contact-list membership (`ContactListMember`), templates (with MJML
-  source), campaigns, campaign runs, email jobs (with `origin` and threading
-  metadata: `messageId`/`inReplyTo`/`references`), email events, API keys,
+  source), campaigns, campaign runs, email jobs (with `origin`,
+  `senderIdentityId`, and threading metadata:
+  `messageId`/`inReplyTo`/`references`), email events, API keys,
   webhook endpoints, webhook deliveries, email drafts (Email Studio composer
   state), email attachments (metadata for blobs in object storage), and
   password reset tokens.
@@ -242,6 +254,19 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Default SMTP connection selection is implemented.
 - [x] Dashboard page exists.
 - [x] Dedicated Mailcow setup documentation.
+
+### Sending Domains and Sender Identities
+
+- [x] Sending domains with `EXTERNAL` and `MANAGED` DKIM modes.
+- [x] Managed mode generates an RSA-2048 keypair, signs DKIM in-process, and
+  surfaces the DNS records to publish.
+- [x] DKIM verification worker moves managed domains `PENDING → VERIFIED/FAILED`,
+  on demand and on a daily recheck.
+- [x] Sender identities (concrete From name+email under a domain, bound to an
+  SMTP connection); one org default.
+- [x] All send paths resolve the From identity and DKIM options through
+  `resolveSender`/`dkimSignOptionsFor`; UI send surfaces pick a sender identity.
+- [x] Dashboard page for sending domains and DKIM setup.
 
 ### Contacts, Templates, and Campaigns
 
@@ -362,17 +387,19 @@ End-to-end, the app can currently support a self-hosted operator who:
 3. Logs into the React dashboard.
 4. Recovers an account through the password reset flow.
 5. Creates and verifies an SMTP connection.
-6. Creates contacts, contact lists, and templates.
-7. Sends a one-off transactional email from the dashboard or API key.
-8. Creates campaigns, sends now, schedules one-shot campaigns, configures
+6. Adds sending domains and sender identities — publishing DNS records and
+   verifying managed DKIM, and choosing a default identity.
+7. Creates contacts, contact lists, and templates.
+8. Sends a transactional email from Compose (Email Studio), the API, or the SDK.
+9. Creates campaigns, sends now, schedules one-shot campaigns, configures
    recurring campaigns, pauses/resumes campaigns, and views campaign analytics.
-9. Records queued, sent, delivered, opened, clicked, bounced, complained, and
-   failed events where the matching flow emits them.
-10. Monitors queues, inspects failed jobs, and retries them from the queue
+10. Records queued, sent, delivered, opened, clicked, bounced, complained, and
+    failed events where the matching flow emits them.
+11. Monitors queues, inspects failed jobs, and retries them from the queue
     operations dashboard (OWNER/ADMIN only).
-11. Creates outbound webhook endpoints, receives signed webhook deliveries,
+12. Creates outbound webhook endpoints, receives signed webhook deliveries,
     views recent attempts, and manually retries failed deliveries.
-12. Uses the SDK to call the transactional send API.
+13. Uses the SDK to call the transactional send API.
 
 ## Known Gaps
 
@@ -404,8 +431,8 @@ End-to-end, the app can currently support a self-hosted operator who:
 - [x] Phase C: contacts & lists — CSV import/export (membership `source`),
   per-contact activity timeline, org-wide suppression registry + RFC 8058
   List-Unsubscribe, and basic tag-driven segmentation (preview + materialize to
-  a list). See `docs/PHASE_C_PLAN.md`.
-- [x] Phase D: advanced campaign features (see `docs/PHASE_D_PLAN.md`) — all
+  a list).
+- [x] Phase D: advanced campaign features — all
   shipped: bounce-driven auto-suppression (soft/hard threshold), per-domain
   throttling (worker-side Redis fixed window), dynamic segmentation (`Segment`
   rule tree resolved at send time), A/B subject testing (test fraction +
@@ -416,6 +443,13 @@ End-to-end, the app can currently support a self-hosted operator who:
   QQueue, and a simplified inbox UI without ticketing.
 - [~] Richer team collaboration on conversations remains out of scope for the
   core inbox.
+- [x] Phase F: sending domains & sender identities — decouple the visible From
+  from the authenticating SMTP credential; `EXTERNAL` vs `MANAGED` DKIM;
+  managed-mode RSA-2048 keygen + in-process signing + published DNS records; a
+  verification worker (`PENDING → VERIFIED/FAILED`, daily recheck); send-time
+  resolution via `resolveSender`/`dkimSignOptionsFor` (transactional, manual, and
+  campaign); a from-picker and Sending Domains page in the dashboard; and
+  backward-compatible public API/SDK `senderIdentityId` support.
 
 ### UX
 
@@ -467,6 +501,22 @@ End-to-end, the app can currently support a self-hosted operator who:
 10. Collect feedback from real installations.
 
 ## Verification
+
+### Phase F sending domains & sender identities (2026-06-30)
+
+- [x] Added the `SendingDomain` and `SenderIdentity` models with the `DkimMode`
+  (`EXTERNAL`/`MANAGED`) and `DkimStatus` (`PENDING`/`VERIFIED`/`FAILED`/`NA`)
+  enums, and a `senderIdentityId` link on `EmailJob` and `Campaign`.
+- [x] Managed mode generates an RSA-2048 keypair (selector `qqueue`), stores the
+  private key encrypted, signs DKIM in-process, and surfaces the DNS records; the
+  `dkim-verification` worker moves managed domains `PENDING → VERIFIED/FAILED`
+  on demand and on a daily recheck.
+- [x] Send-time From/DKIM resolution is centralized in `resolveSender` /
+  `dkimSignOptionsFor` and re-applied in the send worker, with unit tests for the
+  resolver precedence, the managed+verified DKIM gate, and the verification path.
+- [x] Migrations `20260630000000_phase_f_sending_domains` and
+  `20260630120000_phase_f_sender_identity_links` are additive (new tables/enums
+  and nullable `senderIdentityId` columns).
 
 ### Inbox simplification (2026-06-17)
 

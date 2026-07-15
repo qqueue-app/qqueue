@@ -11,6 +11,7 @@ import {
 } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { describeSmtpVerifyError } from "./verify-error.js";
 
 const smtpConnectionSelect = {
   id: true,
@@ -45,13 +46,16 @@ async function normalizeDefault(
   return !existingDefault;
 }
 
-function toProvider(connection: {
-  host: string;
-  port: number;
-  secure: boolean;
-  usernameEncrypted: string;
-  passwordEncrypted: string;
-}) {
+function toProvider(
+  connection: {
+    host: string;
+    port: number;
+    secure: boolean;
+    usernameEncrypted: string;
+    passwordEncrypted: string;
+  },
+  timeouts?: { connectionTimeout: number; greetingTimeout: number }
+) {
   return new SMTPProvider({
     host: connection.host,
     port: connection.port,
@@ -59,9 +63,15 @@ function toProvider(connection: {
     auth: {
       user: decryptSecret(connection.usernameEncrypted),
       pass: decryptSecret(connection.passwordEncrypted)
-    }
+    },
+    ...timeouts
   });
 }
+
+// Verification is interactive (the wizard and the connections dialog block on
+// it), so fail well before Nodemailer's 2-minute connect / 30s greeting
+// defaults. Sends keep the defaults.
+const VERIFY_TIMEOUT_MS = 15_000;
 
 async function verifyConnection(connection: {
   host: string;
@@ -71,18 +81,16 @@ async function verifyConnection(connection: {
   passwordEncrypted: string;
 }) {
   try {
-    await toProvider(connection).verify();
+    await toProvider(connection, {
+      connectionTimeout: VERIFY_TIMEOUT_MS,
+      greetingTimeout: VERIFY_TIMEOUT_MS
+    }).verify();
   } catch (error) {
     if (error instanceof SecretDecryptionError) {
       throw new HttpError(400, SECRET_DECRYPTION_MESSAGE);
     }
 
-    throw new HttpError(
-      400,
-      error instanceof Error
-        ? `SMTP verification failed: ${error.message}`
-        : "SMTP verification failed"
-    );
+    throw new HttpError(400, describeSmtpVerifyError(error, connection));
   }
 }
 

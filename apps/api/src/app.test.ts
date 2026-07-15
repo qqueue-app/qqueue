@@ -51,10 +51,41 @@ describe("health + cors + json", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: "ok" });
   });
+
+  it("allows localhost dev origins across the Vite port range", async () => {
+    const res = await request(app)
+      .get("/health")
+      .set("Origin", "http://localhost:5177");
+    expect(res.headers["access-control-allow-origin"]).toBe(
+      "http://localhost:5177"
+    );
+  });
+
+  it("allows the 127.0.0.1 host on a dev port", async () => {
+    const res = await request(app)
+      .get("/health")
+      .set("Origin", "http://127.0.0.1:5173");
+    expect(res.headers["access-control-allow-origin"]).toBe(
+      "http://127.0.0.1:5173"
+    );
+  });
+
+  it("does not allow origins outside the dev allowlist", async () => {
+    const outOfRange = await request(app)
+      .get("/health")
+      .set("Origin", "http://localhost:9999");
+    expect(outOfRange.headers["access-control-allow-origin"]).toBeUndefined();
+
+    const foreign = await request(app)
+      .get("/health")
+      .set("Origin", "http://evil.example");
+    expect(foreign.headers["access-control-allow-origin"]).toBeUndefined();
+  });
 });
 
 describe("auth routes", () => {
   it("registers a user (201)", async () => {
+    prismaMock.user.count.mockResolvedValue(0);
     prismaMock.user.create.mockResolvedValue({
       id: "user_1",
       email: "a@b.com",

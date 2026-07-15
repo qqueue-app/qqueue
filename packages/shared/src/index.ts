@@ -381,6 +381,35 @@ export const organizationSchema = z.object({
 
 export type OrganizationInput = z.infer<typeof organizationSchema>;
 
+// Instance-wide settings (first-run onboarding). Sparse key-value rows in the
+// InstanceSetting table; an absent key falls back to the env/default value.
+export const INSTANCE_SETTING_KEYS = {
+  allowPublicRegistration: "allowPublicRegistration",
+  setupCompletedAt: "setupCompletedAt",
+} as const;
+
+// Body for POST /setup/complete: the wizard's final registration-policy choice.
+export const setupCompleteSchema = z.object({
+  allowPublicRegistration: z.boolean(),
+});
+
+export type SetupCompleteInput = z.infer<typeof setupCompleteSchema>;
+
+export const instanceSettingsUpdateSchema = z.object({
+  allowPublicRegistration: z.boolean().optional(),
+});
+
+export type InstanceSettingsUpdateInput = z.infer<
+  typeof instanceSettingsUpdateSchema
+>;
+
+// Public first-run probe consumed by the web app's SetupGate and Login page.
+export interface SetupStatus {
+  needsSetup: boolean;
+  setupCompleted: boolean;
+  allowPublicRegistration: boolean;
+}
+
 export const contactSchema = z.object({
   organizationId: z.string().min(1),
   email: emailAddressSchema,

@@ -22,35 +22,49 @@ vi.mock("../lib/session-context.js", () => ({
   useSession: () => sessionValue.current
 }));
 
-vi.mock("../lib/api.js", () => ({
-  outboundWebhookEvents: [
-    "email.queued",
-    "email.sent",
-    "email.delivered",
-    "email.opened",
-    "email.clicked",
-    "email.bounced",
-    "email.complained",
-    "email.failed"
-  ],
-  api: {
-    createOrganization: vi.fn(),
-    listApiKeys: vi.fn(),
-    createApiKey: vi.fn(),
-    revokeApiKey: vi.fn(),
-    listWebhookEndpoints: vi.fn(),
-    createWebhookEndpoint: vi.fn(),
-    deleteWebhookEndpoint: vi.fn(),
-    listWebhookDeliveries: vi.fn(),
-    retryWebhookDelivery: vi.fn()
-  }
-}));
+vi.mock("../lib/api.js", async () => {
+  const actual = await vi.importActual<typeof import("../lib/api.js")>(
+    "../lib/api.js"
+  );
+  return {
+    ApiError: actual.ApiError,
+    outboundWebhookEvents: [
+      "email.queued",
+      "email.sent",
+      "email.delivered",
+      "email.opened",
+      "email.clicked",
+      "email.bounced",
+      "email.complained",
+      "email.failed"
+    ],
+    api: {
+      createOrganization: vi.fn(),
+      updateOrganization: vi.fn(),
+      getInstanceSettings: vi.fn(),
+      updateInstanceSettings: vi.fn(),
+      instanceEnvStatus: vi.fn(),
+      listApiKeys: vi.fn(),
+      createApiKey: vi.fn(),
+      revokeApiKey: vi.fn(),
+      listWebhookEndpoints: vi.fn(),
+      createWebhookEndpoint: vi.fn(),
+      deleteWebhookEndpoint: vi.fn(),
+      listWebhookDeliveries: vi.fn(),
+      retryWebhookDelivery: vi.fn()
+    }
+  };
+});
 
 import { Settings } from "./Settings.js";
-import { api } from "../lib/api.js";
+import { ApiError, api } from "../lib/api.js";
 
 const mockedApi = api as unknown as {
   createOrganization: ReturnType<typeof vi.fn>;
+  updateOrganization: ReturnType<typeof vi.fn>;
+  getInstanceSettings: ReturnType<typeof vi.fn>;
+  updateInstanceSettings: ReturnType<typeof vi.fn>;
+  instanceEnvStatus: ReturnType<typeof vi.fn>;
   listApiKeys: ReturnType<typeof vi.fn>;
   createApiKey: ReturnType<typeof vi.fn>;
   revokeApiKey: ReturnType<typeof vi.fn>;
@@ -70,6 +84,50 @@ describe("Settings", () => {
     mockedApi.listApiKeys.mockResolvedValue([]);
     mockedApi.listWebhookEndpoints.mockResolvedValue([]);
     mockedApi.listWebhookDeliveries.mockResolvedValue([]);
+    // Default: not an instance admin, so the Instance card stays hidden.
+    mockedApi.getInstanceSettings.mockRejectedValue(
+      new ApiError("Instance administrator access required", 403)
+    );
+  });
+
+  it("shows the Instance card with the registration toggle for instance admins", async () => {
+    mockedApi.getInstanceSettings.mockResolvedValue({
+      allowPublicRegistration: false,
+      setupCompletedAt: "2026-01-01T00:00:00.000Z"
+    });
+    mockedApi.instanceEnvStatus.mockResolvedValue({
+      database: { ok: true },
+      redis: { ok: true, host: "localhost", port: 6379 },
+      storage: { endpoint: "http://localhost:9100", bucket: "qqueue-attachments" },
+      secrets: { webhookSecretConfigured: false },
+      urls: {
+        appUrl: "http://localhost:4000",
+        publicAppUrl: "http://localhost:5173",
+        webOrigin: null
+      },
+      tunables: {
+        softBounceThreshold: 3,
+        softBounceWindowDays: 30,
+        defaultDomainMaxPerMinute: 60,
+        attachmentMaxBytes: 10485760
+      }
+    });
+    render(<Settings />);
+
+    expect(await screen.findByText("Instance")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Allow public registration")
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Configuration health")).toBeInTheDocument();
+  });
+
+  it("hides the Instance card for non-instance-admins", async () => {
+    render(<Settings />);
+
+    await waitFor(() =>
+      expect(mockedApi.getInstanceSettings).toHaveBeenCalled()
+    );
+    expect(screen.queryByText("Instance")).not.toBeInTheDocument();
   });
 
   it("renders account details", () => {

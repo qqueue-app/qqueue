@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { DashboardLayout } from "../layouts/DashboardLayout.js";
+import { SetupGate } from "../components/SetupGate.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 
 const Campaigns = lazy(() =>
@@ -31,6 +32,11 @@ const Dashboard = lazy(() =>
 const Login = lazy(() =>
   import("../pages/Login.js").then((module) => ({
     default: module.Login,
+  }))
+);
+const Setup = lazy(() =>
+  import("../pages/Setup.js").then((module) => ({
+    default: module.Setup,
   }))
 );
 const LegalPage = lazy(() =>
@@ -102,7 +108,9 @@ function RouteFallback() {
 export function AppRoutes() {
   return (
     <Suspense fallback={<RouteFallback />}>
+      <SetupGate>
       <Routes>
+        <Route path="/setup" element={<Setup />} />
         <Route path="/login" element={<Login mode="login" />} />
         <Route path="/register" element={<Login mode="register" />} />
         <Route path="/forgot-password" element={<Login mode="forgot" />} />
@@ -138,6 +146,7 @@ export function AppRoutes() {
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
+      </SetupGate>
     </Suspense>
   );
 }

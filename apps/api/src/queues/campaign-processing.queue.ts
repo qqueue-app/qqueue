@@ -1,5 +1,5 @@
 import { Queue } from "bullmq";
-import { env } from "../config/env.js";
+import { redisConnection } from "../config/redis.js";
 
 export interface CampaignProcessingJob {
   campaignId: string;
@@ -19,9 +19,6 @@ export interface CampaignProcessingJob {
 export const campaignProcessingQueue = new Queue<CampaignProcessingJob>(
   "campaign-processing",
   {
-    connection: {
-      host: env.REDIS_HOST,
-      port: env.REDIS_PORT
-    }
+    connection: redisConnection
   }
 );

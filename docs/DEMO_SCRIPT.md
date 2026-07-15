@@ -17,9 +17,10 @@ to show real delivery.
 ## 0. What is QQueue? [~45s]
 
 > "QQueue is an open-core, self-hostable email platform. The core — everything
-> we'll see today — is open source under AGPL-3.0: transactional email, SMTP
-> connections, contacts and lists, templates, campaigns, background queues,
-> open/click tracking, and outbound webhooks. You run it on your own
+> we'll see today — is open source under AGPL-3.0: transactional email, sending
+> accounts and sender identities, contacts and lists, templates, campaigns,
+> background queues, open/click tracking, and outbound webhooks. You run it on
+> your own
 > infrastructure and connect your own mail server. We'll go from zero to a sent
 > email, then a campaign, then the operational view."
 
@@ -39,9 +40,9 @@ to show real delivery.
 - Mention you can create additional organizations from **Settings** and switch
   between them; all data — SMTP, contacts, campaigns — is scoped per org.
 
-## 3. Add an SMTP connection [~1m]
+## 3. Add a sending account (SMTP) [~1m]
 
-- Go to **SMTP Connections → New connection**.
+- Go to **Sending accounts → New connection**.
 - Enter host, port (`587`, `secure` off for STARTTLS), username, password, from
   address; mark it **default**.
 - Save and call out: QQueue **verifies** the credentials before saving and
@@ -50,11 +51,26 @@ to show real delivery.
 > "QQueue is bring-your-own-SMTP — Mailcow, a transactional provider, anything
 > that speaks SMTP. Credentials are encrypted with your key; we never see them."
 
+## 3b. Add a sending domain & sender identity (managed DKIM) [~1m]
+
+- Go to **Sending domains → New domain** and add a domain in **MANAGED** DKIM
+  mode. Point out the alternative, **EXTERNAL**, where your upstream relay
+  (Mailcow, SES) signs DKIM instead.
+- Show the generated **DNS TXT records** to publish; once they resolve, the
+  verification worker moves the domain to **VERIFIED**.
+- Create a **sender identity** (a concrete From name + email) under the domain,
+  bound to the sending account from step 3; optionally make it the org default.
+
+> "A sending domain decouples the visible From-domain from that one SMTP
+> credential. In managed mode QQueue generates the keys, signs DKIM in-process,
+> and only signs once the domain is verified — sender identities are the actual
+> From addresses your sends and campaigns pick from."
+
 ## 4. Create a contact and a list [~1m]
 
 - Go to **Contacts → New contact**, add a recipient (use an inbox you control).
-- Go to **Campaigns → Contact lists → New list**, create a list and add the
-  contact to it. This is the audience for a campaign later.
+- Go to **Lists → New list**, create a list and add the contact to it. This is
+  the audience for a campaign later.
 
 ## 5. Create a template [~1m]
 
@@ -65,9 +81,9 @@ to show real delivery.
 
 ## 6. Send a transactional email [~1m]
 
-- Go to **Send Email**.
-- Choose your SMTP connection and recipient, either type a subject/body or pick
-  the template, send.
+- Go to **Compose** (Email Studio).
+- Pick the **sender identity** from step 3b (or your sending account) and a
+  recipient, either type a subject/body or pick the template, send.
 - Switch to your inbox and show it arriving.
 
 > "That's a single transactional send. The same thing is available over a signed
@@ -77,7 +93,8 @@ to show real delivery.
 ## 7. Create a campaign [~1m]
 
 - Go to **Campaigns → New campaign**.
-- Select the template and the contact list from steps 4–5.
+- Select the template and the list from steps 4–5; optionally pick the sender
+  identity from step 3b (managed, verified domains get DKIM-signed here too).
 - Send now (or schedule for the near future to show queuing), and explain
   campaigns can also be **recurring** on a cron schedule.
 
@@ -86,9 +103,9 @@ to show real delivery.
 
 ## 8. Inspect queue, events, and analytics [~1m30s]
 
-- **Queue Operations** (owners/admins only): show the `email-sending`,
-  `campaign-processing`, and `webhook-delivery` queues with queued / processing /
-  failed counts, and the **Retry** action on a failed job.
+- **Background jobs** (Queue Operations; owners/admins only): show the
+  `email-sending`, `campaign-processing`, and `webhook-delivery` queues with
+  queued / processing / failed counts, and the **Retry** action on a failed job.
 - **Dashboard**: show the recent activity feed of email jobs and events.
 - **Campaign analytics**: open the campaign's analytics — recipients, sent,
   delivered, opens/clicks (and their rates), and top clicked links.

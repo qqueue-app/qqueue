@@ -1,9 +1,8 @@
 import { Redis } from "ioredis";
-import { env } from "../config/env.js";
+import { redisConnection } from "../config/redis.js";
 
 export const redis = new Redis({
-  host: env.REDIS_HOST,
-  port: env.REDIS_PORT,
+  ...redisConnection,
   maxRetriesPerRequest: 1,
   lazyConnect: true
 });

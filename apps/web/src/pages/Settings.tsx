@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Copy, KeyRound, LogOut, RotateCcw, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
+import { InstanceSettingsCard } from "../components/InstanceSettingsCard.js";
 import { PageHeader } from "../components/PageHeader.js";
 import {
   api,
@@ -66,6 +67,8 @@ export function Settings() {
   } = useSession();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [apiKeyName, setApiKeyName] = useState("");
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
@@ -189,6 +192,34 @@ export function Settings() {
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function renameOrganization(event: FormEvent) {
+    event.preventDefault();
+    if (!currentOrganizationId || !renameValue.trim()) {
+      return;
+    }
+    setRenaming(true);
+    try {
+      const organization = await api.updateOrganization(currentOrganizationId, {
+        name: renameValue.trim()
+      });
+      const existingRole =
+        organizations.find((org) => org.id === organization.id)?.role ??
+        "OWNER";
+      addOrganization(
+        { id: organization.id, name: organization.name, role: existingRole },
+        false
+      );
+      setRenameValue("");
+      toast.success(`Organization renamed to "${organization.name}".`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to rename organization"
+      );
+    } finally {
+      setRenaming(false);
     }
   }
 
@@ -453,6 +484,31 @@ export function Settings() {
                 {saving ? "Creating..." : "Create organization"}
               </Button>
             </form>
+            <Separator className="my-4" />
+            <form onSubmit={renameOrganization} className="space-y-2">
+              <Label htmlFor="rename-org">Rename active organization</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="rename-org"
+                  placeholder={
+                    organizations.find((org) => org.id === currentOrganizationId)
+                      ?.name ?? "Organization name"
+                  }
+                  value={renameValue}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                />
+                <Button
+                  type="submit"
+                  variant="outline"
+                  disabled={
+                    renaming || !currentOrganizationId || !renameValue.trim()
+                  }
+                >
+                  {renaming ? <Spinner /> : null}
+                  Rename
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
 
@@ -485,6 +541,8 @@ export function Settings() {
             </Button>
           </CardContent>
         </Card>
+
+        <InstanceSettingsCard />
 
         <Card className="h-fit lg:col-span-2">
           <CardHeader>

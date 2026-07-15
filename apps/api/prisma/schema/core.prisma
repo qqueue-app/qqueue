@@ -115,11 +115,24 @@ model User {
   email               String               @unique
   name                String?
   passwordHash        String?
+  // Instance administrator: may edit InstanceSettings (registration policy,
+  // env status view). Set for the first user created on a fresh install;
+  // backfilled for OWNERs of the oldest organization on existing installs.
+  isInstanceAdmin     Boolean              @default(false)
   members             OrganizationMember[]
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+}
+
+// Instance-wide runtime settings (install scope, not per-org). Sparse
+// key-value rows: an absent key means "use the env/default value". Keys and
+// value shapes are owned by src/lib/instance-settings.ts.
+model InstanceSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
 
 model PasswordResetToken {

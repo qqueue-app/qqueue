@@ -41,7 +41,26 @@ Successful sends return `202 Accepted` with a compact job reference:
 }
 ```
 
-Scheduled sends return the same shape with `status: "QUEUED"`.
+`status` is `SENT` for an immediate send and `QUEUED` for a scheduled send (one
+with `scheduledAt`).
+
+### Choosing who the email sends as
+
+Two optional fields select the sending identity:
+
+- `senderIdentityId` — send as a configured sender identity (its From name/email
+  and the SMTP connection that transports it). This is the preferred option.
+- `smtpConnectionId` — send through a specific SMTP connection.
+
+If you provide neither, QQueue resolves the sender automatically: it uses the
+organization's default sender identity, then falls back to the organization's
+default SMTP connection.
+
+### Other body fields
+
+Beyond `to`, `subject`, and content, the body also accepts `cc`, `bcc`,
+`replyTo`, `attachmentIds`, and `inReplyTo` / `references` (for threading
+replies).
 
 ## Idempotency
 
@@ -102,6 +121,10 @@ const email = await qqueue.sendEmail({
 
 console.log(email.id, email.status);
 ```
+
+`sendEmail` accepts the same sender selection as the REST endpoint —
+`senderIdentityId` or `smtpConnectionId` — and otherwise falls back to the
+organization's defaults.
 
 For local development, omit `baseUrl` to use
 `http://localhost:4000/api/v1`.

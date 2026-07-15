@@ -155,8 +155,10 @@ See `docs/CLOUD_BOUNDARY.md` for the current Phase 7 boundary rules.
   per-workspace isolation of contacts, templates, campaigns, and SMTP configs.
 - **Usage limits:** enforce per-plan quotas (emails/month, contacts, API calls)
   at the queue/worker layer; surface usage in the dashboard.
-- **Hosted onboarding:** guided signup, managed shared/pooled sending infra,
-  domain + DKIM/SPF verification flows.
+- **Hosted onboarding:** guided signup and managed shared/pooled sending
+  infrastructure. (Managed DKIM signing and per-domain verification already ship
+  in the AGPL core as Phase F; the cloud layer builds pooled sending and
+  onboarding around them.)
 - **Multi-tenant hardening:** row-level tenant scoping audit, rate limiting,
   noisy-neighbor isolation, per-tenant secrets handling, abuse/deliverability
   controls.
@@ -188,8 +190,6 @@ pipeline, not three products. See `docs/DECISIONS.md` for the rationale behind
 the decisions referenced below.
 
 ### Phase A: Send-pipeline refactor (enabling — do first)
-
-See [docs/PHASE_A_PLAN.md](PHASE_A_PLAN.md) for the detailed implementation plan.
 
 Harden the shared send pipeline before larger UI work.
 
@@ -232,8 +232,8 @@ separate product: every send flows through the existing shared pipeline
 and `createdByUserId` recorded. A thin `manual-email` API module resolves and
 deduplicates recipients, renders the body through the MJML email-safe layer, and
 delegates to `transactionalEmailService.send`; it does **not** introduce a
-parallel delivery path. The legacy one-off `SendEmail.tsx` page remains for
-single-recipient sends.
+parallel delivery path. (The earlier one-off `SendEmail.tsx` page has since been
+retired — `/send-email` now redirects to Email Studio.)
 
 - [x] Multiple `To` recipients (one message, deduplicated)
 - [x] `CC` and `BCC`
@@ -260,11 +260,7 @@ build on.
 - [x] Suppression list and List-Unsubscribe handling
 - [x] Segmentation (basic, tag-driven) — advanced segmentation in Phase D
 
-See [docs/PHASE_C_PLAN.md](PHASE_C_PLAN.md) for the implementation details.
-
 ### Phase D: Advanced campaign features
-
-See [docs/PHASE_D_PLAN.md](PHASE_D_PLAN.md) for the implementation plan.
 
 - [x] Segmentation (dynamic `Segment` rule tree, re-resolved at send time;
   campaigns can target a segment instead of a list)
@@ -298,6 +294,28 @@ become a mailbox product.
 Ticketing and helpdesk-style collaboration are not part of the inbox scope. If
 added later, they should live as a separate integration workflow rather than in
 the core inbox UI.
+
+### Phase F: Sending domains and sender identities (managed DKIM)
+
+Decouple the visible From identity from the single authenticating SMTP
+credential, and let QQueue optionally own DKIM for domains it sends from.
+
+- [x] `SendingDomain` model with `EXTERNAL` vs `MANAGED` DKIM modes and a
+  `DkimStatus` (`PENDING`/`VERIFIED`/`FAILED`/`NA`).
+- [x] Managed mode: RSA-2048 keypair generation (selector `qqueue`), encrypted
+  private key, in-process DKIM signing, and the DNS records to publish.
+- [x] `dkim-verification` worker resolves the published TXT record and moves
+  managed domains `PENDING → VERIFIED/FAILED`, on demand and on a daily recheck.
+- [x] `SenderIdentity` model: a concrete From (name+email) under a sending
+  domain, bound to the SMTP connection that transports it; one org default.
+- [x] Send-time resolution via `resolveSender`/`dkimSignOptionsFor`
+  (`apps/api/src/lib/sender.ts` + `apps/worker/src/lib/sender.ts`), covering
+  transactional, manual, and campaign sends; only `MANAGED`+`VERIFIED` domains
+  are signed.
+- [x] Dashboard: a Sending Domains page and a sender-identity from-picker on the
+  send surfaces.
+- [x] Public API and SDK accept an optional `senderIdentityId`, backward
+  compatible with the existing `smtpConnectionId`/org-default flow.
 
 ### Editor stack
 

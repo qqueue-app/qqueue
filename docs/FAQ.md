@@ -35,6 +35,25 @@ others via their SMTP interface). QQueue uses one generic Nodemailer SMTP
 provider. Provider-*native* API integrations are **not implemented** — connect
 via SMTP. See the [SMTP provider guide](SMTP_PROVIDER_GUIDE.md).
 
+## What are sending domains and sender identities?
+
+They decouple the visible From address from the single SMTP credential that
+authenticates the send. A **sending domain** owns the DKIM configuration for a
+domain; **sender identities** are concrete From records (name + email) under a
+domain, each bound to the SMTP connection that transports it. One identity can
+be the org default. The dashboard's send surfaces pick a sender identity rather
+than free-typing a From address. This is optional — you can still send straight
+from a default SMTP connection.
+
+## Do I need to configure DKIM?
+
+Only if you want QQueue to sign it. A sending domain has two DKIM modes.
+**EXTERNAL:** your upstream relay signs DKIM (for example Mailcow or Amazon SES),
+and QQueue never signs. **MANAGED:** QQueue generates an RSA-2048 keypair,
+surfaces the DNS TXT records for you to publish, and a verification worker moves
+the domain `PENDING → VERIFIED`; from then on QQueue signs DKIM in-process. Only
+**MANAGED** domains that are **VERIFIED** are signed.
+
 ## Does it support transactional email?
 
 Yes — a public transactional send endpoint with API keys, inline or

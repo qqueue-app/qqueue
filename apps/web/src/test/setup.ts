@@ -54,9 +54,10 @@ if (!Range.prototype.getBoundingClientRect) {
   );
 }
 
-// Unmount React trees and clear localStorage between tests so component and
-// session tests stay isolated.
+// Unmount React trees and clear web storage between tests so component,
+// session, and setup-draft tests stay isolated.
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });

@@ -11,6 +11,51 @@ SMTP/Redis/network error.
 
 ---
 
+## Setup (`pnpm setup` and the first-run wizard)
+
+**Symptom: setup says Postgres/Redis/MinIO is "not reachable".**
+
+- The Docker services aren't running. Say yes when setup offers to start them,
+  or run `docker compose up -d` yourself and re-run `pnpm setup`. If Docker
+  itself fails, make sure Docker Desktop (or the docker daemon) is running.
+- You pointed setup at a hosted service and the host/port or connection string
+  has a typo. Re-run `pnpm setup` and re-enter it — the previous value is
+  offered as the default so you can correct it. Provider-specific connection
+  details: [Managed infrastructure](MANAGED_INFRASTRUCTURE.md).
+- A hosted Redis needs its password and TLS: set `REDIS_PASSWORD` and
+  `REDIS_TLS=true` in `.env`.
+
+**Symptom: migrations fail during setup.**
+
+- Postgres is reachable but the credentials or database name are wrong —
+  check `DATABASE_URL` in `.env`.
+- On a hosted Postgres, make sure the connection string keeps
+  `?sslmode=require` and (for Supabase) uses the session pooler, not the
+  transaction pooler.
+- Fix the cause, then run `pnpm db:migrate` directly (or re-run `pnpm setup`).
+
+**Symptom: the browser doesn't show the setup wizard.**
+
+- The wizard only appears while the instance has **zero users**. If an account
+  already exists, sign in and visit `/setup` to resume an unfinished wizard,
+  or use **Settings → Instance** for the registration policy.
+- The API isn't running or isn't reachable from the web app — check
+  `http://localhost:4000/health` (dev) or `https://<your-domain>/health`.
+
+**Symptom: the wizard's sending-account step keeps failing.**
+
+- Saving *is* the connection test: QQueue performs a real SMTP handshake
+  before storing anything. The error shown explains what went wrong in plain
+  language, with the mail server's actual response in parentheses — see
+  [SMTP connection failures](#smtp-connection-failures) below for the common
+  host/port/TLS combinations.
+
+**Symptom: `/register` says registration is closed.**
+
+- The instance admin chose "invite only" (the default) during setup. An
+  instance admin can open registration under **Settings → Instance**, or
+  create accounts on request. There is no self-service invite flow yet.
+
 ## SMTP connection failures
 
 **Symptoms:** Creating an SMTP connection fails verification; transactional
@@ -18,12 +63,19 @@ sends return `502 smtp_failure`; jobs land in **Failed** with an SMTP error.
 
 - **Wrong host/port/TLS combination.** Port `587` uses STARTTLS → set
   `secure: false`. Port `465` uses implicit TLS → set `secure: true`. A mismatch
-  causes immediate connection or handshake errors.
+  causes immediate connection or handshake errors — `secure: true` against a
+  STARTTLS port fails with the OpenSSL error
+  `SSL routines:ssl3_get_record:wrong version number`, and `secure: false`
+  against port `465` times out waiting for the greeting.
 - **Bad credentials.** QQueue verifies credentials on save; a failure here means
   the username/password were rejected. Confirm them with an external client
   (`swaks`, `openssl s_client`, or your mail UI).
 - **Firewall / egress blocked.** Many hosts block outbound `25`/`465`/`587`.
-  Test from the server: `nc -vz smtp.example.com 587`.
+  Corporate endpoint security (CrowdStrike, Zscaler, and similar) often kills
+  plaintext-start SMTP on `587`/`25` specifically — the symptom is
+  `Connection closed` before any server response, even though a plain TCP
+  connect succeeds. Port `465` usually passes because it's encrypted from the
+  first byte. Test from the server: `nc -vz smtp.example.com 587`.
 - **`SECRET_DECRYPTION` error on send.** The stored credentials can't be
   decrypted — usually because `ENCRYPTION_KEY` changed since the connection was
   saved. Re-create the SMTP connection with the current key. Never rotate

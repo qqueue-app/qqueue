@@ -39,12 +39,33 @@ Nginx on public ports `80`/`443` and exposes QQueue only on
 ```sh
 git clone https://github.com/your-org/qqueue.git
 cd qqueue
-cp .env.example .env
 ```
 
 Replace the clone URL with the real repository URL for your deployment.
 
 ## 2. Configure Production Environment
+
+The guided setup writes a production-ready `.env` for you — it generates all
+secrets and passwords, sets your domain, and explains each value as it goes
+(requires Node.js 20+ and pnpm on the server; `pnpm install` first):
+
+```sh
+pnpm install
+pnpm setup -- --mode=production --domain=mail.example.com
+```
+
+Bringing your own hosted Postgres, Redis, or object storage instead of the
+bundled containers? See [Managed infrastructure](MANAGED_INFRASTRUCTURE.md)
+for how to get them (Neon, Upstash, R2) and which `PROD_*` overrides to set.
+
+<details>
+<summary>Manual route (what <code>pnpm setup</code> automates)</summary>
+
+Copy the template first:
+
+```sh
+cp .env.example .env
+```
 
 Open `.env` and set the production values. At minimum, change these:
 
@@ -85,7 +106,9 @@ Generate secrets with:
 openssl rand -hex 32
 ```
 
-Important production notes:
+</details>
+
+Important production notes (they apply on both routes):
 
 - `DOMAIN` must match the public hostname users open in the browser.
 - Production Compose derives `APP_URL`, `PUBLIC_APP_URL`, and `WEB_ORIGIN` from
@@ -99,10 +122,13 @@ Important production notes:
 - Use the same value for `S3_SECRET_ACCESS_KEY` and `MINIO_ROOT_PASSWORD` when
   using bundled MinIO.
 
-To use external infrastructure instead:
+To use external infrastructure instead (step-by-step provider guides in
+[Managed infrastructure](MANAGED_INFRASTRUCTURE.md)):
 
 - External Postgres: set `PROD_DATABASE_URL`.
-- External Redis: set `PROD_REDIS_HOST` and `PROD_REDIS_PORT`.
+- External Redis: set `PROD_REDIS_HOST` and `PROD_REDIS_PORT`, plus
+  `REDIS_PASSWORD` and `REDIS_TLS=true` if the provider requires them
+  (Upstash does).
 - External S3/R2/B2/etc.: add `PROD_S3_ENDPOINT` and set the `S3_*` variables
   for that provider. For AWS S3, set `PROD_S3_ENDPOINT=` and
   `S3_FORCE_PATH_STYLE=false`.
@@ -229,21 +255,30 @@ Expected health response:
 If HTTPS fails, check DNS, firewall rules, and Caddy logs. If you get `502 Bad
 Gateway`, check that the `migrate` service completed and the API is running.
 
-## 6. Create the First Account
+## 6. Complete the Setup Wizard
 
 Open:
 
 ```txt
-https://mail.example.com/register
+https://mail.example.com
 ```
 
-Registration creates your user, the first organization, and gives your user the
-`OWNER` role for that organization.
+On a fresh install QQueue routes you into a short **setup wizard**: it creates
+your administrator account and first organization, connects and verifies the
+sending account (SMTP), asks whether other people may register on this server
+(default: invite only — the safe choice for a server on the open internet),
+and optionally sends you a test email. Everything it configures can be changed
+later in **Settings** (the registration policy lives under **Settings →
+Instance**).
 
-## 7. Connect SMTP
+If you close the tab mid-wizard, sign in and visit `/setup` to resume.
 
-In the dashboard, go to **SMTP Connections** and create a connection for the
-mailbox or provider you want QQueue to send through.
+## 7. Connect SMTP (reference)
+
+The wizard already connected your first sending account; use this section when
+adding more. In the dashboard, go to **Sending accounts** (the SMTP connections
+screen) and create a connection for the mailbox or provider you want QQueue to
+send through.
 
 For a standard submission server, common settings are:
 

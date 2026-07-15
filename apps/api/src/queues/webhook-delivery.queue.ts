@@ -1,5 +1,5 @@
 import { Queue } from "bullmq";
-import { env } from "../config/env.js";
+import { redisConnection } from "../config/redis.js";
 
 export interface WebhookDeliveryJob {
   deliveryId: string;
@@ -8,9 +8,6 @@ export interface WebhookDeliveryJob {
 export const webhookDeliveryQueue = new Queue<WebhookDeliveryJob>(
   "webhook-delivery",
   {
-    connection: {
-      host: env.REDIS_HOST,
-      port: env.REDIS_PORT
-    }
+    connection: redisConnection
   }
 );

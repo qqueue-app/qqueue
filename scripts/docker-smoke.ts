@@ -171,6 +171,39 @@ async function main() {
     const organizationId = register.body.data.organization.id as string;
     const auth = `Bearer ${accessToken}`;
 
+    // The first registration bootstraps the instance (instance admin) and
+    // locks public registration until the setup wizard records a choice, so a
+    // second walk-up signup must be rejected.
+    await request(app)
+      .post("/api/v1/auth/register")
+      .send({ email: `second-${Date.now()}@example.com`, password: "password123" })
+      .expect(403);
+
+    const midSetup = await request(app).get("/api/v1/setup/status").expect(200);
+    if (
+      midSetup.body.data.needsSetup !== false ||
+      midSetup.body.data.setupCompleted !== false ||
+      midSetup.body.data.allowPublicRegistration !== false
+    ) {
+      throw new Error(
+        `Unexpected mid-setup status: ${JSON.stringify(midSetup.body.data)}`
+      );
+    }
+
+    // Finish first-run setup, keeping the instance invite-only.
+    await request(app)
+      .post("/api/v1/setup/complete")
+      .set("Authorization", auth)
+      .send({ allowPublicRegistration: false })
+      .expect(201);
+
+    const completed = await request(app).get("/api/v1/setup/status").expect(200);
+    if (completed.body.data.setupCompleted !== true) {
+      throw new Error(
+        `Setup completion not reflected: ${JSON.stringify(completed.body.data)}`
+      );
+    }
+
     await request(app)
       .post("/api/v1/smtp-connections")
       .set("Authorization", auth)

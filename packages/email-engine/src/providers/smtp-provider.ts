@@ -13,6 +13,12 @@ export interface SMTPProviderOptions {
     user: string;
     pass: string;
   };
+  /**
+   * Fail-fast overrides (ms), passed through to Nodemailer. Interactive
+   * verification uses these; sends keep Nodemailer's defaults.
+   */
+  connectionTimeout?: number;
+  greetingTimeout?: number;
 }
 
 export class SMTPProvider implements EmailProvider {

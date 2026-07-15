@@ -12,6 +12,16 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_HOST: z.string().default("localhost"),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
+  // Optional auth/TLS for hosted Redis (e.g. Upstash). Blank = no auth, no TLS
+  // (the bundled private container).
+  REDIS_PASSWORD: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  REDIS_TLS: z.preprocess(
+    (value) => (value === "" || value === undefined ? "false" : value),
+    z.enum(["true", "false"]).transform((value) => value === "true")
+  ),
   WEB_ORIGIN: z.string().url().optional(),
   JWT_ACCESS_SECRET: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().min(1),

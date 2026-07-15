@@ -1,15 +1,17 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pencil, Plus, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import {
+  SMTPConnectionForm,
+  emptySMTPConnectionForm,
+  type SMTPConnectionFormValues
+} from "../components/SMTPConnectionForm.js";
 import { api, type SMTPConnection } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Button } from "../components/ui/button.js";
-import { Checkbox } from "../components/ui/checkbox.js";
-import { Input } from "../components/ui/input.js";
-import { Label } from "../components/ui/label.js";
 import { Badge } from "../components/ui/badge.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { Skeleton } from "../components/ui/skeleton.js";
@@ -23,37 +25,12 @@ import {
   DialogTitle
 } from "../components/ui/dialog.js";
 
-interface ConnectionForm {
-  name: string;
-  host: string;
-  port: string;
-  secure: boolean;
-  username: string;
-  password: string;
-  fromEmail: string;
-  fromName: string;
-  isDefault: boolean;
-}
-
-const emptyForm: ConnectionForm = {
-  name: "",
-  host: "",
-  port: "587",
-  secure: false,
-  username: "",
-  password: "",
-  fromEmail: "",
-  fromName: "",
-  isDefault: false
-};
-
 export function SMTPConnections() {
   const { currentOrganizationId: organizationId } = useSession();
   const [connections, setConnections] = useState<SMTPConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SMTPConnection | null>(null);
-  const [form, setForm] = useState<ConnectionForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SMTPConnection | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -81,28 +58,33 @@ export function SMTPConnections() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ ...emptyForm, name: "Default SMTP", isDefault: connections.length === 0 });
     setDialogOpen(true);
   }
 
   function openEdit(connection: SMTPConnection) {
     setEditing(connection);
-    setForm({
-      name: connection.name,
-      host: connection.host,
-      port: String(connection.port),
-      secure: connection.secure,
-      username: "",
-      password: "",
-      fromEmail: connection.fromEmail,
-      fromName: connection.fromName ?? "",
-      isDefault: connection.isDefault
-    });
     setDialogOpen(true);
   }
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  const initialForm: SMTPConnectionFormValues = editing
+    ? {
+        name: editing.name,
+        host: editing.host,
+        port: String(editing.port),
+        secure: editing.secure,
+        username: "",
+        password: "",
+        fromEmail: editing.fromEmail,
+        fromName: editing.fromName ?? "",
+        isDefault: editing.isDefault
+      }
+    : {
+        ...emptySMTPConnectionForm,
+        name: "Default SMTP",
+        isDefault: connections.length === 0
+      };
+
+  async function submit(form: SMTPConnectionFormValues) {
     if (!organizationId) {
       toast.error("Select an organization in Settings first.");
       return;
@@ -258,130 +240,27 @@ export function SMTPConnections() {
                 : "Add SMTP credentials so QQueue can send email on your behalf."}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-            </div>
-            <div className="grid grid-cols-[1fr_120px] gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="host">Host</Label>
-                <Input
-                  id="host"
-                  placeholder="smtp.example.com"
-                  value={form.host}
-                  onChange={(e) => setForm({ ...form, host: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="port">Port</Label>
-                <Input
-                  id="port"
-                  inputMode="numeric"
-                  value={form.port}
-                  onChange={(e) => setForm({ ...form, port: e.target.value })}
-                  required
-                />
-              </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="username">
-                  Username{editing ? " (optional)" : ""}
-                </Label>
-                <Input
-                  id="username"
-                  autoComplete="off"
-                  placeholder={editing ? "Keep current" : ""}
-                  value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
-                  required={!editing}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">
-                  Password{editing ? " (optional)" : ""}
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={editing ? "Keep current" : ""}
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  required={!editing}
-                />
-              </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="fromEmail">From email</Label>
-                <Input
-                  id="fromEmail"
-                  type="email"
-                  placeholder="hello@example.com"
-                  value={form.fromEmail}
-                  onChange={(e) => setForm({ ...form, fromEmail: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="fromName">From name</Label>
-                <Input
-                  id="fromName"
-                  value={form.fromName}
-                  onChange={(e) => setForm({ ...form, fromName: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-5">
-              <label
-                htmlFor="smtp-secure"
-                className="flex items-center gap-2.5 text-sm font-medium"
-              >
-                <Checkbox
-                  id="smtp-secure"
-                  checked={form.secure}
-                  onCheckedChange={(checked) =>
-                    setForm({ ...form, secure: checked })
-                  }
-                />
-                Secure TLS
-              </label>
-              <label
-                htmlFor="smtp-default"
-                className="flex items-center gap-2.5 text-sm font-medium"
-              >
-                <Checkbox
-                  id="smtp-default"
-                  checked={form.isDefault}
-                  onCheckedChange={(checked) =>
-                    setForm({ ...form, isDefault: checked })
-                  }
-                />
-                Use as default sender
-              </label>
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? <Spinner /> : null}
-                {editing ? "Test and save" : "Test and create"}
-              </Button>
-            </DialogFooter>
-          </form>
+          <SMTPConnectionForm
+            key={editing?.id ?? "new"}
+            initial={initialForm}
+            editing={Boolean(editing)}
+            onSubmit={submit}
+            footer={
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={saving}>
+                  {saving ? <Spinner /> : null}
+                  {editing ? "Test and save" : "Test and create"}
+                </Button>
+              </DialogFooter>
+            }
+          />
         </DialogContent>
       </Dialog>
 

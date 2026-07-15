@@ -19,6 +19,7 @@ import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { GetStartedCard } from "../components/GetStartedCard.js";
 import { api, type DashboardSummary } from "../lib/api.js";
+import { fetchSetupStatus } from "../lib/setup-status.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
@@ -102,6 +103,23 @@ export function Dashboard() {
   const { currentOrganizationId: organizationId } = useSession();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [instanceSetupCompleted, setInstanceSetupCompleted] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSetupStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setInstanceSetupCompleted(status.setupCompleted);
+        }
+      })
+      .catch(() => {
+        // Unknown state: don't nag about setup.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!organizationId) {
@@ -208,7 +226,10 @@ export function Dashboard() {
         ) : null}
 
         {showOnboarding ? (
-          <GetStartedCard summary={summary} />
+          <GetStartedCard
+            summary={summary}
+            instanceSetupCompleted={instanceSetupCompleted}
+          />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {cards.map((card) => {
