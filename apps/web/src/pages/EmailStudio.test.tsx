@@ -124,12 +124,18 @@ function setup({ withSmtp = true } = {}) {
   mockedApi.deleteAttachment.mockResolvedValue(undefined);
 }
 
-function renderStudio() {
-  return render(
+async function renderStudio() {
+  const result = render(
     <MemoryRouter>
       <EmailStudio />
     </MemoryRouter>
   );
+  // Wait for the initial data load to resolve and the composer form to render.
+  // The submit button only exists once `loading` flips to false, so this clears
+  // the loading skeleton before the synchronous queries below run — otherwise
+  // they race the skeleton and intermittently fail under load.
+  await screen.findByRole("button", { name: /Send email/i });
+  return result;
 }
 
 describe("EmailStudio", () => {
@@ -140,7 +146,7 @@ describe("EmailStudio", () => {
 
   it("warns and disables sending when there is no SMTP connection", async () => {
     setup({ withSmtp: false });
-    renderStudio();
+    await renderStudio();
     expect(await screen.findByText("No sending account yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Send email/i })).toBeDisabled();
   });
@@ -148,10 +154,7 @@ describe("EmailStudio", () => {
   it("sends a manually composed email through the manual pipeline", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
-    );
+    await renderStudio();
 
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
     await user.type(screen.getByLabelText("Subject"), "Hello there");
@@ -171,8 +174,7 @@ describe("EmailStudio", () => {
   it("adds contacts from the picker into the recipients", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() => expect(mockedApi.listContacts).toHaveBeenCalled());
+    await renderStudio();
 
     await user.click(screen.getByRole("button", { name: /Add contacts/i }));
     const dialog = await screen.findByRole("dialog");
@@ -192,8 +194,7 @@ describe("EmailStudio", () => {
   it("sends to a selected contact list", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() => expect(mockedApi.listContactLists).toHaveBeenCalled());
+    await renderStudio();
 
     await user.click(screen.getByRole("button", { name: /Add list/i }));
     const dialog = await screen.findByRole("dialog");
@@ -213,10 +214,7 @@ describe("EmailStudio", () => {
   it("offers one-time scheduling but not recurring on a one-off send", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
-    );
+    await renderStudio();
 
     // Recurring isn't supported for one-off Compose sends, so it's hidden.
     expect(
@@ -233,8 +231,7 @@ describe("EmailStudio", () => {
   it("loads a template into the composer without mutating it", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() => expect(mockedApi.listTemplates).toHaveBeenCalled());
+    await renderStudio();
 
     await user.click(screen.getByRole("combobox", { name: "Template" }));
     await user.click(await screen.findByRole("option", { name: "Welcome" }));
@@ -251,10 +248,7 @@ describe("EmailStudio", () => {
   it("uploads an attachment and includes it in the send", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
-    );
+    await renderStudio();
 
     const file = new File(["pdf-bytes"], "doc.pdf", {
       type: "application/pdf"
@@ -287,10 +281,7 @@ describe("EmailStudio", () => {
   it("removes an attachment from the list", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
-    );
+    await renderStudio();
 
     const file = new File(["pdf-bytes"], "doc.pdf", {
       type: "application/pdf"
@@ -309,10 +300,7 @@ describe("EmailStudio", () => {
   it("shows per-recipient delivery status after sending", async () => {
     const user = userEvent.setup();
     setup();
-    renderStudio();
-    await waitFor(() =>
-      expect(mockedApi.listSMTPConnections).toHaveBeenCalled()
-    );
+    await renderStudio();
 
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
     await user.type(screen.getByLabelText("Subject"), "Hi");
