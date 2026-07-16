@@ -69,6 +69,22 @@ Check this before building something — most of the platform already exists.
 - **Templates** — metadata (description/category/tags), declared variables with
   sample/default values + `{{variable}}` substitution, starter templates, and a
   dedicated `TemplateEditor` page (Tiptap editor in `apps/web/src/components/editor/*`).
+  Editor links/buttons/variables are collected in in-app dialogs (no browser
+  `prompt`); images can be uploaded from the device (stored as `ImageAsset`,
+  embedded by public URL) or linked; CTA buttons carry their own
+  colour/size/corner styling, sit inline beside text, and are editable in place.
+  - **`CtaButton` is an inline atom, not a block.** A block node can only ever
+    occupy its own line, so it could never sit beside text. Placement is
+    therefore the *paragraph's* `text-align` (owned by the TextAlign
+    extension), not a button attribute — the dialog's alignment control writes
+    to the line, and only when the user changes it.
+  - Three traps live in that extension, all with regression tests:
+    its parse rule needs a high **rule** `priority` to beat Link (extension
+    priority would also reorder the schema and make this content-less atom the
+    default block type, breaking lists and Enter); `font-weight` must stay off
+    the anchor and on the inner label span, or Bold parses it back as a mark
+    and wraps the button in `<strong>` on every reopen; and colours are
+    hex-validated before reaching an inline `style`.
 - **Inbox** — IMAP reply sync, conversation grouping, reply-from-QQueue (no
   ticketing/assignment). Mounts by default; the old `INBOX_ENABLED` flag is gone.
 - **Ops** — outbound signed webhooks (+ delivery history/retry); inbound ESP
@@ -92,7 +108,7 @@ Not built: org invitations / member-management UI, billing/usage metering
   `apps/api/src/modules/*` (auth, setup, instance-settings, organizations,
   smtp-connections, contacts, contact-lists, templates,
   campaigns, transactional-email, manual-email, email-drafts, attachments,
-  api-keys, webhooks, tracking, unsubscribe, suppressions, segments,
+  images, api-keys, webhooks, tracking, unsubscribe, suppressions, segments,
   domain-throttles, deliverability, queue-operations, dashboard, inbox). Entry
   `src/index.ts`; app `src/app.ts`; env `src/config/env.ts`;
   Prisma client `src/lib/prisma.ts`; v1 router `src/routes/v1.ts`; health
@@ -101,7 +117,7 @@ Not built: org invitations / member-management UI, billing/usage metering
   `User` (with `isInstanceAdmin`), `InstanceSetting` (key-value instance config),
   `Contact`/`ContactList`/`ContactListMember`, `Suppression`/`SuppressionPolicy`,
   `DomainThrottle`, `Template`, `Campaign`/`CampaignVariant`/`CampaignRun`,
-  `Segment`, `EmailJob`/`EmailEvent`/`EmailDraft`/`EmailAttachment`,
+  `Segment`, `EmailJob`/`EmailEvent`/`EmailDraft`/`EmailAttachment`/`ImageAsset`,
   `InboxAccount`/`InboundMessage`, `ApiKey`, `WebhookEndpoint`/`WebhookDelivery`)
   and `cloud.prisma` (proprietary — `Subscription`/`Seat`/`UsageCounter`).
   Migrations in `prisma/schema/migrations`.
@@ -186,6 +202,14 @@ standard `DATABASE_URL`/`REDIS_*`/`APP_URL`/`*_ORIGIN`:
   delivery. New send paths must respect suppressions — don't route around them.
 - Transactional sends dedupe on the `Idempotency-Key` header; preserve that for
   any externally-retried send surface.
+- **Attachments and images are not interchangeable.** `EmailAttachment` is
+  private (auth-scoped download) and travels inside the message.
+  `ImageAsset` (`modules/images`) backs images embedded in email HTML, so
+  `GET /api/v1/images/:publicId` is deliberately **public and unauthenticated** —
+  a recipient's mail client has no session. That endpoint is why uploads are
+  restricted to sniffed raster types (no SVG: it would be stored XSS on our own
+  origin) and addressed by a random `publicId` rather than the row id. Don't
+  relax either without a fresh decision, and don't route attachments through it.
 - Instance-scope runtime settings go through
   `apps/api/src/lib/instance-settings.ts` (DB rows with env/default fallback,
   short TTL cache) — don't read the `InstanceSetting` table directly. Endpoints

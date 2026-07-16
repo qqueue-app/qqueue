@@ -161,6 +161,19 @@ export function TemplateEditor() {
     [state.subject, state.html]
   );
 
+  /**
+   * Images embedded in a template are hosted publicly so recipients' mail
+   * clients can load them. Errors propagate to the image dialog, which shows
+   * them inline.
+   */
+  async function uploadInlineImage(file: File) {
+    if (!organizationId) {
+      throw new Error("Select an organization in Settings first");
+    }
+    const image = await api.uploadImage(file, { organizationId });
+    return image.url;
+  }
+
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!organizationId) {
@@ -356,6 +369,7 @@ export function TemplateEditor() {
               onChange={(html) => setState((prev) => ({ ...prev, html }))}
               variables={used.length ? used : undefined}
               placeholder="Write your email…"
+              onUploadImage={uploadInlineImage}
             />
           </div>
 

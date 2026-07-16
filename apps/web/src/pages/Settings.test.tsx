@@ -28,6 +28,7 @@ vi.mock("../lib/api.js", async () => {
   );
   return {
     ApiError: actual.ApiError,
+    apiBaseUrl: actual.apiBaseUrl,
     outboundWebhookEvents: [
       "email.queued",
       "email.sent",

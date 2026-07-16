@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { prismaMock } from "../../test/prisma-mock.js";
 import { HttpError } from "../../lib/http-error.js";
 
@@ -480,10 +479,15 @@ describe("transactionalEmailService.send", () => {
         status: "PROCESSING"
       } as never); // lookup after the unique-constraint conflict
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    // Shaped like the error the generated client actually throws: it comes from
+    // the client's CJS copy of the runtime and so fails `instanceof` against the
+    // class imported here (see lib/prisma-error.ts).
     prismaMock.emailJob.create.mockRejectedValue(
-      new PrismaClientKnownRequestError("Unique constraint failed", {
+      Object.assign(new Error("Unique constraint failed"), {
+        name: "PrismaClientKnownRequestError",
         code: "P2002",
-        clientVersion: "6.x"
+        clientVersion: "6.x",
+        meta: { modelName: "EmailJob", target: ["organizationId", "idempotencyKey"] }
       })
     );
 

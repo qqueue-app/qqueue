@@ -378,6 +378,19 @@ export function EmailStudio() {
     }
   }
 
+  /**
+   * Editor images are not attachments: they are hosted publicly so recipients'
+   * mail clients can load them, and the editor embeds the returned URL. Errors
+   * propagate so the image dialog can show them inline.
+   */
+  async function uploadInlineImage(file: File) {
+    if (!organizationId) {
+      throw new Error("Select an organization first");
+    }
+    const image = await api.uploadImage(file, { organizationId });
+    return image.url;
+  }
+
   async function removeAttachment(id: string) {
     try {
       await api.deleteAttachment(id);
@@ -898,6 +911,7 @@ export function EmailStudio() {
                   onChange={setHtml}
                   placeholder="Write your email…"
                   showVariables={false}
+                  onUploadImage={uploadInlineImage}
                 />
               </Card>
             </div>

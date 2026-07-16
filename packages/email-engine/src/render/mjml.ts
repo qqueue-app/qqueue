@@ -103,11 +103,11 @@ function escapeHtml(value: string): string {
 
 /**
  * Wrap arbitrary body HTML (e.g. editor/template output) in an email-safe MJML
- * document: the body inside a padded white card on a tinted page background. The
- * author's HTML is passed through verbatim inside an `<mj-raw>` block so its own
- * markup survives; the surrounding scaffold supplies the email-safe table/column
- * structure plus typography defaults that make plain editor output look
- * intentional.
+ * document: the body padded on the client's default background, with no card or
+ * page tint. The author's HTML is passed through verbatim inside an `<mj-text>`
+ * block so its own markup survives; the surrounding scaffold supplies the
+ * email-safe table/column structure plus typography defaults that make plain
+ * editor output look intentional.
  *
  * A brand header and a copyright/unsubscribe footer are added ONLY when the
  * caller supplies the corresponding `branding` fields — by default the document
@@ -169,9 +169,9 @@ export function wrapHtmlInMjml(
         ].join("\n")
       : "";
 
-  // Card padding adapts so the body isn't crammed against the top/bottom when
-  // there's no header/footer section to provide breathing room.
-  const cardPadding = header || footer ? "36px 40px" : "40px";
+  // Body padding adapts so the content isn't crammed against the top/bottom
+  // when there's no header/footer section to provide breathing room.
+  const bodyPadding = header || footer ? "36px 40px" : "40px";
 
   return [
     "<mjml>",
@@ -190,11 +190,17 @@ export function wrapHtmlInMjml(
     `      .qq-body blockquote { margin: 0 0 14px; padding: 4px 0 4px 16px; border-left: 3px solid ${accent}; color: #486581; }`,
     "    </mj-style>",
     "  </mj-head>",
-    `  <mj-body background-color="#eef2f1">`,
+    // No page tint and no card panel: the sender's content sits on the client's
+    // default background. Chrome the sender didn't author doesn't get added.
+    `  <mj-body>`,
     header,
-    `    <mj-section background-color="#ffffff" border-radius="14px" padding="${cardPadding}">`,
+    `    <mj-section padding="${bodyPadding}">`,
     "      <mj-column>",
-    `        <mj-raw><div class="qq-body">${bodyHtml}</div></mj-raw>`,
+    // mj-text, not mj-raw: mj-raw emits its markup as a direct child of <tbody>,
+    // which parsers foster-parent out of the table and into the surrounding
+    // column (font-size:0px) — the body arrives invisible. mj-text renders a
+    // real <tr><td> and applies the mj-all/mj-text font attributes.
+    `        <mj-text padding="0"><div class="qq-body">${bodyHtml}</div></mj-text>`,
     "      </mj-column>",
     "    </mj-section>",
     footer,

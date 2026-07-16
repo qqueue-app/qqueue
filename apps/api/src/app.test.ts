@@ -485,14 +485,15 @@ describe("unsubscribe routes (public)", () => {
 
 describe("error-handler integration", () => {
   it("maps a Prisma P2025 thrown in a handler to 404", async () => {
-    const { PrismaClientKnownRequestError } = await import(
-      "@prisma/client/runtime/library"
-    );
     prismaMock.organizationMember.findUnique.mockResolvedValue({
       role: "OWNER"
     } as never);
+    // Shaped like the generated client's real error (see lib/prisma-error.ts):
+    // it originates in the client's CJS runtime copy, not the ESM one this
+    // process imports, so `instanceof` never matches it.
     prismaMock.organization.update.mockRejectedValue(
-      new PrismaClientKnownRequestError("nope", {
+      Object.assign(new Error("nope"), {
+        name: "PrismaClientKnownRequestError",
         code: "P2025",
         clientVersion: "6.0.0"
       })

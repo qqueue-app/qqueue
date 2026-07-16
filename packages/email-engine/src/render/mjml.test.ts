@@ -62,17 +62,27 @@ describe("renderMjml", () => {
 });
 
 describe("wrapHtmlInMjml / renderHtmlAsEmailSafe", () => {
-  it("wraps body HTML in an email-safe card with no default branding", () => {
+  it("wraps body HTML in an email-safe document with no default branding", () => {
     const doc = wrapHtmlInMjml("<p>Body</p>");
     expect(doc).toContain("<mjml>");
-    // Author HTML survives verbatim inside the body card.
+    // Author HTML survives verbatim inside the body.
     expect(doc).toContain(
-      `<mj-raw><div class="qq-body"><p>Body</p></div></mj-raw>`
+      `<mj-text padding="0"><div class="qq-body"><p>Body</p></div></mj-text>`
     );
     // No vendor name is injected when no branding is supplied.
     expect(doc).not.toContain("QQueue");
-    // With no header/footer, only the body card section remains.
+    // With no header/footer, only the body section remains.
     expect(doc).not.toContain("&copy;");
+  });
+
+  // The body used to render as a rounded white card floating on a tinted page.
+  // That was chrome the sender never authored, so it reads as the product
+  // stamping its own styling onto their mail.
+  it("adds no card panel or page tint of its own", () => {
+    const doc = wrapHtmlInMjml("<p>Body</p>");
+    expect(doc).not.toContain("border-radius");
+    expect(doc).not.toContain("#eef2f1");
+    expect(doc).toContain("<mj-body>");
   });
 
   it("renders a brand header and copyright footer only when opted in", () => {
@@ -99,5 +109,23 @@ describe("wrapHtmlInMjml / renderHtmlAsEmailSafe", () => {
     expect(result.usedFallback).toBe(false);
     expect(result.html).toContain("<table");
     expect(result.html).toContain("<p>Body</p>");
+  });
+
+  // Regression: the body used to be emitted via mj-raw, which places it as a
+  // direct child of <tbody>. Parsers foster-parent that out of the table and
+  // into the column wrapper (font-size:0px), so the body arrived invisible —
+  // present in the source, blank on screen. Asserting the body is merely
+  // *present* does not catch this; assert where it lands.
+  it("places the body inside a table cell, never directly in <tbody>", async () => {
+    const result = await renderHtmlAsEmailSafe("<p>Body</p>");
+
+    expect(result.html).not.toMatch(/<tbody>\s*<div class="qq-body">/);
+    // The cell wrapper carries a real font-size, so the body can't inherit 0px.
+    const body = result.html.slice(
+      result.html.indexOf("</style>"),
+      result.html.indexOf('<div class="qq-body">')
+    );
+    expect(body).toMatch(/<td[^>]*>/);
+    expect(body).toMatch(/font-size:16px/);
   });
 });

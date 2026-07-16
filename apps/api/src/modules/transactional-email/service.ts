@@ -1,5 +1,4 @@
 import type { InputJsonValue } from "@prisma/client/runtime/library";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { injectTracking } from "@qqueue/email-engine";
 import type {
   EmailOrigin,
@@ -8,6 +7,7 @@ import type {
 } from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
+import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 import { attachmentService } from "../attachments/service.js";
@@ -79,11 +79,7 @@ async function createEmailJob(
   try {
     return { job: await prisma.emailJob.create({ data }), replayed: false };
   } catch (error) {
-    if (
-      idempotencyKey &&
-      error instanceof PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (idempotencyKey && isPrismaKnownRequestError(error, "P2002")) {
       const existing = await prisma.emailJob.findUnique({
         where: {
           organizationId_idempotencyKey: { organizationId, idempotencyKey }

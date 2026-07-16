@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RichTextEditor } from "./RichTextEditor.js";
@@ -62,41 +62,117 @@ describe("RichTextEditor", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("prompts for a URL when the link button is used", async () => {
+  it("opens a link dialog instead of a browser prompt", async () => {
     const user = userEvent.setup();
-    const promptSpy = vi
-      .spyOn(window, "prompt")
-      .mockReturnValue("https://example.com");
-    render(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
-    const link = await screen.findByLabelText("Link");
-    await user.click(link);
-    expect(promptSpy).toHaveBeenCalled();
+    const promptSpy = vi.spyOn(window, "prompt");
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    await user.click(await screen.findByLabelText("Link"));
+
+    const field = await screen.findByLabelText("Link URL");
+    await user.clear(field);
+    await user.type(field, "https://example.com");
+    await user.click(screen.getByRole("button", { name: "Add link" }));
+
+    expect(promptSpy).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Link URL")).not.toBeInTheDocument()
+    );
   });
 
-  it("clears the link when the prompt returns an empty string", async () => {
+  it("keeps the link dialog open when the URL is blank", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "prompt").mockReturnValue("");
     render(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
     await user.click(await screen.findByLabelText("Link"));
-    expect(screen.getByLabelText("Link")).toBeInTheDocument();
+    await user.clear(await screen.findByLabelText("Link URL"));
+    await user.click(screen.getByRole("button", { name: "Add link" }));
+    expect(screen.getByLabelText("Link URL")).toBeInTheDocument();
   });
 
-  it("ignores the link action when the prompt is cancelled", async () => {
+  it("closes the link dialog when cancelled", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "prompt").mockReturnValue(null);
     render(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
     await user.click(await screen.findByLabelText("Link"));
-    expect(screen.getByLabelText("Link")).toBeInTheDocument();
+    await screen.findByLabelText("Link URL");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Link URL")).not.toBeInTheDocument()
+    );
+  });
+
+  it("inserts a styled button from the dialog", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>x</p>" onChange={onChange} />);
+    await user.click(await screen.findByLabelText("Button"));
+
+    // Scoped to the dialog: the toolbar has its own text-alignment controls
+    // with the same labels.
+    const dialog = within(await screen.findByRole("dialog"));
+    const label = dialog.getByLabelText("Button text");
+    await user.clear(label);
+    await user.type(label, "Read more");
+    const href = dialog.getByLabelText("Button URL");
+    await user.clear(href);
+    await user.type(href, "https://example.com");
+    await user.click(dialog.getByLabelText("Align right"));
+    await user.click(dialog.getByRole("button", { name: "Insert button" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const html = onChange.mock.calls.at(-1)?.[0] as string;
+    expect(html).toContain("data-qq-button");
+    expect(html).toContain("Read more");
+    // Alignment is applied to the line the button sits on.
+    expect(html).toContain("text-align: right");
+  });
+
+  it("offers the button control by name, not just an icon", async () => {
+    render(<RichTextEditor value="<p>x</p>" onChange={() => {}} />);
+    expect(
+      await screen.findByRole("button", { name: "Button" })
+    ).toHaveTextContent("Button");
+  });
+
+  // Edit mode keys off a ProseMirror node selection, which needs real layout
+  // to produce from a click — jsdom has none, so the switch itself is covered
+  // where it can be driven honestly: `updateCtaButton` in button-extension's
+  // tests, and the pre-filled Save path in ButtonDialog's.
+  it("keeps a button beside the text it was inserted next to", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>Ready to start?</p>" onChange={onChange} />);
+
+    await user.click(await screen.findByLabelText("Button"));
+    const dialog = within(await screen.findByRole("dialog"));
+    const href = dialog.getByLabelText("Button URL");
+    await user.clear(href);
+    await user.type(href, "https://example.com");
+    await user.click(dialog.getByRole("button", { name: "Insert button" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const html = onChange.mock.calls.at(-1)?.[0] as string;
+    // One paragraph holding both: the button shares the line with the text
+    // instead of taking its own. (It lands at the cursor, which the test
+    // never moved off the start of the document.)
+    expect(html).toContain("data-qq-button");
+    expect(html).toContain("Ready to start?");
+    expect(html.match(/<p[\s>]/g)).toHaveLength(1);
+    // Alignment was untouched, so the line keeps its own.
+    expect(html).not.toContain("text-align");
   });
 
   it("inserts a sanitized custom variable", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    vi.spyOn(window, "prompt").mockReturnValue("my.var!");
     render(<RichTextEditor value="" onChange={onChange} showVariables />);
     await user.click(await screen.findByRole("button", { name: /Variable/i }));
     await user.click(await screen.findByText("Custom…"));
+
+    await user.type(await screen.findByLabelText("Variable name"), "my.var!");
+    await user.click(screen.getByRole("button", { name: "Insert variable" }));
+
     await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain("{{my.var}}");
   });
 
   it("exercises the remaining toolbar buttons", async () => {

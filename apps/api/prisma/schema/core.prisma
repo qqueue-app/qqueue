@@ -172,6 +172,7 @@ model Organization {
   emailJobs         EmailJob[]
   emailDrafts       EmailDraft[]
   emailAttachments  EmailAttachment[]
+  imageAssets       ImageAsset[]
   inboxAccounts     InboxAccount[]
   inboundMessages   InboundMessage[]
   emailEvents       EmailEvent[]
@@ -560,6 +561,26 @@ model EmailAttachment {
   @@index([organizationId])
   @@index([emailJobId])
   @@index([emailDraftId])
+}
+
+/// An image embedded in email HTML (editor "insert image" uploads). Unlike
+/// EmailAttachment — which is private and travels inside the message — these
+/// blobs are served publicly and unauthenticated, because recipients' mail
+/// clients fetch them with no session. `publicId` is a random token rather than
+/// the cuid primary key so the public URL can't be enumerated.
+model ImageAsset {
+  id              String       @id @default(cuid())
+  publicId        String       @unique
+  organizationId  String
+  filename        String
+  contentType     String
+  size            Int
+  storageKey      String
+  createdByUserId String?
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+
+  @@index([organizationId])
 }
 
 model EmailEvent {

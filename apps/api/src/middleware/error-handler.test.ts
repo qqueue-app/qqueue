@@ -77,7 +77,23 @@ describe("errorHandler", () => {
     });
   });
 
-  it("maps Prisma P2002 to 409", () => {
+  it("maps Prisma P2002 to 409, naming the model and duplicated field", () => {
+    const error = new PrismaClientKnownRequestError("conflict", {
+      code: "P2002",
+      clientVersion: "6.0.0",
+      meta: { modelName: "Contact", target: ["organizationId", "email"] }
+    });
+    const res = run(error);
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({
+      error: {
+        code: "conflict",
+        message: "A contact with this email address already exists"
+      }
+    });
+  });
+
+  it("falls back to a generic conflict message without usable meta", () => {
     const error = new PrismaClientKnownRequestError("conflict", {
       code: "P2002",
       clientVersion: "6.0.0"
@@ -85,7 +101,30 @@ describe("errorHandler", () => {
     const res = run(error);
     expect(res.statusCode).toBe(409);
     expect(res.body).toEqual({
-      error: { code: "conflict", message: "Resource already exists" }
+      error: { code: "conflict", message: "That record already exists" }
+    });
+  });
+
+  // The errors the running server actually sees come from the generated
+  // client's CJS copy of the runtime, so they fail `instanceof` against the
+  // class imported above (see lib/prisma-error.ts). Reproduce that shape
+  // directly — a class-based test alone would pass while production 500s.
+  it("maps a P2002 from the client's other runtime copy to 409", () => {
+    const foreignCopyError = Object.assign(new Error("conflict"), {
+      name: "PrismaClientKnownRequestError",
+      code: "P2002",
+      clientVersion: "6.19.3",
+      meta: { modelName: "Contact", target: ["organizationId", "email"] }
+    });
+    expect(foreignCopyError).not.toBeInstanceOf(PrismaClientKnownRequestError);
+
+    const res = run(foreignCopyError);
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({
+      error: {
+        code: "conflict",
+        message: "A contact with this email address already exists"
+      }
     });
   });
 

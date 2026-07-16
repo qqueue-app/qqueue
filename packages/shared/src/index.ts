@@ -84,6 +84,8 @@ export type ApiErrorCode =
   | "invalid_schedule"
   | "validation_error"
   | "attachment_too_large"
+  | "image_too_large"
+  | "unsupported_image_type"
   | "not_found"
   | "conflict";
 

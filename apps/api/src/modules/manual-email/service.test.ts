@@ -6,12 +6,9 @@ vi.mock("../transactional-email/service.js", () => ({
   transactionalEmailService: { send }
 }));
 
+const renderHtmlAsEmailSafe = vi.hoisted(() => vi.fn());
 vi.mock("@qqueue/email-engine", () => ({
-  renderHtmlAsEmailSafe: vi.fn(async (html: string) => ({
-    html: `<safe>${html}</safe>`,
-    errors: [],
-    usedFallback: false
-  })),
+  renderHtmlAsEmailSafe,
   injectTracking: vi.fn((html?: string) =>
     html === undefined ? undefined : `${html}<pixel>`
   )
@@ -21,6 +18,11 @@ const { manualEmailService } = await import("./service.js");
 
 beforeEach(() => {
   send.mockReset().mockResolvedValue({ id: "job_1", status: "SENT" });
+  renderHtmlAsEmailSafe.mockReset().mockImplementation(async (html: string) => ({
+    html: `<safe>${html}</safe>`,
+    errors: [],
+    usedFallback: false
+  }));
   prismaMock.contact.findMany.mockResolvedValue([] as never);
   prismaMock.contactListMember.findMany.mockResolvedValue([] as never);
 });
@@ -148,6 +150,69 @@ describe("manualEmailService.send", () => {
       "user_1"
     );
     expect(send.mock.calls[0][0].attachmentIds).toEqual(["att_1", "att_2"]);
+  });
+
+  it("logs an error when MJML compilation falls back to the raw body", async () => {
+    renderHtmlAsEmailSafe.mockResolvedValue({
+      html: "<p>Body</p>",
+      errors: ["Unexpected token"],
+      usedFallback: true
+    });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await manualEmailService.send(
+      { organizationId: "org_1", to: ["a@x.com"], subject: "Hi", html: "<p>Body</p>" },
+      "user_1"
+    );
+
+    expect(spy).toHaveBeenCalledOnce();
+    expect(spy.mock.calls[0][0]).toContain("Unexpected token");
+    // The send still goes out — a fallback degrades the layout, not delivery.
+    expect(send.mock.calls[0][0].html).toBe("<p>Body</p>");
+    spy.mockRestore();
+  });
+
+  it("warns when MJML reports validation issues but still renders", async () => {
+    renderHtmlAsEmailSafe.mockResolvedValue({
+      html: "<safe/>",
+      errors: ["mj-raw is not allowed here"],
+      usedFallback: false
+    });
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await manualEmailService.send(
+      { organizationId: "org_1", to: ["a@x.com"], subject: "Hi", html: "<p>Body</p>" },
+      "user_1"
+    );
+
+    expect(spy.mock.calls[0][0]).toContain("mj-raw is not allowed here");
+    spy.mockRestore();
+  });
+
+  // Every other test here stubs the renderer, so none of them would notice the
+  // real one emitting an invisible body (the mj-raw-in-<tbody> bug). This one
+  // drives the actual MJML layer through the manual send path.
+  it("sends a visible body through the real MJML renderer", async () => {
+    const actual =
+      await vi.importActual<typeof import("@qqueue/email-engine")>(
+        "@qqueue/email-engine"
+      );
+    renderHtmlAsEmailSafe.mockImplementation(actual.renderHtmlAsEmailSafe);
+
+    await manualEmailService.send(
+      {
+        organizationId: "org_1",
+        to: ["a@x.com"],
+        subject: "Hi",
+        html: "<p>My typed content</p>"
+      },
+      "user_1"
+    );
+
+    const html: string = send.mock.calls[0][0].html;
+    expect(html).toContain("<p>My typed content</p>");
+    // Not foster-parented out of the table into the font-size:0px column.
+    expect(html).not.toMatch(/<tbody>\s*<div class="qq-body">/);
   });
 });
 

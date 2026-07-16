@@ -1,6 +1,8 @@
 import { clearSession, getSession, updateTokens } from "./session.js";
 
-const apiBaseUrl =
+// Empty string in a production build means same-origin relative requests, which
+// is how QQueue is deployed unless VITE_API_URL pins an explicit API host.
+export const apiBaseUrl =
   import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
   (import.meta.env.PROD ? "" : "http://localhost:4000");
 
@@ -290,6 +292,15 @@ export interface Template {
 
 export interface EmailAttachment {
   id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+}
+
+/** An image embedded in email HTML. `url` is public, absolute, and permanent. */
+export interface ImageAsset {
+  id: string;
+  url: string;
   filename: string;
   contentType: string;
   size: number;
@@ -1215,6 +1226,20 @@ export const api = {
 
   deleteAttachment(id: string) {
     return request<void>(`/api/v1/attachments/${id}`, { method: "DELETE" });
+  },
+
+  /**
+   * Upload an image for embedding in email HTML. The returned `url` is public
+   * and absolute — recipients' mail clients fetch it with no session.
+   */
+  uploadImage(file: File, options: { organizationId: string }) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("organizationId", options.organizationId);
+    return request<ImageAsset>("/api/v1/images", {
+      method: "POST",
+      body: form,
+    });
   },
 
   listEmailDrafts(organizationId: string) {

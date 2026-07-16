@@ -7,6 +7,7 @@ import { PageHeader } from "../components/PageHeader.js";
 import { TeamCard } from "../components/TeamCard.js";
 import {
   api,
+  apiBaseUrl,
   outboundWebhookEvents,
   type ApiKey,
   type OutboundWebhookEvent,
@@ -53,9 +54,6 @@ import {
   TableHeader,
   TableRow
 } from "../components/ui/table.js";
-
-const apiBaseUrl =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
 
 export function Settings() {
   const {
@@ -531,7 +529,7 @@ export function Settings() {
               <div>
                 <dt className="font-medium">API base URL</dt>
                 <dd className="mt-1 font-mono text-xs text-muted-foreground">
-                  {apiBaseUrl}
+                  {apiBaseUrl || window.location.origin}
                 </dd>
               </div>
             </dl>

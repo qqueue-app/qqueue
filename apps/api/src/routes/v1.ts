@@ -10,6 +10,7 @@ import { dashboardRouter } from "../modules/dashboard/routes.js";
 import { deliverabilityRouter } from "../modules/deliverability/routes.js";
 import { domainThrottleRouter } from "../modules/domain-throttles/routes.js";
 import { emailDraftRouter } from "../modules/email-drafts/routes.js";
+import { imagePublicRouter, imageRouter } from "../modules/images/routes.js";
 import { inboxRouter } from "../modules/inbox/routes.js";
 import { instanceSettingsRouter } from "../modules/instance-settings/routes.js";
 import {
@@ -52,6 +53,11 @@ v1Router.use(unsubscribeRouter);
 // authenticated and lives on the `/invitations` router mounted below.
 v1Router.use(invitationPublicRouter);
 
+// Public image reads: recipients' mail clients fetch images embedded in email
+// HTML with no session. Authorized by the unguessable publicId in the URL.
+// Uploading is authenticated and lives on the `/images` router mounted below.
+v1Router.use(imagePublicRouter);
+
 // Transactional sends support either dashboard JWT auth or public API keys.
 v1Router.use("/transactional-email", transactionalEmailRouter);
 
@@ -86,6 +92,9 @@ v1Router.use("/email-drafts", emailDraftRouter);
 // Email attachment upload/download/delete. Blobs live in object storage; the
 // send pipeline links rows to the EmailJob and the worker streams them to SMTP.
 v1Router.use("/attachments", attachmentRouter);
+// Editor image uploads. Blobs live in object storage; the rows they create are
+// read back through the public router mounted above.
+v1Router.use("/images", imageRouter);
 v1Router.use("/webhook-endpoints", webhookEndpointRouter);
 // Inbox module: IMAP reply sync, assignment, notes, and reply-from-QQueue.
 v1Router.use("/inbox", inboxRouter);

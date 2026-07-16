@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -22,7 +22,7 @@ import {
   AlignRight,
   Palette,
   Image as ImageIcon,
-  MousePointerClick,
+  RectangleHorizontal,
   Minus,
   Braces,
   Undo,
@@ -30,7 +30,17 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +49,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import { CtaButton } from "./button-extension";
+import {
+  CtaButton,
+  type ButtonAlign,
+  type ButtonFormValue
+} from "./button-extension";
+import { ButtonDialog } from "./ButtonDialog";
+import { ImageDialog } from "./ImageDialog";
 
 const DEFAULT_VARIABLES = ["firstName", "lastName", "email"];
 
@@ -54,6 +70,109 @@ const TEXT_COLORS = [
   { label: "Amber", value: "#d97706" }
 ];
 
+interface PromptField {
+  name: string;
+  label: string;
+  type?: string;
+  placeholder?: string;
+}
+
+// One dialog drives every toolbar action that needs to collect a value.
+interface PromptConfig {
+  title: string;
+  description?: string;
+  submitLabel: string;
+  fields: PromptField[];
+  initial: Record<string, string>;
+  removeLabel?: string;
+  onRemove?: () => void;
+  onSubmit: (values: Record<string, string>) => void;
+}
+
+function EditorPromptDialog({
+  config,
+  onClose
+}: {
+  config: PromptConfig | null;
+  onClose: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (config) {
+      setValues(config.initial);
+    }
+  }, [config]);
+
+  if (!config) {
+    return null;
+  }
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = Object.fromEntries(
+      Object.entries(values).map(([key, value]) => [key, value.trim()])
+    );
+    if (config!.fields.some((field) => !trimmed[field.name])) {
+      return;
+    }
+    config!.onSubmit(trimmed);
+    onClose();
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{config.title}</DialogTitle>
+          {config.description ? (
+            <DialogDescription>{config.description}</DialogDescription>
+          ) : null}
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          {config.fields.map((field, index) => (
+            <div key={field.name} className="space-y-2">
+              <Label htmlFor={`editor-prompt-${field.name}`}>{field.label}</Label>
+              <Input
+                id={`editor-prompt-${field.name}`}
+                type={field.type ?? "text"}
+                placeholder={field.placeholder}
+                autoFocus={index === 0}
+                value={values[field.name] ?? ""}
+                onChange={(event) =>
+                  setValues((current) => ({
+                    ...current,
+                    [field.name]: event.target.value
+                  }))
+                }
+              />
+            </div>
+          ))}
+          <DialogFooter>
+            {config.onRemove ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="sm:mr-auto"
+                onClick={() => {
+                  config.onRemove?.();
+                  onClose();
+                }}
+              >
+                {config.removeLabel ?? "Remove"}
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit">{config.submitLabel}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 interface RichTextEditorProps {
   value: string;
   onChange: (html: string) => void;
@@ -61,6 +180,12 @@ interface RichTextEditorProps {
   variables?: string[];
   showVariables?: boolean;
   className?: string;
+  /**
+   * Uploads an image and resolves to its public URL. When omitted the image
+   * dialog only offers linking, so the editor stays usable without an
+   * organization context.
+   */
+  onUploadImage?: (file: File) => Promise<string>;
 }
 
 function ToolbarButton({
@@ -136,24 +261,15 @@ function ColorMenu({ editor }: { editor: Editor }) {
 
 function VariableMenu({
   editor,
-  variables
+  variables,
+  onInsertCustom
 }: {
   editor: Editor;
   variables: string[];
+  onInsertCustom: () => void;
 }) {
   function insert(name: string) {
     editor.chain().focus().insertContent(`{{${name}}}`).run();
-  }
-
-  function insertCustom() {
-    const name = window.prompt("Variable name (letters, numbers, dots)");
-    if (!name) {
-      return;
-    }
-    const clean = name.trim().replace(/[^\w.-]/g, "");
-    if (clean) {
-      insert(clean);
-    }
   }
 
   return (
@@ -164,7 +280,11 @@ function VariableMenu({
           Variable
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      {/* Focus goes to the editor or the dialog, never back to the trigger. */}
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
         <DropdownMenuLabel>Insert variable</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {variables.map((variable) => (
@@ -173,7 +293,7 @@ function VariableMenu({
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={insertCustom}>Custom…</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onInsertCustom}>Custom…</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -185,8 +305,12 @@ export function RichTextEditor({
   placeholder,
   variables = DEFAULT_VARIABLES,
   showVariables = true,
-  className
+  className,
+  onUploadImage
 }: RichTextEditorProps) {
+  const [prompt, setPrompt] = useState<PromptConfig | null>(null);
+  const [imageOpen, setImageOpen] = useState(false);
+  const [buttonOpen, setButtonOpen] = useState(false);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -227,41 +351,59 @@ export function RichTextEditor({
     return null;
   }
 
+  // With a button selected the toolbar control edits it in place instead of
+  // inserting a second one.
+  const buttonSelected = editor.isActive("ctaButton");
+
+  // The button is inline, so its placement is the alignment of the line it
+  // sits on — seed the dialog from that rather than forcing a default.
+  const currentAlign: ButtonAlign = editor.isActive({ textAlign: "center" })
+    ? "center"
+    : editor.isActive({ textAlign: "right" })
+      ? "right"
+      : "left";
+
   function setLink() {
     const previous = editor!.getAttributes("link").href as string | undefined;
-    const url = window.prompt("Link URL", previous ?? "https://");
-    if (url === null) {
-      return;
-    }
-    if (url === "") {
-      editor!.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
-    }
-    editor!
-      .chain()
-      .focus()
-      .extendMarkRange("link")
-      .setLink({ href: url })
-      .run();
+    setPrompt({
+      title: previous ? "Edit link" : "Add link",
+      description: "The selected text becomes a link to this address.",
+      submitLabel: previous ? "Update link" : "Add link",
+      fields: [
+        {
+          name: "href",
+          label: "Link URL",
+          type: "url",
+          placeholder: "https://example.com"
+        }
+      ],
+      initial: { href: previous ?? "https://" },
+      removeLabel: "Remove link",
+      onRemove: previous
+        ? () => editor!.chain().focus().extendMarkRange("link").unsetLink().run()
+        : undefined,
+      onSubmit: ({ href }) =>
+        editor!.chain().focus().extendMarkRange("link").setLink({ href }).run()
+    });
   }
 
-  function insertImage() {
-    const url = window.prompt("Image URL", "https://");
-    if (url) {
-      editor!.chain().focus().setImage({ src: url }).run();
-    }
-  }
-
-  function insertButton() {
-    const label = window.prompt("Button text", "Get started");
-    if (!label) {
-      return;
-    }
-    const href = window.prompt("Button URL", "https://");
-    if (!href) {
-      return;
-    }
-    editor!.chain().focus().setCtaButton({ label, href }).run();
+  function insertCustomVariable() {
+    setPrompt({
+      title: "Insert variable",
+      description:
+        "Use letters, numbers, dots, dashes and underscores. Anything else is stripped.",
+      submitLabel: "Insert variable",
+      fields: [
+        { name: "name", label: "Variable name", placeholder: "company.name" }
+      ],
+      initial: { name: "" },
+      onSubmit: ({ name }) => {
+        const clean = name.replace(/[^\w.-]/g, "");
+        if (clean) {
+          editor!.chain().focus().insertContent(`{{${clean}}}`).run();
+        }
+      }
+    });
   }
 
   return (
@@ -373,12 +515,26 @@ export function RichTextEditor({
         <ToolbarButton label="Link" active={editor.isActive("link")} onClick={setLink}>
           <LinkIcon />
         </ToolbarButton>
-        <ToolbarButton label="Image" onClick={insertImage}>
+        <ToolbarButton label="Image" onClick={() => setImageOpen(true)}>
           <ImageIcon />
         </ToolbarButton>
-        <ToolbarButton label="Button" onClick={insertButton}>
-          <MousePointerClick />
-        </ToolbarButton>
+        {/* Labelled rather than icon-only: an icon alone made this hard to
+            find, and it doubles as "edit" when a button is selected. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => setButtonOpen(true)}
+          aria-label={buttonSelected ? "Edit button" : "Button"}
+          className={cn(
+            "h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground",
+            buttonSelected && "bg-primary/10 text-primary"
+          )}
+        >
+          <RectangleHorizontal className="h-4 w-4" />
+          {buttonSelected ? "Edit button" : "Button"}
+        </Button>
         <ToolbarButton
           label="Divider"
           onClick={() => editor.chain().focus().setHorizontalRule().run()}
@@ -405,12 +561,52 @@ export function RichTextEditor({
 
         {showVariables ? (
           <div className="ml-auto">
-            <VariableMenu editor={editor} variables={variables} />
+            <VariableMenu
+              editor={editor}
+              variables={variables}
+              onInsertCustom={insertCustomVariable}
+            />
           </div>
         ) : null}
       </div>
 
       <EditorContent editor={editor} />
+
+      <EditorPromptDialog config={prompt} onClose={() => setPrompt(null)} />
+      <ImageDialog
+        open={imageOpen}
+        onClose={() => setImageOpen(false)}
+        onUpload={onUploadImage}
+        onInsert={(src) => editor.chain().focus().setImage({ src }).run()}
+      />
+      <ButtonDialog
+        open={buttonOpen}
+        initial={
+          buttonSelected
+            ? ({
+                ...editor.getAttributes("ctaButton"),
+                align: currentAlign
+              } as Partial<ButtonFormValue>)
+            : undefined
+        }
+        currentAlign={currentAlign}
+        onClose={() => setButtonOpen(false)}
+        onSubmit={({ align, ...attrs }) => {
+          const chain = editor.chain().focus();
+          if (buttonSelected) {
+            chain.updateCtaButton(attrs);
+          } else {
+            chain.setCtaButton(attrs);
+          }
+          // Alignment lives on the paragraph, not the button — so only touch
+          // it when the user actually changed it, or inserting a button beside
+          // text would restamp that line's alignment.
+          if (align !== currentAlign) {
+            chain.setTextAlign(align);
+          }
+          chain.run();
+        }}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="163" height="20" role="img" aria-label="backend coverage: 91.61%">
-  <title>backend coverage: 91.61%</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="163" height="20" role="img" aria-label="backend coverage: 91.32%">
+  <title>backend coverage: 91.32%</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -13,7 +13,7 @@
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="110" text-rendering="geometricPrecision">
     <text x="570" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="1040">backend coverage</text>
     <text x="570" y="140" transform="scale(.1)" fill="#fff" textLength="1040">backend coverage</text>
-    <text x="1385" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="390">91.61%</text>
-    <text x="1385" y="140" transform="scale(.1)" fill="#fff" textLength="390">91.61%</text>
+    <text x="1385" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="390">91.32%</text>
+    <text x="1385" y="140" transform="scale(.1)" fill="#fff" textLength="390">91.32%</text>
   </g>
 </svg>

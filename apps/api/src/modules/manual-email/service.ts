@@ -107,6 +107,20 @@ async function renderBody(html: string | undefined) {
     return undefined;
   }
   const result = await renderHtmlAsEmailSafe(html);
+
+  // renderHtmlAsEmailSafe never throws: a compile failure silently degrades to
+  // the raw body HTML. Surface that, or the send just quietly stops being
+  // email-safe with nothing to explain why.
+  if (result.usedFallback) {
+    console.error(
+      `[manual-email] MJML compilation failed; sending unwrapped body HTML. ${result.errors.join("; ")}`
+    );
+  } else if (result.errors.length > 0) {
+    console.warn(
+      `[manual-email] MJML validation reported issues: ${result.errors.join("; ")}`
+    );
+  }
+
   return result.html;
 }
 

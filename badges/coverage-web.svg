@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="137" height="20" role="img" aria-label="web coverage: 78.23%">
-  <title>web coverage: 78.23%</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="137" height="20" role="img" aria-label="web coverage: 78.71%">
+  <title>web coverage: 78.71%</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -13,7 +13,7 @@
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="110" text-rendering="geometricPrecision">
     <text x="440" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="780">web coverage</text>
     <text x="440" y="140" transform="scale(.1)" fill="#fff" textLength="780">web coverage</text>
-    <text x="1125" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="390">78.23%</text>
-    <text x="1125" y="140" transform="scale(.1)" fill="#fff" textLength="390">78.23%</text>
+    <text x="1125" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="390">78.71%</text>
+    <text x="1125" y="140" transform="scale(.1)" fill="#fff" textLength="390">78.71%</text>
   </g>
 </svg>

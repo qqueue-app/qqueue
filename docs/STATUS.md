@@ -112,7 +112,10 @@ operational and abuse-control gaps from the original audit have been closed.
   generation and DNS verification), transactional sends, the `manual-email`
   module (Email Studio send + preview +
   per-recipient delivery status), `email-drafts` module (composer drafts), and
-  `attachments` module (upload/download/delete to object storage), tracking
+  `attachments` module (upload/download/delete to object storage), `images`
+  module (editor image uploads; the read endpoint is public and unauthenticated
+  because recipients' mail clients load embedded images without a session),
+  tracking
   endpoints, inbound ESP webhook normalization, queue operations endpoints,
   Redis-backed rate limiting, and queue enqueueing. The `manual-email` module
   reuses `transactionalEmailService.send` rather than introducing a parallel
@@ -150,7 +153,8 @@ operational and abuse-control gaps from the original audit have been closed.
   `senderIdentityId`, and threading metadata:
   `messageId`/`inReplyTo`/`references`), email events, API keys,
   webhook endpoints, webhook deliveries, email drafts (Email Studio composer
-  state), email attachments (metadata for blobs in object storage), and
+  state), email attachments (metadata for blobs in object storage), image assets
+  (publicly-served images embedded in email HTML), and
   password reset tokens.
 - `scripts`: coverage badge generation, dependency license audit, cloud
   boundary guardrail checks, and the Docker-backed smoke test (`docker-smoke.ts`).
@@ -273,6 +277,18 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Contacts CRUD exists, with tags and created date surfaced in the UI.
 - [x] Contact lists CRUD, descriptions, and contact membership exist.
 - [x] Templates CRUD exists, with an in-app preview.
+- [x] Editor link/button/variable dialogs are in-app (no browser `prompt`), and
+  images can be uploaded from the device or linked by URL. Uploads are stored as
+  `ImageAsset` blobs in object storage and embedded via a public URL, since
+  recipients' mail clients fetch images with no session; uploads are limited to
+  content-sniffed PNG/JPEG/GIF/WebP (SVG rejected) and addressed by a random
+  `publicId`.
+- [x] CTA buttons are inline, so they can sit beside text on the same line, and
+  support background and text colour, size, and corner style, with alignment
+  (left/centre/right) applied to the line they sit on. They can be re-edited in
+  place. Styling is stored as `data-qq-*` attributes beside the inline styles so
+  it survives a save/load cycle; buttons saved before this keep rendering as the
+  original centred green.
 - [x] Email Studio manual composer: multiple `To`, `CC`/`BCC`, contact and
   contact-list pickers, template apply, MJML-backed preview, drafts,
   attachments (object storage), per-recipient delivery status, and manual send
