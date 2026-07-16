@@ -950,6 +950,157 @@ describe("queue-operations RBAC", () => {
   });
 });
 
+describe("invitations routes", () => {
+  const future = new Date(Date.now() + 60 * 60 * 1000);
+
+  it("creates an invitation (201) as an OWNER", async () => {
+    // requireOrgMembership + service assertOrgRole both see OWNER (default).
+    prismaMock.organizationMember.findFirst.mockResolvedValue(null);
+    prismaMock.organizationInvite.create.mockResolvedValue({
+      id: "inv_1",
+      email: "new@x.com",
+      role: "MEMBER"
+    } as never);
+    prismaMock.organization.findUnique.mockResolvedValue({ name: "Acme" } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post("/api/v1/invitations")
+      .set("Authorization", auth)
+      .send({ organizationId: "org_1", email: "new@x.com", role: "MEMBER" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.acceptUrl).toContain("/accept-invite?token=");
+  });
+
+  it("denies a normal member issuing an invitation (403)", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    const res = await request(app)
+      .post("/api/v1/invitations")
+      .set("Authorization", auth)
+      .send({ organizationId: "org_1", email: "new@x.com", role: "MEMBER" });
+    expect(res.status).toBe(403);
+  });
+
+  it("lists pending invitations", async () => {
+    prismaMock.organizationInvite.findMany.mockResolvedValue([] as never);
+    const res = await request(app)
+      .get("/api/v1/invitations?organizationId=org_1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ data: [] });
+  });
+
+  it("revokes an invitation", async () => {
+    prismaMock.organizationInvite.findUnique.mockResolvedValue({
+      id: "inv_1",
+      organizationId: "org_1",
+      status: "PENDING"
+    } as never);
+    prismaMock.organizationInvite.update.mockResolvedValue({
+      id: "inv_1",
+      status: "REVOKED"
+    } as never);
+    const res = await request(app)
+      .delete("/api/v1/invitations/inv_1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe("REVOKED");
+  });
+
+  it("previews an invitation without auth (public lookup)", async () => {
+    prismaMock.organizationInvite.findUnique.mockResolvedValue({
+      email: "new@x.com",
+      role: "MEMBER",
+      status: "PENDING",
+      expiresAt: future,
+      organization: { name: "Acme" }
+    } as never);
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    const res = await request(app).get(
+      "/api/v1/invitations/lookup?token=a-token-that-is-long-enough"
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ organizationName: "Acme", hasAccount: false });
+  });
+
+  it("returns 400 for a lookup without a token", async () => {
+    const res = await request(app).get("/api/v1/invitations/lookup");
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts an invitation for a new account without auth (public)", async () => {
+    prismaMock.organizationInvite.findUnique.mockResolvedValue({
+      id: "inv_1",
+      organizationId: "org_1",
+      email: "new@x.com",
+      role: "MEMBER",
+      status: "PENDING",
+      expiresAt: future
+    } as never);
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.user.create.mockResolvedValue({
+      id: "user_9",
+      email: "new@x.com",
+      name: null,
+      createdAt: new Date(0)
+    } as never);
+    prismaMock.organizationMember.create.mockResolvedValue({} as never);
+    prismaMock.organizationInvite.update.mockResolvedValue({} as never);
+    prismaMock.organization.findUnique.mockResolvedValue({
+      id: "org_1",
+      name: "Acme"
+    } as never);
+
+    const res = await request(app)
+      .post("/api/v1/invitations/accept")
+      .send({ token: "a-token-that-is-long-enough", password: "password123" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.tokens.accessToken).toEqual(expect.any(String));
+    expect(res.body.data.requiresSignIn).toBe(false);
+  });
+});
+
+describe("organization member routes", () => {
+  it("changes a member's role (OWNER acting)", async () => {
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER" } as never)
+      .mockResolvedValueOnce({ role: "MEMBER" } as never);
+    prismaMock.organizationMember.update.mockResolvedValue({
+      userId: "user_2",
+      role: "ADMIN"
+    } as never);
+    const res = await request(app)
+      .patch("/api/v1/organizations/org_1/members/user_2")
+      .set("Authorization", auth)
+      .send({ role: "ADMIN" });
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe("ADMIN");
+  });
+
+  it("removes a member (204)", async () => {
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER" } as never)
+      .mockResolvedValueOnce({ role: "MEMBER" } as never);
+    prismaMock.organizationMember.delete.mockResolvedValue({} as never);
+    const res = await request(app)
+      .delete("/api/v1/organizations/org_1/members/user_2")
+      .set("Authorization", auth);
+    expect(res.status).toBe(204);
+  });
+
+  it("lists members", async () => {
+    prismaMock.organizationMember.findMany.mockResolvedValue([] as never);
+    const res = await request(app)
+      .get("/api/v1/organizations/org_1/members")
+      .set("Authorization", auth);
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("createApp", () => {
   it("returns a callable express app", () => {
     const built = createApp();
