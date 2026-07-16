@@ -22,7 +22,13 @@ export default defineConfig({
         "src/**/*.d.ts",
         "src/index.ts",
         "src/config/env.ts"
-      ]
+      ],
+      thresholds: {
+        lines: 85,
+        functions: 85,
+        branches: 85,
+        statements: 85
+      }
     }
   }
 });

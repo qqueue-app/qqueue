@@ -27,16 +27,16 @@ export default defineConfig({
         "src/test/**",
         "src/styles.css"
       ],
-      // TODO(coverage): raise these back to 80 across the board. New
-      // onboarding UI is tested; the shortfall is pre-existing debt in the
-      // legacy pages and the lib/api.ts client (many endpoint wrappers are
-      // never called in tests). Pinned to the current floor to stop further
-      // regression; tracked in the coverage follow-up.
+      // Function coverage lags the other metrics on purpose. The remaining
+      // uncovered functions are handlers and callbacks inside pages that
+      // already have tests, plus Inbox.tsx (untested end to end) — diffuse
+      // work with no single lever, unlike the line gap. Raise `functions`
+      // only alongside real interaction tests, not by chasing the number.
       thresholds: {
-        lines: 77,
-        functions: 64,
-        branches: 79,
-        statements: 77
+        lines: 85,
+        functions: 75,
+        branches: 80,
+        statements: 85
       }
     }
   }
