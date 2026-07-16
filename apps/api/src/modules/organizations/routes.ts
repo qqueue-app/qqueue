@@ -6,6 +6,14 @@ export const organizationRouter = Router();
 organizationRouter.get("/", organizationController.list);
 organizationRouter.post("/", organizationController.create);
 organizationRouter.get("/:id/members", organizationController.listMembers);
+organizationRouter.patch(
+  "/:id/members/:userId",
+  organizationController.updateMemberRole
+);
+organizationRouter.delete(
+  "/:id/members/:userId",
+  organizationController.removeMember
+);
 organizationRouter.get("/:id", organizationController.get);
 organizationRouter.put("/:id", organizationController.update);
 organizationRouter.delete("/:id", organizationController.delete);

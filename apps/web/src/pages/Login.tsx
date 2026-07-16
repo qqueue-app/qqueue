@@ -160,8 +160,8 @@ export function Login({ mode }: LoginProps) {
             <CardHeader>
               <CardTitle className="text-xl">Registration is closed</CardTitle>
               <CardDescription>
-                This QQueue server is invite only. Ask your administrator for
-                an account.
+                This QQueue server is invite only. Ask an administrator to
+                invite you — you'll get an email link to set up your account.
               </CardDescription>
             </CardHeader>
             <CardContent>

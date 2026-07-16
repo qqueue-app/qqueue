@@ -381,6 +381,42 @@ export const organizationSchema = z.object({
 
 export type OrganizationInput = z.infer<typeof organizationSchema>;
 
+// Org membership roles. Mirrors the Prisma `UserRole` enum and the `UserRole`
+// union above; kept as a Zod enum so request bodies validate against it.
+export const userRoleSchema = z.enum(["OWNER", "ADMIN", "MEMBER"]);
+
+// Changing an existing member's role. OWNER-related guards (last-owner, who may
+// grant OWNER) live in the service, not the schema.
+export const memberRoleUpdateSchema = z.object({
+  role: userRoleSchema,
+});
+
+export type MemberRoleUpdateInput = z.infer<typeof memberRoleUpdateSchema>;
+
+export type InviteStatus = "PENDING" | "ACCEPTED" | "REVOKED";
+
+// Create an invitation to join an organization. The role defaults to MEMBER;
+// inviting someone as OWNER is allowed by the schema but gated to OWNERs in the
+// service (an ADMIN cannot mint a new OWNER).
+export const inviteCreateSchema = z.object({
+  organizationId: z.string().min(1),
+  email: emailAddressSchema,
+  role: userRoleSchema.default("MEMBER"),
+});
+
+export type InviteCreateInput = z.infer<typeof inviteCreateSchema>;
+
+// Accept an invitation via its emailed token. `password`/`name` are only used
+// when the invited email has no account yet (a new user is created); the
+// service requires a password in that case and ignores these otherwise.
+export const inviteAcceptSchema = z.object({
+  token: z.string().min(16),
+  password: z.string().min(8).optional(),
+  name: z.string().optional(),
+});
+
+export type InviteAcceptInput = z.infer<typeof inviteAcceptSchema>;
+
 // Instance-wide settings (first-run onboarding). Sparse key-value rows in the
 // InstanceSetting table; an absent key falls back to the env/default value.
 export const INSTANCE_SETTING_KEYS = {

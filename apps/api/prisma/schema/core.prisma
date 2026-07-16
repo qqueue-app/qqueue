@@ -21,6 +21,12 @@ enum UserRole {
   MEMBER
 }
 
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
 enum ContactStatus {
   ACTIVE
   UNSUBSCRIBED
@@ -122,6 +128,7 @@ model User {
   members             OrganizationMember[]
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
+  invitesSent         OrganizationInvite[] @relation("InvitesSent")
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 }
@@ -152,6 +159,7 @@ model Organization {
   id                String               @id @default(cuid())
   name              String
   members           OrganizationMember[]
+  invites           OrganizationInvite[]
   smtpConnections   SMTPConnection[]
   contacts          Contact[]
   contactLists      ContactList[]
@@ -188,6 +196,30 @@ model OrganizationMember {
   createdAt      DateTime     @default(now())
 
   @@unique([organizationId, userId])
+}
+
+// A pending invitation for someone to join an organization. The raw token is
+// only ever in the emailed accept link; we persist its sha256 hash (same shape
+// as PasswordResetToken). Invitations are the sanctioned exception to closed
+// public registration: an org OWNER/ADMIN deliberately vouches for the invitee.
+model OrganizationInvite {
+  id              String       @id @default(cuid())
+  organizationId  String
+  email           String
+  role            UserRole     @default(MEMBER)
+  tokenHash       String       @unique
+  status          InviteStatus @default(PENDING)
+  invitedByUserId String
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy       User         @relation("InvitesSent", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([expiresAt])
 }
 
 model SMTPConnection {

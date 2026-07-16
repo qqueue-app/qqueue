@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
 import { InstanceSettingsCard } from "../components/InstanceSettingsCard.js";
 import { PageHeader } from "../components/PageHeader.js";
+import { TeamCard } from "../components/TeamCard.js";
 import {
   api,
   outboundWebhookEvents,
@@ -541,6 +542,8 @@ export function Settings() {
             </Button>
           </CardContent>
         </Card>
+
+        <TeamCard />
 
         <InstanceSettingsCard />
 

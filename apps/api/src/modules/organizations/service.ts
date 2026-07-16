@@ -1,6 +1,17 @@
-import type { OrganizationInput } from "@qqueue/shared";
-import { assertOrgAccess, assertOrgRole } from "../../lib/org-access.js";
+import type { OrganizationInput, UserRole } from "@qqueue/shared";
+import {
+  assertOrgAccess,
+  assertOrgRole,
+  getMembership
+} from "../../lib/org-access.js";
+import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+
+const memberUserSelect = {
+  id: true,
+  email: true,
+  name: true
+};
 
 type OrganizationMemberWithOrganization = {
   organization: {
@@ -78,5 +89,83 @@ export const organizationService = {
   async delete(id: string, userId: string) {
     await assertOrgRole(userId, id, ["OWNER"]);
     await prisma.organization.delete({ where: { id } });
+  },
+
+  // Change a member's role. Guardrails: OWNER/ADMIN only; an ADMIN may not touch
+  // an OWNER; only an OWNER may grant the OWNER role; and the last remaining
+  // OWNER can never be demoted (an org must always have an owner).
+  async updateMemberRole(
+    organizationId: string,
+    targetUserId: string,
+    actorUserId: string,
+    role: UserRole
+  ) {
+    const actor = await assertOrgRole(actorUserId, organizationId, [
+      "OWNER",
+      "ADMIN"
+    ]);
+
+    const target = await getMembership(targetUserId, organizationId);
+    if (!target) {
+      throw new HttpError(404, "Member not found in this organization");
+    }
+
+    if (actor.role === "ADMIN" && target.role === "OWNER") {
+      throw new HttpError(403, "Admins cannot change an owner's role");
+    }
+
+    if (role === "OWNER" && actor.role !== "OWNER") {
+      throw new HttpError(403, "Only an owner can grant the owner role");
+    }
+
+    if (target.role === "OWNER" && role !== "OWNER") {
+      await assertNotLastOwner(organizationId);
+    }
+
+    return prisma.organizationMember.update({
+      where: { organizationId_userId: { organizationId, userId: targetUserId } },
+      data: { role },
+      include: { user: { select: memberUserSelect } }
+    });
+  },
+
+  // Remove a member. Guardrails mirror role changes: OWNER/ADMIN only; an ADMIN
+  // may not remove an OWNER; and the last remaining OWNER can never be removed.
+  async removeMember(
+    organizationId: string,
+    targetUserId: string,
+    actorUserId: string
+  ) {
+    const actor = await assertOrgRole(actorUserId, organizationId, [
+      "OWNER",
+      "ADMIN"
+    ]);
+
+    const target = await getMembership(targetUserId, organizationId);
+    if (!target) {
+      throw new HttpError(404, "Member not found in this organization");
+    }
+
+    if (actor.role === "ADMIN" && target.role === "OWNER") {
+      throw new HttpError(403, "Admins cannot remove an owner");
+    }
+
+    if (target.role === "OWNER") {
+      await assertNotLastOwner(organizationId);
+    }
+
+    await prisma.organizationMember.delete({
+      where: { organizationId_userId: { organizationId, userId: targetUserId } }
+    });
   }
 };
+
+// Reject an operation that would leave an organization with no OWNER.
+async function assertNotLastOwner(organizationId: string) {
+  const ownerCount = await prisma.organizationMember.count({
+    where: { organizationId, role: "OWNER" }
+  });
+  if (ownerCount <= 1) {
+    throw new HttpError(400, "An organization must always have at least one owner");
+  }
+}

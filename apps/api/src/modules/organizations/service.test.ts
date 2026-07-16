@@ -80,4 +80,102 @@ describe("organizationService", () => {
       "You do not have permission to do this"
     );
   });
+
+  describe("updateMemberRole", () => {
+    it("lets an OWNER promote a MEMBER to ADMIN", async () => {
+      // First findUnique = actor membership, second = target membership.
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "OWNER" } as never)
+        .mockResolvedValueOnce({ role: "MEMBER" } as never);
+      prismaMock.organizationMember.update.mockResolvedValue({
+        userId: "target",
+        role: "ADMIN"
+      } as never);
+
+      const result = await organizationService.updateMemberRole(
+        "org_1",
+        "target",
+        "actor",
+        "ADMIN"
+      );
+      expect(result).toMatchObject({ role: "ADMIN" });
+      expect(prismaMock.organizationMember.update).toHaveBeenCalled();
+    });
+
+    it("forbids an ADMIN from changing an OWNER's role", async () => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "ADMIN" } as never)
+        .mockResolvedValueOnce({ role: "OWNER" } as never);
+
+      await expect(
+        organizationService.updateMemberRole("org_1", "target", "actor", "MEMBER")
+      ).rejects.toThrow("Admins cannot change an owner's role");
+    });
+
+    it("forbids an ADMIN from granting the OWNER role", async () => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "ADMIN" } as never)
+        .mockResolvedValueOnce({ role: "MEMBER" } as never);
+
+      await expect(
+        organizationService.updateMemberRole("org_1", "target", "actor", "OWNER")
+      ).rejects.toThrow("Only an owner can grant the owner role");
+    });
+
+    it("refuses to demote the last remaining OWNER", async () => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "OWNER" } as never)
+        .mockResolvedValueOnce({ role: "OWNER" } as never);
+      prismaMock.organizationMember.count.mockResolvedValue(1);
+
+      await expect(
+        organizationService.updateMemberRole("org_1", "target", "actor", "MEMBER")
+      ).rejects.toThrow("at least one owner");
+    });
+
+    it("returns 404 when the target is not a member", async () => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "OWNER" } as never)
+        .mockResolvedValueOnce(null);
+
+      await expect(
+        organizationService.updateMemberRole("org_1", "ghost", "actor", "ADMIN")
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+  });
+
+  describe("removeMember", () => {
+    it("lets an OWNER remove a MEMBER", async () => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "OWNER" } as never)
+        .mockResolvedValueOnce({ role: "MEMBER" } as never);
+      prismaMock.organizationMember.delete.mockResolvedValue({} as never);
+
+      await organizationService.removeMember("org_1", "target", "actor");
+      expect(prismaMock.organizationMember.delete).toHaveBeenCalledWith({
+        where: { organizationId_userId: { organizationId: "org_1", userId: "target" } }
+      });
+    });
+
+    it("forbids an ADMIN from removing an OWNER", async () => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "ADMIN" } as never)
+        .mockResolvedValueOnce({ role: "OWNER" } as never);
+
+      await expect(
+        organizationService.removeMember("org_1", "target", "actor")
+      ).rejects.toThrow("Admins cannot remove an owner");
+    });
+
+    it("refuses to remove the last remaining OWNER", async () => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "OWNER" } as never)
+        .mockResolvedValueOnce({ role: "OWNER" } as never);
+      prismaMock.organizationMember.count.mockResolvedValue(1);
+
+      await expect(
+        organizationService.removeMember("org_1", "target", "actor")
+      ).rejects.toThrow("at least one owner");
+    });
+  });
 });

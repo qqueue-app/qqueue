@@ -52,6 +52,40 @@ export interface OrganizationMember {
   };
 }
 
+export type InviteStatus = "PENDING" | "ACCEPTED" | "REVOKED";
+
+export interface OrganizationInvite {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: string;
+  status: InviteStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  createdAt: string;
+  invitedBy: { id: string; email: string; name?: string | null } | null;
+}
+
+export interface InviteLookup {
+  email: string;
+  role: string;
+  organizationName: string;
+  expiresAt: string;
+  // False when the invited email has no account yet — the accept page then
+  // collects a password to create one.
+  hasAccount: boolean;
+}
+
+export interface InviteAcceptResult {
+  organization: { id: string; name: string } | null;
+  // True for existing accounts: membership was granted but they must sign in.
+  requiresSignIn: boolean;
+  alreadyMember?: boolean;
+  role?: string;
+  user?: { id: string; email: string; name?: string | null; createdAt: string };
+  tokens?: { accessToken: string; refreshToken: string };
+}
+
 export interface Contact {
   id: string;
   organizationId: string;
@@ -1197,6 +1231,59 @@ export const api = {
     return request<OrganizationMember[]>(
       `/api/v1/organizations/${organizationId}/members`
     );
+  },
+
+  updateMemberRole(organizationId: string, userId: string, role: string) {
+    return request<OrganizationMember>(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      }
+    );
+  },
+
+  removeMember(organizationId: string, userId: string) {
+    return request<void>(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  listInvites(organizationId: string) {
+    return request<OrganizationInvite[]>(
+      `/api/v1/invitations?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createInvite(input: { organizationId: string; email: string; role: string }) {
+    return request<{ invite: OrganizationInvite; acceptUrl: string }>(
+      "/api/v1/invitations",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    );
+  },
+
+  revokeInvite(id: string) {
+    return request<OrganizationInvite>(
+      `/api/v1/invitations/${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  lookupInvite(token: string) {
+    return request<InviteLookup>(
+      `/api/v1/invitations/lookup?token=${encodeURIComponent(token)}`
+    );
+  },
+
+  acceptInvite(input: { token: string; password?: string; name?: string }) {
+    return request<InviteAcceptResult>("/api/v1/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
 
   createEmailDraft(input: Record<string, unknown>) {

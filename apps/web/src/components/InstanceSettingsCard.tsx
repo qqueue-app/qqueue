@@ -109,8 +109,9 @@ export function InstanceSettingsCard() {
               Allow public registration
             </Label>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              When off, this server is invite only: visitors can't create
-              accounts at /register.
+              When off, visitors can't self-register at /register. You can still
+              add people to any organization from its Team section — invitations
+              work even while this is off.
             </p>
           </div>
           {settings ? (

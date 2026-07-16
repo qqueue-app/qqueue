@@ -12,6 +12,10 @@ import { domainThrottleRouter } from "../modules/domain-throttles/routes.js";
 import { emailDraftRouter } from "../modules/email-drafts/routes.js";
 import { inboxRouter } from "../modules/inbox/routes.js";
 import { instanceSettingsRouter } from "../modules/instance-settings/routes.js";
+import {
+  invitationPublicRouter,
+  invitationRouter
+} from "../modules/invitations/routes.js";
 import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
@@ -43,6 +47,11 @@ v1Router.use(trackingRouter);
 // link, not a session — recipients aren't QQueue users.
 v1Router.use(unsubscribeRouter);
 
+// Public invitation preview + accept. Authorized by the emailed token, not a
+// session (invitees may not have an account yet). Managing invitations is
+// authenticated and lives on the `/invitations` router mounted below.
+v1Router.use(invitationPublicRouter);
+
 // Transactional sends support either dashboard JWT auth or public API keys.
 v1Router.use("/transactional-email", transactionalEmailRouter);
 
@@ -51,6 +60,8 @@ v1Router.use(requireAuth);
 v1Router.use("/dashboard", dashboardRouter);
 v1Router.use("/api-keys", apiKeyRouter);
 v1Router.use("/organizations", organizationRouter);
+// Organization invitations (OWNER/ADMIN): issue, list, and revoke.
+v1Router.use("/invitations", invitationRouter);
 // Install-scope settings (registration policy, env status) — instance admins only.
 v1Router.use("/instance-settings", instanceSettingsRouter);
 v1Router.use("/queue-operations", queueOperationsRouter);

@@ -39,6 +39,11 @@ const Setup = lazy(() =>
     default: module.Setup,
   }))
 );
+const AcceptInvite = lazy(() =>
+  import("../pages/AcceptInvite.js").then((module) => ({
+    default: module.AcceptInvite,
+  }))
+);
 const LegalPage = lazy(() =>
   import("../pages/Legal.js").then((module) => ({
     default: module.LegalPage,
@@ -115,6 +120,7 @@ export function AppRoutes() {
         <Route path="/register" element={<Login mode="register" />} />
         <Route path="/forgot-password" element={<Login mode="forgot" />} />
         <Route path="/reset-password" element={<Login mode="reset" />} />
+        <Route path="/accept-invite" element={<AcceptInvite />} />
         <Route path="/terms" element={<LegalPage kind="terms" />} />
         <Route path="/privacy" element={<LegalPage kind="privacy" />} />
         <Route path="/licensing" element={<LegalPage kind="licensing" />} />

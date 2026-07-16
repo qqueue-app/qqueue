@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { organizationSchema } from "@qqueue/shared";
+import { memberRoleUpdateSchema, organizationSchema } from "@qqueue/shared";
 import { organizationService } from "./service.js";
 
 export const organizationController = {
@@ -48,6 +48,26 @@ export const organizationController = {
 
   async delete(req: Request, res: Response) {
     await organizationService.delete(String(req.params.id), req.userId!);
+    res.status(204).send();
+  },
+
+  async updateMemberRole(req: Request, res: Response) {
+    const { role } = memberRoleUpdateSchema.parse(req.body);
+    const member = await organizationService.updateMemberRole(
+      String(req.params.id),
+      String(req.params.userId),
+      req.userId!,
+      role
+    );
+    res.json({ data: member });
+  },
+
+  async removeMember(req: Request, res: Response) {
+    await organizationService.removeMember(
+      String(req.params.id),
+      String(req.params.userId),
+      req.userId!
+    );
     res.status(204).send();
   }
 };
