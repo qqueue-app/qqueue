@@ -188,6 +188,12 @@ export function wrapHtmlInMjml(
     `      .qq-body ul, .qq-body ol { margin: 0 0 14px; padding-left: 22px; }`,
     `      .qq-body img { max-width: 100%; height: auto; }`,
     `      .qq-body blockquote { margin: 0 0 14px; padding: 4px 0 4px 16px; border-left: 3px solid ${accent}; color: #486581; }`,
+    // Tables are a fallback only. The editor writes inline style attributes on
+    // every table/td/th precisely because Gmail and Outlook.com strip <style>
+    // blocks, so these rules cover pasted-in markup that arrived without them.
+    `      .qq-body table { border-collapse: collapse; width: 100%; margin: 0 0 14px; }`,
+    `      .qq-body th, .qq-body td { border: 1px solid #d9e2ec; padding: 6px 10px; vertical-align: top; }`,
+    `      .qq-body th { background-color: #f0f4f8; font-weight: 600; text-align: left; }`,
     "    </mj-style>",
     "  </mj-head>",
     // No page tint and no card panel: the sender's content sits on the client's

@@ -144,10 +144,25 @@ export const attachmentService = {
     if (!attachmentIds?.length) {
       return;
     }
-    await prisma.emailAttachment.updateMany({
-      where: { id: { in: attachmentIds }, organizationId, emailJobId: null },
+    const unique = Array.from(new Set(attachmentIds));
+    const { count } = await prisma.emailAttachment.updateMany({
+      where: { id: { in: unique }, organizationId, emailJobId: null },
       data: { emailJobId }
     });
+
+    // The scoping above silently drops ids that are unknown, already consumed
+    // by another job, or owned by a different org. Left unchecked that sends a
+    // message with fewer attachments than the caller asked for and reports
+    // success — the user only finds out when the recipient tells them. Fail the
+    // send instead: an explicit error is recoverable, a silently-missing
+    // attachment is not.
+    if (count !== unique.length) {
+      throw new HttpError(
+        400,
+        "One or more attachments are unavailable (already sent, unknown, or from another organization)",
+        "validation_error"
+      );
+    }
   },
 
   /**

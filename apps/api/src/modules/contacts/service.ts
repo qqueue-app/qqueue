@@ -29,6 +29,8 @@ export interface ContactImportSummary {
   skipped: number;
   suppressed: number;
   errors: CsvParseError[];
+  /** The list rows were linked into, when the import targeted one. */
+  contactList?: { id: string; name: string; created: boolean };
 }
 
 // Collapse header variants ("First Name", "first_name") to a canonical key.
@@ -149,28 +151,83 @@ export const contactService = {
   },
 
   /**
+   * Delete many contacts at once. Ids that don't belong to the caller's
+   * organization are filtered out by the same membership scoping the single
+   * delete uses, so a mismatched id is skipped rather than leaking existence.
+   * Returns the number actually removed so the UI can report a partial result.
+   *
+   * List memberships cascade (ContactListMember.contact is onDelete: Cascade),
+   * and campaigns reference lists rather than contacts, so nothing else needs
+   * cleaning up here. Suppressions are keyed by email and deliberately survive:
+   * deleting a contact must not silently un-suppress that address.
+   */
+  async bulkDelete(
+    organizationId: string,
+    userId: string,
+    contactIds: string[]
+  ): Promise<{ deleted: number }> {
+    const { count } = await prisma.contact.deleteMany({
+      where: {
+        id: { in: contactIds },
+        organizationId,
+        organization: { members: { some: { userId } } }
+      }
+    });
+    return { deleted: count };
+  },
+
+  /**
    * Bulk import contacts from CSV. Upserts by (organizationId, email): new
    * contacts are created, existing ones have names filled in and tags merged
    * (union, never clobbered). Addresses already on the suppression list are
    * still imported but reported separately and never reactivated. When a target
    * list is given, members are linked with source CSV_IMPORT.
+   *
+   * The target list may be an existing id (`contactListId`) or a name to create
+   * (`contactListName`). Importing straight into a list is the normal path: the
+   * contact record itself still dedupes org-wide on email, so the same person
+   * imported into three lists is one Contact with three memberships.
    */
   async importContacts(params: {
     organizationId: string;
     csv: string;
     contactListId?: string;
+    contactListName?: string;
   }): Promise<ContactImportSummary> {
-    const { organizationId, csv, contactListId } = params;
+    const { organizationId, csv, contactListName } = params;
+    let { contactListId } = params;
     const { rows, errors } = parseContactsCsv(csv);
+    let listSummary: ContactImportSummary["contactList"];
 
     if (contactListId) {
       const list = await prisma.contactList.findFirst({
         where: { id: contactListId, organizationId },
-        select: { id: true }
+        select: { id: true, name: true }
       });
       if (!list) {
         throw new HttpError(404, "Contact list not found");
       }
+      listSummary = { id: list.id, name: list.name, created: false };
+    } else if (contactListName) {
+      // Reuse a same-named list rather than creating duplicates on re-import;
+      // ContactList has no unique constraint on (organizationId, name), so this
+      // is a find-then-create by design.
+      const trimmed = contactListName.trim();
+      if (!trimmed) {
+        throw new HttpError(400, "Contact list name is required", "validation_error");
+      }
+      const existingList = await prisma.contactList.findFirst({
+        where: { organizationId, name: trimmed },
+        select: { id: true, name: true }
+      });
+      const list =
+        existingList ??
+        (await prisma.contactList.create({
+          data: { organizationId, name: trimmed },
+          select: { id: true, name: true }
+        }));
+      contactListId = list.id;
+      listSummary = { id: list.id, name: list.name, created: !existingList };
     }
 
     const emails = rows.map((row) => row.email);
@@ -236,7 +293,14 @@ export const contactService = {
       }
     }
 
-    return { created, updated, skipped: errors.length, suppressed, errors };
+    return {
+      created,
+      updated,
+      skipped: errors.length,
+      suppressed,
+      errors,
+      ...(listSummary ? { contactList: listSummary } : {})
+    };
   },
 
   /**

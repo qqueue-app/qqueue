@@ -19,6 +19,7 @@ const h = vi.hoisted(() => {
     lastConfig: undefined as unknown
   };
   const simpleParser = vi.fn();
+  const storage = { putObject: vi.fn(), getObject: vi.fn() };
   class ImapFlow {
     constructor(config: unknown) {
       state.lastConfig = config;
@@ -41,12 +42,13 @@ const h = vi.hoisted(() => {
       state.closeCalls++;
     }
   }
-  return { state, simpleParser, ImapFlow };
+  return { state, simpleParser, storage, ImapFlow };
 });
 
 vi.mock("imapflow", () => ({ ImapFlow: h.ImapFlow }));
 vi.mock("mailparser", () => ({ simpleParser: h.simpleParser }));
 vi.mock("./crypto.js", () => ({ decryptSecret: (v: string) => `dec:${v}` }));
+vi.mock("./storage.js", () => ({ storage: h.storage }));
 
 const { syncInboxAccount, syncInboxAccounts } = await import("./inbox-sync.js");
 
@@ -81,6 +83,12 @@ beforeEach(() => {
   h.state.connectError = null;
   h.state.lastConfig = undefined;
   h.simpleParser.mockReset();
+  // The upsert's return value is now used (attachments hang off the stored
+  // message id), so it needs a row rather than the deep mock's undefined.
+  prismaMock.inboundMessage.upsert.mockResolvedValue({ id: "msg-1" } as never);
+  prismaMock.inboundAttachment.findMany.mockResolvedValue([] as never);
+  h.storage.putObject.mockReset();
+  h.storage.putObject.mockResolvedValue(undefined);
 });
 
 describe("syncInboxAccounts", () => {
@@ -267,5 +275,136 @@ describe("syncInboxAccount", () => {
     );
     expect(h.state.closeCalls).toBe(1);
     expect(prismaMock.inboxAccount.update).not.toHaveBeenCalled();
+  });
+});
+
+// These parts used to be parsed and discarded, so a received PDF simply never
+// appeared anywhere in the app.
+describe("inbound attachments", () => {
+  function messageWithAttachments(attachments: unknown[]) {
+    h.state.mailbox = { exists: 1, uidNext: 6 };
+    h.state.messages = [{ uid: 5, source: "raw" }];
+    h.simpleParser.mockResolvedValue({
+      from: { value: [{ address: "a@b.co" }] },
+      attachments
+    });
+  }
+
+  it("stores each attachment's blob and metadata", async () => {
+    messageWithAttachments([
+      {
+        filename: "report.pdf",
+        contentType: "application/pdf",
+        content: Buffer.from("pdf-bytes"),
+        cid: "cid-1",
+        contentDisposition: "attachment"
+      }
+    ]);
+
+    await syncInboxAccount(makeAccount());
+
+    expect(h.storage.putObject).toHaveBeenCalledTimes(1);
+    const put = h.storage.putObject.mock.calls[0][0];
+    expect(put.contentType).toBe("application/pdf");
+    expect(put.key).toMatch(/^inbound\/org-1\/.*-report\.pdf$/);
+
+    expect(prismaMock.inboundAttachment.create).toHaveBeenCalledTimes(1);
+    const created = prismaMock.inboundAttachment.create.mock.calls[0][0];
+    expect(created.data).toMatchObject({
+      organizationId: "org-1",
+      inboundMessageId: "msg-1",
+      filename: "report.pdf",
+      contentType: "application/pdf",
+      size: Buffer.from("pdf-bytes").length,
+      contentId: "cid-1",
+      isInline: false
+    });
+  });
+
+  it("marks inline parts so they aren't listed as downloads", async () => {
+    messageWithAttachments([
+      {
+        filename: "logo.png",
+        contentType: "image/png",
+        content: Buffer.from("png"),
+        cid: "logo",
+        contentDisposition: "inline"
+      }
+    ]);
+
+    await syncInboxAccount(makeAccount());
+
+    expect(
+      prismaMock.inboundAttachment.create.mock.calls[0][0].data.isInline
+    ).toBe(true);
+  });
+
+  it("strips path components from a hostile filename", async () => {
+    messageWithAttachments([
+      {
+        filename: "../../etc/passwd",
+        contentType: "text/plain",
+        content: Buffer.from("x")
+      }
+    ]);
+
+    await syncInboxAccount(makeAccount());
+
+    const created = prismaMock.inboundAttachment.create.mock.calls[0][0];
+    expect(created.data.filename).toBe("passwd");
+    expect(h.storage.putObject.mock.calls[0][0].key).not.toContain("..");
+  });
+
+  it("skips oversized parts without failing the sync", async () => {
+    messageWithAttachments([
+      {
+        filename: "huge.bin",
+        contentType: "application/octet-stream",
+        // env default ceiling is 25MB.
+        content: Buffer.alloc(26 * 1024 * 1024)
+      }
+    ]);
+
+    await syncInboxAccount(makeAccount());
+
+    expect(h.storage.putObject).not.toHaveBeenCalled();
+    expect(prismaMock.inboundAttachment.create).not.toHaveBeenCalled();
+    // The message itself is still stored and the sync still advances.
+    expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.inboxAccount.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the message when storing a blob fails", async () => {
+    messageWithAttachments([
+      {
+        filename: "a.txt",
+        contentType: "text/plain",
+        content: Buffer.from("x")
+      }
+    ]);
+    h.storage.putObject.mockRejectedValue(new Error("s3 down"));
+
+    await syncInboxAccount(makeAccount());
+
+    expect(prismaMock.inboundAttachment.create).not.toHaveBeenCalled();
+    expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not duplicate attachments when the same message is re-synced", async () => {
+    messageWithAttachments([
+      {
+        filename: "a.txt",
+        contentType: "text/plain",
+        content: Buffer.from("x")
+      }
+    ]);
+    prismaMock.inboundAttachment.findMany.mockResolvedValue([
+      { id: "existing" }
+    ] as never);
+
+    await syncInboxAccount(makeAccount());
+
+    expect(h.storage.putObject).not.toHaveBeenCalled();
+    expect(prismaMock.inboundAttachment.create).not.toHaveBeenCalled();
   });
 });

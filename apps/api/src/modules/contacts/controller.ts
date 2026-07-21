@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import {
   contactActivityQuerySchema,
+  contactBulkDeleteSchema,
   contactSchema,
   csvImportSchema,
   segmentFilterSchema
@@ -50,6 +51,17 @@ export const contactController = {
     res.status(204).send();
   },
 
+  async bulkDelete(req: Request, res: Response) {
+    const { contactIds } = contactBulkDeleteSchema.parse(req.body);
+    const result = await contactService.bulkDelete(
+      // organizationId is verified and pinned by requireOrgMembership.
+      req.organizationId!,
+      req.userId!,
+      contactIds
+    );
+    res.json({ data: result });
+  },
+
   async previewSegment(req: Request, res: Response) {
     const input = segmentFilterSchema.parse(req.body);
     const result = await contactService.previewSegment(input);
@@ -78,11 +90,13 @@ export const contactController = {
       throw new HttpError(400, "A CSV file or csv field is required", "validation_error");
     }
 
-    const { organizationId, contactListId } = csvImportSchema.parse(req.body);
+    const { organizationId, contactListId, contactListName } =
+      csvImportSchema.parse(req.body);
     const summary = await contactService.importContacts({
       organizationId,
       csv,
-      contactListId
+      contactListId,
+      contactListName
     });
     res.status(200).json({ data: summary });
   },

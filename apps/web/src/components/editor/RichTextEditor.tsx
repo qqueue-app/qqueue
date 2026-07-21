@@ -6,6 +6,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import Image from "@tiptap/extension-image";
+import { TableKit } from "@tiptap/extension-table";
 import {
   Bold,
   Italic,
@@ -23,6 +24,9 @@ import {
   Palette,
   Image as ImageIcon,
   RectangleHorizontal,
+  Table as TableIcon,
+  Rows3,
+  Columns3,
   Minus,
   Braces,
   Undo,
@@ -326,6 +330,31 @@ export function RichTextEditor({
         inline: false,
         HTMLAttributes: { style: "max-width:100%;height:auto" }
       }),
+      // Without these nodes in the schema, ProseMirror silently drops table
+      // markup on paste — a pasted table was flattened to paragraphs before it
+      // ever reached the send pipeline. Styles are inline rather than class-based
+      // because mail clients strip <style> blocks, so a class-styled table would
+      // arrive borderless.
+      TableKit.configure({
+        table: {
+          resizable: false,
+          HTMLAttributes: {
+            style:
+              "border-collapse:collapse;width:100%;border:1px solid #d4d4d8"
+          }
+        },
+        tableCell: {
+          HTMLAttributes: {
+            style: "border:1px solid #d4d4d8;padding:6px 10px;vertical-align:top"
+          }
+        },
+        tableHeader: {
+          HTMLAttributes: {
+            style:
+              "border:1px solid #d4d4d8;padding:6px 10px;vertical-align:top;background-color:#f4f4f5;font-weight:600;text-align:left"
+          }
+        }
+      }),
       CtaButton
     ],
     content: value,
@@ -535,6 +564,41 @@ export function RichTextEditor({
           <RectangleHorizontal className="h-4 w-4" />
           {buttonSelected ? "Edit button" : "Button"}
         </Button>
+        <ToolbarButton
+          label={
+            editor.isActive("table") ? "Delete table" : "Insert table (3×3)"
+          }
+          active={editor.isActive("table")}
+          onClick={() => {
+            if (editor.isActive("table")) {
+              editor.chain().focus().deleteTable().run();
+              return;
+            }
+            editor
+              .chain()
+              .focus()
+              .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+              .run();
+          }}
+        >
+          <TableIcon />
+        </ToolbarButton>
+        {editor.isActive("table") ? (
+          <>
+            <ToolbarButton
+              label="Add row"
+              onClick={() => editor.chain().focus().addRowAfter().run()}
+            >
+              <Rows3 />
+            </ToolbarButton>
+            <ToolbarButton
+              label="Add column"
+              onClick={() => editor.chain().focus().addColumnAfter().run()}
+            >
+              <Columns3 />
+            </ToolbarButton>
+          </>
+        ) : null}
         <ToolbarButton
           label="Divider"
           onClick={() => editor.chain().focus().setHorizontalRule().run()}

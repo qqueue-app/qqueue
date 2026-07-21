@@ -10,6 +10,7 @@ import { ImapFlow } from "imapflow";
 import { encryptSecret } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { storage } from "../../lib/storage.js";
 import { manualEmailService } from "../manual-email/service.js";
 
 const messageInclude = {
@@ -20,6 +21,17 @@ const messageInclude = {
       toEmail: true,
       messageId: true,
     },
+  },
+  // Metadata only — blobs are fetched one at a time through the download route.
+  attachments: {
+    select: {
+      id: true,
+      filename: true,
+      contentType: true,
+      size: true,
+      isInline: true,
+    },
+    orderBy: { createdAt: "asc" },
   },
 } satisfies Prisma.InboundMessageInclude;
 
@@ -338,5 +350,32 @@ export const inboxService = {
       where: { id },
       include: messageInclude,
     });
+  },
+
+  /**
+   * Fetch an inbound attachment (metadata + blob) for download.
+   *
+   * Scoped to organization membership rather than to an uploading user — unlike
+   * outbound attachments, nobody here authored the file; it arrived in the org's
+   * shared mailbox, so anyone who can read the message can read its parts.
+   *
+   * This route is authenticated on purpose. It is the inverse of the public
+   * /images/:publicId endpoint: that one is public because a *recipient's* mail
+   * client must fetch it with no session, whereas these are private files sent
+   * to us and must never be reachable without auth.
+   */
+  async downloadAttachment(id: string, userId: string) {
+    const attachment = await prisma.inboundAttachment.findFirst({
+      where: {
+        id,
+        organization: { members: { some: { userId } } },
+      },
+    });
+    if (!attachment) {
+      throw new HttpError(404, "Attachment not found", "not_found");
+    }
+
+    const body = await storage.getObject(attachment.storageKey);
+    return { attachment, body };
   },
 };

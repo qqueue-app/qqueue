@@ -624,12 +624,35 @@ export function compileSegmentRules(
 
 // CSV import options. The CSV payload itself is handled by the upload middleware,
 // not validated here; this only carries the optional target list.
-export const csvImportSchema = z.object({
-  organizationId: z.string().min(1),
-  contactListId: z.string().min(1).optional(),
-});
+//
+// A target list can be named two ways: `contactListId` for an existing list, or
+// `contactListName` to create one as part of the import. They are mutually
+// exclusive — passing both is a validation error rather than a silent
+// precedence rule, so the caller's intent is never guessed at.
+export const csvImportSchema = z
+  .object({
+    organizationId: z.string().min(1),
+    contactListId: z.string().min(1).optional(),
+    contactListName: z.string().min(1).max(200).optional(),
+  })
+  .refine(
+    (value) => !(value.contactListId && value.contactListName),
+    {
+      message: "Provide either contactListId or contactListName, not both",
+      path: ["contactListName"],
+    },
+  );
 
 export type CsvImportInput = z.infer<typeof csvImportSchema>;
+
+// Bulk contact deletion. Capped so a single request can't take out an entire
+// table in one transaction; the UI pages through larger selections.
+export const contactBulkDeleteSchema = z.object({
+  organizationId: z.string().min(1),
+  contactIds: z.array(z.string().min(1)).min(1).max(1000),
+});
+
+export type ContactBulkDeleteInput = z.infer<typeof contactBulkDeleteSchema>;
 
 export const suppressionCreateSchema = z.object({
   organizationId: z.string().min(1),
@@ -1214,6 +1237,58 @@ export const manualEmailSendSchema = z
   });
 
 export type ManualEmailSendInput = z.infer<typeof manualEmailSendSchema>;
+
+// A composed message that repeats on a cron schedule. Same shape as a manual
+// send minus the one-shot/attachment bits, plus the recurrence itself.
+//
+// `scheduledAt` has no meaning here (the cron owns the timing) and attachments
+// are unsupported because an EmailAttachment row is claimed by a single
+// EmailJob and cannot be reused across occurrences.
+export const recurringSendCreateSchema = z
+  .object({
+    organizationId: z.string().min(1),
+    name: z.string().min(1).max(200),
+    to: z.array(emailAddressSchema).optional(),
+    cc: z.array(emailAddressSchema).optional(),
+    bcc: z.array(emailAddressSchema).optional(),
+    contactIds: z.array(z.string().min(1)).optional(),
+    listIds: z.array(z.string().min(1)).optional(),
+    replyTo: emailAddressSchema.optional(),
+    smtpConnectionId: z.string().min(1).optional(),
+    templateId: z.string().min(1).optional(),
+    subject: z.string().min(1),
+    html: z.string().optional(),
+    text: z.string().optional(),
+    variables: z.record(z.unknown()).optional(),
+    cronExpression: cronExpressionSchema,
+    timezone: timezoneSchema,
+  })
+  .refine(
+    (input) =>
+      (input.to?.length ?? 0) +
+        (input.contactIds?.length ?? 0) +
+        (input.listIds?.length ?? 0) >
+      0,
+    { message: "At least one recipient is required", path: ["to"] },
+  )
+  .refine((input) => Boolean(input.html || input.text), {
+    message: "Provide an email body",
+    path: ["html"],
+  });
+
+export type RecurringSendCreateInput = z.infer<
+  typeof recurringSendCreateSchema
+>;
+
+export const recurringSendUpdateSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  cronExpression: cronExpressionSchema.optional(),
+  timezone: timezoneSchema.optional(),
+});
+
+export type RecurringSendUpdateInput = z.infer<
+  typeof recurringSendUpdateSchema
+>;
 
 // Preview renders the composed body through the exact same MJML + tracking
 // pipeline used when sending, so the preview matches the delivered email. All

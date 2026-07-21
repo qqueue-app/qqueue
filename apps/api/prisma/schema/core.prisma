@@ -33,6 +33,14 @@ enum ContactStatus {
   BOUNCED
 }
 
+// Whether a recurring compose send is currently armed. Mirrors the pause/resume
+// semantics campaigns already have; there is no SENT terminal state because a
+// recurrence has no end.
+enum RecurringSendStatus {
+  ACTIVE
+  PAUSED
+}
+
 // How a contact came to be a member of a list. Recorded on ContactListMember so
 // imports and tag-driven segments are distinguishable from manual additions.
 enum MembershipSource {
@@ -175,6 +183,8 @@ model Organization {
   imageAssets       ImageAsset[]
   inboxAccounts     InboxAccount[]
   inboundMessages   InboundMessage[]
+  inboundAttachments InboundAttachment[]
+  recurringSends    RecurringSend[]
   emailEvents       EmailEvent[]
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
@@ -239,6 +249,73 @@ model SMTPConnection {
   emailJobs         EmailJob[]
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+}
+
+/// A composed message that re-sends on a cron schedule ("recurring" in Email
+/// Studio). This is the compose-side counterpart to Campaign recurrence.
+///
+/// It exists as its own model rather than as fields on EmailDraft because a
+/// draft is scratch space that is deleted once sent, whereas this must outlive
+/// the composer, be listable, and be pausable. It is deliberately NOT a
+/// Campaign: campaigns require a Template and a ContactList, while compose
+/// sends address ad-hoc To/CC/BCC alongside contacts and lists.
+///
+/// Each firing creates an ordinary EmailJob with origin MANUAL, so recurring
+/// sends run through the one delivery pipeline like everything else — the
+/// scheduler is an extra entry point, not a parallel path.
+///
+/// Attachments are intentionally absent: EmailAttachment rows are claimed by a
+/// single EmailJob at send time, so they cannot be reused across occurrences.
+model RecurringSend {
+  id               String              @id @default(cuid())
+  organizationId   String
+  createdByUserId  String?
+  name             String
+  subject          String
+  html             String?
+  text             String?
+  // Ad-hoc addresses, plus contacts/lists resolved fresh at each occurrence so
+  // a growing list is picked up without editing the schedule.
+  to               String[]            @default([])
+  cc               String[]            @default([])
+  bcc              String[]            @default([])
+  contactIds       String[]            @default([])
+  listIds          String[]            @default([])
+  replyTo          String?
+  // Resolved to a concrete connection when the schedule is created; the worker
+  // must not have to re-derive "the org default" at fire time.
+  smtpConnectionId String
+  templateId       String?
+  variables        Json?
+  cronExpression   String
+  timezone         String              @default("UTC")
+  status           RecurringSendStatus @default(ACTIVE)
+  nextRunAt        DateTime?
+  lastRunAt        DateTime?
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  runs             RecurringSendRun[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([organizationId])
+  @@index([status, nextRunAt])
+}
+
+/// One firing of a RecurringSend. Exists purely for idempotency: BullMQ can
+/// deliver the same scheduled job more than once (retries, restarts), and the
+/// unique key on (recurringSendId, occurrenceKey) means a repeat delivery finds
+/// the run already recorded and skips creating a second EmailJob. Same role
+/// CampaignRun plays for campaigns.
+model RecurringSendRun {
+  id              String        @id @default(cuid())
+  recurringSendId String
+  occurrenceKey   String
+  emailJobId      String?
+  recurringSend   RecurringSend @relation(fields: [recurringSendId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([recurringSendId, occurrenceKey])
+  @@index([recurringSendId])
 }
 
 model Contact {
@@ -645,6 +722,7 @@ model InboundMessage {
   organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboxAccount           InboxAccount           @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
   emailJob               EmailJob?              @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  attachments            InboundAttachment[]
   createdAt              DateTime               @default(now())
 
   @@unique([inboxAccountId, messageId])
@@ -652,6 +730,33 @@ model InboundMessage {
   @@index([organizationId, readAt])
   @@index([emailJobId])
   @@index([inReplyTo])
+}
+
+/// A file attached to a received message. Deliberately a separate model from
+/// EmailAttachment: that one is outbound (it travels *into* a send and its FKs
+/// point at EmailJob/EmailDraft), whereas this is inbound and owned by the
+/// message it arrived on — hence onDelete: Cascade rather than SetNull.
+///
+/// Blobs live in object storage exactly like outbound attachments; only
+/// metadata is in Postgres. `contentId` retains the MIME Content-ID so a
+/// `cid:` reference in the HTML body can be resolved to its part, and
+/// `isInline` marks parts the sender meant to display rather than list.
+model InboundAttachment {
+  id               String         @id @default(cuid())
+  organizationId   String
+  inboundMessageId String
+  filename         String
+  contentType      String
+  size             Int
+  storageKey       String
+  contentId        String?
+  isInline         Boolean        @default(false)
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboundMessage   InboundMessage @relation(fields: [inboundMessageId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@index([organizationId])
+  @@index([inboundMessageId])
 }
 
 model ApiKey {

@@ -69,6 +69,24 @@ export const inboxController = {
     res.json({ data: message });
   },
 
+  async downloadAttachment(req: Request, res: Response) {
+    const { attachment, body } = await inboxService.downloadAttachment(
+      String(req.params.attachmentId),
+      req.userId!
+    );
+
+    res.setHeader("Content-Type", attachment.contentType);
+    // Always force a download rather than letting the browser render it: this
+    // is a file from an untrusted sender, and inline rendering of e.g. an
+    // text/html part would execute it on our own origin.
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${attachment.filename.replace(/"/g, "")}"`
+    );
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(body);
+  },
+
   async replyToMessage(req: Request, res: Response) {
     const input = inboundMessageReplySchema.parse(req.body);
     const result = await inboxService.replyToMessage(

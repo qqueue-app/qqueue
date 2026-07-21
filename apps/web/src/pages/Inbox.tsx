@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   MailOpen,
   MailPlus,
+  Paperclip,
   Plug,
   Reply,
   Search,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
+import { InboundHtmlFrame } from "../components/InboundHtmlFrame.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { api, type InboxAccount, type InboundMessage } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
@@ -57,7 +59,27 @@ function formatDate(value?: string | null) {
 function snippet(message: InboundMessage) {
   const text = message.text?.replace(/\s+/g, " ").trim();
   if (text) return text.slice(0, 180);
-  return message.html ? "HTML message" : "No preview available";
+  if (!message.html) return "No preview available";
+  // HTML-only message: derive a preview instead of showing a placeholder. This
+  // is a list snippet rendered as a plain text node, never as markup, so
+  // stripping tags crudely is enough — script/style contents are dropped first
+  // so their source doesn't surface as "preview text".
+  const stripped = message.html
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped ? stripped.slice(0, 180) : "No preview available";
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function senderLabel(message: InboundMessage) {
@@ -142,6 +164,13 @@ export function Inbox() {
     "all"
   );
   const [replyBody, setReplyBody] = useState("");
+  // Per-message opt-in to loading remote images. Deliberately not persisted:
+  // the choice lasts for the session, so a tracking pixel fires at most once
+  // and only after the reader explicitly asked for images.
+  const [remoteContentAllowed, setRemoteContentAllowed] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -178,6 +207,41 @@ export function Inbox() {
     () => filteredMessages.filter((message) => !message.readAt).length,
     [filteredMessages]
   );
+
+  async function downloadAttachment(
+    messageId: string,
+    file: { id: string; filename: string }
+  ) {
+    if (!organizationId) return;
+    setDownloadingId(file.id);
+    try {
+      const blob = await api.downloadInboundAttachment({
+        messageId,
+        attachmentId: file.id,
+        organizationId,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Unable to download attachment");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  function allowRemoteContent(messageId: string) {
+    setRemoteContentAllowed((current) => {
+      const next = new Set(current);
+      next.add(messageId);
+      return next;
+    });
+  }
 
   async function load() {
     if (!organizationId) {
@@ -486,11 +550,23 @@ export function Inbox() {
                               {thread.unreadCount > 0 ? (
                                 <span className="h-2 w-2 rounded-full bg-primary" aria-hidden />
                               ) : null}
-                              <span className="truncate text-sm font-semibold">
+                              <span
+                                className={`truncate text-sm ${
+                                  thread.unreadCount > 0
+                                    ? "font-semibold"
+                                    : "font-normal text-muted-foreground"
+                                }`}
+                              >
                                 {thread.sender}
                               </span>
                             </div>
-                            <div className="mt-1 truncate text-sm">
+                            <div
+                              className={`mt-1 truncate text-sm ${
+                                thread.unreadCount > 0
+                                  ? "font-semibold"
+                                  : "font-normal"
+                              }`}
+                            >
                               {thread.subject}
                             </div>
                           </div>
@@ -578,9 +654,85 @@ export function Inbox() {
                             </Badge>
                           ) : null}
                         </div>
-                        <div className="whitespace-pre-wrap text-sm leading-6">
-                          {message.text || "This reply has no plain-text body."}
-                        </div>
+                        {/*
+                          Prefer the HTML part. It has always been synced into
+                          InboundMessage.html; the pane just never rendered it,
+                          so formatted mail (tables especially) was shown as the
+                          flattened text/plain alternative. Fall back to text
+                          only when there is no HTML part.
+                        */}
+                        {message.html ? (
+                          <InboundHtmlFrame
+                            html={message.html}
+                            showRemoteContent={remoteContentAllowed.has(
+                              message.id
+                            )}
+                            title={`Message from ${senderLabel(message)}`}
+                          />
+                        ) : (
+                          <div className="whitespace-pre-wrap text-sm leading-6">
+                            {message.text || "This message has no body."}
+                          </div>
+                        )}
+                        {/*
+                          Downloadable parts. Inline parts (cid: images the
+                          sender meant to render in the body) are filtered out
+                          so a signature logo doesn't look like an attachment.
+                        */}
+                        {(message.attachments ?? []).filter(
+                          (file) => !file.isInline
+                        ).length > 0 ? (
+                          <div className="mt-4 border-t pt-3">
+                            <div className="mb-2 text-xs font-medium text-muted-foreground">
+                              Attachments
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {(message.attachments ?? [])
+                                .filter((file) => !file.isInline)
+                                .map((file) => (
+                                  <Button
+                                    key={file.id}
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={downloadingId === file.id}
+                                    onClick={() =>
+                                      void downloadAttachment(message.id, file)
+                                    }
+                                    className="h-auto gap-2 py-1.5"
+                                  >
+                                    {downloadingId === file.id ? (
+                                      <Spinner className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <Paperclip className="h-3.5 w-3.5" />
+                                    )}
+                                    <span className="max-w-[220px] truncate">
+                                      {file.filename}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {formatBytes(file.size)}
+                                    </span>
+                                  </Button>
+                                ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {message.html && !remoteContentAllowed.has(message.id) ? (
+                          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed bg-muted/40 px-3 py-2">
+                            <span className="text-xs text-muted-foreground">
+                              Remote images are blocked so the sender can&apos;t
+                              track when you open this.
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => allowRemoteContent(message.id)}
+                            >
+                              Show images
+                            </Button>
+                          </div>
+                        ) : null}
                       </article>
                     ))}
                   </div>

@@ -2,11 +2,16 @@ import { prisma } from "./lib/prisma.js";
 import { campaignProcessingQueue } from "./queues/campaign-processing.queue.js";
 import { emailSendingQueue } from "./queues/email-sending.queue.js";
 import { inboxSyncQueue } from "./queues/inbox-sync.queue.js";
+import {
+  recurringSendQueue,
+  recurringSendSchedulerId,
+} from "./queues/recurring-send.queue.js";
 import { webhookDeliveryQueue } from "./queues/webhook-delivery.queue.js";
 import { env } from "./config/env.js";
 import { startCampaignProcessingWorker } from "./workers/campaign-processing.worker.js";
 import { startEmailSendingWorker } from "./workers/email-sending.worker.js";
 import { startInboxSyncWorker } from "./workers/inbox-sync.worker.js";
+import { startRecurringSendWorker } from "./workers/recurring-send.worker.js";
 import { startWebhookDeliveryWorker } from "./workers/webhook-delivery.worker.js";
 
 async function recoverQueuedWork() {
@@ -39,6 +44,24 @@ async function recoverQueuedWork() {
         select: { id: true, nextAttemptAt: true },
       }),
     ]);
+
+  // Active recurring compose sends: re-register their job schedulers so a Redis
+  // flush doesn't silently stop them. Idempotent, like the campaign loop below.
+  const activeRecurringSends = await prisma.recurringSend.findMany({
+    where: { status: "ACTIVE" },
+    select: { id: true, cronExpression: true, timezone: true },
+  });
+  for (const send of activeRecurringSends) {
+    await recurringSendQueue.upsertJobScheduler(
+      recurringSendSchedulerId(send.id),
+      { pattern: send.cronExpression, tz: send.timezone },
+      {
+        name: "process-recurring-send",
+        data: { recurringSendId: send.id },
+        opts: { attempts: 3, backoff: { type: "exponential", delay: 30_000 } },
+      }
+    );
+  }
 
   if (scheduledOneShots.length > 0) {
     await campaignProcessingQueue.addBulk(
@@ -136,6 +159,7 @@ const workers = [
   startCampaignProcessingWorker(),
   startWebhookDeliveryWorker(),
   startInboxSyncWorker(),
+  startRecurringSendWorker(),
 ];
 
 await recoverQueuedWork();

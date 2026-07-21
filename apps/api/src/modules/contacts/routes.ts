@@ -45,6 +45,13 @@ contactRouter.post(
   contactController.import
 );
 contactRouter.get("/export", requireOrgMembership, contactController.export);
+// Bulk delete. POST rather than DELETE because it carries a body of ids, and
+// registered before "/:id" so "bulk-delete" isn't captured as a contact id.
+contactRouter.post(
+  "/bulk-delete",
+  requireOrgMembership,
+  contactController.bulkDelete
+);
 // Tag-driven segment preview (count + sample of matching contacts).
 contactRouter.post(
   "/segment/preview",

@@ -26,6 +26,7 @@ import {
   type ContactList,
   type EmailAttachment,
   type EmailDraft,
+  type RecurringSend,
   type ManualEmailDeliveryStatus,
   type RecipientDelivery,
   type SMTPConnection,
@@ -188,6 +189,7 @@ export function EmailStudio() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
+  const [recurringSends, setRecurringSends] = useState<RecurringSend[]>([]);
 
   // Composer state.
   const [smtpConnectionId, setSMTPConnectionId] = useState(DEFAULT_SMTP);
@@ -257,19 +259,27 @@ export function EmailStudio() {
     }
     setLoading(true);
     try {
-      const [templateData, smtpData, contactData, listData, draftData] =
-        await Promise.all([
-          api.listTemplates(organizationId),
-          api.listSMTPConnections(organizationId),
-          api.listContacts(organizationId),
-          api.listContactLists(organizationId),
-          api.listEmailDrafts(organizationId)
-        ]);
+      const [
+        templateData,
+        smtpData,
+        contactData,
+        listData,
+        draftData,
+        recurringData
+      ] = await Promise.all([
+        api.listTemplates(organizationId),
+        api.listSMTPConnections(organizationId),
+        api.listContacts(organizationId),
+        api.listContactLists(organizationId),
+        api.listEmailDrafts(organizationId),
+        api.listRecurringSends(organizationId)
+      ]);
       setTemplates(templateData);
       setSMTPConnections(smtpData);
       setContacts(contactData);
       setContactLists(listData);
       setDrafts(draftData);
+      setRecurringSends(recurringData);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to load Email Studio"
@@ -282,6 +292,41 @@ export function EmailStudio() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function toggleRecurringSend(send: RecurringSend) {
+    try {
+      const updated =
+        send.status === "ACTIVE"
+          ? await api.pauseRecurringSend(send.id)
+          : await api.resumeRecurringSend(send.id);
+      setRecurringSends((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item))
+      );
+      toast.success(
+        updated.status === "ACTIVE"
+          ? "Recurring send resumed."
+          : "Recurring send paused."
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to update the schedule"
+      );
+    }
+  }
+
+  async function removeRecurringSend(send: RecurringSend) {
+    try {
+      await api.deleteRecurringSend(send.id);
+      setRecurringSends((current) =>
+        current.filter((item) => item.id !== send.id)
+      );
+      toast.success("Recurring send deleted.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to delete the schedule"
+      );
+    }
+  }
 
   function resetComposer() {
     setSMTPConnectionId(DEFAULT_SMTP);
@@ -556,9 +601,52 @@ export function EmailStudio() {
         toast.error("Enter a valid schedule.");
         return;
       }
-      // TODO: Persist recurring manual sends once Compose has a recurring
-      // draft/job model. Campaign recurrence is currently campaign-only.
-      toast.error("Recurring one-off sends aren't wired up yet.");
+      // A recurring send outlives the composer, so it becomes its own record
+      // rather than a queued EmailJob. Attachments are not carried over: an
+      // attachment row is claimed by a single EmailJob and can't be reused on
+      // every occurrence.
+      if (attachments.length > 0) {
+        toast.error(
+          "Recurring sends can't include attachments. Remove them or send once instead."
+        );
+        return;
+      }
+
+      setSending(true);
+      try {
+        const created = await api.createRecurringSend({
+          organizationId,
+          name: subject,
+          to: toEmails,
+          cc: ccEmails.length ? ccEmails : undefined,
+          bcc: bccEmails.length ? bccEmails : undefined,
+          listIds: selectedListIds.length ? selectedListIds : undefined,
+          replyTo: replyTo || undefined,
+          smtpConnectionId:
+            smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
+          templateId: templateId === NO_TEMPLATE ? undefined : templateId,
+          subject,
+          html,
+          cronExpression: cron,
+          timezone: recurrence.timezone
+        });
+        if (draftId) {
+          await api.deleteEmailDraft(draftId).catch(() => undefined);
+        }
+        toast.success(`Recurring send created: ${describeCron(cron)}.`);
+        resetComposer();
+        setDrafts(await api.listEmailDrafts(organizationId));
+        setRecurringSends(await api.listRecurringSends(organizationId));
+        void created;
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Unable to create the recurring send"
+        );
+      } finally {
+        setSending(false);
+      }
       return;
     }
     if (scheduleForLater) {
@@ -971,7 +1059,7 @@ export function EmailStudio() {
                 <div>
                   <h2 className="text-sm font-semibold">Send options</h2>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Send now, or schedule it for later.
+                    Send now, schedule it for later, or repeat it on a schedule.
                   </p>
                 </div>
                 <ScheduleControls
@@ -983,8 +1071,13 @@ export function EmailStudio() {
                   onRecurringChange={setRecurring}
                   recurrence={recurrence}
                   onRecurrenceChange={setRecurrence}
-                  showRecurring={false}
                 />
+                {recurring && attachments.length > 0 ? (
+                  <p className="text-xs leading-5 text-destructive">
+                    Recurring sends can&apos;t include attachments — each
+                    occurrence would need its own copy.
+                  </p>
+                ) : null}
 
                 <Button
                   type="submit"
@@ -992,7 +1085,11 @@ export function EmailStudio() {
                   disabled={sending || noSmtp || !organizationId}
                 >
                   {sending ? <Spinner /> : <Send className="h-4 w-4" />}
-                  {scheduleForLater ? "Schedule email" : "Send email"}
+                  {recurring
+                    ? "Create recurring send"
+                    : scheduleForLater
+                      ? "Schedule email"
+                      : "Send email"}
                 </Button>
                 {lastSavedAt ? (
                   <p className="text-center text-xs text-muted-foreground">
@@ -1000,6 +1097,63 @@ export function EmailStudio() {
                   </p>
                 ) : null}
               </Card>
+
+              {recurringSends.length > 0 ? (
+                <Card className="space-y-3 p-5">
+                  <div>
+                    <h2 className="text-sm font-semibold">Recurring sends</h2>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Recipients are re-resolved each time, so growing lists are
+                      picked up automatically.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {recurringSends.map((send) => (
+                      <div
+                        key={send.id}
+                        className="rounded-md border px-3 py-2 text-sm"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="min-w-0 flex-1 truncate font-medium">
+                            {send.name}
+                          </span>
+                          <Badge
+                            variant={
+                              send.status === "ACTIVE" ? "default" : "secondary"
+                            }
+                          >
+                            {send.status === "ACTIVE" ? "Active" : "Paused"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {describeCron(send.cronExpression) ??
+                            send.cronExpression}{" "}
+                          · {send.timezone}
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void toggleRecurringSend(send)}
+                          >
+                            {send.status === "ACTIVE" ? "Pause" : "Resume"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => void removeRecurringSend(send)}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ) : null}
 
               {deliveryStatus ? (
                 <DeliveryStatusCard

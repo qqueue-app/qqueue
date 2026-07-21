@@ -115,6 +115,7 @@ export interface ContactImportSummary {
   skipped: number;
   suppressed: number;
   errors: { row: number; message: string }[];
+  contactList?: { id: string; name: string; created: boolean };
 }
 
 export interface ContactActivityEvent {
@@ -205,6 +206,49 @@ export interface InboundMessage {
     toEmail: string;
     messageId?: string | null;
   } | null;
+  attachments?: InboundAttachment[];
+}
+
+export interface InboundAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  /** Sender marked this part for display in the body rather than as a download. */
+  isInline: boolean;
+}
+
+export interface RecurringSend {
+  id: string;
+  organizationId: string;
+  name: string;
+  subject: string;
+  cronExpression: string;
+  timezone: string;
+  status: "ACTIVE" | "PAUSED";
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  createdAt: string;
+  _count?: { runs: number };
+}
+
+export interface RecurringSendCreatePayload {
+  organizationId: string;
+  name: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  contactIds?: string[];
+  listIds?: string[];
+  replyTo?: string;
+  smtpConnectionId?: string;
+  templateId?: string;
+  subject: string;
+  html?: string;
+  text?: string;
+  variables?: Record<string, unknown>;
+  cronExpression: string;
+  timezone: string;
 }
 
 export interface InboundMessageList {
@@ -835,17 +879,31 @@ export const api = {
 
   importContacts(
     file: File,
-    options: { organizationId: string; contactListId?: string }
+    options: {
+      organizationId: string;
+      contactListId?: string;
+      contactListName?: string;
+    }
   ) {
     const form = new FormData();
     form.append("file", file);
     form.append("organizationId", options.organizationId);
+    // Mutually exclusive server-side: an existing list id, or a name to create.
     if (options.contactListId) {
       form.append("contactListId", options.contactListId);
+    } else if (options.contactListName) {
+      form.append("contactListName", options.contactListName);
     }
     return request<ContactImportSummary>("/api/v1/contacts/import", {
       method: "POST",
       body: form,
+    });
+  },
+
+  bulkDeleteContacts(organizationId: string, contactIds: string[]) {
+    return request<{ deleted: number }>("/api/v1/contacts/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ organizationId, contactIds }),
     });
   },
 
@@ -1387,6 +1445,56 @@ export const api = {
         body: JSON.stringify({ read: input.read }),
       }
     );
+  },
+
+  // Returns a Blob rather than JSON, so it bypasses request(). The endpoint is
+  // authenticated, so the bearer token has to be attached explicitly — the file
+  // can't simply be linked to with an <a href>.
+  async downloadInboundAttachment(input: {
+    messageId: string;
+    attachmentId: string;
+    organizationId: string;
+  }) {
+    const { accessToken } = getSession();
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/inbox/messages/${encodeURIComponent(input.messageId)}/attachments/${encodeURIComponent(input.attachmentId)}?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      }
+    );
+    if (!response.ok) {
+      throw new ApiError("Unable to download attachment", response.status);
+    }
+    return response.blob();
+  },
+
+  listRecurringSends(organizationId: string) {
+    return request<RecurringSend[]>(
+      `/api/v1/recurring-sends?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createRecurringSend(input: RecurringSendCreatePayload) {
+    return request<RecurringSend>("/api/v1/recurring-sends", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  pauseRecurringSend(id: string) {
+    return request<RecurringSend>(`/api/v1/recurring-sends/${id}/pause`, {
+      method: "POST",
+    });
+  },
+
+  resumeRecurringSend(id: string) {
+    return request<RecurringSend>(`/api/v1/recurring-sends/${id}/resume`, {
+      method: "POST",
+    });
+  },
+
+  deleteRecurringSend(id: string) {
+    return request<void>(`/api/v1/recurring-sends/${id}`, { method: "DELETE" });
   },
 
   replyToInboundMessage(

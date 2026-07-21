@@ -19,7 +19,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
   api,
   type Contact,
-  type ContactActivityEvent
+  type ContactActivityEvent,
+  type ContactList
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
 import { Button } from "../components/ui/button.js";
@@ -114,6 +115,22 @@ export function Contacts() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importTarget, setImportTarget] = useState<"none" | "existing" | "new">(
+    "none"
+  );
+  const [importListId, setImportListId] = useState("");
+  const [importListName, setImportListName] = useState("");
+  const [importErrors, setImportErrors] = useState<
+    { row: number; message: string }[]
+  >([]);
+  const [lists, setLists] = useState<ContactList[]>([]);
+
+  // Bulk selection for delete.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Tag-driven segment filter.
   const [filterTags, setFilterTags] = useState("");
@@ -172,6 +189,9 @@ export function Contacts() {
 
   useEffect(() => {
     void load();
+    void loadLists();
+    // Selection is by id and can't survive an org switch.
+    setSelectedIds(new Set());
   }, [organizationId]);
 
   function openCreate() {
@@ -241,28 +261,118 @@ export function Contacts() {
     }
   }
 
-  async function handleImportFile(event: FormEvent<HTMLInputElement>) {
+  function handleImportFileSelected(event: FormEvent<HTMLInputElement>) {
     const input = event.currentTarget;
     const file = input.files?.[0];
     // Reset so selecting the same file again still fires onChange.
     input.value = "";
-    if (!file || !organizationId) {
+    if (!file) {
       return;
     }
+    setImportFile(file);
+    setImportDialogOpen(true);
+  }
+
+  async function runImport(event: FormEvent) {
+    event.preventDefault();
+    if (!importFile || !organizationId) {
+      return;
+    }
+
     setImporting(true);
+    setImportErrors([]);
     try {
-      const summary = await api.importContacts(file, { organizationId });
+      // The contact record always dedupes org-wide on email; the list target
+      // only adds a membership. So importing the same CSV into two lists gives
+      // one contact in both, never a duplicate.
+      const summary = await api.importContacts(importFile, {
+        organizationId,
+        contactListId:
+          importTarget === "existing" ? importListId || undefined : undefined,
+        contactListName:
+          importTarget === "new" ? importListName.trim() || undefined : undefined
+      });
+
       const parts = [`${summary.created} added`, `${summary.updated} updated`];
       if (summary.suppressed > 0) parts.push(`${summary.suppressed} suppressed`);
       if (summary.skipped > 0) parts.push(`${summary.skipped} skipped`);
-      toast.success(`Import complete: ${parts.join(", ")}.`);
+      const where = summary.contactList
+        ? ` into ${summary.contactList.name}${summary.contactList.created ? " (new list)" : ""}`
+        : "";
+      toast.success(`Import complete${where}: ${parts.join(", ")}.`);
+
+      // Keep the dialog open when rows failed so the reasons stay readable —
+      // previously these were parsed server-side and then thrown away.
+      if (summary.errors.length > 0) {
+        setImportErrors(summary.errors);
+      } else {
+        closeImportDialog();
+      }
       await load();
+      await loadLists();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to import contacts"
       );
     } finally {
       setImporting(false);
+    }
+  }
+
+  function closeImportDialog() {
+    setImportDialogOpen(false);
+    setImportFile(null);
+    setImportErrors([]);
+    setImportListName("");
+  }
+
+  async function loadLists() {
+    if (!organizationId) return;
+    try {
+      setLists(await api.listContactLists(organizationId));
+    } catch {
+      // Non-fatal: the import dialog falls back to "don't add to a list".
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllFiltered() {
+    setSelectedIds((current) => {
+      const allSelected = filtered.every((contact) => current.has(contact.id));
+      if (allSelected) {
+        return new Set();
+      }
+      return new Set(filtered.map((contact) => contact.id));
+    });
+  }
+
+  async function confirmBulkDelete() {
+    if (!organizationId || selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      const { deleted } = await api.bulkDeleteContacts(
+        organizationId,
+        Array.from(selectedIds)
+      );
+      toast.success(`${deleted} contact${deleted === 1 ? "" : "s"} removed.`);
+      setSelectedIds(new Set());
+      setBulkDeleteOpen(false);
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete.");
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -373,7 +483,7 @@ export function Contacts() {
               type="file"
               accept=".csv,text/csv"
               className="hidden"
-              onChange={handleImportFile}
+              onChange={handleImportFileSelected}
             />
             <Button
               variant="outline"
@@ -491,6 +601,31 @@ export function Contacts() {
                 </span>
               </div>
 
+              {selectedIds.size > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2">
+                  <span className="text-sm font-medium">
+                    {selectedIds.size} selected
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedIds(new Set())}
+                  >
+                    Clear selection
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => setBulkDeleteOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete selected
+                  </Button>
+                </div>
+              ) : null}
+
               {filtered.length === 0 ? (
                 <EmptyState
                   icon={Search}
@@ -501,6 +636,25 @@ export function Contacts() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10">
+                        {/*
+                          Selects everything matching the current search, not
+                          just the visible page — otherwise "select all" on a
+                          filtered set of 400 would silently mean 10.
+                        */}
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer accent-primary"
+                          aria-label="Select all matching contacts"
+                          checked={
+                            filtered.length > 0 &&
+                            filtered.every((contact) =>
+                              selectedIds.has(contact.id)
+                            )
+                          }
+                          onChange={toggleSelectAllFiltered}
+                        />
+                      </TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Tags</TableHead>
@@ -512,6 +666,15 @@ export function Contacts() {
                   <TableBody>
                     {paginated.map((contact) => (
                       <TableRow key={contact.id}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 cursor-pointer accent-primary"
+                            aria-label={`Select ${contact.email}`}
+                            checked={selectedIds.has(contact.id)}
+                            onChange={() => toggleSelected(contact.id)}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">{contact.email}</TableCell>
                         <TableCell className="text-muted-foreground">
                           {[contact.firstName, contact.lastName]
@@ -693,6 +856,139 @@ export function Contacts() {
         loading={deleting}
         onConfirm={confirmDelete}
       />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={(open) => !open && setBulkDeleteOpen(false)}
+        title={`Delete ${selectedIds.size} contact${selectedIds.size === 1 ? "" : "s"}?`}
+        description="They will be permanently removed, along with their list memberships. Suppressions are kept, so suppressed addresses stay suppressed."
+        confirmLabel="Delete"
+        loading={bulkDeleting}
+        onConfirm={confirmBulkDelete}
+      />
+
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(open) => !open && closeImportDialog()}
+      >
+        <DialogContent>
+          <form onSubmit={runImport}>
+            <DialogHeader>
+              <DialogTitle>Import contacts</DialogTitle>
+              <DialogDescription>
+                Contacts are matched on email address — importing someone who
+                already exists updates them and merges tags instead of creating
+                a duplicate.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                <span className="font-medium">{importFile?.name}</span>
+                {importFile ? (
+                  <span className="ml-2 text-muted-foreground">
+                    {Math.max(1, Math.round(importFile.size / 1024))} KB
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="importTarget">Add to a list</Label>
+                <Select
+                  value={importTarget}
+                  onValueChange={(value) =>
+                    setImportTarget(value as "none" | "existing" | "new")
+                  }
+                >
+                  <SelectTrigger id="importTarget">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      Don&apos;t add to a list
+                    </SelectItem>
+                    <SelectItem value="existing" disabled={lists.length === 0}>
+                      Existing list
+                    </SelectItem>
+                    <SelectItem value="new">Create a new list</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {importTarget === "existing" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="importListId">List</Label>
+                  <Select value={importListId} onValueChange={setImportListId}>
+                    <SelectTrigger id="importListId">
+                      <SelectValue placeholder="Choose a list" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lists.map((list) => (
+                        <SelectItem key={list.id} value={list.id}>
+                          {list.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+
+              {importTarget === "new" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="importListName">New list name</Label>
+                  <Input
+                    id="importListName"
+                    value={importListName}
+                    onChange={(event) => setImportListName(event.target.value)}
+                    placeholder="e.g. Newsletter signups"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A list with this name is reused if it already exists.
+                  </p>
+                </div>
+              ) : null}
+
+              {importErrors.length > 0 ? (
+                <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+                  <div className="text-sm font-medium text-destructive">
+                    {importErrors.length} row
+                    {importErrors.length === 1 ? "" : "s"} skipped
+                  </div>
+                  <ul className="max-h-40 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
+                    {importErrors.slice(0, 50).map((error, index) => (
+                      <li key={`${error.row}-${index}`}>
+                        Row {error.row}: {error.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeImportDialog}
+              >
+                {importErrors.length > 0 ? "Close" : "Cancel"}
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  importing ||
+                  !importFile ||
+                  (importTarget === "existing" && !importListId) ||
+                  (importTarget === "new" && !importListName.trim())
+                }
+              >
+                {importing ? <Spinner /> : null}
+                Import
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={listDialogOpen} onOpenChange={setListDialogOpen}>
         <DialogContent>

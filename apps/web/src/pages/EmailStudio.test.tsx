@@ -28,7 +28,12 @@ vi.mock("../lib/api.js", () => ({
     updateEmailDraft: vi.fn(),
     deleteEmailDraft: vi.fn(),
     uploadAttachment: vi.fn(),
-    deleteAttachment: vi.fn()
+    deleteAttachment: vi.fn(),
+    listRecurringSends: vi.fn(),
+    createRecurringSend: vi.fn(),
+    pauseRecurringSend: vi.fn(),
+    resumeRecurringSend: vi.fn(),
+    deleteRecurringSend: vi.fn()
   }
 }));
 
@@ -96,6 +101,7 @@ function setup({ withSmtp = true } = {}) {
   mockedApi.listContacts.mockResolvedValue(contacts);
   mockedApi.listContactLists.mockResolvedValue(lists);
   mockedApi.listEmailDrafts.mockResolvedValue([]);
+  mockedApi.listRecurringSends.mockResolvedValue([]);
   mockedApi.sendManualEmail.mockResolvedValue({ id: "job1", status: "SENT" });
   mockedApi.previewEmail.mockResolvedValue({
     subject: "Hi",
@@ -211,21 +217,52 @@ describe("EmailStudio", () => {
     ]);
   });
 
-  it("offers one-time scheduling but not recurring on a one-off send", async () => {
+  it("offers one-time scheduling", async () => {
     const user = userEvent.setup();
     setup();
     await renderStudio();
-
-    // Recurring isn't supported for one-off Compose sends, so it's hidden.
-    expect(
-      screen.queryByLabelText("Repeat on a schedule")
-    ).not.toBeInTheDocument();
 
     await user.click(screen.getByLabelText("Schedule for later"));
     expect(screen.getByLabelText("Scheduled time")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Schedule email/i })
     ).toBeInTheDocument();
+  });
+
+  it("creates a recurring send instead of a one-off job when repeating", async () => {
+    const user = userEvent.setup();
+    setup();
+    mockedApi.createRecurringSend.mockResolvedValue({
+      id: "rs-1",
+      status: "ACTIVE"
+    });
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "person@example.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Weekly digest");
+    await user.type(screen.getByLabelText("body-editor"), "<p>Digest</p>");
+    await user.click(screen.getByLabelText("Repeat on a schedule"));
+
+    expect(
+      screen.getByRole("button", { name: /Create recurring send/i })
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /Create recurring send/i })
+    );
+
+    await waitFor(() => {
+      expect(mockedApi.createRecurringSend).toHaveBeenCalled();
+    });
+    // A recurrence must not also fire a one-off send.
+    expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
+
+    const payload = mockedApi.createRecurringSend.mock.calls[0][0];
+    expect(payload).toMatchObject({
+      subject: "Weekly digest",
+      to: ["person@example.com"]
+    });
+    expect(payload.cronExpression).toBeTruthy();
   });
 
   it("loads a template into the composer without mutating it", async () => {

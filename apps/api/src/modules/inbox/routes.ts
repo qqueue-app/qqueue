@@ -50,3 +50,11 @@ inboxRouter.post(
   requireOrgMembership,
   inboxController.replyToMessage
 );
+// Authenticated download of a file that arrived on a received message. Private
+// by design — the public /images/:publicId route exists for the opposite case
+// (recipients' mail clients), and inbound files must never be reachable there.
+inboxRouter.get(
+  "/messages/:id/attachments/:attachmentId",
+  requireOrgMembership,
+  inboxController.downloadAttachment
+);

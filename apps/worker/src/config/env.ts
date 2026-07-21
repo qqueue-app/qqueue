@@ -55,6 +55,15 @@ const envSchema = z.object({
   // Inbox sync cadence for active read-only IMAP inbox accounts.
   INBOX_SYNC_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(120),
   INBOX_SYNC_MAX_MESSAGES: z.coerce.number().int().min(1).max(500).default(50),
+  // Per-part ceiling for attachments on *received* mail. Separate from
+  // ATTACHMENT_MAX_BYTES (which governs what our users may upload) because
+  // inbound size is chosen by the sender, not by us: anything larger is
+  // skipped so one huge part can't wedge a mailbox sync.
+  INBOUND_ATTACHMENT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(25 * 1024 * 1024),
 });
 
 export const env = envSchema.parse(process.env);
