@@ -20,6 +20,7 @@ Following the Beta Polish + Launch Prep Sprint, QQueue now includes:
 - Contact lists (with descriptions and membership management)
 - Templates (with preview and MJML-aware source)
 - Email Studio (manual composer, preview, drafts, manual send)
+- Drafts page and Outbox (queued/scheduled sends, with cancel)
 - Campaigns
 - Transactional API
 - API keys
@@ -57,14 +58,25 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    *Implemented.*
 3. **Manual email sending** — a user-facing composer for individual/small-batch
    sends. *Implemented as **Email Studio*** (`apps/web/src/pages/EmailStudio.tsx`):
-   multiple `To` recipients, `CC`/`BCC`, contact and contact-list pickers,
+   multiple `To` recipients, always-visible `CC`/`BCC` with autocomplete over
+   contacts and previously-mailed addresses, contact and contact-list pickers,
    template apply, Tiptap editor, MJML-backed preview, drafts (`EmailDraft`:
-   auto-save/resume/delete/send), schedule-for-later, **attachments**
+   auto-save/resume/delete/send, with a dedicated `/drafts` page that deep-links
+   back into the composer), schedule-for-later, **attachments**
    (S3/MinIO object storage), and **per-recipient delivery status** after a
-   send. Sends run through the shared pipeline with `origin = MANUAL`.
+   send. The From picker names the account a send will actually use rather than
+   saying "default". Sends run through the shared pipeline with
+   `origin = MANUAL`.
 4. **Inbox module** — IMAP reply sync, conversation view, and reply-from-QQueue.
    *Implemented as a focused email-operations workflow, not a full mailbox or
    ticketing product.*
+5. **Outbox** (`apps/web/src/pages/Outbox.tsx`, `outbox` API module) — every
+   `EmailJob` still `PENDING`/`QUEUED`/`PROCESSING` for the org, whatever its
+   origin, with the sending account it will use and a cancel action for anything
+   not yet handed to SMTP. Cancelling flips the row to `CANCELLED` and removes
+   the delayed BullMQ job; the send worker independently skips `CANCELLED` jobs,
+   so a race with an in-flight worker is safe. This is the product-level view of
+   the queue — `/queue-operations` remains the admin-only BullMQ inspector.
 
 Campaign, transactional, and manual sends are three entry points into a single
 pipeline (`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`), not three
@@ -111,7 +123,9 @@ operational and abuse-control gaps from the original audit have been closed.
   sender-identity and sending-domain management (with managed-DKIM keypair
   generation and DNS verification), transactional sends, the `manual-email`
   module (Email Studio send + preview +
-  per-recipient delivery status), `email-drafts` module (composer drafts), and
+  per-recipient delivery status + recipient autocomplete, cached per org for
+  60s over an `(organizationId, createdAt)` index), `email-drafts`
+  module (composer drafts), `outbox` module (queued/scheduled sends + cancel), and
   `attachments` module (upload/download/delete to object storage), `images`
   module (editor image uploads; the read endpoint is public and unauthenticated
   because recipients' mail clients load embedded images without a session),
@@ -121,7 +135,7 @@ operational and abuse-control gaps from the original audit have been closed.
   reuses `transactionalEmailService.send` rather than introducing a parallel
   path.
 - `apps/web`: Vite React dashboard. It includes login/register, password reset,
-  dashboard, Compose (Email Studio), inbox, contacts, lists, smart lists
+  dashboard, Compose (Email Studio), drafts, outbox, inbox, contacts, lists, smart lists
   (segments), templates, campaigns, campaign analytics, sending accounts (SMTP
   connections), sending domains, sending health (deliverability), blocked
   addresses (suppressions), background jobs (queue operations),

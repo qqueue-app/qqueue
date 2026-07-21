@@ -45,10 +45,20 @@ Check this before building something — most of the platform already exists.
 - **Sending** — campaigns (drafts, send-now, one-shot schedule, cron
   recurrence, pause/resume, A/B subject testing with delayed winner decision,
   per-variant analytics); transactional API/SDK/SMTP sends with `Idempotency-Key`
-  support; manual sends via **Email Studio** (multi-`To`/CC/BCC, contact + list
-  pickers, template apply, Tiptap editor, MJML preview, drafts, attachments,
+  support; manual sends via **Email Studio** (multi-`To`/CC/BCC always visible
+  with autocomplete over contacts + past recipients, contact + list pickers,
+  template apply, Tiptap editor, MJML preview, drafts, attachments,
   schedule-for-later, per-recipient delivery status). UI send surfaces pick a
-  **sending account** (SMTP connection) rather than free-typing a From address.
+  **sending account** (SMTP connection) rather than free-typing a From address,
+  and the From picker names the account a send resolves to instead of just
+  saying "default".
+- **Drafts + Outbox** — `/drafts` lists composer drafts and deep-links back into
+  the composer (`/email-studio?draft=<id>`); `/outbox` shows every `EmailJob`
+  still `PENDING`/`QUEUED`/`PROCESSING` for the org (any origin) with its
+  sending account, and cancels the ones SMTP hasn't seen yet. Cancel sets
+  `EmailJob.status = CANCELLED` and removes the delayed BullMQ job; the send
+  worker already skips `CANCELLED` rows, so losing that race is safe. This is
+  the everyone-facing view — `/queue-operations` stays the admin BullMQ inspector.
 - **First-run onboarding** — `pnpm setup` CLI (plain-language guided `.env`
   creation: secret generation, infra reachability checks, migrations); a
   one-time `/setup` web wizard gated on zero users (admin account → verified
@@ -107,7 +117,7 @@ Not built: org invitations / member-management UI, billing/usage metering
 - `apps/api` — Express API. Route/controller/service separation per module under
   `apps/api/src/modules/*` (auth, setup, instance-settings, organizations,
   smtp-connections, contacts, contact-lists, templates,
-  campaigns, transactional-email, manual-email, email-drafts, attachments,
+  campaigns, transactional-email, manual-email, email-drafts, outbox, attachments,
   images, api-keys, webhooks, tracking, unsubscribe, suppressions, segments,
   domain-throttles, deliverability, queue-operations, dashboard, inbox). Entry
   `src/index.ts`; app `src/app.ts`; env `src/config/env.ts`;
@@ -126,7 +136,8 @@ Not built: org invitations / member-management UI, billing/usage metering
     `SMTPConnection` model) — don't rename the backend to match the label.
 - `apps/web` — Vite + React + Tailwind dashboard. Entry `src/main.tsx`; routes
   `src/routes/AppRoutes.tsx`; shell `src/layouts/DashboardLayout.tsx`; pages
-  `src/pages/*` (`Dashboard`, `EmailStudio`, `Campaigns`/`CampaignAnalytics`,
+  `src/pages/*` (`Dashboard`, `EmailStudio`, `Drafts`, `Outbox`,
+  `Campaigns`/`CampaignAnalytics`,
   `Contacts`, `ContactLists`, `Templates`/`TemplateEditor`, `Segments`,
   `Suppressions`, `Deliverability`, `Inbox`, `SMTPConnections`,
   `QueueOperations`, `Settings`, chrome-free `Setup` wizard, public

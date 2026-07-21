@@ -20,6 +20,7 @@ vi.mock("../lib/api.js", () => ({
     listContacts: vi.fn(),
     listContactLists: vi.fn(),
     listEmailDrafts: vi.fn(),
+    listRecipientSuggestions: vi.fn(),
     sendManualEmail: vi.fn(),
     previewEmail: vi.fn(),
     manualEmailStatus: vi.fn(),
@@ -101,6 +102,7 @@ function setup({ withSmtp = true } = {}) {
   mockedApi.listContacts.mockResolvedValue(contacts);
   mockedApi.listContactLists.mockResolvedValue(lists);
   mockedApi.listEmailDrafts.mockResolvedValue([]);
+  mockedApi.listRecipientSuggestions.mockResolvedValue([]);
   mockedApi.listRecurringSends.mockResolvedValue([]);
   mockedApi.sendManualEmail.mockResolvedValue({ id: "job1", status: "SENT" });
   mockedApi.previewEmail.mockResolvedValue({
@@ -172,9 +174,8 @@ describe("EmailStudio", () => {
     expect(payload.to).toEqual(["rcpt@x.com"]);
     expect(payload.subject).toBe("Hello there");
     expect(payload.html).toContain("Body");
-    expect(toast.success).toHaveBeenCalledWith(
-      expect.stringContaining("job1")
-    );
+    // Confirmations name the recipients, never the queue job id.
+    expect(toast.success).toHaveBeenCalledWith("Sent to 1 person.");
   });
 
   it("adds contacts from the picker into the recipients", async () => {
@@ -332,6 +333,111 @@ describe("EmailStudio", () => {
       expect(mockedApi.deleteAttachment).toHaveBeenCalledWith("att1")
     );
     expect(screen.queryByText("doc.pdf")).not.toBeInTheDocument();
+  });
+
+  it("names the account the default From option actually sends as", async () => {
+    setup();
+    await renderStudio();
+
+    // "Default sending account" on its own never told anyone which address it
+    // would use.
+    expect(
+      screen.getByRole("combobox", { name: "From" })
+    ).toHaveTextContent("Default · from@x.com");
+  });
+
+  it("keeps Cc and Bcc visible without hunting for a button", async () => {
+    setup();
+    await renderStudio();
+
+    expect(screen.getByLabelText("Cc")).toBeInTheDocument();
+    expect(screen.getByLabelText("Bcc")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Reply-To")).not.toBeInTheDocument();
+  });
+
+  it("autocompletes recipients from contacts and past sends", async () => {
+    const user = userEvent.setup();
+    setup();
+    mockedApi.listRecipientSuggestions.mockResolvedValue([
+      { email: "archived@x.com", source: "recent" }
+    ]);
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "a");
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "alice@x.com",
+      "archived@x.comRecent"
+    ]);
+
+    await user.click(options[0]);
+    // The chip replaces the typed text, so the list closes.
+    expect(screen.getByLabelText("Remove alice@x.com")).toBeInTheDocument();
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("selects a suggestion with the keyboard", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "b");
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByLabelText("Remove bob@x.com")).toBeInTheDocument();
+  });
+
+  it("still accepts an address that matches no suggestion", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "nobody@elsewhere.com{Enter}");
+
+    expect(
+      screen.getByLabelText("Remove nobody@elsewhere.com")
+    ).toBeInTheDocument();
+  });
+
+  it("confirms before a template overwrites a started message", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("Subject"), "My own subject");
+    await user.click(screen.getByRole("combobox", { name: "Template" }));
+    await user.click(await screen.findByRole("option", { name: "Welcome" }));
+
+    // Nothing is replaced until the confirmation is accepted.
+    expect(screen.getByLabelText("Subject")).toHaveValue("My own subject");
+    await user.click(screen.getByRole("button", { name: "Use template" }));
+    expect(screen.getByLabelText("Subject")).toHaveValue("Welcome aboard");
+  });
+
+  it("confirms a scheduled send by time instead of job id", async () => {
+    const user = userEvent.setup();
+    setup();
+    mockedApi.sendManualEmail.mockResolvedValue({
+      id: "job1",
+      status: "QUEUED"
+    });
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Hi");
+    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
+    await user.click(screen.getByLabelText("Schedule for later"));
+    const future = new Date(Date.now() + 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 16);
+    await user.type(screen.getByLabelText("Scheduled time"), future);
+    await user.click(screen.getByRole("button", { name: /Schedule email/i }));
+
+    await waitFor(() => expect(mockedApi.sendManualEmail).toHaveBeenCalled());
+    const [message] = toast.success.mock.calls.at(-1)!;
+    expect(message).toMatch(/^Scheduled — sends /);
+    expect(message).not.toContain("job1");
   });
 
   it("shows per-recipient delivery status after sending", async () => {

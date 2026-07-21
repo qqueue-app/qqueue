@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import {
   Home,
   Inbox,
+  FileEdit,
+  Send,
   PenSquare,
   Users,
   List,
@@ -80,6 +82,8 @@ const navSections: NavSection[] = [
     items: [
       { to: "/", label: "Home", icon: Home },
       { to: "/email-studio", label: "Compose", icon: PenSquare },
+      { to: "/drafts", label: "Drafts", icon: FileEdit },
+      { to: "/outbox", label: "Outbox", icon: Send },
       { to: "/inbox", label: "Inbox", icon: Inbox },
     ],
   },

@@ -583,6 +583,10 @@ model EmailJob {
   @@unique([organizationId, idempotencyKey])
   @@index([messageId])
   @@index([organizationId, origin])
+  // Newest-first reads scoped to one org: the outbox, the dashboard's recent
+  // activity, and the composer's recipient suggestions all page backwards
+  // through this table and would otherwise scan every job the org has ever sent.
+  @@index([organizationId, createdAt])
 }
 
 // Email Studio composer drafts. Org- and user-scoped, editable until sent. A

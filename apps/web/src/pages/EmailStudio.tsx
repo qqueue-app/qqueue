@@ -1,8 +1,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   FileText,
   Paperclip,
-  Plus,
   Save,
   Search,
   Send,
@@ -29,6 +29,7 @@ import {
   type RecurringSend,
   type ManualEmailDeliveryStatus,
   type RecipientDelivery,
+  type RecipientSuggestion,
   type SMTPConnection,
   type Template
 } from "../lib/api.js";
@@ -72,6 +73,28 @@ function htmlIsEmpty(html: string) {
   return stripped === "" && !/<(img|hr|br)/i.test(html);
 }
 
+function describeRecipientCount(count: number) {
+  return count === 1 ? "1 person" : `${count} people`;
+}
+
+// Confirmations name the time a message goes out rather than a queue job id.
+function formatSendTime(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+// How a sending account reads in the From picker and the "sending as" hints.
+function describeConnection(connection: SMTPConnection) {
+  return connection.fromName
+    ? `${connection.fromName} <${connection.fromEmail}>`
+    : connection.fromEmail;
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -82,24 +105,67 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const MAX_SUGGESTIONS = 8;
+
 interface RecipientFieldProps {
   id: string;
   label: string;
   emails: string[];
   onChange: (emails: string[]) => void;
-  onRemoveField?: () => void;
+  suggestions?: RecipientSuggestion[];
 }
 
-// A simple chip input: type an address and press Enter/comma to add it. Used for
-// the To/CC/BCC fields. Invalid or duplicate addresses are rejected on commit.
+// A chip input with autocomplete: type part of a name or address to pick from
+// the contact book and previously-mailed addresses, or type a full address and
+// press Enter/comma to add it. Used for the To/CC/BCC fields. Invalid or
+// duplicate addresses are rejected on commit.
 function RecipientField({
   id,
   label,
   emails,
   onChange,
-  onRemoveField
+  suggestions = []
 }: RecipientFieldProps) {
   const [value, setValue] = useState("");
+  const [highlight, setHighlight] = useState(0);
+
+  const query = value.trim().toLowerCase();
+  const matches = useMemo(() => {
+    if (query === "") {
+      return [];
+    }
+    const chosen = new Set(emails.map((email) => email.toLowerCase()));
+    return suggestions
+      .filter(
+        (suggestion) =>
+          !chosen.has(suggestion.email.toLowerCase()) &&
+          (suggestion.email.toLowerCase().includes(query) ||
+            (suggestion.name ?? "").toLowerCase().includes(query))
+      )
+      .slice(0, MAX_SUGGESTIONS);
+  }, [suggestions, query, emails]);
+
+  // Reset the highlight whenever the candidate set changes so a stale index
+  // can't select the wrong person.
+  useEffect(() => {
+    setHighlight(0);
+  }, [query]);
+
+  function add(candidates: string[]) {
+    const next = [...emails];
+    for (const candidate of candidates) {
+      if (!isValidEmail(candidate)) {
+        toast.error(`"${candidate}" is not a valid email address.`);
+        continue;
+      }
+      if (next.some((email) => email.toLowerCase() === candidate.toLowerCase())) {
+        continue;
+      }
+      next.push(candidate);
+    }
+    onChange(next);
+    setValue("");
+  }
 
   function commit(raw: string) {
     const parts = raw
@@ -109,72 +175,116 @@ function RecipientField({
     if (parts.length === 0) {
       return;
     }
-    const next = [...emails];
-    for (const part of parts) {
-      if (!isValidEmail(part)) {
-        toast.error(`"${part}" is not a valid email address.`);
-        continue;
-      }
-      if (next.some((email) => email.toLowerCase() === part.toLowerCase())) {
-        continue;
-      }
-      next.push(part);
-    }
-    onChange(next);
-    setValue("");
+    add(parts);
   }
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label htmlFor={id}>{label}</Label>
-        {onRemoveField ? (
-          <button
-            type="button"
-            onClick={onRemoveField}
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            Remove
-          </button>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-1.5 rounded-lg border border-input bg-card p-1.5 shadow-sm focus-within:ring-2 focus-within:ring-ring">
-        {emails.map((email) => (
-          <Badge key={email} variant="secondary" className="gap-1 font-normal">
-            {email}
-            <button
-              type="button"
-              aria-label={`Remove ${email}`}
-              onClick={() =>
-                onChange(emails.filter((current) => current !== email))
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <div className="flex flex-wrap gap-1.5 rounded-lg border border-input bg-card p-1.5 shadow-sm focus-within:ring-2 focus-within:ring-ring">
+          {emails.map((email) => (
+            <Badge key={email} variant="secondary" className="gap-1 font-normal">
+              {email}
+              <button
+                type="button"
+                aria-label={`Remove ${email}`}
+                onClick={() =>
+                  onChange(emails.filter((current) => current !== email))
+                }
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+          <input
+            id={id}
+            type="text"
+            value={value}
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={matches.length > 0}
+            aria-controls={`${id}-suggestions`}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (matches.length > 0 && event.key === "ArrowDown") {
+                event.preventDefault();
+                setHighlight((current) => (current + 1) % matches.length);
+              } else if (matches.length > 0 && event.key === "ArrowUp") {
+                event.preventDefault();
+                setHighlight(
+                  (current) => (current - 1 + matches.length) % matches.length
+                );
+              } else if (event.key === "Escape" && matches.length > 0) {
+                event.preventDefault();
+                setValue("");
+              } else if (event.key === "Enter" || event.key === ",") {
+                event.preventDefault();
+                const match = matches[highlight];
+                if (event.key === "Enter" && match) {
+                  add([match.email]);
+                } else {
+                  commit(value);
+                }
+              } else if (
+                event.key === "Backspace" &&
+                value === "" &&
+                emails.length > 0
+              ) {
+                onChange(emails.slice(0, -1));
               }
-              className="text-muted-foreground hover:text-destructive"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </Badge>
-        ))}
-        <input
-          id={id}
-          type="text"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === ",") {
-              event.preventDefault();
-              commit(value);
-            } else if (
-              event.key === "Backspace" &&
-              value === "" &&
-              emails.length > 0
-            ) {
-              onChange(emails.slice(0, -1));
-            }
-          }}
-          onBlur={() => commit(value)}
-          placeholder={emails.length === 0 ? "name@example.com" : ""}
-          className="min-w-[12ch] flex-1 bg-transparent px-1.5 py-0.5 text-sm outline-none"
-        />
+            }}
+            onBlur={() => commit(value)}
+            placeholder={emails.length === 0 ? "name@example.com" : ""}
+            className="min-w-[12ch] flex-1 bg-transparent px-1.5 py-0.5 text-sm outline-none"
+          />
+        </div>
+        {matches.length > 0 ? (
+          <ul
+            id={`${id}-suggestions`}
+            role="listbox"
+            className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-md"
+          >
+            {matches.map((match, index) => (
+              <li key={`${match.source}-${match.email}`}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={index === highlight}
+                  // Commit on mousedown: the input's onBlur would otherwise fire
+                  // first and swallow the click.
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    add([match.email]);
+                  }}
+                  onMouseEnter={() => setHighlight(index)}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+                    index === highlight ? "bg-accent" : ""
+                  }`}
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {match.name ? (
+                      <>
+                        {match.name}{" "}
+                        <span className="text-muted-foreground">
+                          {match.email}
+                        </span>
+                      </>
+                    ) : (
+                      match.email
+                    )}
+                  </span>
+                  {match.source === "recent" ? (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      Recent
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </div>
   );
@@ -182,6 +292,8 @@ function RecipientField({
 
 export function EmailStudio() {
   const { currentOrganizationId: organizationId } = useSession();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -190,6 +302,9 @@ export function EmailStudio() {
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [recurringSends, setRecurringSends] = useState<RecurringSend[]>([]);
+  const [recentRecipients, setRecentRecipients] = useState<
+    RecipientSuggestion[]
+  >([]);
 
   // Composer state.
   const [smtpConnectionId, setSMTPConnectionId] = useState(DEFAULT_SMTP);
@@ -199,10 +314,7 @@ export function EmailStudio() {
   const [toEmails, setToEmails] = useState<string[]>([]);
   const [ccEmails, setCcEmails] = useState<string[]>([]);
   const [bccEmails, setBccEmails] = useState<string[]>([]);
-  const [showCc, setShowCc] = useState(false);
-  const [showBcc, setShowBcc] = useState(false);
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
-  const [replyTo, setReplyTo] = useState("");
   const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [scheduleForLater, setScheduleForLater] = useState(false);
@@ -221,6 +333,11 @@ export function EmailStudio() {
   const [listPickerOpen, setListPickerOpen] = useState(false);
   const [draftsOpen, setDraftsOpen] = useState(false);
   const [deleteDraftTarget, setDeleteDraftTarget] = useState<EmailDraft | null>(
+    null
+  );
+  // Applying a template overwrites the composer, so a started message gets a
+  // confirmation step first.
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(
     null
   );
 
@@ -252,6 +369,43 @@ export function EmailStudio() {
   const totalRecipients =
     toEmails.length + ccEmails.length + bccEmails.length + listMemberEstimate;
 
+  // The API resolves "no explicit account" strictly as the connection flagged
+  // isDefault — there is no fallback to the first one — so the picker names the
+  // same account the send will actually use.
+  const defaultConnection = useMemo(
+    () => smtpConnections.find((connection) => connection.isDefault),
+    [smtpConnections]
+  );
+
+  // Contacts first so a saved name wins over a bare address from past sends.
+  const recipientSuggestions = useMemo<RecipientSuggestion[]>(() => {
+    const seen = new Set<string>();
+    const merged: RecipientSuggestion[] = [];
+    for (const contact of contacts) {
+      const key = contact.email.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push({
+        email: contact.email,
+        name:
+          [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
+          null,
+        source: "contact"
+      });
+    }
+    for (const recent of recentRecipients) {
+      const key = recent.email.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(recent);
+    }
+    return merged;
+  }, [contacts, recentRecipients]);
+
   const load = useCallback(async () => {
     if (!organizationId) {
       setLoading(false);
@@ -265,14 +419,17 @@ export function EmailStudio() {
         contactData,
         listData,
         draftData,
-        recurringData
+        recurringData,
+        recentData
       ] = await Promise.all([
         api.listTemplates(organizationId),
         api.listSMTPConnections(organizationId),
         api.listContacts(organizationId),
         api.listContactLists(organizationId),
         api.listEmailDrafts(organizationId),
-        api.listRecurringSends(organizationId)
+        api.listRecurringSends(organizationId),
+        // Autocomplete is a convenience: never let it fail the whole page.
+        api.listRecipientSuggestions(organizationId).catch(() => [])
       ]);
       setTemplates(templateData);
       setSMTPConnections(smtpData);
@@ -280,9 +437,10 @@ export function EmailStudio() {
       setContactLists(listData);
       setDrafts(draftData);
       setRecurringSends(recurringData);
+      setRecentRecipients(recentData);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Unable to load Email Studio"
+        error instanceof Error ? error.message : "Couldn't load the composer."
       );
     } finally {
       setLoading(false);
@@ -336,10 +494,7 @@ export function EmailStudio() {
     setToEmails([]);
     setCcEmails([]);
     setBccEmails([]);
-    setShowCc(false);
-    setShowBcc(false);
     setSelectedListIds([]);
-    setReplyTo("");
     setAttachments([]);
     setScheduleForLater(false);
     setScheduledAt("");
@@ -349,31 +504,33 @@ export function EmailStudio() {
     setLastSavedAt(null);
   }
 
-  function selectTemplate(value: string) {
-    setTemplateId(value);
-    if (value === NO_TEMPLATE) {
-      return;
-    }
+  function applyTemplate(value: string) {
     const template = templates.find((item) => item.id === value);
     if (!template) {
       return;
     }
-    // Loading a template overwrites the composer, so confirm first if the user
-    // has already started writing. The original template row is never written
-    // back to, so edits here never alter the saved template.
-    const hasContent =
-      subject.trim() !== "" || html.replace(/<[^>]*>/g, "").trim() !== "";
-    if (
-      hasContent &&
-      !window.confirm(
-        "Replace the current subject and message with this template?"
-      )
-    ) {
-      return;
-    }
+    // The original template row is never written back to, so edits made here
+    // never alter the saved template.
+    setTemplateId(value);
     setSubject(template.subject);
     setHtml(template.html);
     toast.success(`Loaded "${template.name}".`);
+  }
+
+  function selectTemplate(value: string) {
+    if (value === NO_TEMPLATE) {
+      setTemplateId(value);
+      return;
+    }
+    // Loading a template overwrites the composer, so confirm first if the user
+    // has already started writing.
+    const started =
+      subject.trim() !== "" || html.replace(/<[^>]*>/g, "").trim() !== "";
+    if (started) {
+      setPendingTemplateId(value);
+      return;
+    }
+    applyTemplate(value);
   }
 
   function addContacts(selected: Contact[]) {
@@ -461,7 +618,6 @@ export function EmailStudio() {
           cc: ccEmails,
           bcc: bccEmails,
           listIds: selectedListIds,
-          replyTo: replyTo || undefined,
           smtpConnectionId:
             smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
           templateId: templateId === NO_TEMPLATE ? undefined : templateId
@@ -497,7 +653,6 @@ export function EmailStudio() {
       ccEmails,
       bccEmails,
       selectedListIds,
-      replyTo,
       smtpConnectionId,
       templateId,
       draftId
@@ -523,10 +678,26 @@ export function EmailStudio() {
     ccEmails,
     bccEmails,
     selectedListIds,
-    replyTo,
     smtpConnectionId,
     templateId
   ]);
+
+  const applyDraft = useCallback((draft: EmailDraft) => {
+    setDraftId(draft.id);
+    setSubject(draft.subject ?? "");
+    setHtml(draft.html ?? "");
+    setToEmails(draft.to ?? []);
+    setCcEmails(draft.cc ?? []);
+    setBccEmails(draft.bcc ?? []);
+    setSelectedListIds(draft.listIds ?? []);
+    setAttachments(draft.attachments ?? []);
+    setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
+    setTemplateId(draft.templateId ?? NO_TEMPLATE);
+    setLastSavedAt(draft.updatedAt);
+    setDeliveryStatus(null);
+    setDraftsOpen(false);
+    toast.success("Draft loaded.");
+  }, []);
 
   async function loadDraft(summary: EmailDraft) {
     // The drafts list omits attachments; fetch the full draft so resuming
@@ -537,24 +708,30 @@ export function EmailStudio() {
     } catch {
       // Use the summary as-is; attachments simply won't be restored.
     }
-    setDraftId(draft.id);
-    setSubject(draft.subject ?? "");
-    setHtml(draft.html ?? "");
-    setToEmails(draft.to ?? []);
-    setCcEmails(draft.cc ?? []);
-    setBccEmails(draft.bcc ?? []);
-    setShowCc((draft.cc?.length ?? 0) > 0);
-    setShowBcc((draft.bcc?.length ?? 0) > 0);
-    setSelectedListIds(draft.listIds ?? []);
-    setReplyTo(draft.replyTo ?? "");
-    setAttachments(draft.attachments ?? []);
-    setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
-    setTemplateId(draft.templateId ?? NO_TEMPLATE);
-    setLastSavedAt(draft.updatedAt);
-    setDeliveryStatus(null);
-    setDraftsOpen(false);
-    toast.success("Draft loaded.");
+    applyDraft(draft);
   }
+
+  // Deep link from the Drafts page: /email-studio?draft=<id>.
+  const requestedDraftId = searchParams.get("draft");
+  useEffect(() => {
+    if (!requestedDraftId) {
+      return;
+    }
+    // Drop the param first so a refresh doesn't re-open the draft over work in
+    // progress.
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("draft");
+        return next;
+      },
+      { replace: true }
+    );
+    api
+      .getEmailDraft(requestedDraftId)
+      .then(applyDraft)
+      .catch(() => toast.error("That draft couldn't be opened."));
+  }, [requestedDraftId, applyDraft, setSearchParams]);
 
   async function confirmDeleteDraft() {
     if (!deleteDraftTarget) {
@@ -621,7 +798,6 @@ export function EmailStudio() {
           cc: ccEmails.length ? ccEmails : undefined,
           bcc: bccEmails.length ? bccEmails : undefined,
           listIds: selectedListIds.length ? selectedListIds : undefined,
-          replyTo: replyTo || undefined,
           smtpConnectionId:
             smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
           templateId: templateId === NO_TEMPLATE ? undefined : templateId,
@@ -662,6 +838,12 @@ export function EmailStudio() {
       scheduledAtIso = date.toISOString();
     }
 
+    // Captured before the composer resets, so the confirmation can say who it
+    // went to rather than quoting a job id.
+    const recipientSummary = listMemberEstimate > 0
+      ? `about ${totalRecipients} people`
+      : describeRecipientCount(totalRecipients);
+
     setSending(true);
     try {
       const result = await api.sendManualEmail({
@@ -670,7 +852,6 @@ export function EmailStudio() {
         cc: ccEmails.length ? ccEmails : undefined,
         bcc: bccEmails.length ? bccEmails : undefined,
         listIds: selectedListIds.length ? selectedListIds : undefined,
-        replyTo: replyTo || undefined,
         smtpConnectionId:
           smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
         templateId: templateId === NO_TEMPLATE ? undefined : templateId,
@@ -685,11 +866,19 @@ export function EmailStudio() {
       if (draftId) {
         await api.deleteEmailDraft(draftId).catch(() => undefined);
       }
-      toast.success(
-        result.status === "QUEUED"
-          ? `Email scheduled (job ${result.id}).`
-          : `Email sent (job ${result.id}).`
-      );
+      if (result.status === "QUEUED" && scheduledAtIso) {
+        toast.success(
+          `Scheduled — sends ${formatSendTime(scheduledAtIso)} to ${recipientSummary}.`,
+          {
+            action: {
+              label: "View outbox",
+              onClick: () => navigate("/outbox")
+            }
+          }
+        );
+      } else {
+        toast.success(`Sent to ${recipientSummary}.`);
+      }
       resetComposer();
       setDrafts(await api.listEmailDrafts(organizationId));
       // Surface per-recipient delivery status for the just-created job.
@@ -701,7 +890,9 @@ export function EmailStudio() {
         // Non-fatal: the send already succeeded.
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to send email");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't send the email."
+      );
     } finally {
       setSending(false);
     }
@@ -775,28 +966,46 @@ export function EmailStudio() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={DEFAULT_SMTP}>
-                          Default sending account
+                        {/* Name the account the send will actually use, rather
+                            than the word "default" on its own. */}
+                        <SelectItem
+                          value={DEFAULT_SMTP}
+                          disabled={!loading && !defaultConnection}
+                        >
+                          {defaultConnection
+                            ? `Default · ${describeConnection(defaultConnection)}`
+                            : "No default sending account — pick one below"}
                         </SelectItem>
                         {smtpConnections.map((connection) => (
                           <SelectItem key={connection.id} value={connection.id}>
-                            {connection.fromName
-                              ? `${connection.fromName} <${connection.fromEmail}>`
-                              : connection.fromEmail}
+                            <span className="flex items-center gap-2">
+                              {describeConnection(connection)}
+                              {connection.isDefault ? (
+                                <Badge variant="secondary" className="font-normal">
+                                  Default
+                                </Badge>
+                              ) : null}
+                            </span>
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="replyTo">Reply-To</Label>
-                    <Input
-                      id="replyTo"
-                      type="email"
-                      placeholder="optional"
-                      value={replyTo}
-                      onChange={(event) => setReplyTo(event.target.value)}
-                    />
+                    <Label htmlFor="template">Template</Label>
+                    <Select value={templateId} onValueChange={selectTemplate}>
+                      <SelectTrigger id="template">
+                        <SelectValue placeholder="Start from a template" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
+                        {templates.map((template) => (
+                          <SelectItem key={template.id} value={template.id}>
+                            {template.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
@@ -805,6 +1014,7 @@ export function EmailStudio() {
                   label="To"
                   emails={toEmails}
                   onChange={setToEmails}
+                  suggestions={recipientSuggestions}
                 />
 
                 <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -826,28 +1036,6 @@ export function EmailStudio() {
                     <Users className="h-4 w-4" />
                     Add list
                   </Button>
-                  {!showCc ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowCc(true)}
-                    >
-                      <Plus className="h-4 w-4" />
-                      Cc
-                    </Button>
-                  ) : null}
-                  {!showBcc ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowBcc(true)}
-                    >
-                      <Plus className="h-4 w-4" />
-                      Bcc
-                    </Button>
-                  ) : null}
                 </div>
 
                 {selectedLists.length > 0 ? (
@@ -872,30 +1060,20 @@ export function EmailStudio() {
                   </div>
                 ) : null}
 
-                {showCc ? (
-                  <RecipientField
-                    id="cc"
-                    label="Cc"
-                    emails={ccEmails}
-                    onChange={setCcEmails}
-                    onRemoveField={() => {
-                      setShowCc(false);
-                      setCcEmails([]);
-                    }}
-                  />
-                ) : null}
-                {showBcc ? (
-                  <RecipientField
-                    id="bcc"
-                    label="Bcc"
-                    emails={bccEmails}
-                    onChange={setBccEmails}
-                    onRemoveField={() => {
-                      setShowBcc(false);
-                      setBccEmails([]);
-                    }}
-                  />
-                ) : null}
+                <RecipientField
+                  id="cc"
+                  label="Cc"
+                  emails={ccEmails}
+                  onChange={setCcEmails}
+                  suggestions={recipientSuggestions}
+                />
+                <RecipientField
+                  id="bcc"
+                  label="Bcc"
+                  emails={bccEmails}
+                  onChange={setBccEmails}
+                  suggestions={recipientSuggestions}
+                />
 
                 <div className="space-y-2">
                   <Label htmlFor="subject">Subject</Label>
@@ -973,25 +1151,6 @@ export function EmailStudio() {
                     Write your message and send it through your delivery
                     pipeline.
                   </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select value={templateId} onValueChange={selectTemplate}>
-                    <SelectTrigger
-                      className="w-full sm:w-72"
-                      aria-label="Template"
-                    >
-                      <SelectValue placeholder="Start from a template" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
-                      {templates.map((template) => (
-                        <SelectItem key={template.id} value={template.id}>
-                          {template.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 <RichTextEditor
@@ -1238,6 +1397,21 @@ export function EmailStudio() {
         description="This draft will be permanently removed."
         confirmLabel="Delete"
         onConfirm={confirmDeleteDraft}
+      />
+
+      <ConfirmDialog
+        open={pendingTemplateId !== null}
+        onOpenChange={(open) => !open && setPendingTemplateId(null)}
+        title="Use this template?"
+        description="It replaces the subject and message you have written. Your saved template isn't changed."
+        confirmLabel="Use template"
+        destructive={false}
+        onConfirm={() => {
+          if (pendingTemplateId) {
+            applyTemplate(pendingTemplateId);
+          }
+          setPendingTemplateId(null);
+        }}
       />
     </>
   );

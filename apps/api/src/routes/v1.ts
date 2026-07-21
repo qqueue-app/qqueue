@@ -20,6 +20,7 @@ import {
 import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { recurringSendRouter } from "../modules/recurring-sends/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
+import { outboxRouter } from "../modules/outbox/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { segmentRouter } from "../modules/segments/routes.js";
 import { setupRouter } from "../modules/setup/routes.js";
@@ -90,6 +91,10 @@ v1Router.use("/campaigns", campaignRouter);
 // shared send pipeline (origin = MANUAL) rather than a parallel send path.
 v1Router.use("/manual-email", manualEmailRouter);
 v1Router.use("/email-drafts", emailDraftRouter);
+// Outbox: mail that has been accepted but not yet delivered, in product terms
+// (subjects, addresses, sending account) rather than the raw BullMQ jobs the
+// queue-operations dashboard exposes. Any member can view and cancel.
+v1Router.use("/outbox", outboxRouter);
 v1Router.use("/recurring-sends", recurringSendRouter);
 // Email attachment upload/download/delete. Blobs live in object storage; the
 // send pipeline links rows to the EmailJob and the worker streams them to SMTP.

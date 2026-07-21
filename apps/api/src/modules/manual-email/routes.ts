@@ -13,6 +13,12 @@ manualEmailRouter.post(
   requireOrgMembership,
   manualEmailController.preview
 );
+// Addresses this org has mailed before, for composer recipient autocomplete.
+manualEmailRouter.get(
+  "/recipient-suggestions",
+  requireOrgMembership,
+  manualEmailController.recipientSuggestions
+);
 // Per-recipient delivery status for a sent manual email (org from query).
 manualEmailRouter.get(
   "/:emailJobId/status",

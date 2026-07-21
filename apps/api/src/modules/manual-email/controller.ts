@@ -15,6 +15,14 @@ export const manualEmailController = {
     res.json({ data: result });
   },
 
+  async recipientSuggestions(req: Request, res: Response) {
+    // organizationId is verified and pinned by requireOrgMembership (query).
+    const suggestions = await manualEmailService.recentRecipients(
+      req.organizationId!
+    );
+    res.json({ data: suggestions });
+  },
+
   async status(req: Request, res: Response) {
     // organizationId is verified and pinned by requireOrgMembership (query).
     const result = await manualEmailService.deliveryStatus(

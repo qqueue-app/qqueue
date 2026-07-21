@@ -277,6 +277,81 @@ describe("manualEmailService.deliveryStatus", () => {
   });
 });
 
+describe("manualEmailService.recentRecipients", () => {
+  beforeEach(() => {
+    manualEmailService.clearRecipientSuggestionCache();
+  });
+
+  it("flattens past sends into a deduplicated, newest-first address list", async () => {
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      // toEmail holds the comma-joined To set for multi-recipient sends.
+      { toEmail: "a@x.com, b@x.com", cc: ["c@x.com"], bcc: [] },
+      { toEmail: "A@X.com", cc: [], bcc: ["d@x.com"] }
+    ] as never);
+
+    const suggestions = await manualEmailService.recentRecipients("org_1");
+
+    expect(suggestions.map((item) => item.email)).toEqual([
+      "a@x.com",
+      "b@x.com",
+      "c@x.com",
+      "d@x.com"
+    ]);
+    expect(suggestions.every((item) => item.source === "recent")).toBe(true);
+    expect(prismaMock.emailJob.findMany.mock.calls[0][0]).toMatchObject({
+      where: { organizationId: "org_1" },
+      orderBy: { createdAt: "desc" }
+    });
+  });
+
+  it("serves repeat reads from cache instead of rescanning", async () => {
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      { toEmail: "a@x.com", cc: [], bcc: [] }
+    ] as never);
+
+    const first = await manualEmailService.recentRecipients("org_1");
+    const second = await manualEmailService.recentRecipients("org_1");
+
+    expect(second).toEqual(first);
+    // Every composer load would otherwise scan 500 rows.
+    expect(prismaMock.emailJob.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches per organization rather than globally", async () => {
+    prismaMock.emailJob.findMany
+      .mockResolvedValueOnce([
+        { toEmail: "a@org1.com", cc: [], bcc: [] }
+      ] as never)
+      .mockResolvedValueOnce([
+        { toEmail: "b@org2.com", cc: [], bcc: [] }
+      ] as never);
+
+    const one = await manualEmailService.recentRecipients("org_1");
+    const two = await manualEmailService.recentRecipients("org_2");
+
+    // One org must never be offered another's addresses.
+    expect(one.map((item) => item.email)).toEqual(["a@org1.com"]);
+    expect(two.map((item) => item.email)).toEqual(["b@org2.com"]);
+  });
+
+  it("rereads once the cached list has expired", async () => {
+    vi.useFakeTimers();
+    try {
+      prismaMock.emailJob.findMany.mockResolvedValue([
+        { toEmail: "a@x.com", cc: [], bcc: [] }
+      ] as never);
+
+      await manualEmailService.recentRecipients("org_1");
+      vi.advanceTimersByTime(61_000);
+      await manualEmailService.recentRecipients("org_1");
+
+      expect(prismaMock.emailJob.findMany).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("manualEmailService.preview", () => {
   it("renders the body through MJML + tracking and summarizes recipients", async () => {
     prismaMock.contact.findMany.mockResolvedValue([] as never);

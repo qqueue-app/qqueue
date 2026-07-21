@@ -1345,6 +1345,36 @@ export interface ManualEmailDeliveryStatus {
   complaints: number;
 }
 
+// Autocomplete entry for the composer's To/Cc/Bcc fields. `source` distinguishes
+// a saved contact from an address that only shows up in past sends, so the UI
+// can label the two differently.
+export interface RecipientSuggestion {
+  email: string;
+  name?: string | null;
+  source: "contact" | "recent";
+}
+
+// A message that has been accepted but not yet delivered: the user-facing view
+// of the send queue. Unlike the queue-operations dashboard (raw BullMQ jobs),
+// this is addressed by EmailJob id and speaks in subjects and addresses.
+export interface OutboxEmail {
+  id: string;
+  subject: string;
+  to: string[];
+  ccCount: number;
+  bccCount: number;
+  status: EmailJobStatus;
+  origin: EmailOrigin;
+  scheduledAt?: string | null;
+  createdAt: string;
+  campaignName?: string | null;
+  sendingAccount?: {
+    name: string;
+    fromEmail: string;
+    fromName?: string | null;
+  } | null;
+}
+
 // Draft persistence for the composer. Drafts are intentionally permissive (the
 // recipient arrays are plain strings, not validated emails) so an in-progress
 // message can always be saved. Validation happens at send time.

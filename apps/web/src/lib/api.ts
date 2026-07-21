@@ -394,6 +394,34 @@ export interface ManualEmailDeliveryStatus {
   complaints: number;
 }
 
+// Autocomplete entry for the composer's To/Cc/Bcc fields. `source` separates a
+// saved contact from an address that only appears in past sends.
+export interface RecipientSuggestion {
+  email: string;
+  name?: string | null;
+  source: "contact" | "recent";
+}
+
+// A message that has been accepted but not delivered yet — the product-level
+// view of the send queue (subjects and addresses, not BullMQ jobs).
+export interface OutboxEmail {
+  id: string;
+  subject: string;
+  to: string[];
+  ccCount: number;
+  bccCount: number;
+  status: "PENDING" | "QUEUED" | "PROCESSING";
+  origin: "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL";
+  scheduledAt?: string | null;
+  createdAt: string;
+  campaignName?: string | null;
+  sendingAccount?: {
+    name: string;
+    fromEmail: string;
+    fromName?: string | null;
+  } | null;
+}
+
 export interface EmailPreviewResult {
   subject: string;
   html: string;
@@ -1258,6 +1286,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+
+  listRecipientSuggestions(organizationId: string) {
+    return request<RecipientSuggestion[]>(
+      `/api/v1/manual-email/recipient-suggestions?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  listOutbox(organizationId: string) {
+    return request<OutboxEmail[]>(
+      `/api/v1/outbox?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  cancelOutboxEmail(id: string, organizationId: string) {
+    return request<{ id: string; status: string }>(
+      `/api/v1/outbox/${encodeURIComponent(id)}/cancel`,
+      { method: "POST", body: JSON.stringify({ organizationId }) }
+    );
   },
 
   manualEmailStatus(emailJobId: string, organizationId: string) {
