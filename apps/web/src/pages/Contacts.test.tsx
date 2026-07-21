@@ -18,7 +18,9 @@ vi.mock("../lib/api.js", () => ({
     exportContacts: vi.fn(),
     getContactActivity: vi.fn(),
     previewSegment: vi.fn(),
-    createListFromSegment: vi.fn()
+    createListFromSegment: vi.fn(),
+    listContactLists: vi.fn(),
+    bulkDeleteContacts: vi.fn()
   }
 }));
 
@@ -42,6 +44,7 @@ describe("Contacts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     session.current = { currentOrganizationId: "org_1" };
+    mockedApi.listContactLists.mockResolvedValue([]);
   });
 
   it("shows the empty state when there are no contacts", async () => {
@@ -196,5 +199,173 @@ describe("Contacts", () => {
       expect(mockedApi.exportContacts).toHaveBeenCalledWith("org_1")
     );
     expect(createObjectURL).toHaveBeenCalled();
+  });
+});
+
+describe("Contacts import dialog", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session.current = { currentOrganizationId: "org_1" };
+    mockedApi.listContacts.mockResolvedValue(makeContacts(1));
+    mockedApi.listContactLists.mockResolvedValue([
+      { id: "list_1", name: "VIPs" }
+    ]);
+    mockedApi.importContacts.mockResolvedValue({
+      created: 2,
+      updated: 0,
+      skipped: 0,
+      suppressed: 0,
+      errors: []
+    });
+  });
+
+  async function openImportDialog(user: ReturnType<typeof userEvent.setup>) {
+    render(<Contacts />);
+    await screen.findByText("user0@x.com");
+    const file = new File(["email\na@b.com\n"], "contacts.csv", {
+      type: "text/csv"
+    });
+    const input = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement;
+    await user.upload(input, file);
+    return file;
+  }
+
+  it("opens a dialog on file choice instead of importing immediately", async () => {
+    const user = userEvent.setup();
+    await openImportDialog(user);
+
+    expect(await screen.findByText("Import contacts")).toBeInTheDocument();
+    // Choosing a file must not send it on its own.
+    expect(mockedApi.importContacts).not.toHaveBeenCalled();
+    expect(screen.getByText("contacts.csv")).toBeInTheDocument();
+  });
+
+  it("imports without a list by default", async () => {
+    const user = userEvent.setup();
+    await openImportDialog(user);
+    await screen.findByText("Import contacts");
+
+    await user.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(() => expect(mockedApi.importContacts).toHaveBeenCalled());
+    const [, options] = mockedApi.importContacts.mock.calls[0];
+    expect(options).toEqual({
+      organizationId: "org_1",
+      contactListId: undefined,
+      contactListName: undefined
+    });
+  });
+
+  it("imports straight into a new list named in the dialog", async () => {
+    const user = userEvent.setup();
+    mockedApi.importContacts.mockResolvedValue({
+      created: 2,
+      updated: 0,
+      skipped: 0,
+      suppressed: 0,
+      errors: [],
+      contactList: { id: "list_new", name: "Newsletter", created: true }
+    });
+    await openImportDialog(user);
+    await screen.findByText("Import contacts");
+
+    await user.click(screen.getByLabelText("Add to a list"));
+    await user.click(await screen.findByRole("option", { name: /new list/i }));
+    await user.type(screen.getByLabelText("New list name"), "Newsletter");
+    await user.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(() => expect(mockedApi.importContacts).toHaveBeenCalled());
+    const [, options] = mockedApi.importContacts.mock.calls[0];
+    expect(options).toMatchObject({ contactListName: "Newsletter" });
+    expect(options.contactListId).toBeUndefined();
+    expect(toast.success).toHaveBeenCalledWith(
+      expect.stringContaining("Newsletter")
+    );
+  });
+
+  it("keeps per-row errors visible instead of discarding them", async () => {
+    const user = userEvent.setup();
+    mockedApi.importContacts.mockResolvedValue({
+      created: 1,
+      updated: 0,
+      skipped: 2,
+      suppressed: 0,
+      errors: [
+        { row: 3, message: "Missing email" },
+        { row: 7, message: "Invalid email: nope" }
+      ]
+    });
+    await openImportDialog(user);
+    await screen.findByText("Import contacts");
+
+    await user.click(screen.getByRole("button", { name: /^import$/i }));
+
+    expect(await screen.findByText(/2 rows skipped/i)).toBeInTheDocument();
+    expect(screen.getByText(/Row 3: Missing email/)).toBeInTheDocument();
+    expect(screen.getByText(/Row 7: Invalid email/)).toBeInTheDocument();
+    // Dialog stays open so the reasons remain readable.
+    expect(screen.getByText("Import contacts")).toBeInTheDocument();
+  });
+});
+
+describe("Contacts bulk delete", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session.current = { currentOrganizationId: "org_1" };
+    mockedApi.listContacts.mockResolvedValue(makeContacts(3));
+    mockedApi.listContactLists.mockResolvedValue([]);
+    mockedApi.bulkDeleteContacts.mockResolvedValue({ deleted: 2 });
+  });
+
+  it("shows no bulk bar until something is selected", async () => {
+    render(<Contacts />);
+    await screen.findByText("user0@x.com");
+
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it("deletes the selected contacts", async () => {
+    const user = userEvent.setup();
+    render(<Contacts />);
+    await screen.findByText("user0@x.com");
+
+    await user.click(screen.getByLabelText("Select user0@x.com"));
+    await user.click(screen.getByLabelText("Select user1@x.com"));
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /delete selected/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /^delete$/i })
+    );
+
+    await waitFor(() =>
+      expect(mockedApi.bulkDeleteContacts).toHaveBeenCalledWith("org_1", [
+        "c0",
+        "c1"
+      ])
+    );
+  });
+
+  it("select-all covers every filtered contact, not just the visible page", async () => {
+    const user = userEvent.setup();
+    render(<Contacts />);
+    await screen.findByText("user0@x.com");
+
+    await user.click(screen.getByLabelText("Select all matching contacts"));
+
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+  });
+
+  it("clears the selection", async () => {
+    const user = userEvent.setup();
+    render(<Contacts />);
+    await screen.findByText("user0@x.com");
+
+    await user.click(screen.getByLabelText("Select user0@x.com"));
+    await user.click(screen.getByRole("button", { name: /clear selection/i }));
+
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
   });
 });

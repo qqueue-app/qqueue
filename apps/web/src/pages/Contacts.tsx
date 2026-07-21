@@ -329,7 +329,9 @@ export function Contacts() {
   async function loadLists() {
     if (!organizationId) return;
     try {
-      setLists(await api.listContactLists(organizationId));
+      // Coalesce to an array: the import dialog's children are evaluated even
+      // while it is closed, so a non-array here would break the whole page.
+      setLists((await api.listContactLists(organizationId)) ?? []);
     } catch {
       // Non-fatal: the import dialog falls back to "don't add to a list".
     }

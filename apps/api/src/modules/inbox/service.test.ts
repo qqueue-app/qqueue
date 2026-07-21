@@ -12,6 +12,14 @@ const manualEmailServiceMock = vi.hoisted(() => ({
   send: vi.fn().mockResolvedValue({ id: "job_reply", status: "QUEUED" }),
 }));
 
+const storageMock = vi.hoisted(() => ({
+  getObject: vi.fn(),
+  putObject: vi.fn(),
+  deleteObject: vi.fn(),
+}));
+
+vi.mock("../../lib/storage.js", () => ({ storage: storageMock }));
+
 vi.mock("imapflow", () => ({
   ImapFlow: vi.fn(() => imapMock),
 }));
@@ -210,5 +218,44 @@ describe("inboxService", () => {
       },
       data: { readAt: expect.any(Date) },
     });
+  });
+});
+
+describe("inboxService.downloadAttachment", () => {
+  it("scopes the lookup to the caller's organization membership", async () => {
+    prismaMock.inboundAttachment.findFirst.mockResolvedValue({
+      id: "att_1",
+      filename: "report.pdf",
+      contentType: "application/pdf",
+      storageKey: "inbound/org_1/abc-report.pdf",
+    } as never);
+    storageMock.getObject.mockResolvedValue(Buffer.from("pdf-bytes"));
+
+    const result = await inboxService.downloadAttachment("att_1", "user_1");
+
+    // Scoped by membership, not by an uploading user: nobody here authored the
+    // file, it arrived in the org's shared mailbox.
+    expect(prismaMock.inboundAttachment.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "att_1",
+        organization: { members: { some: { userId: "user_1" } } },
+      },
+    });
+    expect(storageMock.getObject).toHaveBeenCalledWith(
+      "inbound/org_1/abc-report.pdf"
+    );
+    expect(result.body).toEqual(Buffer.from("pdf-bytes"));
+    expect(result.attachment.filename).toBe("report.pdf");
+  });
+
+  it("404s for an attachment outside the caller's organizations", async () => {
+    storageMock.getObject.mockClear();
+    prismaMock.inboundAttachment.findFirst.mockResolvedValue(null as never);
+
+    await expect(
+      inboxService.downloadAttachment("att_1", "user_1")
+    ).rejects.toThrow("Attachment not found");
+    // The blob is never fetched for an attachment the caller can't see.
+    expect(storageMock.getObject).not.toHaveBeenCalled();
   });
 });

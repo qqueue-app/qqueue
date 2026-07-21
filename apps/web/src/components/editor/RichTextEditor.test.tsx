@@ -186,4 +186,58 @@ describe("RichTextEditor", () => {
     await user.click(screen.getByLabelText("Redo"));
     expect(screen.getByLabelText("Bold")).toBeInTheDocument();
   });
+
+  // Regression: the editor had no table nodes in its schema, so ProseMirror
+  // silently dropped pasted table markup — a table arrived as plain paragraphs
+  // before anything was ever sent.
+  it("keeps table markup instead of flattening it to paragraphs", async () => {
+    const onChange = vi.fn();
+    render(
+      <RichTextEditor
+        value={
+          "<table><tbody><tr><th>Quarter</th><td>Q1</td></tr></tbody></table>"
+        }
+        onChange={onChange}
+      />
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("table")).not.toBeNull();
+    });
+    expect(document.querySelectorAll("td").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll("th").length).toBeGreaterThan(0);
+  });
+
+  it("inserts and removes a table from the toolbar", async () => {
+    const user = userEvent.setup();
+    render(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
+
+    await user.click(await screen.findByLabelText(/Insert table/i));
+    await waitFor(() => {
+      expect(document.querySelector("table")).not.toBeNull();
+    });
+
+    // With the cursor in a table the control becomes "delete".
+    await user.click(await screen.findByLabelText(/Delete table/i));
+    await waitFor(() => {
+      expect(document.querySelector("table")).toBeNull();
+    });
+  });
+
+  it("carries inline styles on table cells so mail clients keep the borders", async () => {
+    render(
+      <RichTextEditor
+        value="<table><tbody><tr><td>A</td></tr></tbody></table>"
+        onChange={() => {}}
+      />
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("table")).not.toBeNull();
+    });
+    // Class-based styling would be stripped by Gmail/Outlook; the style
+    // attribute is what survives.
+    const cell = document.querySelector("td");
+    expect(cell?.getAttribute("style")).toContain("border");
+  });
 });

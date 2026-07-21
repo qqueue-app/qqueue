@@ -358,6 +358,11 @@ export function RichTextEditor({
       CtaButton
     ],
     content: value,
+    // The toolbar reads editor.isActive(...) during render for its active
+    // states (bold, alignment, "Edit button", the table controls). Tiptap v3
+    // defaults this to false, which leaves every one of those stale — the
+    // row/column controls never appear and highlights never update.
+    shouldRerenderOnTransaction: true,
     editorProps: {
       attributes: {
         class:

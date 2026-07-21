@@ -159,6 +159,121 @@ describe("contactService.importContacts", () => {
       })
     ).rejects.toThrow("Contact list not found");
   });
+
+  it("creates a list by name and reports it as newly created", async () => {
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contactList.findFirst.mockResolvedValue(null as never);
+    prismaMock.contactList.create.mockResolvedValue({
+      id: "list_new",
+      name: "Newsletter"
+    } as never);
+    prismaMock.contact.findUnique.mockResolvedValue(null as never);
+    prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
+    prismaMock.contactListMember.upsert.mockResolvedValue({ id: "m" } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
+      contactListName: "Newsletter",
+      csv: "email\na@b.com\n"
+    });
+
+    expect(prismaMock.contactList.create).toHaveBeenCalledWith({
+      data: { organizationId: "org_1", name: "Newsletter" },
+      select: { id: true, name: true }
+    });
+    expect(summary.contactList).toEqual({
+      id: "list_new",
+      name: "Newsletter",
+      created: true
+    });
+    expect(
+      prismaMock.contactListMember.upsert.mock.calls[0][0].create
+    ).toMatchObject({ contactListId: "list_new", source: "CSV_IMPORT" });
+  });
+
+  it("reuses a same-named list instead of creating duplicates on re-import", async () => {
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contactList.findFirst.mockResolvedValue({
+      id: "list_existing",
+      name: "Newsletter"
+    } as never);
+    prismaMock.contact.findUnique.mockResolvedValue(null as never);
+    prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
+    prismaMock.contactListMember.upsert.mockResolvedValue({ id: "m" } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
+      contactListName: "Newsletter",
+      csv: "email\na@b.com\n"
+    });
+
+    expect(prismaMock.contactList.create).not.toHaveBeenCalled();
+    expect(summary.contactList).toEqual({
+      id: "list_existing",
+      name: "Newsletter",
+      created: false
+    });
+  });
+
+  it("trims a list name and rejects one that is only whitespace", async () => {
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contactList.findFirst.mockResolvedValue(null as never);
+
+    await expect(
+      contactService.importContacts({
+        organizationId: "org_1",
+        contactListName: "   ",
+        csv: "email\na@b.com\n"
+      })
+    ).rejects.toThrow("Contact list name is required");
+  });
+
+  it("omits the list summary when no list was targeted", async () => {
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contact.findUnique.mockResolvedValue(null as never);
+    prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
+      csv: "email\na@b.com\n"
+    });
+
+    expect(summary.contactList).toBeUndefined();
+    expect(prismaMock.contactListMember.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("contactService.bulkDelete", () => {
+  it("deletes many contacts scoped to the org and the caller's membership", async () => {
+    prismaMock.contact.deleteMany.mockResolvedValue({ count: 2 } as never);
+
+    const result = await contactService.bulkDelete("org_1", "user_1", [
+      "c1",
+      "c2"
+    ]);
+
+    expect(prismaMock.contact.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["c1", "c2"] },
+        organizationId: "org_1",
+        organization: { members: { some: { userId: "user_1" } } }
+      }
+    });
+    expect(result).toEqual({ deleted: 2 });
+  });
+
+  it("reports a partial count when some ids are not the caller's", async () => {
+    // Ids outside the org are filtered out by the scoping rather than erroring,
+    // so the caller learns how many were actually removed.
+    prismaMock.contact.deleteMany.mockResolvedValue({ count: 1 } as never);
+
+    const result = await contactService.bulkDelete("org_1", "user_1", [
+      "mine",
+      "someone-elses"
+    ]);
+
+    expect(result).toEqual({ deleted: 1 });
+  });
 });
 
 describe("contactService.activity", () => {

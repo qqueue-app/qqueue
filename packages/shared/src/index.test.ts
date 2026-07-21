@@ -12,7 +12,10 @@ import {
   contactSchema,
   createListFromSegmentSchema,
   cronExpressionSchema,
+  contactBulkDeleteSchema,
   csvImportSchema,
+  recurringSendCreateSchema,
+  recurringSendUpdateSchema,
   compileSegmentRules,
   segmentFilterSchema,
   segmentSchema,
@@ -572,6 +575,163 @@ describe("csvImportSchema", () => {
         contactListId: "list_1"
       }).success
     ).toBe(true);
+  });
+
+  it("accepts a new list name as an alternative to an existing id", () => {
+    expect(
+      csvImportSchema.safeParse({
+        organizationId: "org_1",
+        contactListName: "Newsletter signups"
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects an id and a name together rather than picking one silently", () => {
+    const parsed = csvImportSchema.safeParse({
+      organizationId: "org_1",
+      contactListId: "list_1",
+      contactListName: "Newsletter signups"
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.success === false && parsed.error.issues[0].path).toEqual([
+      "contactListName"
+    ]);
+  });
+
+  it("rejects a blank list name", () => {
+    expect(
+      csvImportSchema.safeParse({
+        organizationId: "org_1",
+        contactListName: ""
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("contactBulkDeleteSchema", () => {
+  it("requires at least one id", () => {
+    expect(
+      contactBulkDeleteSchema.safeParse({
+        organizationId: "org_1",
+        contactIds: []
+      }).success
+    ).toBe(false);
+  });
+
+  it("accepts a list of ids", () => {
+    expect(
+      contactBulkDeleteSchema.safeParse({
+        organizationId: "org_1",
+        contactIds: ["c_1", "c_2"]
+      }).success
+    ).toBe(true);
+  });
+
+  it("caps a single request so one call can't clear a whole table", () => {
+    expect(
+      contactBulkDeleteSchema.safeParse({
+        organizationId: "org_1",
+        contactIds: Array.from({ length: 1001 }, (_, i) => `c_${i}`)
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("recurringSendCreateSchema", () => {
+  const base = {
+    organizationId: "org_1",
+    name: "Weekly digest",
+    subject: "Digest",
+    html: "<p>hi</p>",
+    to: ["person@example.com"],
+    cronExpression: "0 9 * * 1",
+    timezone: "UTC"
+  };
+
+  it("accepts a valid recurring send", () => {
+    expect(recurringSendCreateSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("accepts contacts or lists as the only recipients", () => {
+    expect(
+      recurringSendCreateSchema.safeParse({
+        ...base,
+        to: undefined,
+        listIds: ["list_1"]
+      }).success
+    ).toBe(true);
+    expect(
+      recurringSendCreateSchema.safeParse({
+        ...base,
+        to: undefined,
+        contactIds: ["c_1"]
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects a send with no recipients at all", () => {
+    const parsed = recurringSendCreateSchema.safeParse({
+      ...base,
+      to: undefined
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.success === false && parsed.error.issues[0].path).toEqual([
+      "to"
+    ]);
+  });
+
+  it("rejects a send with no body", () => {
+    const parsed = recurringSendCreateSchema.safeParse({
+      ...base,
+      html: undefined
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.success === false && parsed.error.issues[0].path).toEqual([
+      "html"
+    ]);
+  });
+
+  it("accepts a text-only body", () => {
+    expect(
+      recurringSendCreateSchema.safeParse({
+        ...base,
+        html: undefined,
+        text: "plain"
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects an invalid cron expression", () => {
+    expect(
+      recurringSendCreateSchema.safeParse({
+        ...base,
+        cronExpression: "not a cron"
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects an unknown timezone", () => {
+    expect(
+      recurringSendCreateSchema.safeParse({
+        ...base,
+        timezone: "Mars/Olympus_Mons"
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("recurringSendUpdateSchema", () => {
+  it("allows a partial update", () => {
+    expect(recurringSendUpdateSchema.safeParse({}).success).toBe(true);
+    expect(
+      recurringSendUpdateSchema.safeParse({ name: "Renamed" }).success
+    ).toBe(true);
+  });
+
+  it("still validates the cron when one is supplied", () => {
+    expect(
+      recurringSendUpdateSchema.safeParse({ cronExpression: "nope" }).success
+    ).toBe(false);
   });
 });
 

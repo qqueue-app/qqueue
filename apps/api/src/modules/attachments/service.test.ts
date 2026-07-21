@@ -206,3 +206,55 @@ describe("attachmentService.delete", () => {
     );
   });
 });
+
+describe("attachmentService.linkToJob", () => {
+  beforeEach(() => {
+    prismaMock.emailAttachment.updateMany.mockReset();
+  });
+
+  it("does nothing when there are no attachment ids", async () => {
+    await attachmentService.linkToJob(undefined, "org_1", "job_1");
+    await attachmentService.linkToJob([], "org_1", "job_1");
+
+    expect(prismaMock.emailAttachment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("claims unlinked attachments for the job", async () => {
+    prismaMock.emailAttachment.updateMany.mockResolvedValue({
+      count: 2
+    } as never);
+
+    await attachmentService.linkToJob(["a1", "a2"], "org_1", "job_1");
+
+    expect(prismaMock.emailAttachment.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["a1", "a2"] }, organizationId: "org_1", emailJobId: null },
+      data: { emailJobId: "job_1" }
+    });
+  });
+
+  // Previously these were skipped silently, producing an email with fewer
+  // attachments than the caller asked for and reporting success.
+  it("throws when an id cannot be claimed (already sent, unknown, or other org)", async () => {
+    prismaMock.emailAttachment.updateMany.mockResolvedValue({
+      count: 1
+    } as never);
+
+    await expect(
+      attachmentService.linkToJob(["a1", "a2"], "org_1", "job_1")
+    ).rejects.toThrow(HttpError);
+  });
+
+  it("counts duplicate ids once so a repeated id is not a false mismatch", async () => {
+    prismaMock.emailAttachment.updateMany.mockResolvedValue({
+      count: 1
+    } as never);
+
+    await expect(
+      attachmentService.linkToJob(["a1", "a1"], "org_1", "job_1")
+    ).resolves.toBeUndefined();
+
+    expect(
+      prismaMock.emailAttachment.updateMany.mock.calls[0][0].where.id
+    ).toEqual({ in: ["a1"] });
+  });
+});
