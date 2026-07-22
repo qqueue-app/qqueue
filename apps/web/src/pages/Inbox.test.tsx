@@ -77,6 +77,10 @@ async function findRow(subject = /Quarterly numbers/) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // jsdom implements neither half of the object-URL API, which attachment
+  // downloads and inline images both rely on.
+  URL.createObjectURL = vi.fn(() => "blob:qqueue/inline-1");
+  URL.revokeObjectURL = vi.fn();
 });
 
 describe("Inbox read/unread emphasis", () => {
@@ -154,16 +158,62 @@ describe("Inbox message body rendering", () => {
     render(<Inbox />);
 
     const frame = await screen.findByTitle(/^Message from/);
-    // Blocked: img-src permits data: only, so the tracking pixel never loads.
-    expect(frame.getAttribute("srcdoc")).toContain("img-src data:;");
+    // Blocked twice over: the pixel's src is stripped from the body, and
+    // img-src wouldn't permit it anyway. blob: is local inline parts only.
+    expect(frame.getAttribute("srcdoc")).toContain("img-src data: blob:;");
+    expect(frame.getAttribute("srcdoc")).not.toContain("tracker.test");
 
     await user.click(screen.getByRole("button", { name: /show images/i }));
 
     const unblocked = await screen.findByTitle(/^Message from/);
-    expect(unblocked.getAttribute("srcdoc")).toContain("img-src data: https:");
+    expect(unblocked.getAttribute("srcdoc")).toContain(
+      "img-src data: blob: https:"
+    );
+    expect(unblocked.getAttribute("srcdoc")).toContain("tracker.test");
     expect(
       screen.queryByRole("button", { name: /show images/i })
     ).not.toBeInTheDocument();
+  });
+
+  // The reported bug: an embedded image (sender's logo, pasted screenshot)
+  // rendered as a broken image, because nothing resolved its cid: reference.
+  it("loads inline cid: images and renders them without an opt-in", async () => {
+    setup([
+      makeMessage({
+        html: '<p>See below</p><img src="cid:logo@corp">',
+        attachments: [
+          {
+            id: "att_1",
+            filename: "logo.png",
+            contentType: "image/png",
+            size: 120,
+            isInline: true,
+            contentId: "<logo@corp>"
+          }
+        ]
+      })
+    ]);
+    mockedApi.downloadInboundAttachment.mockResolvedValue(
+      new Blob(["png"], { type: "image/png" })
+    );
+    render(<Inbox />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByTitle(/^Message from/).getAttribute("srcdoc")
+      ).toContain("src=\"blob:")
+    );
+    expect(mockedApi.downloadInboundAttachment).toHaveBeenCalledWith({
+      messageId: "m1",
+      attachmentId: "att_1",
+      organizationId: "org_1"
+    });
+    // Inline parts are not remote content, so no prompt is shown for them...
+    expect(
+      screen.queryByRole("button", { name: /show images/i })
+    ).not.toBeInTheDocument();
+    // ...and they stay out of the downloadable attachment strip.
+    expect(screen.queryByText("logo.png")).not.toBeInTheDocument();
   });
 });
 

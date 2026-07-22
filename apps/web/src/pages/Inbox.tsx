@@ -15,6 +15,7 @@ import { EmptyState } from "../components/EmptyState.js";
 import { InboundHtmlFrame } from "../components/InboundHtmlFrame.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { api, type InboxAccount, type InboundMessage } from "../lib/api.js";
+import { useInboundInlineImages } from "../lib/inbound-inline-images.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
@@ -80,6 +81,15 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Does the body pull an image off the network? Inline (`cid:`) parts came with
+ * the message and always render, so a mail that only uses those must not be
+ * fronted by a "remote images are blocked" prompt for images that aren't there.
+ */
+function hasRemoteImages(html?: string | null) {
+  return /<img[^>]+src\s*=\s*["']?\s*https?:/i.test(html ?? "");
 }
 
 function senderLabel(message: InboundMessage) {
@@ -206,6 +216,12 @@ export function Inbox() {
   const unreadCount = useMemo(
     () => filteredMessages.filter((message) => !message.readAt).length,
     [filteredMessages]
+  );
+  // Only the open thread's inline parts are fetched — the list pane renders no
+  // bodies, so downloading blobs for every message would be wasted bandwidth.
+  const inlineImages = useInboundInlineImages(
+    useMemo(() => selectedThread?.messages ?? [], [selectedThread]),
+    organizationId ?? null
   );
 
   async function downloadAttachment(
@@ -667,6 +683,7 @@ export function Inbox() {
                             showRemoteContent={remoteContentAllowed.has(
                               message.id
                             )}
+                            inlineImages={inlineImages[message.id]}
                             title={`Message from ${senderLabel(message)}`}
                           />
                         ) : (
@@ -717,7 +734,8 @@ export function Inbox() {
                             </div>
                           </div>
                         ) : null}
-                        {message.html && !remoteContentAllowed.has(message.id) ? (
+                        {hasRemoteImages(message.html) &&
+                        !remoteContentAllowed.has(message.id) ? (
                           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed bg-muted/40 px-3 py-2">
                             <span className="text-xs text-muted-foreground">
                               Remote images are blocked so the sender can&apos;t

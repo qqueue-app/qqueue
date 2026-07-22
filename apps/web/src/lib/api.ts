@@ -216,6 +216,8 @@ export interface InboundAttachment {
   size: number;
   /** Sender marked this part for display in the body rather than as a download. */
   isInline: boolean;
+  /** MIME Content-ID, as referenced by `cid:` URLs in the body HTML. */
+  contentId?: string | null;
 }
 
 export interface RecurringSend {

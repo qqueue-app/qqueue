@@ -30,6 +30,9 @@ const messageInclude = {
       contentType: true,
       size: true,
       isInline: true,
+      // The reader needs this to match an inline part to the `cid:` reference
+      // in the body HTML; without it embedded images render broken.
+      contentId: true,
     },
     orderBy: { createdAt: "asc" },
   },

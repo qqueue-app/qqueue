@@ -6,9 +6,67 @@ interface InboundHtmlFrameProps {
   html: string;
   /** Whether remote (http/https) images are permitted to load. */
   showRemoteContent: boolean;
+  /**
+   * Inline parts of this message, keyed by normalized Content-ID, each pointing
+   * at a local `blob:` URL. Body `cid:` references are rewritten to these.
+   */
+  inlineImages?: Record<string, string>;
   className?: string;
   title?: string;
   "data-testid"?: string;
+}
+
+/** Content-IDs travel wrapped in angle brackets in MIME but bare in `cid:` URLs. */
+export function normalizeContentId(value: string) {
+  return value.trim().replace(/^<+/, "").replace(/>+$/, "").toLowerCase();
+}
+
+/**
+ * Prepare a received body for display: point `cid:` images at the inline part
+ * we already downloaded, and strip the `src` of remote images while they are
+ * blocked. Without that strip the reader sees a page of broken-image icons —
+ * CSP refuses the request, but the empty <img> still renders as a failure.
+ *
+ * Parsed with DOMParser (an inert document: no scripts run, no subresources
+ * load) rather than by regex, so hostile markup can't be mangled into
+ * something that means one thing here and another in the iframe.
+ */
+function prepareBody(
+  html: string,
+  options: { showRemoteContent: boolean; inlineImages: Record<string, string> }
+) {
+  // Nothing to rewrite in an image-less body, and re-serializing costs fidelity
+  // (the parser normalizes markup), so leave those messages exactly as sent.
+  if (!/<img/i.test(html) && !html.includes("cid:")) {
+    return html;
+  }
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  for (const img of Array.from(doc.querySelectorAll("img"))) {
+    const src = img.getAttribute("src") ?? "";
+    if (/^cid:/i.test(src)) {
+      const resolved = options.inlineImages[normalizeContentId(src.slice(4))];
+      // An unresolvable part (never stored, or the fetch failed) is dropped
+      // rather than left to fail loudly.
+      if (resolved) {
+        img.setAttribute("src", resolved);
+      } else {
+        img.removeAttribute("src");
+      }
+      img.removeAttribute("srcset");
+    } else if (!options.showRemoteContent && /^https?:/i.test(src)) {
+      img.removeAttribute("src");
+      img.removeAttribute("srcset");
+    }
+  }
+
+  // A full-document body keeps its <head> styles, which the parser hoists out
+  // of the fragment we serialize; carry them back in or the mail loses its CSS.
+  const headStyles = Array.from(doc.head.querySelectorAll("style"))
+    .map((node) => node.outerHTML)
+    .join("");
+  return headStyles + doc.body.innerHTML;
 }
 
 /**
@@ -25,7 +83,9 @@ interface InboundHtmlFrameProps {
  * - A CSP of `default-src 'none'` blocks scripts, frames, objects and network
  *   fetches outright, independently of the sandbox attribute. Remote images are
  *   allowed only once the reader opts in — otherwise merely opening a message
- *   would fire the sender's tracking pixel and leak a read receipt.
+ *   would fire the sender's tracking pixel and leak a read receipt. Inline
+ *   (`cid:`) parts are exempt: they arrived with the message, so displaying
+ *   them phones nobody home.
  * - `sandbox="allow-same-origin"` carries NO allow-scripts, so no script in the
  *   message can execute; that is what makes reading the document height for
  *   auto-sizing safe. Scripts are blocked twice over (sandbox + CSP).
@@ -33,6 +93,7 @@ interface InboundHtmlFrameProps {
 export function InboundHtmlFrame({
   html,
   showRemoteContent,
+  inlineImages,
   className,
   title = "Message body",
   "data-testid": testId
@@ -41,9 +102,12 @@ export function InboundHtmlFrame({
   const [height, setHeight] = useState(160);
 
   const srcDoc = useMemo(() => {
-    // `cid:` parts are never resolvable (inbound attachments aren't stored), so
-    // inline-referenced images simply fail to load rather than hitting network.
-    const imgSrc = showRemoteContent ? "data: https: http:" : "data:";
+    // `blob:` is always allowed: those URLs are inline parts of this very
+    // message, already fetched over the authenticated download route, so
+    // rendering them tells the sender nothing.
+    const imgSrc = showRemoteContent
+      ? "data: blob: https: http:"
+      : "data: blob:";
     const csp = [
       "default-src 'none'",
       `img-src ${imgSrc}`,
@@ -67,10 +131,13 @@ export function InboundHtmlFrame({
       "a{color:#2563eb;}",
       "pre{white-space:pre-wrap;word-break:break-word;}",
       "</style></head><body>",
-      html,
+      prepareBody(html, {
+        showRemoteContent,
+        inlineImages: inlineImages ?? {}
+      }),
       "</body></html>"
     ].join("");
-  }, [html, showRemoteContent]);
+  }, [html, showRemoteContent, inlineImages]);
 
   const resize = useCallback(() => {
     const doc = frameRef.current?.contentDocument;
