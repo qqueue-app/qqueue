@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { injectTracking } from "../tracking.js";
-import { renderHtmlAsEmailSafe, renderMjml, wrapHtmlInMjml } from "./mjml.js";
+import {
+  isFullHtmlDocument,
+  renderHtmlAsEmailSafe,
+  renderMjml,
+  wrapHtmlInMjml
+} from "./mjml.js";
 
 const validDocument = `
   <mjml>
@@ -127,5 +132,63 @@ describe("wrapHtmlInMjml / renderHtmlAsEmailSafe", () => {
     );
     expect(body).toMatch(/<td[^>]*>/);
     expect(body).toMatch(/font-size:16px/);
+  });
+});
+
+describe("isFullHtmlDocument", () => {
+  it.each([
+    ["<!doctype html><html><body><p>Hi</p></body></html>"],
+    ["<!DOCTYPE HTML>\n<html>\n<body>Hi</body>\n</html>"],
+    ["<html><head></head><body>Hi</body></html>"],
+    ['<body style="margin:0">Hi</body>'],
+    ["<html>\n  <body>Hi</body>\n</html>"]
+  ])("treats %s as a complete document", (html) => {
+    expect(isFullHtmlDocument(html)).toBe(true);
+  });
+
+  it.each([
+    ["<p>Hi</p>"],
+    [""],
+    ["<div><table><tr><td>Hi</td></tr></table></div>"],
+    // Escaped markup in a code sample is content, not a document declaration.
+    ["<p>Write &lt;html&gt; to start a document</p>"],
+    // Tag-boundary check: a word starting with "body" is not the body element.
+    ["<p>Track your <em>bodyweight</em> here</p>"]
+  ])("treats %s as a fragment", (html) => {
+    expect(isFullHtmlDocument(html)).toBe(false);
+  });
+});
+
+// Pasting an already-built email (a Brevo/Mailchimp export) must not be nested
+// inside MJML's own <html><body> — that produces markup no client renders. The
+// document is passed through byte-for-byte instead.
+describe("renderHtmlAsEmailSafe with a complete document", () => {
+  it("passes a full HTML document through untouched", async () => {
+    const source =
+      '<!doctype html><html><head><style>.x{color:red}</style></head>' +
+      '<body><table><tr><td>Pasted</td></tr></table></body></html>';
+
+    const result = await renderHtmlAsEmailSafe(source);
+
+    expect(result.html).toBe(source);
+    expect(result.errors).toEqual([]);
+    expect(result.usedFallback).toBe(false);
+  });
+
+  it("does not add MJML scaffolding around a full document", async () => {
+    const result = await renderHtmlAsEmailSafe(
+      "<html><body><p>Pasted</p></body></html>"
+    );
+
+    expect(result.html).not.toContain("qq-body");
+    // A second <html> element is the exact corruption this guards against.
+    expect(result.html.match(/<html/gi)).toHaveLength(1);
+  });
+
+  it("still wraps a body fragment", async () => {
+    const result = await renderHtmlAsEmailSafe("<p>Fragment</p>");
+
+    expect(result.html).toContain("qq-body");
+    expect(result.html).toContain("<table");
   });
 });

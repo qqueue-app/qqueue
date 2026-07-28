@@ -111,11 +111,57 @@ export interface ContactList {
 
 export interface ContactImportSummary {
   created: number;
+  /** Duplicates that were merged or replaced. */
   updated: number;
+  /** Duplicates left as they were (kept or skipped). */
+  unchanged: number;
+  /** Rows that could not be read — always equal to `errors.length`. */
   skipped: number;
   suppressed: number;
   errors: { row: number; message: string }[];
   contactList?: { id: string; name: string; created: boolean };
+}
+
+/** How an imported row is applied when that email already exists. */
+export type ContactImportResolution = "MERGE" | "REPLACE" | "KEEP" | "SKIP";
+
+export interface ContactImportOverride {
+  resolution?: ContactImportResolution;
+  firstName?: string;
+  lastName?: string;
+  tags?: string[];
+}
+
+export interface ContactImportDuplicate {
+  email: string;
+  incoming: { firstName?: string; lastName?: string; tags: string[] };
+  existing: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    tags: string[];
+    status: string;
+  };
+  suppressed: boolean;
+  changedFields: ("firstName" | "lastName" | "tags")[];
+}
+
+export interface ContactImportPreview {
+  totalRows: number;
+  newCount: number;
+  duplicateCount: number;
+  suppressedCount: number;
+  collapsedInFile: number;
+  errors: { row: number; message: string }[];
+  duplicates: ContactImportDuplicate[];
+  duplicatesTruncated: boolean;
+  newSample: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    tags: string[];
+  }[];
+  contactList?: { id: string | null; name: string; willCreate: boolean };
 }
 
 export interface ContactActivityEvent {
@@ -759,6 +805,27 @@ async function request<T>(
   return (body as ApiEnvelope<T>).data;
 }
 
+/** Shared multipart body for the import preview and the import itself. */
+function buildImportForm(
+  file: File,
+  options: {
+    organizationId: string;
+    contactListId?: string;
+    contactListName?: string;
+  }
+) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("organizationId", options.organizationId);
+  // Mutually exclusive server-side: an existing list id, or a name to create.
+  if (options.contactListId) {
+    form.append("contactListId", options.contactListId);
+  } else if (options.contactListName) {
+    form.append("contactListName", options.contactListName);
+  }
+  return form;
+}
+
 export const api = {
   dashboardSummary(organizationId: string) {
     return request<DashboardSummary>(
@@ -913,20 +980,41 @@ export const api = {
       organizationId: string;
       contactListId?: string;
       contactListName?: string;
+      defaultResolution?: ContactImportResolution;
+      overrides?: Record<string, ContactImportOverride>;
     }
   ) {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("organizationId", options.organizationId);
-    // Mutually exclusive server-side: an existing list id, or a name to create.
-    if (options.contactListId) {
-      form.append("contactListId", options.contactListId);
-    } else if (options.contactListName) {
-      form.append("contactListName", options.contactListName);
+    const form = buildImportForm(file, options);
+    if (options.defaultResolution) {
+      form.append("defaultResolution", options.defaultResolution);
+    }
+    // Multipart fields are text, so per-email decisions travel as JSON. Only the
+    // rows the user decided individually are sent; the rest take the default.
+    if (options.overrides && Object.keys(options.overrides).length > 0) {
+      form.append("overrides", JSON.stringify(options.overrides));
     }
     return request<ContactImportSummary>("/api/v1/contacts/import", {
       method: "POST",
       body: form,
+    });
+  },
+
+  /**
+   * Dry-run an import. Writes nothing; returns how each row would land so
+   * duplicates can be resolved before committing. The file is uploaded again on
+   * commit rather than parked server-side, which keeps the import stateless.
+   */
+  previewImportContacts(
+    file: File,
+    options: {
+      organizationId: string;
+      contactListId?: string;
+      contactListName?: string;
+    }
+  ) {
+    return request<ContactImportPreview>("/api/v1/contacts/import/preview", {
+      method: "POST",
+      body: buildImportForm(file, options),
     });
   },
 

@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
+  Eye,
   FileText,
   Paperclip,
   Save,
@@ -13,7 +14,8 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { RichTextEditor } from "../components/editor/RichTextEditor.js";
+import { EmailPreviewFrame } from "../components/EmailPreviewFrame.js";
+import { BodyEditor } from "../components/editor/BodyEditor.js";
 import {
   buildCron,
   describeCron,
@@ -26,6 +28,7 @@ import {
   type ContactList,
   type EmailAttachment,
   type EmailDraft,
+  type EmailPreviewResult,
   type RecurringSend,
   type ManualEmailDeliveryStatus,
   type RecipientDelivery,
@@ -340,6 +343,12 @@ export function EmailStudio() {
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(
     null
   );
+
+  // Preview is server-rendered (same MJML + tracking pass as the send), so it
+  // shows the delivered email rather than a dashboard approximation.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [preview, setPreview] = useState<EmailPreviewResult | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   // Drafts.
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -752,6 +761,47 @@ export function EmailStudio() {
     }
   }
 
+  /**
+   * Render the composed message through the API's preview endpoint, which
+   * applies the same MJML wrap and tracking injection the send does. Rendering
+   * server-side is the point: a client-side approximation would diverge from the
+   * delivered email exactly where it matters (pasted HTML, tracked links).
+   */
+  async function openPreview() {
+    if (!organizationId) {
+      toast.error("Select an organization in Settings first.");
+      return;
+    }
+    if (htmlIsEmpty(html)) {
+      toast.error("Write something to preview.");
+      return;
+    }
+
+    setPreviewOpen(true);
+    setPreviewing(true);
+    setPreview(null);
+    try {
+      setPreview(
+        await api.previewEmail({
+          organizationId,
+          subject,
+          html,
+          to: toEmails,
+          cc: ccEmails,
+          bcc: bccEmails,
+          listIds: selectedListIds
+        })
+      );
+    } catch (error) {
+      setPreviewOpen(false);
+      toast.error(
+        error instanceof Error ? error.message : "Could not build the preview."
+      );
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
   async function send(event: FormEvent) {
     event.preventDefault();
     if (!organizationId) {
@@ -1145,15 +1195,27 @@ export function EmailStudio() {
               </Card>
 
               <Card className="space-y-4 p-5">
-                <div>
-                  <h2 className="text-base font-semibold">Composer</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Write your message and send it through your delivery
-                    pipeline.
-                  </p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold">Composer</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Write your message and send it through your delivery
+                      pipeline.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void openPreview()}
+                    disabled={previewing}
+                  >
+                    {previewing ? <Spinner /> : <Eye className="h-4 w-4" />}
+                    Preview
+                  </Button>
                 </div>
 
-                <RichTextEditor
+                <BodyEditor
                   value={html}
                   onChange={setHtml}
                   placeholder="Write your email…"
@@ -1413,6 +1475,58 @@ export function EmailStudio() {
           setPendingTemplateId(null);
         }}
       />
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Preview</DialogTitle>
+            <DialogDescription>
+              Rendered by the send pipeline — this is the message your recipients
+              receive, with tracked links in place.
+            </DialogDescription>
+          </DialogHeader>
+          {previewing ? (
+            <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
+              <Spinner />
+              Rendering…
+            </div>
+          ) : preview ? (
+            <div className="space-y-3">
+              <dl className="space-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <div className="flex gap-2">
+                  <dt className="w-16 shrink-0 text-muted-foreground">
+                    Subject
+                  </dt>
+                  <dd className="min-w-0 font-medium">
+                    {preview.subject || "(no subject)"}
+                  </dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="w-16 shrink-0 text-muted-foreground">To</dt>
+                  <dd className="min-w-0 break-words">
+                    {preview.recipients.to.join(", ") || "—"}
+                  </dd>
+                </div>
+                {preview.recipients.total > preview.recipients.to.length ? (
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 text-muted-foreground">
+                      Also
+                    </dt>
+                    <dd className="min-w-0 text-muted-foreground">
+                      {preview.recipients.cc.length} cc,{" "}
+                      {preview.recipients.bcc.length} bcc
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+              <EmailPreviewFrame
+                html={preview.html}
+                data-testid="composer-preview"
+              />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

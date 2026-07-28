@@ -66,6 +66,31 @@ describe("TemplatePreview", () => {
     expect(getFrame().getAttribute("srcdoc")).toContain("<p>Hello Ada</p>");
   });
 
+  // A pasted document brings its own head and styles. Nesting it in the card
+  // shell would emit two <html> elements and let the shell's styles win, so the
+  // preview would stop matching what the pipeline actually sends.
+  it("renders a full HTML document as its own document", () => {
+    const source =
+      "<!doctype html><html><head><style>.x{color:red}</style></head>" +
+      "<body><p>Pasted</p></body></html>";
+    render(<TemplatePreview subject="s" html={source} />);
+
+    const srcDoc = getFrame().getAttribute("srcdoc") ?? "";
+    expect(srcDoc).toBe(source);
+    expect(srcDoc).not.toContain("qq-card");
+  });
+
+  it("still substitutes variables inside a full document", () => {
+    render(
+      <TemplatePreview
+        subject="s"
+        html="<html><body><p>Hello {{firstName}}</p></body></html>"
+        sampleData={{ firstName: "Ada" }}
+      />
+    );
+    expect(getFrame().getAttribute("srcdoc")).toContain("<p>Hello Ada</p>");
+  });
+
   it("defaults to the desktop viewport and switches to mobile", async () => {
     const user = userEvent.setup();
     render(<TemplatePreview subject="s" html="<p>Hi</p>" />);

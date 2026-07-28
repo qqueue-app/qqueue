@@ -16,10 +16,14 @@ import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { ImportReview } from "../components/ImportReview.js";
 import {
   api,
   type Contact,
   type ContactActivityEvent,
+  type ContactImportOverride,
+  type ContactImportPreview,
+  type ContactImportResolution,
   type ContactList
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
@@ -126,6 +130,21 @@ export function Contacts() {
     { row: number; message: string }[]
   >([]);
   const [lists, setLists] = useState<ContactList[]>([]);
+
+  // Import review. The file is dry-run first so collisions with existing
+  // contacts are a decision instead of a silent merge; nothing is written until
+  // the review step is confirmed.
+  const [importStep, setImportStep] = useState<"options" | "review">("options");
+  const [importPreview, setImportPreview] =
+    useState<ContactImportPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [defaultResolution, setDefaultResolution] =
+    useState<ContactImportResolution>("MERGE");
+  // Sparse: only duplicates the user decided individually or edited in place.
+  const [overrides, setOverrides] = useState<
+    Record<string, ContactImportOverride>
+  >({});
+  const [editingDuplicate, setEditingDuplicate] = useState<string | null>(null);
 
   // Bulk selection for delete.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -273,8 +292,43 @@ export function Contacts() {
     setImportDialogOpen(true);
   }
 
-  async function runImport(event: FormEvent) {
+  /** The list target chosen in the options step, in API shape. */
+  function importListTarget() {
+    return {
+      contactListId:
+        importTarget === "existing" ? importListId || undefined : undefined,
+      contactListName:
+        importTarget === "new" ? importListName.trim() || undefined : undefined
+    };
+  }
+
+  async function runPreview(event: FormEvent) {
     event.preventDefault();
+    if (!importFile || !organizationId) {
+      return;
+    }
+
+    setPreviewing(true);
+    setImportErrors([]);
+    try {
+      const preview = await api.previewImportContacts(importFile, {
+        organizationId,
+        ...importListTarget()
+      });
+      setImportPreview(preview);
+      setOverrides({});
+      setEditingDuplicate(null);
+      setImportStep("review");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to read that CSV"
+      );
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function runImport() {
     if (!importFile || !organizationId) {
       return;
     }
@@ -287,15 +341,16 @@ export function Contacts() {
       // one contact in both, never a duplicate.
       const summary = await api.importContacts(importFile, {
         organizationId,
-        contactListId:
-          importTarget === "existing" ? importListId || undefined : undefined,
-        contactListName:
-          importTarget === "new" ? importListName.trim() || undefined : undefined
+        ...importListTarget(),
+        defaultResolution,
+        overrides
       });
 
-      const parts = [`${summary.created} added`, `${summary.updated} updated`];
+      const parts = [`${summary.created} added`];
+      if (summary.updated > 0) parts.push(`${summary.updated} updated`);
+      if (summary.unchanged > 0) parts.push(`${summary.unchanged} left as-is`);
       if (summary.suppressed > 0) parts.push(`${summary.suppressed} suppressed`);
-      if (summary.skipped > 0) parts.push(`${summary.skipped} skipped`);
+      if (summary.skipped > 0) parts.push(`${summary.skipped} unreadable`);
       const where = summary.contactList
         ? ` into ${summary.contactList.name}${summary.contactList.created ? " (new list)" : ""}`
         : "";
@@ -319,11 +374,29 @@ export function Contacts() {
     }
   }
 
+  /** Merge a partial decision into one duplicate's override entry. */
+  function setOverride(email: string, patch: ContactImportOverride) {
+    const key = email.toLowerCase();
+    setOverrides((current) => ({
+      ...current,
+      [key]: { ...current[key], ...patch }
+    }));
+  }
+
+  function resolutionFor(email: string): ContactImportResolution {
+    return overrides[email.toLowerCase()]?.resolution ?? defaultResolution;
+  }
+
   function closeImportDialog() {
     setImportDialogOpen(false);
     setImportFile(null);
     setImportErrors([]);
     setImportListName("");
+    setImportStep("options");
+    setImportPreview(null);
+    setOverrides({});
+    setDefaultResolution("MERGE");
+    setEditingDuplicate(null);
   }
 
   async function loadLists() {
@@ -873,18 +946,30 @@ export function Contacts() {
         open={importDialogOpen}
         onOpenChange={(open) => !open && closeImportDialog()}
       >
-        <DialogContent>
-          <form onSubmit={runImport}>
+        <DialogContent
+          className={importStep === "review" ? "max-w-3xl" : undefined}
+        >
+          <form onSubmit={runPreview}>
             <DialogHeader>
-              <DialogTitle>Import contacts</DialogTitle>
+              <DialogTitle>
+                {importStep === "review"
+                  ? "Review this import"
+                  : "Import contacts"}
+              </DialogTitle>
               <DialogDescription>
-                Contacts are matched on email address — importing someone who
-                already exists updates them and merges tags instead of creating
-                a duplicate.
+                {importStep === "review"
+                  ? "Nothing has been saved yet. Contacts are matched on email address — decide what happens to the ones you already have."
+                  : "Contacts are matched on email address. You'll see anyone who already exists before anything is saved."}
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
+            <div
+              className={
+                importStep === "review"
+                  ? "max-h-[60vh] space-y-4 overflow-y-auto py-4"
+                  : "space-y-4 py-4"
+              }
+            >
               <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
                 <span className="font-medium">{importFile?.name}</span>
                 {importFile ? (
@@ -894,67 +979,92 @@ export function Contacts() {
                 ) : null}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="importTarget">Add to a list</Label>
-                <Select
-                  value={importTarget}
-                  onValueChange={(value) =>
-                    setImportTarget(value as "none" | "existing" | "new")
-                  }
-                >
-                  <SelectTrigger id="importTarget">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">
-                      Don&apos;t add to a list
-                    </SelectItem>
-                    <SelectItem value="existing" disabled={lists.length === 0}>
-                      Existing list
-                    </SelectItem>
-                    <SelectItem value="new">Create a new list</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {importTarget === "existing" ? (
-                <div className="space-y-2">
-                  <Label htmlFor="importListId">List</Label>
-                  <Select value={importListId} onValueChange={setImportListId}>
-                    <SelectTrigger id="importListId">
-                      <SelectValue placeholder="Choose a list" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {lists.map((list) => (
-                        <SelectItem key={list.id} value={list.id}>
-                          {list.name}
+              {importStep === "options" ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="importTarget">Add to a list</Label>
+                    <Select
+                      value={importTarget}
+                      onValueChange={(value) =>
+                        setImportTarget(value as "none" | "existing" | "new")
+                      }
+                    >
+                      <SelectTrigger id="importTarget">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">
+                          Don&apos;t add to a list
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                        <SelectItem
+                          value="existing"
+                          disabled={lists.length === 0}
+                        >
+                          Existing list
+                        </SelectItem>
+                        <SelectItem value="new">Create a new list</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {importTarget === "existing" ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="importListId">List</Label>
+                      <Select
+                        value={importListId}
+                        onValueChange={setImportListId}
+                      >
+                        <SelectTrigger id="importListId">
+                          <SelectValue placeholder="Choose a list" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {lists.map((list) => (
+                            <SelectItem key={list.id} value={list.id}>
+                              {list.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+
+                  {importTarget === "new" ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="importListName">New list name</Label>
+                      <Input
+                        id="importListName"
+                        value={importListName}
+                        onChange={(event) =>
+                          setImportListName(event.target.value)
+                        }
+                        placeholder="e.g. Newsletter signups"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        A list with this name is reused if it already exists.
+                      </p>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
 
-              {importTarget === "new" ? (
-                <div className="space-y-2">
-                  <Label htmlFor="importListName">New list name</Label>
-                  <Input
-                    id="importListName"
-                    value={importListName}
-                    onChange={(event) => setImportListName(event.target.value)}
-                    placeholder="e.g. Newsletter signups"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    A list with this name is reused if it already exists.
-                  </p>
-                </div>
+              {importStep === "review" && importPreview ? (
+                <ImportReview
+                  preview={importPreview}
+                  defaultResolution={defaultResolution}
+                  onDefaultResolutionChange={setDefaultResolution}
+                  overrides={overrides}
+                  onOverride={setOverride}
+                  resolutionFor={resolutionFor}
+                  editing={editingDuplicate}
+                  onEditingChange={setEditingDuplicate}
+                />
               ) : null}
 
               {importErrors.length > 0 ? (
                 <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3">
                   <div className="text-sm font-medium text-destructive">
                     {importErrors.length} row
-                    {importErrors.length === 1 ? "" : "s"} skipped
+                    {importErrors.length === 1 ? "" : "s"} couldn&apos;t be read
                   </div>
                   <ul className="max-h-40 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
                     {importErrors.slice(0, 50).map((error, index) => (
@@ -971,22 +1081,43 @@ export function Contacts() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={closeImportDialog}
-              >
-                {importErrors.length > 0 ? "Close" : "Cancel"}
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  importing ||
-                  !importFile ||
-                  (importTarget === "existing" && !importListId) ||
-                  (importTarget === "new" && !importListName.trim())
+                onClick={
+                  importStep === "review"
+                    ? () => setImportStep("options")
+                    : closeImportDialog
                 }
               >
-                {importing ? <Spinner /> : null}
-                Import
+                {importStep === "review"
+                  ? "Back"
+                  : importErrors.length > 0
+                    ? "Close"
+                    : "Cancel"}
               </Button>
+              {importStep === "review" ? (
+                <Button
+                  type="button"
+                  onClick={() => void runImport()}
+                  disabled={importing || !importPreview?.totalRows}
+                >
+                  {importing ? <Spinner /> : null}
+                  {importPreview
+                    ? `Import ${importPreview.totalRows} contact${importPreview.totalRows === 1 ? "" : "s"}`
+                    : "Import"}
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  disabled={
+                    previewing ||
+                    !importFile ||
+                    (importTarget === "existing" && !importListId) ||
+                    (importTarget === "new" && !importListName.trim())
+                  }
+                >
+                  {previewing ? <Spinner /> : null}
+                  Continue
+                </Button>
+              )}
             </DialogFooter>
           </form>
         </DialogContent>

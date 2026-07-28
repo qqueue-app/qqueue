@@ -455,4 +455,45 @@ describe("EmailStudio", () => {
     expect(within(panel).getByText("rcpt@x.com")).toBeInTheDocument();
     expect(within(panel).getByText("delivered")).toBeInTheDocument();
   });
+
+  // Previewing server-side is the point: it runs the same MJML wrap and tracking
+  // injection the send does, so a pasted document or a tracked link looks in the
+  // preview exactly like it will in the recipient's inbox.
+  it("renders the server-rendered preview of the composed message", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "alice@x.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Hi");
+    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
+    await user.click(screen.getByRole("button", { name: /preview/i }));
+
+    await waitFor(() => expect(mockedApi.previewEmail).toHaveBeenCalled());
+    const [input] = mockedApi.previewEmail.mock.calls[0];
+    expect(input).toMatchObject({
+      organizationId: "org_1",
+      subject: "Hi",
+      html: "<p>Body</p>",
+      to: ["alice@x.com"]
+    });
+
+    const frame = await screen.findByTestId("composer-preview");
+    expect(frame.getAttribute("srcdoc")).toContain("<p>rendered body</p>");
+    // The recipient summary comes from the server's resolved set, not the chips.
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("alice@x.com")).toBeInTheDocument();
+  });
+
+  it("refuses to preview an empty body instead of calling the API", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("Subject"), "Hi");
+    await user.click(screen.getByRole("button", { name: /preview/i }));
+
+    expect(mockedApi.previewEmail).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("Write something to preview.");
+  });
 });

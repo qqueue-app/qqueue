@@ -3,6 +3,8 @@ import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
 import {
   emailAddressSchema,
+  type ContactImportOverride,
+  type ContactImportResolution,
   type ContactInput,
   type SegmentFilterInput
 } from "@qqueue/shared";
@@ -25,13 +27,61 @@ export interface CsvParseError {
 
 export interface ContactImportSummary {
   created: number;
+  /** Duplicates that were merged or replaced. */
   updated: number;
+  /** Duplicates left as they were (KEEP or SKIP). */
+  unchanged: number;
+  /** Rows that could not be read — always equal to `errors.length`. */
   skipped: number;
   suppressed: number;
   errors: CsvParseError[];
   /** The list rows were linked into, when the import targeted one. */
   contactList?: { id: string; name: string; created: boolean };
 }
+
+export type ContactImportChangedField = "firstName" | "lastName" | "tags";
+
+/** A CSV row whose email already belongs to a contact in the organization. */
+export interface ContactImportDuplicate {
+  email: string;
+  incoming: { firstName?: string; lastName?: string; tags: string[] };
+  existing: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    tags: string[];
+    status: string;
+  };
+  /** The address is on the org's suppression list. */
+  suppressed: boolean;
+  /** Fields whose value would actually differ after a REPLACE. */
+  changedFields: ContactImportChangedField[];
+}
+
+export interface ContactImportPreview {
+  /** Distinct contacts the file resolves to, after in-file collapsing. */
+  totalRows: number;
+  newCount: number;
+  duplicateCount: number;
+  suppressedCount: number;
+  /** Rows dropped because the same email appeared earlier in the file. */
+  collapsedInFile: number;
+  errors: CsvParseError[];
+  duplicates: ContactImportDuplicate[];
+  /** True when `duplicates` was capped — the rest still import under the default. */
+  duplicatesTruncated: boolean;
+  newSample: ParsedContactRow[];
+  /** Resolved target list. `id` is null when the list would be created. */
+  contactList?: { id: string | null; name: string; willCreate: boolean };
+}
+
+// The review screen renders one row per duplicate, so the list is capped rather
+// than shipping an unbounded payload. Duplicates past the cap are not hidden:
+// they still import under the chosen default and the UI says how many.
+const DUPLICATE_PREVIEW_LIMIT = 500;
+const NEW_SAMPLE_LIMIT = 20;
+
+const DEFAULT_RESOLUTION: ContactImportResolution = "MERGE";
 
 // Collapse header variants ("First Name", "first_name") to a canonical key.
 function normalizeHeader(header: string): string {
@@ -94,6 +144,131 @@ export function parseContactsCsv(csv: string): {
   });
 
   return { rows, errors };
+}
+
+/**
+ * Collapse rows that repeat the same address within one file into a single
+ * contact: later rows fill in names they supply and their tags accumulate.
+ *
+ * Without this the same person listed twice was counted twice (once created,
+ * once "updated"), so the summary reported rows rather than people, and the
+ * review screen would show a contact as both new and duplicate. Matching is
+ * case-insensitive on the whole address, which is how mail providers treat it in
+ * practice.
+ */
+export function collapseDuplicateRows(rows: ParsedContactRow[]): {
+  rows: ParsedContactRow[];
+  collapsed: number;
+} {
+  const byEmail = new Map<string, ParsedContactRow>();
+  let collapsed = 0;
+
+  for (const row of rows) {
+    const key = row.email.toLowerCase();
+    const existing = byEmail.get(key);
+    if (!existing) {
+      byEmail.set(key, { ...row, tags: [...row.tags] });
+      continue;
+    }
+    collapsed += 1;
+    existing.firstName = row.firstName ?? existing.firstName;
+    existing.lastName = row.lastName ?? existing.lastName;
+    existing.tags = Array.from(new Set([...existing.tags, ...row.tags]));
+  }
+
+  return { rows: [...byEmail.values()], collapsed };
+}
+
+/** Apply the review screen's inline edits to a parsed row. */
+function applyOverride(
+  row: ParsedContactRow,
+  override: ContactImportOverride | undefined
+): ParsedContactRow {
+  if (!override) {
+    return row;
+  }
+  return {
+    email: row.email,
+    // An override that blanks a name is a deliberate clear, so "" is honoured as
+    // undefined rather than falling back to the CSV value.
+    firstName:
+      override.firstName === undefined
+        ? row.firstName
+        : override.firstName.trim() || undefined,
+    lastName:
+      override.lastName === undefined
+        ? row.lastName
+        : override.lastName.trim() || undefined,
+    tags: override.tags ?? row.tags
+  };
+}
+
+/**
+ * Existing contacts and suppressions for a set of addresses, in two queries
+ * rather than one lookup per row. Keyed lower-cased so callers can match a CSV
+ * row regardless of how the address was capitalized.
+ */
+async function loadExistingByEmail(organizationId: string, emails: string[]) {
+  if (emails.length === 0) {
+    return {
+      contacts: new Map<string, ExistingContact>(),
+      suppressed: new Set<string>()
+    };
+  }
+
+  const [contacts, suppressions] = await Promise.all([
+    prisma.contact.findMany({
+      where: { organizationId, email: { in: emails } },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        tags: true,
+        status: true
+      }
+    }),
+    prisma.suppression.findMany({
+      where: { organizationId, email: { in: emails } },
+      select: { email: true }
+    })
+  ]);
+
+  return {
+    contacts: new Map(
+      contacts.map((contact) => [contact.email.toLowerCase(), contact])
+    ),
+    suppressed: new Set(suppressions.map((row) => row.email.toLowerCase()))
+  };
+}
+
+interface ExistingContact {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  tags: string[];
+  status: string;
+}
+
+/** Fields a REPLACE would actually change, for the review screen's diff. */
+function diffFields(
+  row: ParsedContactRow,
+  existing: ExistingContact
+): ContactImportChangedField[] {
+  const changed: ContactImportChangedField[] = [];
+  if ((row.firstName ?? null) !== existing.firstName) {
+    changed.push("firstName");
+  }
+  if ((row.lastName ?? null) !== existing.lastName) {
+    changed.push("lastName");
+  }
+  const incomingTags = [...row.tags].sort().join(" ");
+  const existingTags = [...existing.tags].sort().join(" ");
+  if (incomingTags !== existingTags) {
+    changed.push("tags");
+  }
+  return changed;
 }
 
 export const contactService = {
@@ -177,11 +352,118 @@ export const contactService = {
   },
 
   /**
-   * Bulk import contacts from CSV. Upserts by (organizationId, email): new
-   * contacts are created, existing ones have names filled in and tags merged
-   * (union, never clobbered). Addresses already on the suppression list are
-   * still imported but reported separately and never reactivated. When a target
-   * list is given, members are linked with source CSV_IMPORT.
+   * Dry-run an import: parse the CSV, classify every row against what is already
+   * in the organization, and write nothing.
+   *
+   * This exists so a duplicate is a decision rather than a silent merge. The
+   * import used to overwrite names and union tags with no way to see which
+   * contacts were touched or what changed; the review screen this feeds shows
+   * the before/after for each collision before anything is committed.
+   */
+  async previewImport(params: {
+    organizationId: string;
+    csv: string;
+    contactListId?: string;
+    contactListName?: string;
+  }): Promise<ContactImportPreview> {
+    const { organizationId, csv, contactListId, contactListName } = params;
+    const parsed = parseContactsCsv(csv);
+    const { rows, collapsed } = collapseDuplicateRows(parsed.rows);
+
+    let listPreview: ContactImportPreview["contactList"];
+    if (contactListId) {
+      const list = await prisma.contactList.findFirst({
+        where: { id: contactListId, organizationId },
+        select: { id: true, name: true }
+      });
+      if (!list) {
+        throw new HttpError(404, "Contact list not found");
+      }
+      listPreview = { id: list.id, name: list.name, willCreate: false };
+    } else if (contactListName?.trim()) {
+      const trimmed = contactListName.trim();
+      const existingList = await prisma.contactList.findFirst({
+        where: { organizationId, name: trimmed },
+        select: { id: true, name: true }
+      });
+      listPreview = {
+        id: existingList?.id ?? null,
+        name: trimmed,
+        willCreate: !existingList
+      };
+    }
+
+    const { contacts, suppressed } = await loadExistingByEmail(
+      organizationId,
+      rows.map((row) => row.email)
+    );
+
+    const duplicates: ContactImportDuplicate[] = [];
+    const newSample: ParsedContactRow[] = [];
+    let newCount = 0;
+    let suppressedCount = 0;
+
+    for (const row of rows) {
+      const key = row.email.toLowerCase();
+      if (suppressed.has(key)) {
+        suppressedCount += 1;
+      }
+
+      const existing = contacts.get(key);
+      if (!existing) {
+        newCount += 1;
+        if (newSample.length < NEW_SAMPLE_LIMIT) {
+          newSample.push(row);
+        }
+        continue;
+      }
+
+      if (duplicates.length < DUPLICATE_PREVIEW_LIMIT) {
+        duplicates.push({
+          email: row.email,
+          incoming: {
+            firstName: row.firstName,
+            lastName: row.lastName,
+            tags: row.tags
+          },
+          existing: {
+            id: existing.id,
+            firstName: existing.firstName,
+            lastName: existing.lastName,
+            tags: existing.tags,
+            status: existing.status
+          },
+          suppressed: suppressed.has(key),
+          changedFields: diffFields(row, existing)
+        });
+      }
+    }
+
+    const duplicateCount = rows.length - newCount;
+
+    return {
+      totalRows: rows.length,
+      newCount,
+      duplicateCount,
+      suppressedCount,
+      collapsedInFile: collapsed,
+      errors: parsed.errors,
+      duplicates,
+      duplicatesTruncated: duplicateCount > duplicates.length,
+      newSample,
+      ...(listPreview ? { contactList: listPreview } : {})
+    };
+  },
+
+  /**
+   * Bulk import contacts from CSV. Rows with no existing contact are always
+   * created; rows whose email already exists are resolved by `defaultResolution`
+   * (MERGE unless the caller says otherwise), with `overrides` supplying per-email
+   * decisions and inline edits from the review screen.
+   *
+   * No resolution touches `status`, so an import can never reactivate a bounced
+   * or unsubscribed contact. Addresses on the suppression list are still
+   * imported but reported separately.
    *
    * The target list may be an existing id (`contactListId`) or a name to create
    * (`contactListName`). Importing straight into a list is the normal path: the
@@ -193,10 +475,15 @@ export const contactService = {
     csv: string;
     contactListId?: string;
     contactListName?: string;
+    defaultResolution?: ContactImportResolution;
+    overrides?: Record<string, ContactImportOverride>;
   }): Promise<ContactImportSummary> {
-    const { organizationId, csv, contactListName } = params;
+    const { organizationId, csv, contactListName, overrides } = params;
+    const defaultResolution = params.defaultResolution ?? DEFAULT_RESOLUTION;
     let { contactListId } = params;
-    const { rows, errors } = parseContactsCsv(csv);
+    const parsed = parseContactsCsv(csv);
+    const { rows } = collapseDuplicateRows(parsed.rows);
+    const errors = parsed.errors;
     let listSummary: ContactImportSummary["contactList"];
 
     if (contactListId) {
@@ -230,43 +517,24 @@ export const contactService = {
       listSummary = { id: list.id, name: list.name, created: !existingList };
     }
 
-    const emails = rows.map((row) => row.email);
-    const suppressedRows =
-      emails.length > 0
-        ? await prisma.suppression.findMany({
-            where: { organizationId, email: { in: emails } },
-            select: { email: true }
-          })
-        : [];
-    const suppressedEmails = new Set(suppressedRows.map((row) => row.email));
+    const { contacts, suppressed } = await loadExistingByEmail(
+      organizationId,
+      rows.map((row) => row.email)
+    );
 
     let created = 0;
     let updated = 0;
-    let suppressed = 0;
+    let unchanged = 0;
+    let suppressedCount = 0;
+    const memberContactIds: string[] = [];
 
-    for (const row of rows) {
-      const existing = await prisma.contact.findUnique({
-        where: { organizationId_email: { organizationId, email: row.email } },
-        select: { id: true, tags: true, firstName: true, lastName: true }
-      });
+    for (const parsedRow of rows) {
+      const key = parsedRow.email.toLowerCase();
+      const override = overrides?.[key];
+      const row = applyOverride(parsedRow, override);
+      const existing = contacts.get(key);
 
-      let contactId: string;
-      if (existing) {
-        // Merge tags (union) and only fill in names that the import provides;
-        // never overwrite existing data with blanks. Status is left untouched so
-        // an import never reactivates a bounced/unsubscribed contact.
-        const mergedTags = Array.from(new Set([...existing.tags, ...row.tags]));
-        const contact = await prisma.contact.update({
-          where: { id: existing.id },
-          data: {
-            firstName: row.firstName ?? existing.firstName,
-            lastName: row.lastName ?? existing.lastName,
-            tags: mergedTags
-          }
-        });
-        contactId = contact.id;
-        updated += 1;
-      } else {
+      if (!existing) {
         const contact = await prisma.contact.create({
           data: {
             organizationId,
@@ -276,28 +544,75 @@ export const contactService = {
             tags: row.tags
           }
         });
-        contactId = contact.id;
         created += 1;
+        memberContactIds.push(contact.id);
+        if (suppressed.has(key)) {
+          suppressedCount += 1;
+        }
+        continue;
       }
 
-      if (suppressedEmails.has(row.email)) {
-        suppressed += 1;
+      const resolution = override?.resolution ?? defaultResolution;
+
+      // SKIP is the only resolution that removes the row from the import
+      // outright — KEEP still links the existing contact into the target list,
+      // it just doesn't rewrite the contact itself.
+      if (resolution === "SKIP") {
+        unchanged += 1;
+        continue;
       }
 
-      if (contactListId) {
-        await prisma.contactListMember.upsert({
-          where: { contactListId_contactId: { contactListId, contactId } },
-          create: { contactListId, contactId, source: "CSV_IMPORT" },
-          update: {}
+      if (resolution === "KEEP") {
+        unchanged += 1;
+      } else if (resolution === "REPLACE") {
+        await prisma.contact.update({
+          where: { id: existing.id },
+          data: {
+            firstName: row.firstName ?? null,
+            lastName: row.lastName ?? null,
+            tags: row.tags
+          }
         });
+        updated += 1;
+      } else {
+        // MERGE: fill in only the names the import provides and union the tags,
+        // so a CSV missing a column can never blank out existing data.
+        await prisma.contact.update({
+          where: { id: existing.id },
+          data: {
+            firstName: row.firstName ?? existing.firstName,
+            lastName: row.lastName ?? existing.lastName,
+            tags: Array.from(new Set([...existing.tags, ...row.tags]))
+          }
+        });
+        updated += 1;
       }
+
+      if (suppressed.has(key)) {
+        suppressedCount += 1;
+      }
+      memberContactIds.push(existing.id);
+    }
+
+    if (contactListId && memberContactIds.length > 0) {
+      // skipDuplicates covers contacts already on the list: re-importing is a
+      // no-op on the membership rather than an error.
+      await prisma.contactListMember.createMany({
+        data: memberContactIds.map((contactId) => ({
+          contactListId: contactListId!,
+          contactId,
+          source: "CSV_IMPORT" as const
+        })),
+        skipDuplicates: true
+      });
     }
 
     return {
       created,
       updated,
+      unchanged,
       skipped: errors.length,
-      suppressed,
+      suppressed: suppressedCount,
       errors,
       ...(listSummary ? { contactList: listSummary } : {})
     };

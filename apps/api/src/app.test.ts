@@ -403,7 +403,7 @@ describe("tracking routes (public)", () => {
 describe("contacts CSV routes", () => {
   it("imports contacts from an uploaded CSV file", async () => {
     prismaMock.suppression.findMany.mockResolvedValue([] as never);
-    prismaMock.contact.findUnique.mockResolvedValue(null);
+    prismaMock.contact.findMany.mockResolvedValue([] as never);
     prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
 
     const res = await request(app)
@@ -414,6 +414,56 @@ describe("contacts CSV routes", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ created: 1, updated: 0 });
+  });
+
+  it("dry-runs an import without writing anything", async () => {
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
+        id: "existing",
+        email: "known@x.com",
+        firstName: null,
+        lastName: null,
+        tags: [],
+        status: "ACTIVE"
+      }
+    ] as never);
+
+    const res = await request(app)
+      .post("/api/v1/contacts/import/preview")
+      .set("Authorization", auth)
+      .field("organizationId", "org_1")
+      .attach(
+        "file",
+        Buffer.from("email\nknown@x.com\nnew@x.com\n"),
+        "contacts.csv"
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({
+      totalRows: 2,
+      newCount: 1,
+      duplicateCount: 1
+    });
+    expect(prismaMock.contact.create).not.toHaveBeenCalled();
+  });
+
+  // The resolutions cross a multipart boundary as text. Dropping a malformed
+  // payload instead of rejecting it would apply the default to every duplicate,
+  // overwriting contacts the user had chosen to keep.
+  it("rejects overrides that aren't valid JSON", async () => {
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contact.findMany.mockResolvedValue([] as never);
+
+    const res = await request(app)
+      .post("/api/v1/contacts/import")
+      .set("Authorization", auth)
+      .field("organizationId", "org_1")
+      .field("overrides", "{not json")
+      .attach("file", Buffer.from("email\nnew@x.com\n"), "contacts.csv");
+
+    expect(res.status).toBe(400);
+    expect(prismaMock.contact.create).not.toHaveBeenCalled();
   });
 
   it("exports contacts as CSV (and /export is not treated as a contact id)", async () => {

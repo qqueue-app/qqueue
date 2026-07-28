@@ -629,7 +629,80 @@ export function compileSegmentRules(
 // `contactListName` to create one as part of the import. They are mutually
 // exclusive — passing both is a validation error rather than a silent
 // precedence rule, so the caller's intent is never guessed at.
+// How an imported row is applied when a contact with that email already exists
+// in the organization. Applies to duplicates only — a row with no existing match
+// is always created.
+//
+// MERGE is the default and the historical behaviour: fill in names the contact
+// is missing and union the tags, so an import can never destroy data the CSV
+// simply didn't carry. REPLACE is the opt-in destructive one.
+//
+// No resolution touches `status`: an import must never reactivate a bounced or
+// unsubscribed contact, which is a suppression-integrity rule rather than a
+// merge preference.
+export const contactImportResolutionSchema = z.enum([
+  /** Fill blank names, union tags. */
+  "MERGE",
+  /** Overwrite names and tags with the CSV values. */
+  "REPLACE",
+  /** Leave the contact untouched, but still add it to the target list. */
+  "KEEP",
+  /** Leave the contact untouched and exclude it from the import entirely. */
+  "SKIP",
+]);
+
+export type ContactImportResolution = z.infer<
+  typeof contactImportResolutionSchema
+>;
+
+// Per-email instruction from the import review screen: how to resolve this
+// duplicate, and optionally corrected field values the user edited in place.
+// Edited values replace what the CSV carried before the resolution is applied.
+export const contactImportOverrideSchema = z.object({
+  resolution: contactImportResolutionSchema.optional(),
+  firstName: z.string().max(200).optional(),
+  lastName: z.string().max(200).optional(),
+  tags: z.array(z.string().min(1).max(64)).max(50).optional(),
+});
+
+export type ContactImportOverride = z.infer<typeof contactImportOverrideSchema>;
+
+// CSV import options. The CSV payload itself is handled by the upload middleware,
+// not validated here; this only carries the optional target list and the
+// duplicate-resolution choices made on the review screen.
+//
+// A target list can be named two ways: `contactListId` for an existing list, or
+// `contactListName` to create one as part of the import. They are mutually
+// exclusive — passing both is a validation error rather than a silent
+// precedence rule, so the caller's intent is never guessed at.
+//
+// `overrides` is keyed by lower-cased email and is expected to be sparse: the
+// review screen sends only the rows the user decided individually, with
+// `defaultResolution` covering the rest. The client re-uploads the CSV alongside
+// it rather than the server holding parsed rows between the two calls, which
+// keeps the import stateless at any file size.
 export const csvImportSchema = z
+  .object({
+    organizationId: z.string().min(1),
+    contactListId: z.string().min(1).optional(),
+    contactListName: z.string().min(1).max(200).optional(),
+    defaultResolution: contactImportResolutionSchema.optional(),
+    overrides: z.record(z.string(), contactImportOverrideSchema).optional(),
+  })
+  .refine(
+    (value) => !(value.contactListId && value.contactListName),
+    {
+      message: "Provide either contactListId or contactListName, not both",
+      path: ["contactListName"],
+    },
+  );
+
+export type CsvImportInput = z.infer<typeof csvImportSchema>;
+
+// Dry-run of an import: same parse and same duplicate detection as the real
+// thing, but nothing is written. Takes the target list so the preview can report
+// whether the list would be created.
+export const csvImportPreviewSchema = z
   .object({
     organizationId: z.string().min(1),
     contactListId: z.string().min(1).optional(),
@@ -643,7 +716,7 @@ export const csvImportSchema = z
     },
   );
 
-export type CsvImportInput = z.infer<typeof csvImportSchema>;
+export type CsvImportPreviewInput = z.infer<typeof csvImportPreviewSchema>;
 
 // Bulk contact deletion. Capped so a single request can't take out an entire
 // table in one transaction; the UI pages through larger selections.

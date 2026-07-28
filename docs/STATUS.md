@@ -60,7 +60,9 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    sends. *Implemented as **Email Studio*** (`apps/web/src/pages/EmailStudio.tsx`):
    multiple `To` recipients, always-visible `CC`/`BCC` with autocomplete over
    contacts and previously-mailed addresses, contact and contact-list pickers,
-   template apply, Tiptap editor, MJML-backed preview, drafts (`EmailDraft`:
+   template apply, a Tiptap editor with a **raw HTML source view**, MJML-backed
+   preview rendered by the API (same wrap + tracking injection as the send),
+   drafts (`EmailDraft`:
    auto-save/resume/delete/send, with a dedicated `/drafts` page that deep-links
    back into the composer), schedule-for-later, **attachments**
    (S3/MinIO object storage), and **per-recipient delivery status** after a
@@ -291,6 +293,21 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Contacts CRUD exists, with tags and created date surfaced in the UI.
 - [x] Contact lists CRUD, descriptions, and contact membership exist.
 - [x] Templates CRUD exists, with an in-app preview.
+- [x] Both authoring surfaces (Email Studio, Template Editor) toggle between the
+  rich text editor and a **raw HTML source view**. Source mode writes straight to
+  the body HTML and never mounts Tiptap, so pasted markup the ProseMirror schema
+  has no node for survives instead of being silently dropped; switching back
+  warns and names the tags that would be lost. A complete HTML document (one with
+  `<html>`/`<body>`) locks to source mode and is sent verbatim —
+  `renderHtmlAsEmailSafe` detects it and skips the MJML wrap, which would
+  otherwise nest a second document inside its own.
+- [x] Contact CSV import is dry-run first (`POST /contacts/import/preview`):
+  the review step shows how many rows are new, which collide with existing
+  contacts, and the before/after for each collision. Duplicates resolve as
+  merge / replace / keep / skip — a bulk default plus per-row overrides and
+  inline field edits — instead of the previous silent merge. Rows repeating one
+  address within a file collapse into a single contact, so the summary counts
+  people rather than lines.
 - [x] Editor link/button/variable dialogs are in-app (no browser `prompt`), and
   images can be uploaded from the device or linked by URL. Uploads are stored as
   `ImageAsset` blobs in object storage and embedded via a public URL, since

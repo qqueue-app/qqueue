@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Send, X } from "lucide-react";
 import { toast } from "sonner";
-import { RichTextEditor } from "../components/editor/RichTextEditor.js";
+import { BodyEditor } from "../components/editor/BodyEditor.js";
 import { TemplatePreview } from "../components/editor/TemplatePreview.js";
 import { VariablesPanel } from "../components/editor/VariablesPanel.js";
 import { extractVariables } from "../components/editor/variables.js";
@@ -364,7 +364,7 @@ export function TemplateEditor() {
 
           <div className="space-y-2">
             <Label>Email body</Label>
-            <RichTextEditor
+            <BodyEditor
               value={state.html}
               onChange={(html) => setState((prev) => ({ ...prev, html }))}
               variables={used.length ? used : undefined}

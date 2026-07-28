@@ -217,14 +217,45 @@ export function wrapHtmlInMjml(
     .join("\n");
 }
 
+// A complete HTML document declares itself with a doctype, an <html> element, or
+// a <body> element. Matching requires a tag boundary after the name so prose
+// like "<bodyweight>" or an escaped `&lt;html&gt;` code sample doesn't trip it.
+const FULL_DOCUMENT_MARKERS = [
+  /<!doctype\s+html/i,
+  /<html[\s/>]/i,
+  /<body[\s/>]/i
+];
+
+/**
+ * True when `html` is a complete HTML document rather than a body fragment.
+ *
+ * This is the signal that the author pasted an already-built email (a Brevo /
+ * Mailchimp export, a designer's hand-written template) rather than composing a
+ * fragment in the editor. Such a document must NOT be wrapped: nesting
+ * `<html><body>…` inside MJML's own document produces markup no client renders
+ * correctly.
+ */
+export function isFullHtmlDocument(html: string): boolean {
+  return FULL_DOCUMENT_MARKERS.some((marker) => marker.test(html));
+}
+
 /**
  * Convenience: wrap body HTML in a branded MJML document and render it to
  * email-safe HTML. Falls back to the original body HTML if compilation fails.
+ *
+ * A complete HTML document is passed through verbatim (see
+ * `isFullHtmlDocument`): it already carries its own head/body scaffold, so it is
+ * email-safe on its own terms and wrapping it would corrupt it. Authors who
+ * paste a full document own its client compatibility end to end.
  */
 export async function renderHtmlAsEmailSafe(
   bodyHtml: string,
   options: RenderMjmlOptions & { branding?: EmailBranding } = {}
 ): Promise<RenderMjmlResult> {
+  if (isFullHtmlDocument(bodyHtml)) {
+    return { html: bodyHtml, errors: [], usedFallback: false };
+  }
+
   const { branding, ...mjmlOptions } = options;
   return renderMjml(wrapHtmlInMjml(bodyHtml, branding), {
     fallbackHtml: bodyHtml,

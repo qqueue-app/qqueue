@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Monitor, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TemplateVariable } from "@/lib/api";
+import { isFullHtmlDocument } from "./html-source";
 import { applyVariables, resolveVariableData } from "./variables";
 
 interface TemplatePreviewProps {
@@ -50,10 +51,14 @@ export function TemplatePreview({
     () => applyVariables(subject, data) || "(no subject)",
     [subject, data]
   );
-  const srcDoc = useMemo(
-    () => buildDocument(applyVariables(html, data)),
-    [html, data]
-  );
+  // A pasted full document already has its own head, styles, and page
+  // background. Nesting it in the card shell would double the <html> element and
+  // let the shell's body/card styles override the author's, so the preview would
+  // stop matching what actually gets delivered — render it as its own document.
+  const srcDoc = useMemo(() => {
+    const applied = applyVariables(html, data);
+    return isFullHtmlDocument(applied) ? applied : buildDocument(applied);
+  }, [html, data]);
 
   return (
     <div className="flex h-full flex-col">

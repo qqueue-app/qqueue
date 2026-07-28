@@ -44,6 +44,14 @@ contactRouter.post(
   requireOrgMembership,
   contactController.import
 );
+// Dry run of the same import: classifies rows against existing contacts and
+// writes nothing, so duplicates can be resolved before anything is committed.
+contactRouter.post(
+  "/import/preview",
+  uploadCsv,
+  requireOrgMembership,
+  contactController.importPreview
+);
 contactRouter.get("/export", requireOrgMembership, contactController.export);
 // Bulk delete. POST rather than DELETE because it carries a body of ids, and
 // registered before "/:id" so "bulk-delete" isn't captured as a contact id.

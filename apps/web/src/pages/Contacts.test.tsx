@@ -15,6 +15,7 @@ vi.mock("../lib/api.js", () => ({
     updateContact: vi.fn(),
     deleteContact: vi.fn(),
     importContacts: vi.fn(),
+    previewImportContacts: vi.fn(),
     exportContacts: vi.fn(),
     getContactActivity: vi.fn(),
     previewSegment: vi.fn(),
@@ -213,11 +214,45 @@ describe("Contacts import dialog", () => {
     mockedApi.importContacts.mockResolvedValue({
       created: 2,
       updated: 0,
+      unchanged: 0,
       skipped: 0,
       suppressed: 0,
       errors: []
     });
+    mockedApi.previewImportContacts.mockResolvedValue(makePreview());
   });
+
+  function makePreview(overrides: Record<string, unknown> = {}) {
+    return {
+      totalRows: 2,
+      newCount: 2,
+      duplicateCount: 0,
+      suppressedCount: 0,
+      collapsedInFile: 0,
+      errors: [],
+      duplicates: [],
+      duplicatesTruncated: false,
+      newSample: [],
+      ...overrides
+    };
+  }
+
+  function makeDuplicate(overrides: Record<string, unknown> = {}) {
+    return {
+      email: "dup@x.com",
+      incoming: { firstName: "New", tags: ["fresh"] },
+      existing: {
+        id: "c_dup",
+        firstName: "Old",
+        lastName: null,
+        tags: ["old"],
+        status: "ACTIVE"
+      },
+      suppressed: false,
+      changedFields: ["firstName", "tags"],
+      ...overrides
+    };
+  }
 
   async function openImportDialog(user: ReturnType<typeof userEvent.setup>) {
     render(<Contacts />);
@@ -232,6 +267,14 @@ describe("Contacts import dialog", () => {
     return file;
   }
 
+  /** Walk from file choice through the dry run to the review step. */
+  async function reachReviewStep(user: ReturnType<typeof userEvent.setup>) {
+    await openImportDialog(user);
+    await screen.findByText("Import contacts");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await screen.findByText("Review this import");
+  }
+
   it("opens a dialog on file choice instead of importing immediately", async () => {
     const user = userEvent.setup();
     await openImportDialog(user);
@@ -239,22 +282,34 @@ describe("Contacts import dialog", () => {
     expect(await screen.findByText("Import contacts")).toBeInTheDocument();
     // Choosing a file must not send it on its own.
     expect(mockedApi.importContacts).not.toHaveBeenCalled();
+    expect(mockedApi.previewImportContacts).not.toHaveBeenCalled();
     expect(screen.getByText("contacts.csv")).toBeInTheDocument();
+  });
+
+  // The dry run is what makes a duplicate a decision rather than a silent merge,
+  // so "Continue" must never write.
+  it("dry-runs before writing anything", async () => {
+    const user = userEvent.setup();
+    await reachReviewStep(user);
+
+    expect(mockedApi.previewImportContacts).toHaveBeenCalled();
+    expect(mockedApi.importContacts).not.toHaveBeenCalled();
   });
 
   it("imports without a list by default", async () => {
     const user = userEvent.setup();
-    await openImportDialog(user);
-    await screen.findByText("Import contacts");
+    await reachReviewStep(user);
 
-    await user.click(screen.getByRole("button", { name: /^import$/i }));
+    await user.click(screen.getByRole("button", { name: /^import 2 contacts$/i }));
 
     await waitFor(() => expect(mockedApi.importContacts).toHaveBeenCalled());
     const [, options] = mockedApi.importContacts.mock.calls[0];
     expect(options).toEqual({
       organizationId: "org_1",
       contactListId: undefined,
-      contactListName: undefined
+      contactListName: undefined,
+      defaultResolution: "MERGE",
+      overrides: {}
     });
   });
 
@@ -263,6 +318,7 @@ describe("Contacts import dialog", () => {
     mockedApi.importContacts.mockResolvedValue({
       created: 2,
       updated: 0,
+      unchanged: 0,
       skipped: 0,
       suppressed: 0,
       errors: [],
@@ -274,7 +330,9 @@ describe("Contacts import dialog", () => {
     await user.click(screen.getByLabelText("Add to a list"));
     await user.click(await screen.findByRole("option", { name: /new list/i }));
     await user.type(screen.getByLabelText("New list name"), "Newsletter");
-    await user.click(screen.getByRole("button", { name: /^import$/i }));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await screen.findByText("Review this import");
+    await user.click(screen.getByRole("button", { name: /^import 2 contacts$/i }));
 
     await waitFor(() => expect(mockedApi.importContacts).toHaveBeenCalled());
     const [, options] = mockedApi.importContacts.mock.calls[0];
@@ -285,11 +343,113 @@ describe("Contacts import dialog", () => {
     );
   });
 
+  it("shows what each existing contact looks like before and after", async () => {
+    const user = userEvent.setup();
+    mockedApi.previewImportContacts.mockResolvedValue(
+      makePreview({
+        totalRows: 1,
+        newCount: 0,
+        duplicateCount: 1,
+        duplicates: [makeDuplicate()]
+      })
+    );
+    await reachReviewStep(user);
+
+    expect(screen.getByText("dup@x.com")).toBeInTheDocument();
+    // "Now" is the stored contact; "After import" is the merged result — the
+    // file's name wins where it has one, and its tags join the existing set.
+    expect(screen.getByText("Old")).toBeInTheDocument();
+    expect(screen.getByText("New")).toBeInTheDocument();
+    expect(screen.getByText("old")).toBeInTheDocument();
+    expect(screen.getByText("old, fresh")).toBeInTheDocument();
+  });
+
+  it("sends a per-row choice as an override alongside the default", async () => {
+    const user = userEvent.setup();
+    mockedApi.previewImportContacts.mockResolvedValue(
+      makePreview({
+        totalRows: 2,
+        newCount: 1,
+        duplicateCount: 1,
+        duplicates: [makeDuplicate()]
+      })
+    );
+    await reachReviewStep(user);
+
+    await user.click(
+      screen.getByLabelText("What to do with dup@x.com")
+    );
+    await user.click(await screen.findByRole("option", { name: /^replace$/i }));
+    await user.click(screen.getByRole("button", { name: /^import 2 contacts$/i }));
+
+    await waitFor(() => expect(mockedApi.importContacts).toHaveBeenCalled());
+    const [, options] = mockedApi.importContacts.mock.calls[0];
+    expect(options.defaultResolution).toBe("MERGE");
+    expect(options.overrides).toEqual({
+      "dup@x.com": { resolution: "REPLACE" }
+    });
+  });
+
+  it("carries an inline edit through to the import", async () => {
+    const user = userEvent.setup();
+    mockedApi.previewImportContacts.mockResolvedValue(
+      makePreview({
+        totalRows: 1,
+        newCount: 0,
+        duplicateCount: 1,
+        duplicates: [makeDuplicate()]
+      })
+    );
+    await reachReviewStep(user);
+
+    await user.click(screen.getByRole("button", { name: /edit dup@x.com/i }));
+    const firstName = screen.getByLabelText("First name");
+    await user.clear(firstName);
+    await user.type(firstName, "Corrected");
+    await user.click(screen.getByRole("button", { name: /^import 1 contact$/i }));
+
+    await waitFor(() => expect(mockedApi.importContacts).toHaveBeenCalled());
+    const [, options] = mockedApi.importContacts.mock.calls[0];
+    expect(options.overrides["dup@x.com"]).toMatchObject({
+      firstName: "Corrected"
+    });
+  });
+
+  // Duplicates past the display cap still import — saying so keeps the capped
+  // list from reading as the whole picture.
+  it("says how many existing contacts are beyond the displayed list", async () => {
+    const user = userEvent.setup();
+    mockedApi.previewImportContacts.mockResolvedValue(
+      makePreview({
+        totalRows: 600,
+        newCount: 0,
+        duplicateCount: 600,
+        duplicates: [makeDuplicate()],
+        duplicatesTruncated: true
+      })
+    );
+    await reachReviewStep(user);
+
+    expect(screen.getByText(/599 are imported using the choice above/i))
+      .toBeInTheDocument();
+  });
+
+  it("goes back to the options step without importing", async () => {
+    const user = userEvent.setup();
+    await reachReviewStep(user);
+
+    await user.click(screen.getByRole("button", { name: /back/i }));
+
+    expect(await screen.findByText("Import contacts")).toBeInTheDocument();
+    expect(mockedApi.importContacts).not.toHaveBeenCalled();
+  });
+
   it("keeps per-row errors visible instead of discarding them", async () => {
     const user = userEvent.setup();
     mockedApi.importContacts.mockResolvedValue({
       created: 1,
       updated: 0,
+      unchanged: 0,
       skipped: 2,
       suppressed: 0,
       errors: [
@@ -297,16 +457,17 @@ describe("Contacts import dialog", () => {
         { row: 7, message: "Invalid email: nope" }
       ]
     });
-    await openImportDialog(user);
-    await screen.findByText("Import contacts");
+    await reachReviewStep(user);
 
-    await user.click(screen.getByRole("button", { name: /^import$/i }));
+    await user.click(screen.getByRole("button", { name: /^import 2 contacts$/i }));
 
-    expect(await screen.findByText(/2 rows skipped/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/2 rows couldn't be read/i)
+    ).toBeInTheDocument();
     expect(screen.getByText(/Row 3: Missing email/)).toBeInTheDocument();
     expect(screen.getByText(/Row 7: Invalid email/)).toBeInTheDocument();
     // Dialog stays open so the reasons remain readable.
-    expect(screen.getByText("Import contacts")).toBeInTheDocument();
+    expect(screen.getByText("Review this import")).toBeInTheDocument();
   });
 });
 

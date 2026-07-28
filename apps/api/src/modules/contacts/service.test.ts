@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { prismaMock } from "../../test/prisma-mock.js";
 import { HttpError } from "../../lib/http-error.js";
-import { contactService, parseContactsCsv } from "./service.js";
+import {
+  collapseDuplicateRows,
+  contactService,
+  parseContactsCsv
+} from "./service.js";
 
 const input = {
   organizationId: "org_1",
@@ -95,22 +99,131 @@ describe("parseContactsCsv", () => {
   });
 });
 
-describe("contactService.importContacts", () => {
-  it("creates new contacts, merges tags on existing, and links list membership", async () => {
-    // First row exists (merge tags), second is new.
-    prismaMock.suppression.findMany.mockResolvedValue([] as never);
-    prismaMock.contactList.findFirst.mockResolvedValue({ id: "list_1" } as never);
-    prismaMock.contact.findUnique
-      .mockResolvedValueOnce({
+describe("collapseDuplicateRows", () => {
+  it("folds repeats of the same address into one contact", () => {
+    const { rows, collapsed } = collapseDuplicateRows([
+      { email: "a@b.com", firstName: "Ann", tags: ["vip"] },
+      { email: "A@B.com", lastName: "Bee", tags: ["gold"] },
+      { email: "c@d.com", tags: [] }
+    ]);
+
+    expect(collapsed).toBe(1);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({
+      email: "a@b.com",
+      firstName: "Ann",
+      lastName: "Bee",
+      tags: ["vip", "gold"]
+    });
+  });
+
+  it("lets a later row fill a name the first one left blank", () => {
+    const { rows } = collapseDuplicateRows([
+      { email: "a@b.com", firstName: "Ann", tags: [] },
+      { email: "a@b.com", firstName: "Anna", tags: [] }
+    ]);
+
+    expect(rows[0].firstName).toBe("Anna");
+  });
+});
+
+describe("contactService.previewImport", () => {
+  it("classifies rows against existing contacts without writing anything", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([
+      {
         id: "existing",
-        tags: ["old"],
+        email: "a@b.com",
         firstName: "Keep",
-        lastName: null
-      } as never)
-      .mockResolvedValueOnce(null);
+        lastName: null,
+        tags: ["old"],
+        status: "ACTIVE"
+      }
+    ] as never);
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+
+    const preview = await contactService.previewImport({
+      organizationId: "org_1",
+      csv: "email,firstName,tags\na@b.com,,new\nc@d.com,Cara,gold\n"
+    });
+
+    expect(preview).toMatchObject({
+      totalRows: 2,
+      newCount: 1,
+      duplicateCount: 1,
+      duplicatesTruncated: false
+    });
+    expect(preview.duplicates[0]).toMatchObject({
+      email: "a@b.com",
+      existing: { id: "existing", tags: ["old"] },
+      changedFields: ["firstName", "tags"]
+    });
+    expect(preview.newSample[0].email).toBe("c@d.com");
+    expect(prismaMock.contact.create).not.toHaveBeenCalled();
+    expect(prismaMock.contact.update).not.toHaveBeenCalled();
+  });
+
+  it("reports a named list it would create without creating it", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([] as never);
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    prismaMock.contactList.findFirst.mockResolvedValue(null as never);
+
+    const preview = await contactService.previewImport({
+      organizationId: "org_1",
+      contactListName: "Newsletter",
+      csv: "email\na@b.com\n"
+    });
+
+    expect(preview.contactList).toEqual({
+      id: null,
+      name: "Newsletter",
+      willCreate: true
+    });
+    expect(prismaMock.contactList.create).not.toHaveBeenCalled();
+  });
+
+  it("counts in-file repeats and parse errors separately", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([] as never);
+    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+
+    const preview = await contactService.previewImport({
+      organizationId: "org_1",
+      csv: "email\na@b.com\na@b.com\nbad-email\n"
+    });
+
+    expect(preview.totalRows).toBe(1);
+    expect(preview.collapsedInFile).toBe(1);
+    expect(preview.errors).toHaveLength(1);
+  });
+});
+
+describe("contactService.importContacts", () => {
+  // Existing contacts and suppressions are loaded in one bulk query each rather
+  // than a lookup per row, so both mocks are keyed by the whole address set.
+  function mockExisting(
+    contacts: unknown[] = [],
+    suppressions: unknown[] = []
+  ) {
+    prismaMock.contact.findMany.mockResolvedValue(contacts as never);
+    prismaMock.suppression.findMany.mockResolvedValue(suppressions as never);
+  }
+
+  it("creates new contacts, merges tags on existing, and links list membership", async () => {
+    mockExisting([
+      {
+        id: "existing",
+        email: "a@b.com",
+        firstName: "Keep",
+        lastName: null,
+        tags: ["old"],
+        status: "ACTIVE"
+      }
+    ]);
+    prismaMock.contactList.findFirst.mockResolvedValue({ id: "list_1" } as never);
     prismaMock.contact.update.mockResolvedValue({ id: "existing" } as never);
     prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
-    prismaMock.contactListMember.upsert.mockResolvedValue({ id: "m" } as never);
+    prismaMock.contactListMember.createMany.mockResolvedValue({
+      count: 2
+    } as never);
 
     const summary = await contactService.importContacts({
       organizationId: "org_1",
@@ -118,24 +231,217 @@ describe("contactService.importContacts", () => {
       csv: "email,firstName,tags\na@b.com,,new\nc@d.com,Cara,gold\n"
     });
 
-    expect(summary).toMatchObject({ created: 1, updated: 1, skipped: 0, suppressed: 0 });
+    expect(summary).toMatchObject({
+      created: 1,
+      updated: 1,
+      unchanged: 0,
+      skipped: 0,
+      suppressed: 0
+    });
     // Existing contact keeps its name and gets the union of tags.
     expect(prismaMock.contact.update.mock.calls[0][0].data).toMatchObject({
       firstName: "Keep",
       tags: ["old", "new"]
     });
-    // Membership linked with the CSV_IMPORT source.
-    expect(prismaMock.contactListMember.upsert.mock.calls[0][0].create).toMatchObject({
+    // Both contacts linked with the CSV_IMPORT source.
+    expect(
+      prismaMock.contactListMember.createMany.mock.calls[0][0].data
+    ).toEqual([
+      { contactListId: "list_1", contactId: "existing", source: "CSV_IMPORT" },
+      { contactListId: "list_1", contactId: "new", source: "CSV_IMPORT" }
+    ]);
+  });
+
+  it("overwrites names and tags under REPLACE", async () => {
+    mockExisting([
+      {
+        id: "existing",
+        email: "a@b.com",
+        firstName: "Old",
+        lastName: "Name",
+        tags: ["old"],
+        status: "ACTIVE"
+      }
+    ]);
+    prismaMock.contact.update.mockResolvedValue({ id: "existing" } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
+      defaultResolution: "REPLACE",
+      csv: "email,firstName,tags\na@b.com,New,fresh\n"
+    });
+
+    expect(summary).toMatchObject({ created: 0, updated: 1, unchanged: 0 });
+    expect(prismaMock.contact.update.mock.calls[0][0].data).toMatchObject({
+      firstName: "New",
+      // A column the CSV didn't carry is cleared, unlike MERGE.
+      lastName: null,
+      tags: ["fresh"]
+    });
+  });
+
+  it("leaves the contact alone under KEEP but still links the list", async () => {
+    mockExisting([
+      {
+        id: "existing",
+        email: "a@b.com",
+        firstName: "Old",
+        lastName: null,
+        tags: ["old"],
+        status: "ACTIVE"
+      }
+    ]);
+    prismaMock.contactList.findFirst.mockResolvedValue({ id: "list_1" } as never);
+    prismaMock.contactListMember.createMany.mockResolvedValue({
+      count: 1
+    } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
       contactListId: "list_1",
-      source: "CSV_IMPORT"
+      defaultResolution: "KEEP",
+      csv: "email,firstName\na@b.com,New\n"
+    });
+
+    expect(summary).toMatchObject({ created: 0, updated: 0, unchanged: 1 });
+    expect(prismaMock.contact.update).not.toHaveBeenCalled();
+    expect(
+      prismaMock.contactListMember.createMany.mock.calls[0][0].data
+    ).toEqual([
+      { contactListId: "list_1", contactId: "existing", source: "CSV_IMPORT" }
+    ]);
+  });
+
+  it("drops the row entirely under SKIP, list membership included", async () => {
+    mockExisting([
+      {
+        id: "existing",
+        email: "a@b.com",
+        firstName: "Old",
+        lastName: null,
+        tags: [],
+        status: "ACTIVE"
+      }
+    ]);
+    prismaMock.contactList.findFirst.mockResolvedValue({ id: "list_1" } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
+      contactListId: "list_1",
+      defaultResolution: "SKIP",
+      csv: "email,firstName\na@b.com,New\n"
+    });
+
+    expect(summary).toMatchObject({ created: 0, updated: 0, unchanged: 1 });
+    expect(prismaMock.contact.update).not.toHaveBeenCalled();
+    expect(prismaMock.contactListMember.createMany).not.toHaveBeenCalled();
+  });
+
+  it("applies a per-email override ahead of the default resolution", async () => {
+    mockExisting([
+      {
+        id: "keep_me",
+        email: "keep@b.com",
+        firstName: "Keep",
+        lastName: null,
+        tags: [],
+        status: "ACTIVE"
+      },
+      {
+        id: "replace_me",
+        email: "replace@b.com",
+        firstName: "Old",
+        lastName: null,
+        tags: [],
+        status: "ACTIVE"
+      }
+    ]);
+    prismaMock.contact.update.mockResolvedValue({ id: "replace_me" } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
+      defaultResolution: "REPLACE",
+      overrides: { "keep@b.com": { resolution: "KEEP" } },
+      csv: "email,firstName\nkeep@b.com,New\nreplace@b.com,New\n"
+    });
+
+    expect(summary).toMatchObject({ updated: 1, unchanged: 1 });
+    expect(prismaMock.contact.update).toHaveBeenCalledTimes(1);
+    expect(prismaMock.contact.update.mock.calls[0][0].where).toEqual({
+      id: "replace_me"
+    });
+  });
+
+  it("uses inline-edited values instead of what the CSV carried", async () => {
+    mockExisting([
+      {
+        id: "existing",
+        email: "a@b.com",
+        firstName: "Old",
+        lastName: null,
+        tags: [],
+        status: "ACTIVE"
+      }
+    ]);
+    prismaMock.contact.update.mockResolvedValue({ id: "existing" } as never);
+
+    await contactService.importContacts({
+      organizationId: "org_1",
+      defaultResolution: "REPLACE",
+      overrides: {
+        "a@b.com": { firstName: "Corrected", tags: ["edited"] }
+      },
+      csv: "email,firstName,tags\na@b.com,FromCsv,fromcsv\n"
+    });
+
+    expect(prismaMock.contact.update.mock.calls[0][0].data).toMatchObject({
+      firstName: "Corrected",
+      tags: ["edited"]
+    });
+  });
+
+  it("never writes status, so an import can't reactivate a bounced contact", async () => {
+    mockExisting([
+      {
+        id: "existing",
+        email: "a@b.com",
+        firstName: null,
+        lastName: null,
+        tags: [],
+        status: "BOUNCED"
+      }
+    ]);
+    prismaMock.contact.update.mockResolvedValue({ id: "existing" } as never);
+
+    await contactService.importContacts({
+      organizationId: "org_1",
+      defaultResolution: "REPLACE",
+      csv: "email,firstName\na@b.com,Ann\n"
+    });
+
+    expect(prismaMock.contact.update.mock.calls[0][0].data).not.toHaveProperty(
+      "status"
+    );
+  });
+
+  it("counts a repeated address in one file as a single contact", async () => {
+    mockExisting();
+    prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
+
+    const summary = await contactService.importContacts({
+      organizationId: "org_1",
+      csv: "email,tags\na@b.com,one\na@b.com,two\n"
+    });
+
+    expect(summary).toMatchObject({ created: 1, updated: 0 });
+    expect(prismaMock.contact.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.contact.create.mock.calls[0][0].data).toMatchObject({
+      tags: ["one", "two"]
     });
   });
 
   it("counts suppressed addresses and reports parse errors as skipped", async () => {
-    prismaMock.suppression.findMany.mockResolvedValue([
-      { email: "blocked@b.com" }
-    ] as never);
-    prismaMock.contact.findUnique.mockResolvedValue(null);
+    mockExisting([], [{ email: "blocked@b.com" }]);
     prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
 
     const summary = await contactService.importContacts({
@@ -161,15 +467,16 @@ describe("contactService.importContacts", () => {
   });
 
   it("creates a list by name and reports it as newly created", async () => {
-    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    mockExisting();
     prismaMock.contactList.findFirst.mockResolvedValue(null as never);
     prismaMock.contactList.create.mockResolvedValue({
       id: "list_new",
       name: "Newsletter"
     } as never);
-    prismaMock.contact.findUnique.mockResolvedValue(null as never);
     prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
-    prismaMock.contactListMember.upsert.mockResolvedValue({ id: "m" } as never);
+    prismaMock.contactListMember.createMany.mockResolvedValue({
+      count: 1
+    } as never);
 
     const summary = await contactService.importContacts({
       organizationId: "org_1",
@@ -187,19 +494,22 @@ describe("contactService.importContacts", () => {
       created: true
     });
     expect(
-      prismaMock.contactListMember.upsert.mock.calls[0][0].create
-    ).toMatchObject({ contactListId: "list_new", source: "CSV_IMPORT" });
+      prismaMock.contactListMember.createMany.mock.calls[0][0].data
+    ).toEqual([
+      { contactListId: "list_new", contactId: "new", source: "CSV_IMPORT" }
+    ]);
   });
 
   it("reuses a same-named list instead of creating duplicates on re-import", async () => {
-    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    mockExisting();
     prismaMock.contactList.findFirst.mockResolvedValue({
       id: "list_existing",
       name: "Newsletter"
     } as never);
-    prismaMock.contact.findUnique.mockResolvedValue(null as never);
     prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
-    prismaMock.contactListMember.upsert.mockResolvedValue({ id: "m" } as never);
+    prismaMock.contactListMember.createMany.mockResolvedValue({
+      count: 1
+    } as never);
 
     const summary = await contactService.importContacts({
       organizationId: "org_1",
@@ -216,7 +526,7 @@ describe("contactService.importContacts", () => {
   });
 
   it("trims a list name and rejects one that is only whitespace", async () => {
-    prismaMock.suppression.findMany.mockResolvedValue([] as never);
+    mockExisting();
     prismaMock.contactList.findFirst.mockResolvedValue(null as never);
 
     await expect(
@@ -229,8 +539,7 @@ describe("contactService.importContacts", () => {
   });
 
   it("omits the list summary when no list was targeted", async () => {
-    prismaMock.suppression.findMany.mockResolvedValue([] as never);
-    prismaMock.contact.findUnique.mockResolvedValue(null as never);
+    mockExisting();
     prismaMock.contact.create.mockResolvedValue({ id: "new" } as never);
 
     const summary = await contactService.importContacts({
@@ -239,7 +548,7 @@ describe("contactService.importContacts", () => {
     });
 
     expect(summary.contactList).toBeUndefined();
-    expect(prismaMock.contactListMember.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.contactListMember.createMany).not.toHaveBeenCalled();
   });
 });
 
