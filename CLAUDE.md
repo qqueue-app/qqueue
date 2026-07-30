@@ -92,6 +92,12 @@ Check this before building something — most of the platform already exists.
     attribute allowlists there are checked against the editor's real output in
     `RichTextEditor.test.tsx` ("round-trips back into rich text"); extend them
     only alongside that test.
+  - **Every editor dialog's `<form>` must `stopPropagation()` on submit.**
+    Radix portals a dialog out of the DOM but *not* out of the React tree, so
+    React bubbles its submit into whatever page form the editor sits in —
+    `TemplateEditor` and Email Studio both wrap theirs. Adding a link saved and
+    navigated away from the template; in Email Studio it would have sent the
+    message. Covered by RichTextEditor.test.tsx's "inside a page form" block.
   - **Link and button URLs are normalized, not validated away**
     (`editor/url.ts`). People type `example.com`; stored verbatim that is a
     *relative* URL, which in a mail client resolves against nothing. Those

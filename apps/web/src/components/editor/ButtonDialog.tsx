@@ -214,6 +214,10 @@ export function ButtonDialog({
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    // Portaled out of the DOM but not out of the React tree, so without this
+    // the submit reaches the page form the editor sits inside — saving the
+    // template, or sending the message, from behind the dialog.
+    event.stopPropagation();
     // "example.com" is what people type; stored as-is it would be a relative
     // link that resolves against the mail client rather than the web.
     const href = normalizeUrl(attrs.href);

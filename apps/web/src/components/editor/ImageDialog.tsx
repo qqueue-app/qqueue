@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import { normalizeUrl } from "./url";
 
 /** Mirrors the server-side allowlist in apps/api/src/modules/images/service.ts. */
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -34,7 +35,7 @@ export function ImageDialog({
   onInsert,
   onUpload
 }: ImageDialogProps) {
-  const [url, setUrl] = useState("https://");
+  const [url, setUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export function ImageDialog({
 
   useEffect(() => {
     if (open) {
-      setUrl("https://");
+      setUrl("");
       setUploading(false);
       setDragging(false);
       setError(null);
@@ -77,8 +78,13 @@ export function ImageDialog({
 
   function submitLink(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = url.trim();
-    if (!trimmed || trimmed === "https://") {
+    // Portaled out of the DOM but not out of the React tree, so without this
+    // the submit reaches the page form the editor sits inside — saving the
+    // template, or sending the message, from behind the dialog.
+    event.stopPropagation();
+    const trimmed = normalizeUrl(url);
+    if (!trimmed) {
+      setError("Add the address of the image.");
       return;
     }
     onInsert(trimmed);
@@ -174,13 +180,21 @@ export function ImageDialog({
         <form onSubmit={submitLink} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="image-url">Image URL</Label>
+            {/* Deliberately not type="url": the browser rejects a bare
+                domain before the form submits. normalizeUrl fills in the
+                scheme on the way out instead. */}
             <Input
               id="image-url"
-              type="url"
-              placeholder="https://example.com/banner.png"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="example.com/banner.png"
               value={url}
               disabled={uploading}
-              onChange={(event) => setUrl(event.target.value)}
+              onChange={(event) => {
+                setError(null);
+                setUrl(event.target.value);
+              }}
             />
             <p className="text-xs text-muted-foreground">
               Linked images must stay reachable — recipients load them when they

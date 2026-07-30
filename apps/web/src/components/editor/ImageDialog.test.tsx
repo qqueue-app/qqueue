@@ -107,16 +107,33 @@ describe("ImageDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("ignores an empty link submission", async () => {
+  it("refuses an empty link submission, and says why", async () => {
     const user = userEvent.setup();
     const { onInsert, onClose } = renderDialog({ onUpload: vi.fn() });
 
-    // The field is pre-filled with the "https://" stub — submitting it as-is
-    // must not insert an empty image.
     await user.click(screen.getByRole("button", { name: "Insert image" }));
 
     expect(onInsert).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+    // Refusing used to be silent, which looks like a broken dialog.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Add the address of the image."
+    );
+  });
+
+  // A bare domain stored verbatim is a relative URL — in a mail client it
+  // resolves against nothing, so the image just never loads.
+  it("fills in the scheme for a bare domain", async () => {
+    const user = userEvent.setup();
+    const { onInsert } = renderDialog({ onUpload: vi.fn() });
+
+    await user.type(
+      screen.getByLabelText("Image URL"),
+      "cdn.example.com/banner.png"
+    );
+    await user.click(screen.getByRole("button", { name: "Insert image" }));
+
+    expect(onInsert).toHaveBeenCalledWith("https://cdn.example.com/banner.png");
   });
 
   it("offers link-only when no upload handler is provided", () => {

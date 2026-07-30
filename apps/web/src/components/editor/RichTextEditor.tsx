@@ -126,6 +126,11 @@ function EditorPromptDialog({
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    // The dialog is portaled out of the DOM but not out of the React tree, so
+    // React keeps bubbling this submit up to whatever page form the editor sits
+    // inside. That form then ran its own handler: adding a link saved and left
+    // the template, and in Email Studio it would have sent the message.
+    event.stopPropagation();
     const fields = config!.fields;
     const cleaned = Object.fromEntries(
       Object.entries(values).map(([key, value]) => {

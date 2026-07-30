@@ -256,6 +256,94 @@ describe("RichTextEditor", () => {
     expect(html).not.toContain("text-align");
   });
 
+  // Regression: every one of these dialogs is a <form> inside the page's own
+  // <form>. Radix portals them out of the DOM but not out of the React tree, so
+  // React carried their submit up to the page — adding a link saved and left the
+  // template editor, and in Email Studio it would have sent the message.
+  describe("inside a page form", () => {
+    function renderInForm() {
+      const onPageSubmit = vi.fn((event: React.FormEvent) =>
+        event.preventDefault()
+      );
+      render(
+        <form onSubmit={onPageSubmit}>
+          <RichTextEditor
+            value="<p>text</p>"
+            onChange={() => {}}
+            onUploadImage={async () => "https://cdn.example.com/a.png"}
+          />
+          <button type="submit">Save changes</button>
+        </form>
+      );
+      return onPageSubmit;
+    }
+
+    it("does not submit the page when a link is added", async () => {
+      const user = userEvent.setup();
+      const onPageSubmit = renderInForm();
+
+      await user.click(await screen.findByLabelText("Link"));
+      await user.type(await screen.findByLabelText("Link URL"), "example.com");
+      await user.click(screen.getByRole("button", { name: "Insert link" }));
+
+      await waitFor(() =>
+        expect(screen.queryByLabelText("Link URL")).not.toBeInTheDocument()
+      );
+      expect(onPageSubmit).not.toHaveBeenCalled();
+    });
+
+    // Enter in the URL field is the same submit by another route.
+    it("does not submit the page when the link dialog is confirmed with Enter", async () => {
+      const user = userEvent.setup();
+      const onPageSubmit = renderInForm();
+
+      await user.click(await screen.findByLabelText("Link"));
+      await user.type(
+        await screen.findByLabelText("Link URL"),
+        "example.com{Enter}"
+      );
+
+      expect(onPageSubmit).not.toHaveBeenCalled();
+    });
+
+    it("does not submit the page when a button is inserted", async () => {
+      const user = userEvent.setup();
+      const onPageSubmit = renderInForm();
+
+      await user.click(await screen.findByRole("button", { name: "Button" }));
+      const dialog = within(await screen.findByRole("dialog"));
+      await user.type(dialog.getByLabelText("Button URL"), "example.com");
+      await user.click(dialog.getByRole("button", { name: "Insert button" }));
+
+      expect(onPageSubmit).not.toHaveBeenCalled();
+    });
+
+    it("does not submit the page when an image is inserted", async () => {
+      const user = userEvent.setup();
+      const onPageSubmit = renderInForm();
+
+      await user.click(await screen.findByLabelText("Image"));
+      const dialog = within(await screen.findByRole("dialog"));
+      await user.type(
+        dialog.getByLabelText("Image URL"),
+        "example.com/banner.png"
+      );
+      await user.click(dialog.getByRole("button", { name: "Insert image" }));
+
+      expect(onPageSubmit).not.toHaveBeenCalled();
+    });
+
+    it("still submits the page from its own button", async () => {
+      const user = userEvent.setup();
+      const onPageSubmit = renderInForm();
+
+      await screen.findByLabelText("Link");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      expect(onPageSubmit).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("inserts a sanitized custom variable", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
