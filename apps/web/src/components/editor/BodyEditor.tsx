@@ -13,7 +13,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { RichTextEditor } from "./RichTextEditor";
-import { isFullHtmlDocument, unsupportedInRichText } from "./html-source";
+import {
+  isFullHtmlDocument,
+  richTextCanRepresent,
+  unsupportedInRichText
+} from "./html-source";
 
 export type BodyEditorMode = "rich" | "html";
 
@@ -35,13 +39,16 @@ interface BodyEditorProps {
  *
  * HTML mode writes straight to `value` and never mounts the rich text editor,
  * which matters more than it looks: the editor round-trips content through the
- * ProseMirror schema, so anything it has no node for (<style>, <head>, most
- * layout tables from an exported email) is silently deleted on the way in.
+ * ProseMirror schema, so anything it has no node for (<style>, <head>, the
+ * <div> scaffolding of an exported email) is deleted or rewritten on the way in.
  * Pasted HTML therefore has to bypass it entirely rather than render into it.
  *
- * A complete HTML document locks the editor to HTML mode for the same reason —
- * there is no lossless way back — and is sent verbatim, skipping the server's
- * MJML wrapper.
+ * Which mode a body *opens* in is decided by the body itself, not by a fixed
+ * default. Content the schema can't hold opens in HTML mode, because mounting
+ * the rich text editor over it destroys it on sight — a template written as raw
+ * HTML came back rewritten, which is indistinguishable from the save not having
+ * worked. A complete HTML document goes further and locks HTML mode on: there is
+ * no lossless way back, and it is sent verbatim, skipping the MJML wrapper.
  */
 export function BodyEditor({
   value,
@@ -53,33 +60,48 @@ export function BodyEditor({
   onModeChange,
   className
 }: BodyEditorProps) {
-  const [mode, setMode] = useState<BodyEditorMode>("rich");
+  const [mode, setMode] = useState<BodyEditorMode>(() =>
+    richTextCanRepresent(value) ? "rich" : "html"
+  );
   const [pendingRichSwitch, setPendingRichSwitch] = useState<string[] | null>(
     null
   );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fullDocument = isFullHtmlDocument(value);
+  const richSafe = richTextCanRepresent(value);
 
-  // A pasted full document can't round-trip through the rich text editor, so
-  // take the user there rather than letting the editor eat it. This also covers
-  // loading a draft or template that was authored as raw HTML.
+  // The one body the rich text editor is allowed to rewrite: whatever was on
+  // screen when the user accepted the warning below. Without it, confirming
+  // "switch anyway" would be undone by the effect on the very next render.
+  const acceptedRewrite = useRef<string | null>(null);
+
+  // Content the schema can't hold is pulled into HTML mode rather than fed to
+  // the editor. The initial state above covers a body that is already present at
+  // mount; this covers one that arrives later — a draft loading, or a template
+  // being applied over what the user had — which is the case that silently ate
+  // saved HTML before.
   useEffect(() => {
-    if (fullDocument) {
-      setMode("html");
-    }
-  }, [fullDocument]);
+    if (richSafe) return;
+    if (!fullDocument && value === acceptedRewrite.current) return;
+    setMode("html");
+  }, [richSafe, fullDocument, value]);
 
   useEffect(() => {
     onModeChange?.(mode);
   }, [mode, onModeChange]);
 
   function switchToRich() {
-    const casualties = unsupportedInRichText(value);
+    const { tags, attributes } = unsupportedInRichText(value);
+    const casualties = [
+      ...tags.map((tag) => `<${tag}>`),
+      ...attributes.map((attribute) => `${attribute}=`)
+    ];
     if (casualties.length > 0) {
       setPendingRichSwitch(casualties);
       return;
     }
+    acceptedRewrite.current = value;
     setMode("rich");
   }
 
@@ -166,12 +188,9 @@ export function BodyEditor({
             <AlertDialogTitle>Switch to rich text?</AlertDialogTitle>
             <AlertDialogDescription>
               The rich text editor can&apos;t represent everything in this HTML.
-              Switching removes{" "}
-              {(pendingRichSwitch ?? [])
-                .map((tag) => `<${tag}>`)
-                .join(", ")}{" "}
-              and may rewrite the surrounding markup. Stay in HTML to keep it
-              exactly as written.
+              Switching drops or rewrites {(pendingRichSwitch ?? []).join(", ")}{" "}
+              along with the styling they carry, and there is no way back. Stay
+              in HTML to keep it exactly as written.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -179,6 +198,7 @@ export function BodyEditor({
             <AlertDialogAction
               onClick={() => {
                 setPendingRichSwitch(null);
+                acceptedRewrite.current = value;
                 setMode("rich");
               }}
             >

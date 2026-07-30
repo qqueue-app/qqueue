@@ -83,6 +83,21 @@ Check this before building something — most of the platform already exists.
   `prompt`); images can be uploaded from the device (stored as `ImageAsset`,
   embedded by public URL) or linked; CTA buttons carry their own
   colour/size/corner styling, sit inline beside text, and are editable in place.
+  - **`BodyEditor` chooses rich text vs. HTML source from the content, not a
+    fixed default** (`richTextCanRepresent` in `editor/html-source.ts`).
+    Mounting the Tiptap editor over markup its schema can't hold rewrites that
+    markup on sight — a `<div>` layout, a class-styled or attribute-styled
+    table, a `<style>` block — so such a body must open in the source view.
+    Getting this wrong looks exactly like saves silently failing. The tag and
+    attribute allowlists there are checked against the editor's real output in
+    `RichTextEditor.test.tsx` ("round-trips back into rich text"); extend them
+    only alongside that test.
+  - **Link and button URLs are normalized, not validated away**
+    (`editor/url.ts`). People type `example.com`; stored verbatim that is a
+    *relative* URL, which in a mail client resolves against nothing. Those
+    fields are deliberately not `type="url"` — the browser would reject a bare
+    domain before the form ever submitted. `{{variable}}` hrefs, anchors and
+    root-relative paths pass through untouched.
   - **`CtaButton` is an inline atom, not a block.** A block node can only ever
     occupy its own line, so it could never sit beside text. Placement is
     therefore the *paragraph's* `text-align` (owned by the TextAlign

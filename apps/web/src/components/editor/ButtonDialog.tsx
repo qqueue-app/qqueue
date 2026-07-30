@@ -22,6 +22,7 @@ import {
   type ButtonRadius,
   type ButtonSize
 } from "./button-extension";
+import { normalizeUrl } from "./url";
 
 // Email-safe presets, matching the editor's text colour palette.
 const BACKGROUND_SWATCHES = [
@@ -171,6 +172,8 @@ export function ButtonDialog({
     align: currentAlign
   });
 
+  const [error, setError] = useState<string | null>(null);
+
   // Seeded once per opening. `initial` is rebuilt by the caller on every render
   // (it reads live editor attributes), so reseeding on every change would throw
   // away whatever the user had typed the moment anything re-rendered.
@@ -183,11 +186,15 @@ export function ButtonDialog({
     }
     if (!seeded.current) {
       seeded.current = true;
+      setError(null);
       const { align, ...rest } = initial ?? {};
       setAttrs({
         ...normalizeButtonAttributes({
           ...BUTTON_DEFAULTS,
           label: initial ? BUTTON_DEFAULTS.label : "Get started",
+          // A new button starts with an empty address rather than an "https://"
+          // stub, so the placeholder can show what the field will take.
+          href: initial ? BUTTON_DEFAULTS.href : "",
           ...rest
         }),
         // Default to the line's existing alignment so inserting a button
@@ -201,14 +208,24 @@ export function ButtonDialog({
     key: K,
     value: ButtonFormValue[K]
   ) {
+    setError(null);
     setAttrs((current) => ({ ...current, [key]: value }));
   }
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    const href = attrs.href.trim();
+    // "example.com" is what people type; stored as-is it would be a relative
+    // link that resolves against the mail client rather than the web.
+    const href = normalizeUrl(attrs.href);
     const label = attrs.label.trim();
-    if (!href || href === "https://" || !label) {
+    // Refusing used to be silent, which is the same experience as the dialog
+    // being broken — say which field is holding it up instead.
+    if (!href) {
+      setError("Add the address the button should open.");
+      return;
+    }
+    if (!label) {
+      setError("Give the button some text.");
       return;
     }
     onSubmit({
@@ -240,10 +257,15 @@ export function ButtonDialog({
 
           <div className="space-y-2">
             <Label htmlFor="button-href">Button URL</Label>
+            {/* Deliberately not type="url": the browser rejects "example.com"
+                before the form submits, and that is what people type. The
+                scheme is filled in on submit instead of being demanded. */}
             <Input
               id="button-href"
-              type="url"
-              placeholder="https://example.com"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="example.com"
               value={attrs.href}
               onChange={(event) => set("href", event.target.value)}
             />
@@ -333,6 +355,12 @@ export function ButtonDialog({
               </span>
             </div>
           </div>
+
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

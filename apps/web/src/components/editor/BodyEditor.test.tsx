@@ -77,13 +77,48 @@ describe("BodyEditor", () => {
     ).toBeInTheDocument();
   });
 
+  // Regression: a template written as raw HTML was saved fine, then reopened
+  // into the rich text editor, which parsed it into its own schema and threw
+  // away everything the schema had no node for. The body came back rewritten,
+  // which reads as the save having silently failed.
+  it("opens a hand-written HTML fragment in the source view", async () => {
+    render(
+      <BodyEditor
+        value={'<div style="padding:24px"><p>Hi</p></div>'}
+        onChange={() => {}}
+      />
+    );
+
+    const source = await screen.findByLabelText("HTML source");
+    expect(source).toHaveValue('<div style="padding:24px"><p>Hi</p></div>');
+    // Not a full document, so rich text stays available — just not the default.
+    expect(screen.getByRole("button", { name: "Rich text" })).toBeEnabled();
+  });
+
+  // Drafts and templates arrive after mount, so the choice can't be made once
+  // at mount time against an empty string.
+  it("moves to the source view when unrepresentable content arrives later", async () => {
+    const { rerender } = render(
+      <BodyEditor value="<p>Hi</p>" onChange={() => {}} />
+    );
+    await screen.findByLabelText("Bold");
+
+    rerender(
+      <BodyEditor
+        value={'<div class="wrap"><p>Applied template</p></div>'}
+        onChange={() => {}}
+      />
+    );
+
+    expect(await screen.findByLabelText("HTML source")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Bold")).not.toBeInTheDocument();
+  });
+
   it("warns before switching back to rich text would delete markup", async () => {
     const user = userEvent.setup();
     render(
       <BodyEditor value="<style>.x{}</style><p>Hi</p>" onChange={() => {}} />
     );
-    await screen.findByLabelText("Bold");
-    await user.click(screen.getByRole("button", { name: "HTML" }));
     await screen.findByLabelText("HTML source");
 
     await user.click(screen.getByRole("button", { name: "Rich text" }));
@@ -95,13 +130,13 @@ describe("BodyEditor", () => {
     expect(screen.getByLabelText("HTML source")).toBeInTheDocument();
   });
 
+  // The auto-switch above must not fight the user: accepting the warning has to
+  // stick even though the content is still unrepresentable at that moment.
   it("switches to rich text when the user confirms the warning", async () => {
     const user = userEvent.setup();
     render(
       <BodyEditor value="<style>.x{}</style><p>Hi</p>" onChange={() => {}} />
     );
-    await screen.findByLabelText("Bold");
-    await user.click(screen.getByRole("button", { name: "HTML" }));
     await screen.findByLabelText("HTML source");
     await user.click(screen.getByRole("button", { name: "Rich text" }));
 
@@ -112,6 +147,7 @@ describe("BodyEditor", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Bold")).toBeInTheDocument()
     );
+    expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument();
   });
 
   it("switches back without a warning when nothing would be lost", async () => {

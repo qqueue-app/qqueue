@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RichTextEditor } from "./RichTextEditor.js";
+import { richTextCanRepresent } from "./html-source.js";
 
 describe("RichTextEditor", () => {
   beforeEach(() => {
@@ -114,6 +115,58 @@ describe("RichTextEditor", () => {
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     const html = onChange.mock.calls.at(-1)?.[0] as string;
     expect(html).toContain(">our docs</a>");
+  });
+
+  // Typing the scheme is not something anyone should have to remember, and a
+  // bare "example.com" stored verbatim is a relative link: in a mail client it
+  // resolves against nothing.
+  it("fills in the scheme for a bare domain", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    await user.click(await screen.findByLabelText("Link"));
+
+    await user.type(await screen.findByLabelText("Link URL"), "example.com");
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain(
+      'href="https://example.com"'
+    );
+  });
+
+  it("links a bare email address with mailto:", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    await user.click(await screen.findByLabelText("Link"));
+
+    await user.type(
+      await screen.findByLabelText("Link URL"),
+      "support@example.com"
+    );
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain(
+      'href="mailto:support@example.com"'
+    );
+  });
+
+  // The field used to open pre-filled with "https://", which passed the
+  // required check untouched and linked the text to nothing.
+  it("refuses a scheme with no address after it", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    await user.click(await screen.findByLabelText("Link"));
+
+    await user.type(await screen.findByLabelText("Link URL"), "https://");
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Link URL is required");
+    expect(screen.getByLabelText("Link URL")).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("keeps the link dialog open and says why when the URL is blank", async () => {
@@ -264,6 +317,42 @@ describe("RichTextEditor", () => {
     await waitFor(() => {
       expect(document.querySelector("table")).toBeNull();
     });
+  });
+
+  // `richTextCanRepresent` decides whether a saved body reopens here or in the
+  // source view, from a hand-maintained list of tags and attributes. If this
+  // editor's own output ever fell outside that list, content written here would
+  // reopen as raw HTML — so the list is checked against the real thing rather
+  // than against my reading of the extensions.
+  it("produces markup that round-trips back into rich text", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>Hello</p>" onChange={onChange} />);
+
+    await user.click(await screen.findByLabelText("Bold"));
+    await user.keyboard("bold text");
+    await user.click(screen.getByLabelText("Heading 2"));
+    await user.click(screen.getByLabelText("Align centre"));
+    await user.click(screen.getByLabelText("Numbered list"));
+    await user.click(screen.getByLabelText("Divider"));
+    await user.click(screen.getByLabelText(/Insert table/i));
+    await user.click(screen.getByLabelText("Add row"));
+
+    // A link, an image and a CTA button — the three that carry attributes.
+    await user.click(screen.getByLabelText("Link"));
+    await user.type(await screen.findByLabelText("Link URL"), "example.com");
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
+
+    await user.click(screen.getByRole("button", { name: "Button" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await user.type(dialog.getByLabelText("Button URL"), "example.com");
+    await user.click(dialog.getByRole("button", { name: "Insert button" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const html = onChange.mock.calls.at(-1)?.[0] as string;
+    expect(html).toContain("data-qq-button");
+    expect(html).toContain("<table");
+    expect(richTextCanRepresent(html)).toBe(true);
   });
 
   it("carries inline styles on table cells so mail clients keep the borders", async () => {

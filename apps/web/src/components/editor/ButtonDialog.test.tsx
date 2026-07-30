@@ -173,18 +173,37 @@ describe("ButtonDialog", () => {
     );
   });
 
-  it("refuses to submit without a real URL", async () => {
+  // Nobody types the scheme, and a bare "example.com" on a button is a relative
+  // link — in a mail client it resolves against nothing.
+  it("fills in the scheme for a bare domain", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderDialog();
+
+    await user.type(screen.getByLabelText("Button URL"), "example.com");
+    await user.click(screen.getByRole("button", { name: "Insert button" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ href: "https://example.com" })
+    );
+  });
+
+  it("refuses to submit without a real URL, and says so", async () => {
     const user = userEvent.setup();
     const { onSubmit, onClose } = renderDialog();
 
-    // Left at the "https://" stub.
+    // A scheme with nothing after it is a stub, not an address.
+    await user.type(screen.getByLabelText("Button URL"), "https://");
     await user.click(screen.getByRole("button", { name: "Insert button" }));
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+    // Refusing used to be silent, which looks exactly like a broken dialog.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Add the address the button should open."
+    );
   });
 
-  it("refuses to submit with an empty label", async () => {
+  it("refuses to submit with an empty label, and says so", async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderDialog();
 
@@ -193,5 +212,22 @@ describe("ButtonDialog", () => {
     await user.click(screen.getByRole("button", { name: "Insert button" }));
 
     expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Give the button some text."
+    );
+  });
+
+  it("clears the complaint once the field is fixed", async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderDialog();
+
+    await user.click(screen.getByRole("button", { name: "Insert button" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Button URL"), "example.com");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Insert button" }));
+    expect(onSubmit).toHaveBeenCalled();
   });
 });

@@ -60,6 +60,7 @@ import {
 } from "./button-extension";
 import { ButtonDialog } from "./ButtonDialog";
 import { ImageDialog } from "./ImageDialog";
+import { normalizeUrl } from "./url";
 
 const DEFAULT_VARIABLES = ["firstName", "lastName", "email"];
 
@@ -78,9 +79,15 @@ interface PromptField {
   name: string;
   label: string;
   type?: string;
+  inputMode?: "text" | "url" | "email";
   placeholder?: string;
   /** Blank is allowed — the submit handler supplies a fallback. */
   optional?: boolean;
+  /**
+   * Rewrites the trimmed input before anything sees it — returning `""` marks it
+   * unusable, which fails the required check rather than reaching the editor.
+   */
+  normalize?: (value: string) => string;
 }
 
 // One dialog drives every toolbar action that needs to collect a value.
@@ -92,7 +99,8 @@ interface PromptConfig {
   initial: Record<string, string>;
   removeLabel?: string;
   onRemove?: () => void;
-  onSubmit: (values: Record<string, string>) => void;
+  /** Returns a message to keep the dialog open and show it; nothing to close. */
+  onSubmit: (values: Record<string, string>) => string | void;
 }
 
 function EditorPromptDialog({
@@ -118,19 +126,30 @@ function EditorPromptDialog({
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = Object.fromEntries(
-      Object.entries(values).map(([key, value]) => [key, value.trim()])
+    const fields = config!.fields;
+    const cleaned = Object.fromEntries(
+      Object.entries(values).map(([key, value]) => {
+        const field = fields.find((candidate) => candidate.name === key);
+        const trimmed = value.trim();
+        return [key, field?.normalize ? field.normalize(trimmed) : trimmed];
+      })
     );
     // Never close on an input the editor can't act on — the dialog used to
     // report success and leave the document untouched.
-    const missing = config!.fields.find(
-      (field) => !field.optional && !trimmed[field.name]
+    const missing = fields.find(
+      (field) => !field.optional && !cleaned[field.name]
     );
     if (missing) {
       setError(`${missing.label} is required.`);
       return;
     }
-    config!.onSubmit(trimmed);
+    // The same applies one step later: a command ProseMirror refuses is a
+    // no-op, and closing on it would claim an edit that never happened.
+    const failure = config!.onSubmit(cleaned);
+    if (failure) {
+      setError(failure);
+      return;
+    }
     onClose();
   }
 
@@ -150,6 +169,9 @@ function EditorPromptDialog({
               <Input
                 id={`editor-prompt-${field.name}`}
                 type={field.type ?? "text"}
+                inputMode={field.inputMode}
+                autoComplete="off"
+                spellCheck={false}
                 placeholder={field.placeholder}
                 autoFocus={index === 0}
                 value={values[field.name] ?? ""}
@@ -464,8 +486,12 @@ export function RichTextEditor({
         {
           name: "href",
           label: "Link URL",
-          type: "url",
-          placeholder: "https://example.com"
+          // Deliberately not type="url": the browser would reject "example.com"
+          // before the form submitted, and that is what people type. The scheme
+          // is filled in by normalizeUrl instead of being demanded.
+          inputMode: "url",
+          placeholder: "example.com",
+          normalize: normalizeUrl
         },
         ...(mode === "insert"
           ? [
@@ -478,7 +504,10 @@ export function RichTextEditor({
             ]
           : [])
       ],
-      initial: { href: currentHref ?? "https://", text: "" },
+      // Empty rather than an "https://" stub: the placeholder says more, and a
+      // stub left untouched used to sail through the required check and link
+      // the text to nothing.
+      initial: { href: currentHref ?? "", text: "" },
       removeLabel: "Remove link",
       onRemove:
         mode === "mark" && existing
@@ -486,26 +515,37 @@ export function RichTextEditor({
               editor!.chain().focus().extendMarkRange("link").unsetLink().run()
           : undefined,
       onSubmit: ({ href, text }) => {
-        if (mode === "button") {
-          editor!.chain().focus().updateCtaButton({ href }).run();
-          return;
-        }
-        if (mode === "insert") {
-          editor!
+        const applied = (() => {
+          if (mode === "button") {
+            return editor!.chain().focus().updateCtaButton({ href }).run();
+          }
+          if (mode === "insert") {
+            return (
+              editor!
+                .chain()
+                .focus()
+                .insertContent({
+                  type: "text",
+                  text: text || href,
+                  marks: [{ type: "link", attrs: { href } }]
+                })
+                // Without this the mark stays stored and whatever is typed next
+                // joins the link.
+                .unsetMark("link")
+                .run()
+            );
+          }
+          return editor!
             .chain()
             .focus()
-            .insertContent({
-              type: "text",
-              text: text || href,
-              marks: [{ type: "link", attrs: { href } }]
-            })
-            // Without this the mark stays stored and whatever is typed next
-            // joins the link.
-            .unsetMark("link")
+            .extendMarkRange("link")
+            .setLink({ href })
             .run();
-          return;
+        })();
+
+        if (!applied) {
+          return "That address can't be linked. Try a full web address.";
         }
-        editor!.chain().focus().extendMarkRange("link").setLink({ href }).run();
       }
     });
   }
@@ -522,9 +562,10 @@ export function RichTextEditor({
       initial: { name: "" },
       onSubmit: ({ name }) => {
         const clean = name.replace(/[^\w.-]/g, "");
-        if (clean) {
-          editor!.chain().focus().insertContent(`{{${clean}}}`).run();
+        if (!clean) {
+          return "That leaves nothing usable — try letters, numbers, dots, dashes or underscores.";
         }
+        editor!.chain().focus().insertContent(`{{${clean}}}`).run();
       }
     });
   }
