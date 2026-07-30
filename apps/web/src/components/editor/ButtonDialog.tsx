@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -171,8 +171,18 @@ export function ButtonDialog({
     align: currentAlign
   });
 
+  // Seeded once per opening. `initial` is rebuilt by the caller on every render
+  // (it reads live editor attributes), so reseeding on every change would throw
+  // away whatever the user had typed the moment anything re-rendered.
+  const seeded = useRef(false);
+
   useEffect(() => {
-    if (open) {
+    if (!open) {
+      seeded.current = false;
+      return;
+    }
+    if (!seeded.current) {
+      seeded.current = true;
       const { align, ...rest } = initial ?? {};
       setAttrs({
         ...normalizeButtonAttributes({

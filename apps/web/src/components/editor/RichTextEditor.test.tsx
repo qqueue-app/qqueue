@@ -72,7 +72,7 @@ describe("RichTextEditor", () => {
     const field = await screen.findByLabelText("Link URL");
     await user.clear(field);
     await user.type(field, "https://example.com");
-    await user.click(screen.getByRole("button", { name: "Add link" }));
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
 
     expect(promptSpy).not.toHaveBeenCalled();
     await waitFor(() =>
@@ -80,13 +80,51 @@ describe("RichTextEditor", () => {
     );
   });
 
-  it("keeps the link dialog open when the URL is blank", async () => {
+  // Regression: with nothing selected there was no text to carry the mark, so
+  // the link became a stored mark that vanished with the next selection change —
+  // the dialog closed as though it had worked and the document was untouched.
+  it("inserts a link at the cursor when no text is selected", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    await user.click(await screen.findByLabelText("Link"));
+
+    await user.clear(await screen.findByLabelText("Link URL"));
+    await user.type(screen.getByLabelText("Link URL"), "https://example.com");
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const html = onChange.mock.calls.at(-1)?.[0] as string;
+    expect(html).toContain('href="https://example.com"');
+    // With no link text given, the address is its own label.
+    expect(html).toContain(">https://example.com</a>");
+  });
+
+  it("uses the given link text as the visible label", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    await user.click(await screen.findByLabelText("Link"));
+
+    await user.clear(await screen.findByLabelText("Link URL"));
+    await user.type(screen.getByLabelText("Link URL"), "https://example.com");
+    await user.type(screen.getByLabelText("Link text"), "our docs");
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const html = onChange.mock.calls.at(-1)?.[0] as string;
+    expect(html).toContain(">our docs</a>");
+  });
+
+  it("keeps the link dialog open and says why when the URL is blank", async () => {
     const user = userEvent.setup();
     render(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
     await user.click(await screen.findByLabelText("Link"));
     await user.clear(await screen.findByLabelText("Link URL"));
-    await user.click(screen.getByRole("button", { name: "Add link" }));
+    await user.click(screen.getByRole("button", { name: "Insert link" }));
     expect(screen.getByLabelText("Link URL")).toBeInTheDocument();
+    // Silence used to be the only feedback.
+    expect(screen.getByRole("alert")).toHaveTextContent("Link URL is required");
   });
 
   it("closes the link dialog when cancelled", async () => {
@@ -99,6 +137,10 @@ describe("RichTextEditor", () => {
       expect(screen.queryByLabelText("Link URL")).not.toBeInTheDocument()
     );
   });
+
+  // A selected button needs a ProseMirror node selection, which only a real
+  // click produces — so the link control's button branch is covered where it can
+  // be driven honestly: `updateCtaButton` in button-extension's tests.
 
   it("inserts a styled button from the dialog", async () => {
     const user = userEvent.setup();

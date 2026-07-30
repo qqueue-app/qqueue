@@ -264,6 +264,26 @@ describe("CtaButton rendering", () => {
     expect(editor.getHTML()).toContain("<ul>");
   });
 
+  // The link toolbar control points here when a button is selected: a button
+  // takes no marks, so a link mark on it would be dropped by the schema.
+  it("retargets a button's link without disturbing its styling", () => {
+    const editor = editorWith();
+    editor.commands.setCtaButton({
+      href: "https://old.example",
+      label: "Go",
+      background: "#7c3aed",
+      size: "large"
+    });
+    editor.commands.selectAll();
+    editor.commands.updateCtaButton({ href: "https://new.example" });
+
+    const { anchor } = parseButton(editor.getHTML());
+    expect(anchor.getAttribute("href")).toBe("https://new.example");
+    expect(anchor.textContent).toBe("Go");
+    expect(anchor.style.background).toBe(rgb("#7c3aed"));
+    expect(anchor.style.padding).toBe("16px 30px");
+  });
+
   it("updates a selected button in place rather than adding another", () => {
     const editor = editorWith();
     editor.commands.setCtaButton({ href: "https://example.com", label: "Go" });

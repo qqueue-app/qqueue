@@ -134,6 +134,45 @@ describe("ButtonDialog", () => {
     );
   });
 
+  // The caller rebuilds `initial` from live editor attributes on every render,
+  // so a re-render while the dialog is open used to reset the form and throw
+  // away edits that had not been submitted yet.
+  it("keeps in-progress edits when re-rendered with fresh props", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const props = {
+      href: "https://existing.example",
+      label: "Existing",
+      align: "left" as ButtonAlign
+    };
+    const { rerender } = render(
+      <ButtonDialog
+        open
+        initial={{ ...props }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.clear(screen.getByLabelText("Button text"));
+    await user.type(screen.getByLabelText("Button text"), "Renamed");
+    // Same values, new object identity — exactly what a re-render produces.
+    rerender(
+      <ButtonDialog
+        open
+        initial={{ ...props }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />
+    );
+
+    expect(screen.getByLabelText("Button text")).toHaveValue("Renamed");
+    await user.click(screen.getByRole("button", { name: "Save button" }));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ label: "Renamed" })
+    );
+  });
+
   it("refuses to submit without a real URL", async () => {
     const user = userEvent.setup();
     const { onSubmit, onClose } = renderDialog();

@@ -79,6 +79,8 @@ interface PromptField {
   label: string;
   type?: string;
   placeholder?: string;
+  /** Blank is allowed — the submit handler supplies a fallback. */
+  optional?: boolean;
 }
 
 // One dialog drives every toolbar action that needs to collect a value.
@@ -101,10 +103,12 @@ function EditorPromptDialog({
   onClose: () => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (config) {
       setValues(config.initial);
+      setError(null);
     }
   }, [config]);
 
@@ -117,7 +121,13 @@ function EditorPromptDialog({
     const trimmed = Object.fromEntries(
       Object.entries(values).map(([key, value]) => [key, value.trim()])
     );
-    if (config!.fields.some((field) => !trimmed[field.name])) {
+    // Never close on an input the editor can't act on — the dialog used to
+    // report success and leave the document untouched.
+    const missing = config!.fields.find(
+      (field) => !field.optional && !trimmed[field.name]
+    );
+    if (missing) {
+      setError(`${missing.label} is required.`);
       return;
     }
     config!.onSubmit(trimmed);
@@ -152,6 +162,11 @@ function EditorPromptDialog({
               />
             </div>
           ))}
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
           <DialogFooter>
             {config.onRemove ? (
               <Button
@@ -397,27 +412,101 @@ export function RichTextEditor({
       ? "right"
       : "left";
 
+  /**
+   * The link control has three jobs, decided by what is under the cursor. Two of
+   * them used to fall through to `setLink` on a selection that can't hold a mark,
+   * which ProseMirror discards — the dialog reported success and the document was
+   * left untouched.
+   *
+   * - `button`  — a CTA button owns its own href and takes no marks at all, so
+   *               retarget the node instead of marking it.
+   * - `insert`  — nothing selected: a link mark on an empty selection is only a
+   *               stored mark, dropped as soon as the selection moves. Collect
+   *               the visible text and insert real linked text.
+   * - `mark`    — text is selected, or the cursor sits in an existing link
+   *               (which `extendMarkRange` grows back out to).
+   */
   function setLink() {
-    const previous = editor!.getAttributes("link").href as string | undefined;
+    const existing = editor!.getAttributes("link").href as string | undefined;
+    const mode = editor!.isActive("ctaButton")
+      ? "button"
+      : !existing && editor!.state.selection.empty
+        ? "insert"
+        : "mark";
+
+    const copy = {
+      button: {
+        title: "Button link",
+        description: "Where the selected button sends the reader.",
+        submitLabel: "Update button link"
+      },
+      insert: {
+        title: "Insert link",
+        description:
+          "Nothing is selected, so this inserts a new link where the cursor is.",
+        submitLabel: "Insert link"
+      },
+      mark: {
+        title: existing ? "Edit link" : "Add link",
+        description: "The selected text becomes a link to this address.",
+        submitLabel: existing ? "Update link" : "Add link"
+      }
+    }[mode];
+
+    const currentHref =
+      mode === "button"
+        ? (editor!.getAttributes("ctaButton").href as string | undefined)
+        : existing;
+
     setPrompt({
-      title: previous ? "Edit link" : "Add link",
-      description: "The selected text becomes a link to this address.",
-      submitLabel: previous ? "Update link" : "Add link",
+      ...copy,
       fields: [
         {
           name: "href",
           label: "Link URL",
           type: "url",
           placeholder: "https://example.com"
-        }
+        },
+        ...(mode === "insert"
+          ? [
+              {
+                name: "text",
+                label: "Link text",
+                placeholder: "Defaults to the URL",
+                optional: true
+              }
+            ]
+          : [])
       ],
-      initial: { href: previous ?? "https://" },
+      initial: { href: currentHref ?? "https://", text: "" },
       removeLabel: "Remove link",
-      onRemove: previous
-        ? () => editor!.chain().focus().extendMarkRange("link").unsetLink().run()
-        : undefined,
-      onSubmit: ({ href }) =>
-        editor!.chain().focus().extendMarkRange("link").setLink({ href }).run()
+      onRemove:
+        mode === "mark" && existing
+          ? () =>
+              editor!.chain().focus().extendMarkRange("link").unsetLink().run()
+          : undefined,
+      onSubmit: ({ href, text }) => {
+        if (mode === "button") {
+          editor!.chain().focus().updateCtaButton({ href }).run();
+          return;
+        }
+        if (mode === "insert") {
+          editor!
+            .chain()
+            .focus()
+            .insertContent({
+              type: "text",
+              text: text || href,
+              marks: [{ type: "link", attrs: { href } }]
+            })
+            // Without this the mark stays stored and whatever is typed next
+            // joins the link.
+            .unsetMark("link")
+            .run();
+          return;
+        }
+        editor!.chain().focus().extendMarkRange("link").setLink({ href }).run();
+      }
     });
   }
 
