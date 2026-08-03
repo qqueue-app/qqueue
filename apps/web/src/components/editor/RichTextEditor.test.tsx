@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RichTextEditor } from "./RichTextEditor.js";
-import { richTextCanRepresent } from "./html-source.js";
+import { partitionForSchema } from "./partition.js";
 
 describe("RichTextEditor", () => {
   beforeEach(() => {
@@ -407,11 +407,11 @@ describe("RichTextEditor", () => {
     });
   });
 
-  // `richTextCanRepresent` decides whether a saved body reopens here or in the
-  // source view, from a hand-maintained list of tags and attributes. If this
-  // editor's own output ever fell outside that list, content written here would
-  // reopen as raw HTML — so the list is checked against the real thing rather
-  // than against my reading of the extensions.
+  // Everything this editor can produce has to survive being reloaded into it.
+  // Anything that doesn't comes back as a frozen raw block, so content written
+  // here would reopen as an uneditable slab of HTML — the schema disagreeing
+  // with itself. Checked against the editor's real output rather than against a
+  // reading of the extension list.
   it("produces markup that round-trips back into rich text", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -440,13 +440,34 @@ describe("RichTextEditor", () => {
     const html = onChange.mock.calls.at(-1)?.[0] as string;
     expect(html).toContain("data-qq-button");
     expect(html).toContain("<table");
-    expect(richTextCanRepresent(html)).toBe(true);
+    expect(partitionForSchema(html).frozen).toBe(0);
   });
 
-  it("carries inline styles on table cells so mail clients keep the borders", async () => {
+  // Class-based styling would be stripped by Gmail and Outlook, so a table
+  // inserted from the toolbar carries its borders as inline styles.
+  it("gives a table inserted from the toolbar inline borders", async () => {
+    const user = userEvent.setup();
+    render(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
+
+    await user.click(await screen.findByLabelText(/Insert table/i));
+
+    await waitFor(() => {
+      expect(document.querySelector("table")).not.toBeNull();
+    });
+    expect(document.querySelector("td")?.getAttribute("style")).toContain(
+      "border"
+    );
+  });
+
+  // …and a table that arrived with no styling of its own keeps none. That
+  // styling used to be a static attribute stamped onto every table on render,
+  // which meant a pasted layout table came back carrying borders it never had —
+  // a visible change to the email, and enough of one that the table stopped
+  // round-tripping and was frozen out of the editor entirely.
+  it("leaves a pasted bare table unstyled", async () => {
     render(
       <RichTextEditor
-        value="<table><tbody><tr><td>A</td></tr></tbody></table>"
+        value='<table width="600"><tbody><tr><td>A</td></tr></tbody></table>'
         onChange={() => {}}
       />
     );
@@ -454,9 +475,7 @@ describe("RichTextEditor", () => {
     await waitFor(() => {
       expect(document.querySelector("table")).not.toBeNull();
     });
-    // Class-based styling would be stripped by Gmail/Outlook; the style
-    // attribute is what survives.
-    const cell = document.querySelector("td");
-    expect(cell?.getAttribute("style")).toContain("border");
+    expect(document.querySelector("td")?.getAttribute("style")).toBeNull();
+    expect(document.querySelector("table")?.getAttribute("width")).toBe("600");
   });
 });
