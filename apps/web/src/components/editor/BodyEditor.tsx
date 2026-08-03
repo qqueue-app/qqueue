@@ -1,23 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Code2, Pencil } from "lucide-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { RichTextEditor } from "./RichTextEditor";
-import {
-  isFullHtmlDocument,
-  richTextCanRepresent,
-  unsupportedInRichText
-} from "./html-source";
+import { countRawBlocks, fromEditorHtml, toEditorHtml } from "./document-model";
+import { isFullHtmlDocument } from "./html-source";
 
 export type BodyEditorMode = "rich" | "html";
 
@@ -35,20 +22,21 @@ interface BodyEditorProps {
 
 /**
  * The email body authoring surface: a rich text editor and a raw HTML source
- * view over one HTML string.
+ * view over one HTML string, either of which can hold any document.
  *
- * HTML mode writes straight to `value` and never mounts the rich text editor,
- * which matters more than it looks: the editor round-trips content through the
- * ProseMirror schema, so anything it has no node for (<style>, <head>, the
- * <div> scaffolding of an exported email) is deleted or rewritten on the way in.
- * Pasted HTML therefore has to bypass it entirely rather than render into it.
+ * The two used to be exclusive. Loading arbitrary HTML into the rich text
+ * editor destroys it — ProseMirror keeps a document as schema nodes, so markup
+ * with no node is not damaged on the way in, it is never stored at all — and
+ * the only defence available was to refuse: content the schema couldn't hold
+ * opened in the source view and stayed there. That was right about the loss and
+ * wrong about the cost. One `<style>` block meant no toolbar for the whole
+ * email, permanently.
  *
- * Which mode a body *opens* in is decided by the body itself, not by a fixed
- * default. Content the schema can't hold opens in HTML mode, because mounting
- * the rich text editor over it destroys it on sight — a template written as raw
- * HTML came back rewritten, which is indistinguishable from the save not having
- * worked. A complete HTML document goes further and locks HTML mode on: there is
- * no lossless way back, and it is sent verbatim, skipping the MJML wrapper.
+ * The document is now split rather than refused (see document-model.ts): a
+ * complete document's scaffold is set aside and restored, regions the schema
+ * can't hold become raw blocks holding their markup verbatim, and everything
+ * else is ordinary editable content. Switching is lossless in both directions,
+ * so it is only a switch — no lock, no warning, nothing lost by trying it.
  */
 export function BodyEditor({
   value,
@@ -60,50 +48,44 @@ export function BodyEditor({
   onModeChange,
   className
 }: BodyEditorProps) {
-  const [mode, setMode] = useState<BodyEditorMode>(() =>
-    richTextCanRepresent(value) ? "rich" : "html"
-  );
-  const [pendingRichSwitch, setPendingRichSwitch] = useState<string[] | null>(
-    null
-  );
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [mode, setMode] = useState<BodyEditorMode>("rich");
+  const [prepared, setPrepared] = useState(() => toEditorHtml(value));
 
-  const fullDocument = isFullHtmlDocument(value);
-  const richSafe = richTextCanRepresent(value);
+  // What this component last produced. Everything it emits arrives back as the
+  // `value` prop on the next render, and re-deriving the editor document from
+  // it would discard the editor's own state — selection, undo history — on
+  // every keystroke.
+  const [emitted, setEmitted] = useState<string | null>(null);
 
-  // The one body the rich text editor is allowed to rewrite: whatever was on
-  // screen when the user accepted the warning below. Without it, confirming
-  // "switch anyway" would be undone by the effect on the very next render.
-  const acceptedRewrite = useRef<string | null>(null);
-
-  // Content the schema can't hold is pulled into HTML mode rather than fed to
-  // the editor. The initial state above covers a body that is already present at
-  // mount; this covers one that arrives later — a draft loading, or a template
-  // being applied over what the user had — which is the case that silently ate
-  // saved HTML before.
+  // Splitting a document is a parse and serialize per pass, so it happens when
+  // one *arrives* — at mount, when a draft loads, when a template is applied
+  // over what the author had, and when returning from the source view — rather
+  // than on every keystroke. In the source view it never happens at all: the
+  // editor isn't mounted, so there is nothing to prepare it for.
   useEffect(() => {
-    if (richSafe) return;
-    if (!fullDocument && value === acceptedRewrite.current) return;
-    setMode("html");
-  }, [richSafe, fullDocument, value]);
+    if (mode !== "rich" || value === emitted) return;
+    setPrepared(toEditorHtml(value));
+  }, [value, mode, emitted]);
 
   useEffect(() => {
     onModeChange?.(mode);
   }, [mode, onModeChange]);
 
-  function switchToRich() {
-    const { tags, attributes } = unsupportedInRichText(value);
-    const casualties = [
-      ...tags.map((tag) => `<${tag}>`),
-      ...attributes.map((attribute) => `${attribute}=`)
-    ];
-    if (casualties.length > 0) {
-      setPendingRichSwitch(casualties);
-      return;
-    }
-    acceptedRewrite.current = value;
-    setMode("rich");
-  }
+  const { shell } = prepared;
+  const handleRichChange = useCallback(
+    (html: string) => {
+      setPrepared((current) => ({ ...current, html }));
+      const next = fromEditorHtml(html, shell);
+      setEmitted(next);
+      onChange(next);
+    },
+    [onChange, shell]
+  );
+
+  const fullDocument = isFullHtmlDocument(value);
+  // Counted from what the editor is holding rather than from the split, so it
+  // still reads true after a block is added or deleted.
+  const frozen = countRawBlocks(prepared.html);
 
   return (
     <div className={cn("space-y-2", className)}>
@@ -111,15 +93,10 @@ export function BodyEditor({
         <div className="inline-flex items-center gap-1 rounded-md border bg-muted/40 p-0.5">
           <button
             type="button"
-            onClick={switchToRich}
-            disabled={fullDocument}
-            title={
-              fullDocument
-                ? "A full HTML document can't be edited as rich text without losing its <head>, styles, and layout"
-                : "Rich text"
-            }
+            onClick={() => setMode("rich")}
+            title="Rich text"
             className={cn(
-              "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5",
+              "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground [&_svg]:size-3.5",
               mode === "rich" && "bg-background text-foreground shadow-sm"
             )}
           >
@@ -145,12 +122,23 @@ export function BodyEditor({
             Full HTML document — sent as-is
           </Badge>
         ) : null}
+
+        {/* Says what rich text is doing with markup it has no formatting for,
+            so the framed blocks in the editor aren't a surprise. */}
+        {mode === "rich" && frozen > 0 ? (
+          <span className="text-xs text-muted-foreground">
+            {frozen === 1
+              ? "1 part is kept as HTML"
+              : `${frozen} parts are kept as HTML`}{" "}
+            — edit those in place, or switch to HTML for the whole email.
+          </span>
+        ) : null}
       </div>
 
       {mode === "rich" ? (
         <RichTextEditor
-          value={value}
-          onChange={onChange}
+          value={prepared.html}
+          onChange={handleRichChange}
           placeholder={placeholder}
           variables={variables}
           showVariables={showVariables}
@@ -159,9 +147,13 @@ export function BodyEditor({
       ) : (
         <div className="space-y-1.5">
           <textarea
-            ref={textareaRef}
             value={value}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => {
+              // Not this component's own output, so the next switch back to
+              // rich text has to re-read it.
+              setEmitted(null);
+              onChange(event.target.value);
+            }}
             spellCheck={false}
             aria-label="HTML source"
             placeholder={
@@ -176,37 +168,6 @@ export function BodyEditor({
           </p>
         </div>
       )}
-
-      <AlertDialog
-        open={pendingRichSwitch !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingRichSwitch(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Switch to rich text?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The rich text editor can&apos;t represent everything in this HTML.
-              Switching drops or rewrites {(pendingRichSwitch ?? []).join(", ")}{" "}
-              along with the styling they carry, and there is no way back. Stay
-              in HTML to keep it exactly as written.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Stay in HTML</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setPendingRichSwitch(null);
-                acceptedRewrite.current = value;
-                setMode("rich");
-              }}
-            >
-              Switch anyway
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

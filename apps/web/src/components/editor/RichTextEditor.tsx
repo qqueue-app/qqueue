@@ -1,12 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Placeholder from "@tiptap/extension-placeholder";
-import TextAlign from "@tiptap/extension-text-align";
-import { TextStyle } from "@tiptap/extension-text-style";
-import { Color } from "@tiptap/extension-color";
-import Image from "@tiptap/extension-image";
-import { TableKit } from "@tiptap/extension-table";
 import {
   Bold,
   Italic,
@@ -29,6 +22,7 @@ import {
   Columns3,
   Minus,
   Braces,
+  Code2,
   Undo,
   Redo
 } from "lucide-react";
@@ -53,13 +47,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import {
-  CtaButton,
-  type ButtonAlign,
-  type ButtonFormValue
-} from "./button-extension";
+import type { ButtonAlign, ButtonFormValue } from "./button-extension";
 import { ButtonDialog } from "./ButtonDialog";
 import { ImageDialog } from "./ImageDialog";
+import { RawBlockDialog } from "./RawBlockDialog";
+import { createExtensions } from "./editor-extensions";
+import {
+  DELETE_RAW_EVENT,
+  EDIT_RAW_EVENT,
+  type RawBlockEventDetail
+} from "./raw-html-extension";
 import { normalizeUrl } from "./url";
 
 const DEFAULT_VARIABLES = ["firstName", "lastName", "email"];
@@ -357,48 +354,17 @@ export function RichTextEditor({
   const [prompt, setPrompt] = useState<PromptConfig | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
   const [buttonOpen, setButtonOpen] = useState(false);
+  // `pos: null` means "inserting a new block" rather than editing one in place.
+  const [rawEdit, setRawEdit] = useState<{
+    pos: number | null;
+    html: string;
+  } | null>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        link: { openOnClick: false, autolink: true }
-      }),
-      Placeholder.configure({
-        placeholder: placeholder ?? "Write your email…"
-      }),
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
-      TextStyle,
-      Color,
-      Image.configure({
-        inline: false,
-        HTMLAttributes: { style: "max-width:100%;height:auto" }
-      }),
-      // Without these nodes in the schema, ProseMirror silently drops table
-      // markup on paste — a pasted table was flattened to paragraphs before it
-      // ever reached the send pipeline. Styles are inline rather than class-based
-      // because mail clients strip <style> blocks, so a class-styled table would
-      // arrive borderless.
-      TableKit.configure({
-        table: {
-          resizable: false,
-          HTMLAttributes: {
-            style:
-              "border-collapse:collapse;width:100%;border:1px solid #d4d4d8"
-          }
-        },
-        tableCell: {
-          HTMLAttributes: {
-            style: "border:1px solid #d4d4d8;padding:6px 10px;vertical-align:top"
-          }
-        },
-        tableHeader: {
-          HTMLAttributes: {
-            style:
-              "border:1px solid #d4d4d8;padding:6px 10px;vertical-align:top;background-color:#f4f4f5;font-weight:600;text-align:left"
-          }
-        }
-      }),
-      CtaButton
-    ],
+    // Shared with the partitioner that decides what may be loaded into this
+    // editor. The two have to be the same schema or the partitioner's answer is
+    // about a different editor than the one on screen.
+    extensions: createExtensions({ placeholder }),
     content: value,
     // The toolbar reads editor.isActive(...) during render for its active
     // states (bold, alignment, "Edit button", the table controls). Tiptap v3
@@ -422,6 +388,40 @@ export function RichTextEditor({
       editor.commands.setContent(value, { emitUpdate: false });
     }
   }, [value, editor]);
+
+  // Raw blocks are plain DOM inside a node view, with no React tree of their
+  // own to hang a handler on, so their controls announce themselves by event
+  // and the editor answers on their behalf.
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface || !editor) return;
+
+    function detailOf(event: Event) {
+      return (event as CustomEvent<RawBlockEventDetail>).detail;
+    }
+
+    function edit(event: Event) {
+      setRawEdit(detailOf(event));
+    }
+
+    function remove(event: Event) {
+      const { pos } = detailOf(event);
+      const target = editor!.state.doc.nodeAt(pos);
+      if (!target) return;
+      editor!
+        .chain()
+        .focus()
+        .deleteRange({ from: pos, to: pos + target.nodeSize })
+        .run();
+    }
+
+    surface.addEventListener(EDIT_RAW_EVENT, edit);
+    surface.addEventListener(DELETE_RAW_EVENT, remove);
+    return () => {
+      surface.removeEventListener(EDIT_RAW_EVENT, edit);
+      surface.removeEventListener(DELETE_RAW_EVENT, remove);
+    };
+  }, [editor]);
 
   if (!editor) {
     return null;
@@ -745,6 +745,14 @@ export function RichTextEditor({
         >
           <Minus />
         </ToolbarButton>
+        {/* Dropping a snippet in no longer means abandoning the editor for the
+            source view: it lands as a block that keeps its own markup. */}
+        <ToolbarButton
+          label="HTML block"
+          onClick={() => setRawEdit({ pos: null, html: "" })}
+        >
+          <Code2 />
+        </ToolbarButton>
 
         <Separator orientation="vertical" className="mx-1 h-6" />
 
@@ -774,7 +782,32 @@ export function RichTextEditor({
         ) : null}
       </div>
 
-      <EditorContent editor={editor} />
+      <div ref={surfaceRef}>
+        <EditorContent editor={editor} />
+      </div>
+
+      <RawBlockDialog
+        open={rawEdit !== null}
+        initial={rawEdit?.html ?? ""}
+        editing={rawEdit?.pos !== null && rawEdit?.pos !== undefined}
+        onClose={() => setRawEdit(null)}
+        onSubmit={(html) => {
+          const pos = rawEdit?.pos;
+          if (pos === null || pos === undefined) {
+            editor.chain().focus().insertContent({ type: "rawHtml", attrs: { html } }).run();
+          } else {
+            editor
+              .chain()
+              .focus()
+              .command(({ tr }) => {
+                tr.setNodeAttribute(pos, "html", html);
+                return true;
+              })
+              .run();
+          }
+          setRawEdit(null);
+        }}
+      />
 
       <EditorPromptDialog config={prompt} onClose={() => setPrompt(null)} />
       <ImageDialog

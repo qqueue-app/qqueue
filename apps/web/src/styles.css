@@ -62,6 +62,62 @@
   }
 }
 
+@layer components {
+  /* A region of the email the rich text editor is holding verbatim because its
+     schema has no way to represent it (see raw-html-extension.ts). It is framed
+     rather than blended in: what is inside can't be typed into, and looking
+     editable when it isn't is worse than looking foreign. */
+  .qq-raw-block {
+    margin: 0.75rem 0;
+    border: 1px dashed hsl(var(--border));
+    border-radius: calc(var(--radius) - 2px);
+    background: hsl(var(--muted) / 0.35);
+  }
+
+  .qq-raw-block--selected {
+    border-color: hsl(var(--primary) / 0.6);
+    box-shadow: 0 0 0 2px hsl(var(--primary) / 0.15);
+  }
+
+  .qq-raw-block__bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px dashed hsl(var(--border));
+    font-size: 0.6875rem;
+  }
+
+  /* A block that renders nothing — a bare <style> — has no preview under the
+     bar, so the bar is the whole block and shouldn't look cut off. */
+  .qq-raw-block[data-invisible] .qq-raw-block__bar {
+    border-bottom: none;
+  }
+
+  .qq-raw-block__label {
+    margin-right: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .qq-raw-block__action {
+    border-radius: calc(var(--radius) - 4px);
+    padding: 0.125rem 0.375rem;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .qq-raw-block__action:hover {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+  }
+
+  .qq-raw-block__preview {
+    overflow-x: auto;
+    padding: 0.5rem;
+    background: hsl(var(--background));
+  }
+}
+
 @layer utilities {
   .scrollbar-hidden {
     -ms-overflow-style: none;
