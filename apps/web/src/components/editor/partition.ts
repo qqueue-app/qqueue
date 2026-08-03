@@ -75,6 +75,16 @@ function freeze(element: Element): void {
   element.replaceWith(placeholderFor(markupOf(element)));
 }
 
+/**
+ * The same, for something with no markup of its own to read — a comment, which
+ * has no `outerHTML`. Serialized by putting it in an element and reading that.
+ */
+function freezeNode(node: ChildNode): void {
+  const holder = document.createElement("div");
+  holder.appendChild(node.cloneNode(true));
+  node.replaceWith(placeholderFor(holder.innerHTML));
+}
+
 /** Replaces everything in `holder` with a single raw block. */
 function freezeAll(holder: HTMLElement): void {
   const clone = holder.cloneNode(true) as HTMLElement;
@@ -143,11 +153,20 @@ export function partitionForSchema(
     // is no smaller thing to blame.
     if (offender === holder) break;
 
+    // A comment. The schema has nowhere to put one, so it is frozen where it
+    // stands and everything around it stays editable. A raw block is a block
+    // node: where the comment sat inside a paragraph the placeholder can't stay
+    // there, the next pass blames the paragraph and freezes that instead.
+    if (offender.nodeType !== Node.ELEMENT_NODE) {
+      freezeNode(offender as ChildNode);
+      frozen += 1;
+      continue;
+    }
+
     // Already verbatim and still reported as different: the problem is where it
     // sits, not what it holds. Widen to the parent rather than loop forever.
-    const target = isFrozen(offender)
-      ? offender.parentElement
-      : offender;
+    const element = offender as Element;
+    const target = isFrozen(element) ? element.parentElement : element;
     if (!target || target === holder) break;
 
     freeze(target);

@@ -1,6 +1,8 @@
+import { domEquivalent } from "./dom-equivalence";
 import {
   RAW_ATTRIBUTE,
   buildHolder,
+  dropTrailingParagraph,
   stripInventedMarkers,
   unwrapInventedParagraphs
 } from "./html-dom";
@@ -88,6 +90,37 @@ export function fromEditorHtml(
   stripInventedMarkers(holder);
   expandPlaceholders(holder);
   return joinDocument(shell, holder.innerHTML);
+}
+
+/**
+ * Whether the editor is still holding the document it was handed, or the author
+ * has changed something.
+ *
+ * Deliberately not a string comparison. Loading a document into the editor
+ * rewrites how it is *written* without changing what it is: attributes come back
+ * in the schema's order and the CSSOM's spelling (`padding:24px` as
+ * `padding: 24px;`), empty containers are filled with the paragraph ProseMirror
+ * needs there, and an empty one is kept at the end of a document ending in a
+ * table so there is somewhere to carry on typing. None of that is an edit, and
+ * reporting it as one marks a template dirty the moment it is opened.
+ *
+ * The comparison is the partitioner's own — the same one that decided this
+ * content could be loaded at all, so it agrees with that decision by
+ * construction — over both sides put through the same normalization.
+ */
+export function holdsSameDocument(
+  editorHtml: string,
+  loadedHtml: string
+): boolean {
+  return domEquivalent(settled(editorHtml), settled(loadedHtml));
+}
+
+function settled(html: string): HTMLElement {
+  const holder = buildHolder(html);
+  unwrapInventedParagraphs(holder);
+  stripInventedMarkers(holder);
+  dropTrailingParagraph(holder);
+  return holder;
 }
 
 /**

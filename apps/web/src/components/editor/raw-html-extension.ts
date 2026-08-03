@@ -102,6 +102,12 @@ export function isInvisible(html: string): boolean {
 }
 
 function summarize(html: string): string {
+  // Checked before the tag scan: a conditional comment has tags inside it, and
+  // reading the first one would label an `<!--[if mso]>` block by whatever it
+  // happens to wrap.
+  if (html.trimStart().startsWith("<!--")) {
+    return html.includes("[if ") ? "Outlook-only HTML" : "HTML comment";
+  }
   const match = /<\s*([a-z][a-z0-9-]*)/i.exec(html);
   const tag = match?.[1]?.toLowerCase();
   if (!tag) return "HTML";

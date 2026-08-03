@@ -52,6 +52,7 @@ import { ButtonDialog } from "./ButtonDialog";
 import { ImageDialog } from "./ImageDialog";
 import { RawBlockDialog } from "./RawBlockDialog";
 import { createExtensions } from "./editor-extensions";
+import { holdsSameDocument } from "./document-model";
 import {
   DELETE_RAW_EVENT,
   EDIT_RAW_EVENT,
@@ -360,6 +361,19 @@ export function RichTextEditor({
     html: string;
   } | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  // The document the editor is holding, as of the last time anyone looked: what
+  // it was handed at mount or by the sync effect below, then whatever it reports
+  // afterwards.
+  //
+  // Loading a document dispatches transactions of its own — the trailing node
+  // appends an empty paragraph after a document ending in a table so there is
+  // somewhere to carry on typing — and those arrive at `onUpdate` looking like
+  // an edit. Passed on as one, opening a template would mark it dirty before the
+  // author had touched it. So the first updates are checked against what was
+  // loaded and dropped while they still say the same thing; once something real
+  // lands, the author is editing and the check is not needed again.
+  const loaded = useRef(value);
+  const edited = useRef(false);
   const editor = useEditor({
     // Shared with the partitioner that decides what may be loaded into this
     // editor. The two have to be the same schema or the partitioner's answer is
@@ -378,15 +392,28 @@ export function RichTextEditor({
       }
     },
     onUpdate: ({ editor: instance }) => {
-      onChange(instance.getHTML());
+      const html = instance.getHTML();
+      const previous = loaded.current;
+      loaded.current = html;
+      if (!edited.current) {
+        if (holdsSameDocument(html, previous)) return;
+        edited.current = true;
+      }
+      onChange(html);
     }
   });
 
   // Sync external value changes (e.g. opening the editor with existing content).
+  //
+  // Compared against what was last loaded rather than against the editor's
+  // current HTML: those differ wherever the schema wrote the document back in
+  // its own hand, and re-setting the content over a difference the editor itself
+  // introduced would throw away the author's selection and undo history.
   useEffect(() => {
-    if (editor && value !== editor.getHTML()) {
-      editor.commands.setContent(value, { emitUpdate: false });
-    }
+    if (!editor || value === loaded.current) return;
+    loaded.current = value;
+    edited.current = false;
+    editor.commands.setContent(value, { emitUpdate: false });
   }, [value, editor]);
 
   // Raw blocks are plain DOM inside a node view, with no React tree of their

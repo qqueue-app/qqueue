@@ -98,6 +98,18 @@ describe("raw blocks in the editor", () => {
     expect(rawBlock()).toHaveTextContent("<style> block");
   });
 
+  // A conditional comment has tags inside it, so naming a block by the first
+  // tag it can find would call this one a "<td> block".
+  it("names a conditional comment by what it is", async () => {
+    render(
+      <Editor source="<p>A</p><!--[if mso]><td>spacer</td><![endif]--><p>B</p>" />
+    );
+
+    await screen.findByLabelText("Bold");
+    await waitFor(() => expect(rawBlock()).not.toBeNull());
+    expect(rawBlock()).toHaveTextContent("Outlook-only HTML");
+  });
+
   // The legacy tag is frozen where it stands, inside a cell of a table that
   // stays editable around it.
   it("renders a visible block's markup in an isolated shadow root", async () => {

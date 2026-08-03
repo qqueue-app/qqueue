@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fromEditorHtml,
+  holdsSameDocument,
   joinDocument,
   splitDocument,
   toEditorHtml
@@ -101,5 +102,55 @@ describe("toEditorHtml / fromEditorHtml", () => {
     const once = roundTrip(source);
 
     expect(roundTrip(once)).toBe(once);
+  });
+});
+
+// What tells the editor settling a document it was just given apart from an
+// author editing it. Getting this wrong in either direction is a real bug:
+// too strict marks a template dirty on open, too loose drops the first edit.
+describe("holdsSameDocument", () => {
+  it("ignores how the schema chose to write attributes back", () => {
+    expect(
+      holdsSameDocument(
+        '<table width="100%" cellpadding="0"><tbody><tr><td style="padding: 24px;">A</td></tr></tbody></table>',
+        '<table cellpadding="0" width="100%"><tbody><tr><td style="padding:24px">A</td></tr></tbody></table>'
+      )
+    ).toBe(true);
+  });
+
+  // The trailing node's paragraph, which arrives carrying the invented marker.
+  it("ignores an empty paragraph appended after the document", () => {
+    expect(
+      holdsSameDocument(
+        '<table><tbody><tr><td>A</td></tr></tbody></table><p data-qq-invented=""></p>',
+        "<table><tbody><tr><td>A</td></tr></tbody></table>"
+      )
+    ).toBe(true);
+  });
+
+  it("keeps a blank line the author styled", () => {
+    expect(
+      holdsSameDocument(
+        '<p>A</p><p style="text-align: center"></p>',
+        "<p>A</p>"
+      )
+    ).toBe(false);
+  });
+
+  // An empty document is one empty paragraph. Reading that as scaffolding to
+  // discard would make every new email differ from itself.
+  it("does not read the only block in a document as scaffolding", () => {
+    expect(holdsSameDocument("<p></p>", "<p></p>")).toBe(true);
+    expect(holdsSameDocument("<p></p>", "<p>Written</p>")).toBe(false);
+  });
+
+  it("reports an edit", () => {
+    expect(holdsSameDocument("<p>Hello!</p>", "<p>Hello</p>")).toBe(false);
+    expect(
+      holdsSameDocument(
+        '<div style="padding:24px"><p>A</p></div>',
+        '<div style="padding:25px"><p>A</p></div>'
+      )
+    ).toBe(false);
   });
 });

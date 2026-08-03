@@ -26,6 +26,31 @@ export function buildHolder(html: string): HTMLElement {
 }
 
 /**
+ * Removes the empty paragraph at the end of editor content, if there is one.
+ *
+ * StarterKit's trailing node keeps one after a document that ends in something
+ * the cursor can't follow — a table, an image, a raw block — so there is always
+ * somewhere to carry on typing. It is an editing affordance rather than content,
+ * and removing it is how editor output is compared against the document it was
+ * made from.
+ *
+ * Two things it leaves alone: the only block in the document, since a document
+ * has to hold one and that one is the content rather than scaffolding after it;
+ * and a paragraph carrying attributes, which is a blank line the author styled.
+ *
+ * Runs after `stripInventedMarkers` — the trailing paragraph is invented like
+ * any other ProseMirror creates, and is still carrying the marker before then.
+ */
+export function dropTrailingParagraph(holder: HTMLElement): void {
+  const last = holder.lastElementChild;
+  if (!last || last === holder.firstElementChild) return;
+  if (last !== holder.lastChild) return;
+  if (last.tagName !== "P") return;
+  if (last.attributes.length > 0 || last.childNodes.length > 0) return;
+  last.remove();
+}
+
+/**
  * Parents whose bare inline content ProseMirror fills with a paragraph: table
  * cells, list items, and the generic wrappers. `<li>One</li>` becomes
  * `<li><p>One</p></li>`, which is the same visible change to a list that the

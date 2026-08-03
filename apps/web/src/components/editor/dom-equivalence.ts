@@ -58,6 +58,13 @@ function tagOf(node: Node): string {
   return (node as Element).tagName?.toLowerCase() ?? "";
 }
 
+/** Nodes that can be frozen into a raw block on their own. */
+function blameable(node: Node): boolean {
+  return (
+    node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.COMMENT_NODE
+  );
+}
+
 /** Collapses runs of whitespace the way HTML rendering does. */
 function collapse(text: string): string {
   return text.replace(/\s+/g, " ");
@@ -159,14 +166,22 @@ function attributesMatch(a: Element, b: Element): boolean {
 }
 
 /**
- * The element in `input` responsible for the first difference against `output`,
- * or null when the two are equivalent.
+ * The node in `input` responsible for the first difference against `output`, or
+ * null when the two are equivalent.
  *
- * The partitioner uses the returned element as the thing to freeze into a raw
- * block, so this deliberately reports the *deepest* element it can blame: the
- * smaller the frozen subtree, the more of the document stays editable.
+ * The partitioner uses what comes back as the thing to freeze into a raw block,
+ * so this deliberately reports the *smallest* thing it can blame: the smaller
+ * the frozen subtree, the more of the document stays editable. Usually that is
+ * an element, but a comment is blamed as itself — the schema has nowhere to put
+ * one, and blaming the element around it costs the editability of a whole
+ * section for a `<!-- header -->` label or an `<!--[if mso]>` block, which email
+ * HTML is full of.
+ *
+ * A stray text node stays the parent's problem. There is no useful thing to
+ * freeze it into, and where it is load-bearing the parent is what has to be
+ * preserved anyway.
  */
-export function findDivergence(input: Element, output: Element | null): Element | null {
+export function findDivergence(input: Element, output: Element | null): Node | null {
   if (!output) return input;
   if (tagOf(input) !== tagOf(output)) return input;
   if (!attributesMatch(input, output)) return input;
@@ -181,17 +196,11 @@ export function findDivergence(input: Element, output: Element | null): Element 
     // The serializer produced something with no counterpart in the source —
     // nothing in the input to blame for it, so the parent takes it.
     if (!before) return input;
-    // The source had something the serializer didn't emit. Blame it if it's an
-    // element; a dropped text node is the parent's problem.
-    if (!after) {
-      return before.nodeType === Node.ELEMENT_NODE
-        ? (before as Element)
-        : input;
-    }
-    if (before.nodeType !== after.nodeType) {
-      return before.nodeType === Node.ELEMENT_NODE
-        ? (before as Element)
-        : input;
+    // The source had something the serializer didn't emit, or emitted something
+    // else in its place. Blame it if it is a thing that can be frozen on its
+    // own; a text node is the parent's problem.
+    if (!after || before.nodeType !== after.nodeType) {
+      return blameable(before) ? before : input;
     }
     if (before.nodeType === Node.TEXT_NODE) {
       if (collapse(before.textContent ?? "") !== collapse(after.textContent ?? "")) {
@@ -200,9 +209,10 @@ export function findDivergence(input: Element, output: Element | null): Element 
       continue;
     }
     if (before.nodeType !== Node.ELEMENT_NODE) {
-      // Comments and the like: ProseMirror has nowhere to put them, so their
-      // survival is the parent's problem.
-      if ((before.textContent ?? "") !== (after.textContent ?? "")) return input;
+      // A comment that survived but came back saying something else.
+      if ((before.textContent ?? "") !== (after.textContent ?? "")) {
+        return blameable(before) ? before : input;
+      }
       continue;
     }
 

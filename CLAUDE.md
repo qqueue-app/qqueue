@@ -83,15 +83,31 @@ Check this before building something — most of the platform already exists.
   `prompt`); images can be uploaded from the device (stored as `ImageAsset`,
   embedded by public URL) or linked; CTA buttons carry their own
   colour/size/corner styling, sit inline beside text, and are editable in place.
-  - **`BodyEditor` chooses rich text vs. HTML source from the content, not a
-    fixed default** (`richTextCanRepresent` in `editor/html-source.ts`).
-    Mounting the Tiptap editor over markup its schema can't hold rewrites that
-    markup on sight — a `<div>` layout, a class-styled or attribute-styled
-    table, a `<style>` block — so such a body must open in the source view.
-    Getting this wrong looks exactly like saves silently failing. The tag and
-    attribute allowlists there are checked against the editor's real output in
-    `RichTextEditor.test.tsx` ("round-trips back into rich text"); extend them
-    only alongside that test.
+  - **`BodyEditor` splits a document rather than refusing the editor for it**
+    (`editor/partition.ts`, `editor/document-model.ts`). Mounting Tiptap over
+    markup its schema can't hold rewrites that markup on sight — a `<div>`
+    layout, a class-styled table, a `<style>` block — and getting it wrong looks
+    exactly like saves silently failing. So a document's `<head>`/scaffold is
+    kept as two literal strings and put back, regions the schema can't represent
+    become **raw blocks** holding their markup verbatim, and the rest stays
+    editable. Rich ↔ HTML is lossless both ways; there is no mode lock and no
+    allowlist.
+  - **What the schema can hold is asked of the schema, never listed.**
+    `partitionForSchema` parses through the real schema, serializes back, and
+    compares the two DOM trees (`editor/dom-equivalence.ts`); whatever came back
+    different is frozen and the pass repeats. The editor and the partitioner
+    build from one extension list (`editor/editor-extensions.ts`) and **must**
+    keep sharing it. A hand-maintained tag/attribute allowlist is a second copy
+    of the schema and drifts from it — that is what this replaced. Erring toward
+    "different" is safe: a false difference costs editability, a false match
+    costs the author's layout.
+  - **Loading a document is not editing it.** The schema writes attributes back
+    in its own hand and the trailing node appends an empty paragraph after a
+    document ending in a table, all as ordinary transactions —
+    `RichTextEditor` drops those updates until one says something new
+    (`holdsSameDocument`), or opening a template marks it dirty before the
+    author has touched it. Covered by BodyEditor.test.tsx's "opening a
+    document" block.
   - **Every editor dialog's `<form>` must `stopPropagation()` on submit.**
     Radix portals a dialog out of the DOM but *not* out of the React tree, so
     React bubbles its submit into whatever page form the editor sits in —

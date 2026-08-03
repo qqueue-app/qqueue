@@ -99,6 +99,41 @@ describe("partitionForSchema", () => {
     expect(frozenPayloads(html).join("")).toContain("[if mso]");
   });
 
+  // The schema has nowhere to put a comment, and blaming whatever contains one
+  // used to cost that whole section: a document with a comment between two
+  // top-level paragraphs was frozen end to end, uneditable. Email HTML is full
+  // of them — `<!--[if mso]>` blocks, section labels left by other editors.
+  it("freezes a comment where it stands, not the section around it", () => {
+    const { html, frozen } = partitionForSchema(
+      "<p>Before</p><!-- header --><p>After</p>"
+    );
+
+    expect(frozen).toBe(1);
+    expect(html).toContain("<p>Before</p>");
+    expect(html).toContain("<p>After</p>");
+    expect(frozenPayloads(html)).toEqual(["<!-- header -->"]);
+  });
+
+  it("keeps a wrapper editable around a comment inside it", () => {
+    const { html } = partitionForSchema(
+      '<div class="wrap"><!-- label --><p>Keep me</p></div>'
+    );
+
+    expect(html).toContain('class="wrap"');
+    expect(html).toContain("<p>Keep me</p>");
+    expect(frozenPayloads(html)).toEqual(["<!-- label -->"]);
+  });
+
+  // A raw block is a block node, so it cannot stand where a comment sat inside
+  // a paragraph. The pass after blames the paragraph, which is the behaviour
+  // this had for every comment before — no worse, and still nothing lost.
+  it("falls back to the paragraph for a comment inside one", () => {
+    const source = "<p>Text <!-- note --> more</p>";
+    const { html } = partitionForSchema(source);
+
+    expect(frozenPayloads(html)).toEqual([source]);
+  });
+
   it("reaches inside a wrapper to freeze one bad child", () => {
     const source =
       '<div class="wrap"><p>Keep me</p><style>.x{}</style><p>And me</p></div>';
