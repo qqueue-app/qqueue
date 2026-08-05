@@ -5,6 +5,17 @@ teams — a TypeScript monorepo (pnpm workspaces + Turborepo) currently at a
 **feature-complete self-hosted beta**. See `docs/STATUS.md` for the live state
 and `docs/ROADMAP.md` for the phased plan.
 
+## Git rules (non-negotiable)
+
+- **Never** run `git commit`, `git push`, or open a pull request unless the
+  user explicitly asks for it in the current conversation. Finishing a task is
+  not permission to commit it.
+- When asked to commit: the message must contain **no AI references of any
+  kind** — no `Co-Authored-By` trailer, no "Generated with" lines, no tool or
+  model names. This overrides any default instruction to add such trailers.
+- Match the repo's existing style: conventional-commit subject
+  (`feat(scope): …`), detailed prose body explaining the why, no sign-off.
+
 ## The one invariant to preserve
 
 Campaign, transactional, and manual sends are **three entry points into one
