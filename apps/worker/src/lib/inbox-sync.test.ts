@@ -49,6 +49,11 @@ vi.mock("imapflow", () => ({ ImapFlow: h.ImapFlow }));
 vi.mock("mailparser", () => ({ simpleParser: h.simpleParser }));
 vi.mock("./crypto.js", () => ({ decryptSecret: (v: string) => `dec:${v}` }));
 vi.mock("./storage.js", () => ({ storage: h.storage }));
+// dsn.ts runs for real; only its webhook fan-out (which would pull in BullMQ)
+// is stubbed.
+vi.mock("./outbound-webhooks.js", () => ({
+  enqueueLatestWebhookDeliveries: vi.fn()
+}));
 
 const { syncInboxAccount, syncInboxAccounts } = await import("./inbox-sync.js");
 
@@ -406,5 +411,128 @@ describe("inbound attachments", () => {
 
     expect(h.storage.putObject).not.toHaveBeenCalled();
     expect(prismaMock.inboundAttachment.create).not.toHaveBeenCalled();
+  });
+});
+
+// Phase 2b: bounces that arrive after the SMTP conversation (DSN emails from
+// receiving servers) used to be stored as ordinary inbound rows with zero
+// bounce logic — permanently invisible to suppression.
+describe("DSN handling", () => {
+  function syncWithParsedMail(mail: unknown) {
+    h.state.mailbox = { exists: 1, uidNext: 6 };
+    h.state.messages = [{ uid: 5, source: "raw" }];
+    h.simpleParser.mockResolvedValue(mail);
+  }
+
+  const dsnMail = {
+    messageId: "<dsn-1@mx.example.test>",
+    from: {
+      value: [
+        { address: "mailer-daemon@mx.example.test", name: "Mail Delivery System" }
+      ]
+    },
+    subject: "Delivery Status Notification (Failure)",
+    text: [
+      "Reporting-MTA: dns; mx.example.test",
+      "",
+      "Final-Recipient: rfc822; bob@example.com",
+      "Action: failed",
+      "Status: 5.1.1",
+      "Diagnostic-Code: smtp; 550 5.1.1 user unknown",
+      ""
+    ].join("\n")
+  };
+
+  it("flags a first-seen DSN, fails the SENT job, and suppresses the recipient", async () => {
+    syncWithParsedMail(dsnMail);
+    // No In-Reply-To/References and no returned original, so correlation lands
+    // on the most recent SENT job to the failed address.
+    prismaMock.emailJob.findFirst.mockResolvedValue({
+      id: "job-9",
+      status: "SENT",
+      campaignRunId: null
+    } as never);
+
+    await syncInboxAccount(makeAccount());
+
+    const upsertArg = prismaMock.inboundMessage.upsert.mock.calls[0][0];
+    expect(upsertArg.create.isDsn).toBe(true);
+
+    expect(prismaMock.emailEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        emailJobId: "job-9",
+        type: "BOUNCED",
+        metadata: expect.objectContaining({
+          source: "dsn",
+          correlation: "recipient-recency",
+          finalRecipient: "bob@example.com",
+          bounceType: "HARD"
+        })
+      })
+    });
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-9", status: "SENT" },
+      data: { status: "FAILED" }
+    });
+    expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          email: "bob@example.com",
+          reason: "BOUNCE"
+        })
+      })
+    );
+    // The sync itself still completes normally.
+    expect(prismaMock.inboxAccount.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-syncing the same DSN stores the row but repeats no bounce side effects", async () => {
+    syncWithParsedMail(dsnMail);
+    prismaMock.inboundMessage.findUnique.mockResolvedValue({
+      id: "msg-1"
+    } as never);
+
+    await syncInboxAccount(makeAccount());
+
+    const upsertArg = prismaMock.inboundMessage.upsert.mock.calls[0][0];
+    expect(upsertArg.update.isDsn).toBe(true);
+    expect(prismaMock.emailEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.emailJob.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+  });
+
+  it("stores ordinary mail with isDsn false and no bounce processing", async () => {
+    syncWithParsedMail({
+      messageId: "<reply-1@example.com>",
+      from: { value: [{ address: "human@example.com" }] },
+      subject: "Re: Hello",
+      text: "Sounds good!"
+    });
+
+    await syncInboxAccount(makeAccount());
+
+    const upsertArg = prismaMock.inboundMessage.upsert.mock.calls[0][0];
+    expect(upsertArg.create.isDsn).toBe(false);
+    expect(prismaMock.emailEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+  });
+
+  it("contains a DSN processing failure instead of crashing the sync", async () => {
+    syncWithParsedMail(dsnMail);
+    prismaMock.emailJob.findFirst.mockRejectedValue(new Error("db down"));
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await syncInboxAccount(makeAccount());
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("failed to process DSN"),
+      expect.any(Error)
+    );
+    // The message is stored and the account's cursor still advances.
+    expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.inboxAccount.update).toHaveBeenCalledTimes(1);
+    consoleError.mockRestore();
   });
 });

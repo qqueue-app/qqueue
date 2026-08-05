@@ -1,5 +1,9 @@
 import type { SuppressionReason } from "@prisma/client";
 import type { BounceType } from "@qqueue/email-engine";
+import {
+  resolveSuppressionPolicy,
+  shouldSuppressBounce as decideSuppressBounce
+} from "@qqueue/shared";
 import { env } from "../config/env.js";
 import { prisma } from "./prisma.js";
 
@@ -59,11 +63,11 @@ export function addSuppression(input: {
 }
 
 /**
- * Decide whether a bounce should suppress the address now. Mirrors the API's
- * `suppressionService.shouldSuppressBounce` (the worker can't reach across
- * apps). Hard/block bounces suppress immediately; a soft bounce only suppresses
- * once the org's soft-bounce count for the address within the window reaches the
- * threshold. Call AFTER recording the BOUNCED event so the current bounce counts.
+ * Decide whether a bounce should suppress the address now. The decision itself
+ * lives in `@qqueue/shared` (`shouldSuppressBounce`) — this wrapper supplies
+ * the org's policy row and the soft-bounce event count, which is also what the
+ * API's suppressionService does. Call AFTER recording the BOUNCED event so the
+ * current bounce counts.
  */
 export async function shouldSuppressBounce(input: {
   organizationId: string;
@@ -74,25 +78,28 @@ export async function shouldSuppressBounce(input: {
     return true;
   }
 
-  const policy = await prisma.suppressionPolicy.findUnique({
-    where: { organizationId: input.organizationId }
-  });
-  const softBounceThreshold =
-    policy?.softBounceThreshold ?? env.SOFT_BOUNCE_THRESHOLD;
-  const softBounceWindowDays =
-    policy?.softBounceWindowDays ?? env.SOFT_BOUNCE_WINDOW_DAYS;
-
-  const windowStart = new Date(
-    Date.now() - softBounceWindowDays * 24 * 60 * 60 * 1000
-  );
-  const softCount = await prisma.emailEvent.count({
-    where: {
-      organizationId: input.organizationId,
-      type: "BOUNCED",
-      occurredAt: { gte: windowStart },
-      emailJob: { toEmail: normalizeEmail(input.email) },
-      metadata: { path: ["bounceType"], equals: "SOFT" }
+  const policy = resolveSuppressionPolicy(
+    await prisma.suppressionPolicy.findUnique({
+      where: { organizationId: input.organizationId }
+    }),
+    {
+      softBounceThreshold: env.SOFT_BOUNCE_THRESHOLD,
+      softBounceWindowDays: env.SOFT_BOUNCE_WINDOW_DAYS
     }
+  );
+
+  return decideSuppressBounce({
+    bounceType: input.bounceType,
+    policy,
+    countSoftBouncesSince: (windowStart) =>
+      prisma.emailEvent.count({
+        where: {
+          organizationId: input.organizationId,
+          type: "BOUNCED",
+          occurredAt: { gte: windowStart },
+          emailJob: { toEmail: normalizeEmail(input.email) },
+          metadata: { path: ["bounceType"], equals: "SOFT" }
+        }
+      })
   });
-  return softCount >= softBounceThreshold;
 }

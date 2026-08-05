@@ -120,7 +120,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 - **`ImageAsset`** (652) — `publicId @unique` (random, non-enumerable, used in public URLs), `filename`, `contentType`, `size`, `storageKey`, `createdByUserId?`.
 - **`EmailEvent`** (667) — `emailJobId` (Cascade), `type EmailEventType`, `metadata Json?` (bounceType lives *inside* metadata, not a column), `occurredAt` (default now). **No `@@index` declared — this is the highest-volume table** and analytics query it org-scoped.
 - **`InboxAccount`** (681) — IMAP account: `email`, `host`, `port`, `secure`, `usernameEncrypted`/`passwordEncrypted`, `mailbox` (default "INBOX"), `status`, `lastSyncedAt?`, `lastSeenUid?`. `@@unique([organizationId, email])`.
-- **`InboundMessage`** (708) — `inboxAccountId` (Cascade), `emailJobId?` (SetNull — reply anchoring), `messageId`, `inReplyTo?`, `references[]`, `fromEmail`, `fromName?`, `to[]`/`cc[]`, `subject`, `text?`/`html?`, `receivedAt`, `readAt?`, `imapUid?`. `@@unique([inboxAccountId, messageId])`; four indexes.
+- **`InboundMessage`** (708) — `inboxAccountId` (Cascade), `emailJobId?` (SetNull — reply anchoring), `messageId`, `inReplyTo?`, `references[]`, `fromEmail`, `fromName?`, `to[]`/`cc[]`, `subject`, `text?`/`html?`, `receivedAt`, `readAt?`, `imapUid?`, `isDsn` (default false — Phase 2b: marks recognized bounce reports fed into bounce accounting). `@@unique([inboxAccountId, messageId])`; four indexes.
 - **`InboundAttachment`** (748) — `inboundMessageId` (**Cascade**, unlike outbound's SetNull), `filename`, `contentType`, `size`, `storageKey`, `contentId?`, `isInline`.
 - **`ApiKey`** (766) — `userId?` (SetNull), `name`, `keyHash @unique` (sha256), `lastUsedAt?`, `revokedAt?`. **No org index.**
 - **`WebhookEndpoint`** (779) — `name`, `url`, `events[]`, `secretEncrypted`, `enabled` (default true), `deletedAt?` (soft delete). No indexes.
@@ -134,7 +134,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 
 ### 2.5 Migrations
 
-- **32 migrations** in `apps/api/prisma/schema/migrations/` (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
+- **35 migrations** in `apps/api/prisma/schema/migrations/` (32 at audit time; phases 1, 2, and 2b added `add_system_email_origin`, `per_recipient_sends_and_bulk_flag`, `add_inbound_message_is_dsn`) (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
 - Run paths: dev `pnpm db:migrate` (`migrate dev`); production via a one-shot `migrate` compose service running `prisma migrate deploy`; smoke test and `pnpm setup` also run deploy/dev respectively.
 - **No drift check in CI** — no `migrate diff`/`migrate status` anywhere automated; drift verification is a documented manual practice (`docs/TROUBLESHOOTING.md:126-133`, `docs/BETA_CHECKLIST.md:30`). No seed script.
 
@@ -332,7 +332,7 @@ Totals from EmailJob statuses + EmailEvent groupBys; rates (open/click on unique
 
 **B. Inbound ESP webhook** — `trackingService.recordWebhookEvent()` in `apps/api/src/modules/tracking/service.ts` (note: inbound ESP handling lives in **modules/tracking**, not modules/webhooks — see 6.6).
 
-**C. IMAP inbox sync: no bounce handling at all.** `apps/worker/src/lib/inbox-sync.ts` has zero bounce/suppression logic — DSN/bounce messages landing in a synced inbox are stored as ordinary `InboundMessage` rows and never classified.
+**C. IMAP inbox sync: DSN parsing (added in Phase 2b).** `apps/worker/src/lib/dsn.ts` recognizes delivery status notifications during sync (multipart/report with report-type=delivery-status, mailer-daemon/postmaster senders, or auto-replied with parseable RFC 3464 fields), parses `Final-Recipient`/`Action`/`Status`/`Diagnostic-Code` (body-scan fallback for malformed DSNs), correlates the originating `EmailJob` (In-Reply-To/References → returned original's Message-ID → most recent SENT to the address within 7 days), and feeds the same machinery as surface A: BOUNCED event, SENT→FAILED compare-and-set, `shouldSuppressBounce` → auto-suppression. Idempotent on the DSN's `(inboxAccountId, messageId)` first insert; the stored `InboundMessage` is flagged `isDsn`. Only `Action: failed` counts; delayed/relayed/delivered notifications are ignored. Coverage is limited to identities that have a synced `InboxAccount`.
 
 ### 6.2 Classification — `packages/email-engine/src/bounce.ts`
 
@@ -342,7 +342,7 @@ Totals from EmailJob statuses + EmailEvent groupBys; rates (open/click on unique
 
 `SuppressionPolicy` (`core.prisma:396`): per-org `softBounceThreshold` (default 3) and `softBounceWindowDays` (default 30); when no row exists, env defaults `SOFT_BOUNCE_THRESHOLD` / `SOFT_BOUNCE_WINDOW_DAYS` apply. `shouldSuppressBounce`: HARD and BLOCK suppress immediately; SOFT counts `BOUNCED` events in the window via a Prisma JSON path filter on `metadata.bounceType` joined through `emailJob.toEmail`.
 
-The logic is **duplicated verbatim** in two places (a documented decision so the worker doesn't import from the API app): `apps/api/src/modules/suppressions/service.ts` (`suppressionService.shouldSuppressBounce`) and `apps/worker/src/lib/suppression.ts` — plus independently declared env defaults in both `config/env.ts` files. Any semantic change must be made twice.
+The decision logic lives once in `packages/shared` (`resolveSuppressionPolicy` + `shouldSuppressBounce`, extracted in Phase 2b); `apps/api/src/modules/suppressions/service.ts` and `apps/worker/src/lib/suppression.ts` are thin wrappers supplying the policy row and event count. Env defaults are still independently declared in both `config/env.ts` files and must match.
 
 Caveat: because manual/recurring sends store `toEmail` as a **comma-joined multi-recipient string** (see 6.5), the soft-bounce counter never matches those jobs.
 

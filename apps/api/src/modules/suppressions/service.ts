@@ -1,4 +1,8 @@
-import type { BounceType, SuppressionReason } from "@qqueue/shared";
+import {
+  type BounceType,
+  type SuppressionReason,
+  shouldSuppressBounce as decideSuppressBounce
+} from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -111,10 +115,10 @@ export const suppressionService = {
   },
 
   /**
-   * Decide whether a bounce should suppress the address now. Hard bounces and
-   * blocks suppress immediately; a soft bounce only suppresses once the org's
-   * soft-bounce count for the address within the window reaches the threshold.
-   * Call this AFTER recording the BOUNCED event so the current bounce counts.
+   * Decide whether a bounce should suppress the address now. The decision
+   * itself lives in `@qqueue/shared` (`shouldSuppressBounce`); this wrapper
+   * supplies the org's effective policy and the soft-bounce event count. Call
+   * this AFTER recording the BOUNCED event so the current bounce counts.
    */
   async shouldSuppressBounce(input: {
     organizationId: string;
@@ -124,20 +128,19 @@ export const suppressionService = {
     if (input.bounceType !== "SOFT") {
       return true;
     }
-    const { softBounceThreshold, softBounceWindowDays } =
-      await this.getEffectivePolicy(input.organizationId);
-    const windowStart = new Date(
-      Date.now() - softBounceWindowDays * 24 * 60 * 60 * 1000
-    );
-    const softCount = await prisma.emailEvent.count({
-      where: {
-        organizationId: input.organizationId,
-        type: "BOUNCED",
-        occurredAt: { gte: windowStart },
-        emailJob: { toEmail: input.email.trim().toLowerCase() },
-        metadata: { path: ["bounceType"], equals: "SOFT" }
-      }
+    return decideSuppressBounce({
+      bounceType: input.bounceType,
+      policy: await this.getEffectivePolicy(input.organizationId),
+      countSoftBouncesSince: (windowStart) =>
+        prisma.emailEvent.count({
+          where: {
+            organizationId: input.organizationId,
+            type: "BOUNCED",
+            occurredAt: { gte: windowStart },
+            emailJob: { toEmail: input.email.trim().toLowerCase() },
+            metadata: { path: ["bounceType"], equals: "SOFT" }
+          }
+        })
     });
-    return softCount >= softBounceThreshold;
   }
 };

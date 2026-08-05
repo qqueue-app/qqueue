@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   abTestConfigSchema,
   applyVariables,
@@ -8,6 +8,8 @@ import {
   campaignUpdateSchema,
   contactActivityQuerySchema,
   contactListSchema,
+  resolveSuppressionPolicy,
+  shouldSuppressBounce,
   contactListUpdateSchema,
   contactSchema,
   createListFromSegmentSchema,
@@ -1101,5 +1103,65 @@ describe("emailDraftSchema", () => {
     expect(
       emailDraftUpdateSchema.safeParse({ subject: "Updated" }).success
     ).toBe(true);
+  });
+});
+
+describe("suppression policy helpers", () => {
+  const defaults = { softBounceThreshold: 3, softBounceWindowDays: 30 };
+
+  it("resolveSuppressionPolicy prefers the org row over defaults", () => {
+    expect(
+      resolveSuppressionPolicy(
+        { softBounceThreshold: 5, softBounceWindowDays: 7 },
+        defaults
+      )
+    ).toEqual({ softBounceThreshold: 5, softBounceWindowDays: 7 });
+  });
+
+  it("resolveSuppressionPolicy falls back per-field for a missing row", () => {
+    expect(resolveSuppressionPolicy(null, defaults)).toEqual(defaults);
+    expect(
+      resolveSuppressionPolicy({ softBounceThreshold: 1 }, defaults)
+    ).toEqual({ softBounceThreshold: 1, softBounceWindowDays: 30 });
+  });
+
+  it("shouldSuppressBounce suppresses hard and block bounces without counting", async () => {
+    for (const bounceType of ["HARD", "BLOCK"] as const) {
+      const countSoftBouncesSince = vi.fn();
+      await expect(
+        shouldSuppressBounce({
+          bounceType,
+          policy: defaults,
+          countSoftBouncesSince
+        })
+      ).resolves.toBe(true);
+      expect(countSoftBouncesSince).not.toHaveBeenCalled();
+    }
+  });
+
+  it("shouldSuppressBounce compares the soft count against the threshold over the window", async () => {
+    const countSoftBouncesSince = vi.fn().mockResolvedValue(2);
+    const before = Date.now();
+
+    await expect(
+      shouldSuppressBounce({
+        bounceType: "SOFT",
+        policy: defaults,
+        countSoftBouncesSince
+      })
+    ).resolves.toBe(false);
+
+    const windowStart = countSoftBouncesSince.mock.calls[0][0] as Date;
+    const expectedStart = before - 30 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(windowStart.getTime() - expectedStart)).toBeLessThan(5_000);
+
+    countSoftBouncesSince.mockResolvedValue(3);
+    await expect(
+      shouldSuppressBounce({
+        bounceType: "SOFT",
+        policy: defaults,
+        countSoftBouncesSince
+      })
+    ).resolves.toBe(true);
   });
 });

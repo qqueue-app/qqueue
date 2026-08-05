@@ -738,6 +738,10 @@ model InboundMessage {
   receivedAt             DateTime
   readAt                 DateTime?
   imapUid                Int?
+  /// True when the sync worker recognized this message as a delivery status
+  /// notification (bounce report) and fed it into bounce accounting. Lets the
+  /// inbox list separate bounce noise from human mail.
+  isDsn                  Boolean                @default(false)
   organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboxAccount           InboxAccount           @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
   emailJob               EmailJob?              @relation(fields: [emailJobId], references: [id], onDelete: SetNull)

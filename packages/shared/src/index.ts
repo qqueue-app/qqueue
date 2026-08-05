@@ -144,6 +144,57 @@ export interface SuppressionPolicy {
   softBounceWindowDays: number;
 }
 
+/** An org's auto-suppression policy after falling back to instance defaults. */
+export interface EffectiveSuppressionPolicy {
+  softBounceThreshold: number;
+  softBounceWindowDays: number;
+}
+
+/**
+ * The org's effective auto-suppression policy: its row's values when present,
+ * otherwise the instance defaults (env-provided by the caller).
+ */
+export function resolveSuppressionPolicy(
+  row:
+    | { softBounceThreshold?: number | null; softBounceWindowDays?: number | null }
+    | null
+    | undefined,
+  defaults: EffectiveSuppressionPolicy
+): EffectiveSuppressionPolicy {
+  return {
+    softBounceThreshold:
+      row?.softBounceThreshold ?? defaults.softBounceThreshold,
+    softBounceWindowDays:
+      row?.softBounceWindowDays ?? defaults.softBounceWindowDays
+  };
+}
+
+/**
+ * Decide whether a bounce should suppress the address now. Hard bounces and
+ * blocks suppress immediately; a soft bounce only suppresses once the address's
+ * soft-bounce count within the policy window reaches the threshold. Call AFTER
+ * recording the BOUNCED event so the current bounce counts.
+ *
+ * This is the single copy of the decision the API and worker used to duplicate;
+ * the caller supplies the event count (shared code stays database-free and
+ * browser-safe).
+ */
+export async function shouldSuppressBounce(input: {
+  bounceType: BounceType;
+  policy: EffectiveSuppressionPolicy;
+  /** SOFT BOUNCED events for the address in the org since `windowStart`. */
+  countSoftBouncesSince: (windowStart: Date) => Promise<number>;
+}): Promise<boolean> {
+  if (input.bounceType !== "SOFT") {
+    return true;
+  }
+  const windowStart = new Date(
+    Date.now() - input.policy.softBounceWindowDays * 24 * 60 * 60 * 1000
+  );
+  const softCount = await input.countSoftBouncesSince(windowStart);
+  return softCount >= input.policy.softBounceThreshold;
+}
+
 export interface DomainThrottle {
   id: string;
   organizationId: string;

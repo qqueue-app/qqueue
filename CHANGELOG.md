@@ -4,6 +4,43 @@ Notable changes to QQueue. Phases refer to the evolution plan; each entry lands
 with green `typecheck`/`lint`/`test` and, where the send pipeline or migrations
 are touched, a passing Docker smoke test.
 
+## Phase 2b — Async bounce processing: DSN parsing in inbox sync (2026-08-05)
+
+- **Inbox sync now recognizes delivery status notifications** (bounces that
+  arrive after the SMTP conversation) instead of storing them as ordinary
+  inbound mail with zero bounce logic. `apps/worker/src/lib/dsn.ts` detects a
+  DSN by `multipart/report; report-type=delivery-status`, a
+  `mailer-daemon@`/`postmaster@` sender, or `Auto-Submitted: auto-replied`
+  with parseable RFC 3464 fields; parses `Final-Recipient`, `Action`,
+  `Status`, and `Diagnostic-Code` (unfolding continuations); and falls back to
+  scanning the body for an SMTP status code plus recipient when the
+  machine-readable part is missing or mangled. Unparseable bounce-shaped mail
+  degrades to a normal stored message — a weird DSN never crashes the sync.
+- **Parsed bounces feed the existing pipeline**: the originating `EmailJob` is
+  correlated by In-Reply-To/References, then the returned original's
+  Message-ID, then the most recent SENT job to the failed address within 7
+  days (the method used is recorded on the event). A `BOUNCED` event is
+  written, the job flips SENT → FAILED via a status-guarded compare-and-set
+  (SUPPRESSED/CANCELLED are never overwritten), outbound `email.bounced`
+  webhooks fire, and the existing auto-suppression policy runs — hard/block
+  DSNs suppress immediately, soft ones count toward the org threshold. When no
+  job matches, the recipient is still suppressed org-wide (the org comes from
+  the inbox account). Only `Action: failed` reports count; delayed/relayed/
+  delivered notifications and vacation auto-replies are ignored.
+- **Idempotent by construction**: bounce side effects run only on the DSN's
+  first insert under the existing `(inboxAccountId, messageId)` unique key, so
+  re-syncs and duplicate DSNs never double-count. Stored DSNs are flagged with
+  the new `InboundMessage.isDsn` column (migration
+  `20260805130000_add_inbound_message_is_dsn`) so the inbox can filter bounce
+  noise later.
+- **Suppression decision logic consolidated**: the worker/API duplicated
+  `shouldSuppressBounce` now delegates to a single copy in `@qqueue/shared`
+  (`resolveSuppressionPolicy` + `shouldSuppressBounce`); each app supplies
+  only its policy row and event count.
+- **Operational note (until Phase 4 provisioning exists):** DSNs are only seen
+  for mailboxes with a sync-enabled `InboxAccount`. Add an InboxAccount for
+  every identity used as a From address, or its async bounces stay invisible.
+
 ## Phase 2 — Per-recipient jobs, real suppression coverage, List-Unsubscribe by bulkness (2026-08-05)
 
 - **Multi-recipient manual and recurring sends fan out one EmailJob per To

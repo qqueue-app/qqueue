@@ -4,6 +4,7 @@ import { ImapFlow } from "imapflow";
 import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { env } from "../config/env.js";
 import { decryptSecret } from "./crypto.js";
+import { applyDsnBounce, parseDsn } from "./dsn.js";
 import { prisma } from "./prisma.js";
 import { storage } from "./storage.js";
 
@@ -164,6 +165,27 @@ async function storeParsedMessage(input: {
   const receivedAt = mail.date ?? (internalDate ? new Date(internalDate) : new Date());
   const seen = flags?.has("\\Seen") ?? false;
 
+  // Bounce reports (DSNs) are still stored as inbound messages — they should
+  // be visible — but flagged, and fed into bounce accounting below. The sync
+  // account's own address and the daemon sender are excluded so the body-scan
+  // fallback can't mistake them for the failed recipient.
+  const dsn = parseDsn(mail, {
+    excludeAddresses: [account.email, from.email]
+  });
+
+  // The upsert makes re-syncing a UID safe; the bounce side effects below must
+  // run only when this DSN is first seen, so remember whether the row existed
+  // (sync is sequential per account, so read-then-upsert doesn't race).
+  const existing = await prisma.inboundMessage.findUnique({
+    where: {
+      inboxAccountId_messageId: {
+        inboxAccountId: account.id,
+        messageId,
+      },
+    },
+    select: { id: true },
+  });
+
   const stored = await prisma.inboundMessage.upsert({
     where: {
       inboxAccountId_messageId: {
@@ -188,6 +210,7 @@ async function storeParsedMessage(input: {
       receivedAt,
       readAt: seen ? receivedAt : undefined,
       imapUid: uid,
+      isDsn: Boolean(dsn),
     },
     update: {
       emailJobId: outbound?.id,
@@ -203,6 +226,7 @@ async function storeParsedMessage(input: {
       receivedAt,
       readAt: seen ? receivedAt : undefined,
       imapUid: uid,
+      isDsn: Boolean(dsn),
     },
   });
 
@@ -211,6 +235,26 @@ async function storeParsedMessage(input: {
     inboundMessageId: stored.id,
     mail,
   });
+
+  // First sighting only: the unique (inboxAccountId, messageId) row is the
+  // idempotency key, so a duplicate or re-synced DSN never double-counts a
+  // bounce. Failures are contained — a weird DSN must not wedge the mailbox
+  // and block every later message.
+  if (dsn && !existing) {
+    try {
+      await applyDsnBounce({
+        organizationId: account.organizationId,
+        inboundMessageId: stored.id,
+        threadEmailJobId: outbound?.id ?? null,
+        dsn,
+      });
+    } catch (error) {
+      console.error(
+        `[inbox-sync] failed to process DSN on message ${stored.id}`,
+        error
+      );
+    }
+  }
 }
 
 async function getActiveInboxAccounts(id?: string) {
