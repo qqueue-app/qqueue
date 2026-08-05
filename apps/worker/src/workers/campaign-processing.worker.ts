@@ -217,19 +217,27 @@ export function startCampaignProcessingWorker() {
       // Exclude addresses on the org's suppression list. The ACTIVE-status
       // filter already drops bounced/unsubscribed contacts, but a manual
       // suppression can target an address whose contact is still ACTIVE.
+      // Compared lowercase on both sides: suppressions are stored lowercase,
+      // but a pre-normalization contact may still carry mixed case.
       const suppressed =
         activeContacts.length > 0
           ? await prisma.suppression.findMany({
               where: {
                 organizationId: campaign.organizationId,
-                email: { in: activeContacts.map((contact) => contact.email) }
+                email: {
+                  in: activeContacts.map((contact) =>
+                    contact.email.toLowerCase()
+                  )
+                }
               },
               select: { email: true }
             })
           : [];
-      const suppressedEmails = new Set(suppressed.map((row) => row.email));
+      const suppressedEmails = new Set(
+        suppressed.map((row) => row.email.toLowerCase())
+      );
       const contacts = activeContacts.filter(
-        (contact) => !suppressedEmails.has(contact.email)
+        (contact) => !suppressedEmails.has(contact.email.toLowerCase())
       );
 
       if (contacts.length === 0) {
@@ -253,7 +261,9 @@ export function startCampaignProcessingWorker() {
           campaignId: campaign.id,
           campaignRunId: run.id,
           origin: "CAMPAIGN" as const,
-          toEmail: contact.email,
+          // Campaign fan-out is bulk mail: every job carries List-Unsubscribe.
+          isBulk: true,
+          toEmail: contact.email.toLowerCase(),
           subject: renderVariables(subjectSource, variables) ?? subjectSource,
           html: renderVariables(template.html, variables),
           text: renderVariables(template.text, variables),

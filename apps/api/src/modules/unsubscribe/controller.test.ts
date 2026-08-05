@@ -33,7 +33,9 @@ beforeEach(() => {
 });
 
 describe("unsubscribeController.get", () => {
-  it("unsubscribes and returns an HTML confirmation page naming the address", async () => {
+  it("renders a confirmation page WITHOUT unsubscribing", async () => {
+    // GET links are prefetched by mail clients and scanners; the mutation
+    // lives on POST only. The page's form posts back with the same token.
     const token = signUnsubscribeToken(
       { o: "org_1", e: "person@example.com" },
       SECRET
@@ -42,10 +44,7 @@ describe("unsubscribeController.get", () => {
 
     await unsubscribeController.get(mockReq({ token }), res);
 
-    expect(unsubscribeService.unsubscribe).toHaveBeenCalledWith(
-      "org_1",
-      "person@example.com"
-    );
+    expect(unsubscribeService.unsubscribe).not.toHaveBeenCalled();
     expect(res.set).toHaveBeenCalledWith(
       "Content-Type",
       "text/html; charset=utf-8"
@@ -53,8 +52,11 @@ describe("unsubscribeController.get", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     const html = vi.mocked(res.send).mock.calls[0]?.[0] as string;
     expect(html).toContain("<!doctype html>");
-    expect(html).toContain("You're unsubscribed");
     expect(html).toContain("person@example.com");
+    expect(html).toContain('method="POST"');
+    expect(html).toContain(
+      `action="/api/v1/unsubscribe?token=${encodeURIComponent(token)}"`
+    );
   });
 
   it("rejects a forged token with a plain-text 400", async () => {
@@ -108,8 +110,9 @@ describe("unsubscribeController.get", () => {
 });
 
 describe("unsubscribeController.post", () => {
-  // RFC 8058 one-click: issued by the mail client, so JSON only — never a page.
-  it("unsubscribes and responds with JSON, not HTML", async () => {
+  // Reached by the RFC 8058 one-click POST (client ignores the body) and by
+  // the confirmation page's form submit (renders the body).
+  it("unsubscribes and renders the confirmation page", async () => {
     const token = signUnsubscribeToken(
       { o: "org_1", e: "person@example.com" },
       SECRET
@@ -123,19 +126,18 @@ describe("unsubscribeController.post", () => {
       "person@example.com"
     );
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({ data: { unsubscribed: true } });
-    expect(res.send).not.toHaveBeenCalled();
+    const html = vi.mocked(res.send).mock.calls[0]?.[0] as string;
+    expect(html).toContain("You're unsubscribed");
+    expect(html).toContain("person@example.com");
   });
 
-  it("rejects a forged token with a JSON 400", async () => {
+  it("rejects a forged token with a 400", async () => {
     const res = mockRes();
 
     await unsubscribeController.post(mockReq({ token: "forged.token" }), res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      error: { message: "Invalid unsubscribe link" }
-    });
+    expect(res.send).toHaveBeenCalledWith("Invalid or expired unsubscribe link");
     expect(unsubscribeService.unsubscribe).not.toHaveBeenCalled();
   });
 

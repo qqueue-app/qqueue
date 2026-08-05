@@ -330,6 +330,49 @@ export function EmailStudio() {
   const [deliveryStatus, setDeliveryStatus] =
     useState<ManualEmailDeliveryStatus | null>(null);
 
+  /**
+   * Track a just-queued send to its outcome. Every send is asynchronous now
+   * (the API only accepts the job; the worker delivers it), so with `follow`
+   * this polls the per-recipient status until the job settles — reporting the
+   * real result — and without it takes a single snapshot (scheduled sends
+   * won't move until their time comes). Best-effort: a failed poll never
+   * surfaces as a send error.
+   */
+  async function pollDeliveryStatus(
+    emailJobId: string,
+    orgId: string,
+    options: { follow: boolean; recipientSummary: string }
+  ) {
+    const TERMINAL = new Set(["SENT", "FAILED", "SUPPRESSED", "CANCELLED"]);
+    const MAX_POLLS = 15;
+    const POLL_INTERVAL_MS = 1000;
+
+    try {
+      for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        }
+        const status = await api.manualEmailStatus(emailJobId, orgId);
+        setDeliveryStatus(status);
+        if (!options.follow) {
+          return;
+        }
+        if (TERMINAL.has(status.status)) {
+          if (status.status === "SENT") {
+            toast.success(`Sent to ${options.recipientSummary}.`);
+          } else if (status.status === "FAILED") {
+            toast.error(
+              "The email could not be delivered — check the outbox for details."
+            );
+          }
+          return;
+        }
+      }
+    } catch {
+      // Non-fatal: the send was already accepted.
+    }
+  }
+
   // UI state.
   const [sending, setSending] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
@@ -912,11 +955,11 @@ export function EmailStudio() {
           : undefined,
         scheduledAt: scheduledAtIso
       });
-      // The send succeeded — discard the working draft so it doesn't linger.
+      // The send was accepted — discard the working draft so it doesn't linger.
       if (draftId) {
         await api.deleteEmailDraft(draftId).catch(() => undefined);
       }
-      if (result.status === "QUEUED" && scheduledAtIso) {
+      if (scheduledAtIso) {
         toast.success(
           `Scheduled — sends ${formatSendTime(scheduledAtIso)} to ${recipientSummary}.`,
           {
@@ -927,18 +970,26 @@ export function EmailStudio() {
           }
         );
       } else {
-        toast.success(`Sent to ${recipientSummary}.`);
+        // Every send is queued now: the API answer means "accepted", not
+        // "delivered". Confirm handoff immediately, then poll the job for the
+        // real outcome below.
+        toast.success(`Queued — sending to ${recipientSummary}.`, {
+          action: {
+            label: "View outbox",
+            onClick: () => navigate("/outbox")
+          }
+        });
       }
       resetComposer();
       setDrafts(await api.listEmailDrafts(organizationId));
-      // Surface per-recipient delivery status for the just-created job.
-      try {
-        setDeliveryStatus(
-          await api.manualEmailStatus(result.id, organizationId)
-        );
-      } catch {
-        // Non-fatal: the send already succeeded.
-      }
+      // Surface per-recipient delivery status for the just-created job. For an
+      // immediate send, keep polling until the worker settles the job (or we
+      // give up) so the composer can report the actual outcome. Fire-and-forget
+      // so the form unlocks right away; a failed poll is non-fatal.
+      void pollDeliveryStatus(result.id, organizationId, {
+        follow: !scheduledAtIso,
+        recipientSummary
+      });
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Couldn't send the email."
@@ -1538,12 +1589,13 @@ const DELIVERY_BADGE: Record<
   delivered: "default",
   pending: "secondary",
   rejected: "destructive",
-  failed: "destructive"
+  failed: "destructive",
+  suppressed: "outline"
 };
 
-// Per-recipient delivery status shown after a send. A manual send is one message
-// to many recipients, so granularity comes from the SMTP accepted/rejected
-// result plus thread-level engagement events — not separate jobs per recipient.
+// Per-recipient delivery status shown after a send. A manual send is one
+// EmailJob per To recipient (grouped server-side), so each row reflects its own
+// job's outcome; engagement counts aggregate across the whole send.
 function DeliveryStatusCard({
   status,
   onDismiss

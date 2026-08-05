@@ -104,7 +104,8 @@ function setup({ withSmtp = true } = {}) {
   mockedApi.listEmailDrafts.mockResolvedValue([]);
   mockedApi.listRecipientSuggestions.mockResolvedValue([]);
   mockedApi.listRecurringSends.mockResolvedValue([]);
-  mockedApi.sendManualEmail.mockResolvedValue({ id: "job1", status: "SENT" });
+  // Every send is queued now — the API accepts the job; the worker delivers it.
+  mockedApi.sendManualEmail.mockResolvedValue({ id: "job1", status: "QUEUED" });
   mockedApi.previewEmail.mockResolvedValue({
     subject: "Hi",
     html: "<p>rendered body</p>",
@@ -174,8 +175,45 @@ describe("EmailStudio", () => {
     expect(payload.to).toEqual(["rcpt@x.com"]);
     expect(payload.subject).toBe("Hello there");
     expect(payload.html).toContain("Body");
-    // Confirmations name the recipients, never the queue job id.
-    expect(toast.success).toHaveBeenCalledWith("Sent to 1 person.");
+    // The composer confirms the queue handoff immediately (naming recipients,
+    // never the job id), then reports the real outcome once the poll sees the
+    // worker settle the job.
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Queued — sending to 1 person.",
+        expect.objectContaining({ action: expect.anything() })
+      )
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Sent to 1 person.")
+    );
+  });
+
+  it("reports a failed delivery after the send was accepted", async () => {
+    const user = userEvent.setup();
+    setup();
+    mockedApi.manualEmailStatus.mockResolvedValue({
+      id: "job1",
+      status: "FAILED",
+      sentAt: null,
+      recipients: [{ email: "rcpt@x.com", field: "to", status: "failed" }],
+      opens: 0,
+      clicks: 0,
+      bounces: 0,
+      complaints: 0
+    });
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Hello there");
+    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
+    await user.click(screen.getByRole("button", { name: /Send email/i }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "The email could not be delivered — check the outbox for details."
+      )
+    );
   });
 
   it("adds contacts from the picker into the recipients", async () => {

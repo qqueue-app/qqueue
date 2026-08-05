@@ -7,7 +7,7 @@ import { hashPassword } from "../../lib/crypto.js";
 import { assertOrgRole, getMembership } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { createAuthTokens } from "../../lib/tokens.js";
-import { smtpConnectionService } from "../smtp-connections/service.js";
+import { transactionalEmailService } from "../transactional-email/service.js";
 
 // Invitations are valid for a week. Long enough to survive a weekend, short
 // enough that a leaked link stops working before long.
@@ -37,15 +37,18 @@ function buildAcceptUrl(token: string) {
 
 /**
  * Deliver the invite link over email using the inviting organization's SMTP
- * connection (preferring its default). Best-effort: callers still get the
- * acceptUrl back to copy manually, so a missing connection or transient SMTP
- * failure never blocks issuing the invite.
+ * connection (preferring its default). Routed through the shared send pipeline
+ * as `origin: "SYSTEM"` — a queued EmailJob that skips suppression checks and
+ * tracking injection. Best-effort: callers still get the acceptUrl back to
+ * copy manually, so a missing connection or a queue failure never blocks
+ * issuing the invite.
  */
 async function sendInviteEmail(params: {
   organizationId: string;
   organizationName: string;
   email: string;
   acceptUrl: string;
+  invitedByUserId: string;
 }) {
   const connection = await prisma.sMTPConnection.findFirst({
     where: { organizationId: params.organizationId },
@@ -59,16 +62,15 @@ async function sendInviteEmail(params: {
     return;
   }
 
-  const provider = smtpConnectionService.getProviderForConnection(connection);
-
-  await provider.send({
-    from: connection.fromName
-      ? `${connection.fromName} <${connection.fromEmail}>`
-      : connection.fromEmail,
+  await transactionalEmailService.send({
+    organizationId: params.organizationId,
+    smtpConnectionId: connection.id,
     to: params.email,
     subject: `You've been invited to join ${params.organizationName} on QQueue`,
     text: `Hi,\n\nYou've been invited to join "${params.organizationName}" on QQueue. Use the link below within the next 7 days to accept and set up your account:\n\n${params.acceptUrl}\n\nIf you weren't expecting this, you can safely ignore this email.`,
-    html: `<p>Hi,</p><p>You've been invited to join <strong>${params.organizationName}</strong> on QQueue. Use the link below within the next 7 days to accept and set up your account:</p><p><a href="${params.acceptUrl}">Accept your invitation</a></p><p>If you weren't expecting this, you can safely ignore this email.</p>`
+    html: `<p>Hi,</p><p>You've been invited to join <strong>${params.organizationName}</strong> on QQueue. Use the link below within the next 7 days to accept and set up your account:</p><p><a href="${params.acceptUrl}">Accept your invitation</a></p><p>If you weren't expecting this, you can safely ignore this email.</p>`,
+    origin: "SYSTEM",
+    createdByUserId: params.invitedByUserId
   });
 }
 
@@ -138,7 +140,8 @@ export const invitationService = {
       organizationId: input.organizationId,
       organizationName: organization?.name ?? "an organization",
       email,
-      acceptUrl
+      acceptUrl,
+      invitedByUserId
     }).catch((error) => {
       console.error(
         `[invitations] Failed to send invite email to ${email}:`,

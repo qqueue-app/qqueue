@@ -39,6 +39,24 @@ describe("contactService", () => {
     expect(call.data.tags).toEqual(["vip", "newsletter"]);
   });
 
+  it("stores contact emails lowercase on create and update", async () => {
+    prismaMock.contact.create.mockResolvedValue({ id: "c1" } as never);
+    contactService.create({ ...input, email: " Mixed@Case.COM " });
+    expect(prismaMock.contact.create.mock.calls[0][0].data.email).toBe(
+      "mixed@case.com"
+    );
+
+    prismaMock.contact.findFirst.mockResolvedValue({ id: "c1" } as never);
+    prismaMock.contact.update.mockResolvedValue({ id: "c1" } as never);
+    await contactService.update("c1", "user_1", {
+      ...input,
+      email: "Other@Case.COM"
+    });
+    expect(prismaMock.contact.update.mock.calls[0][0].data.email).toBe(
+      "other@case.com"
+    );
+  });
+
   it("updates an owned contact and persists tags", async () => {
     prismaMock.contact.findFirst.mockResolvedValue({ id: "c1" } as never);
     prismaMock.contact.update.mockResolvedValue({ id: "c1" } as never);

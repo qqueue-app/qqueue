@@ -17,7 +17,7 @@ vi.mock("@qqueue/email-engine", () => ({
 const { manualEmailService } = await import("./service.js");
 
 beforeEach(() => {
-  send.mockReset().mockResolvedValue({ id: "job_1", status: "SENT" });
+  send.mockReset().mockResolvedValue({ id: "job_1", status: "QUEUED" });
   renderHtmlAsEmailSafe.mockReset().mockImplementation(async (html: string) => ({
     html: `<safe>${html}</safe>`,
     errors: [],
@@ -25,6 +25,8 @@ beforeEach(() => {
   }));
   prismaMock.contact.findMany.mockResolvedValue([] as never);
   prismaMock.contactListMember.findMany.mockResolvedValue([] as never);
+  // Default: nobody is suppressed (carrier selection queries this).
+  prismaMock.suppression.findMany.mockResolvedValue([] as never);
 });
 
 describe("manualEmailService.resolveRecipients", () => {
@@ -112,44 +114,95 @@ describe("manualEmailService.send", () => {
       "user_1"
     );
 
-    expect(result).toEqual({ id: "job_1", status: "SENT" });
+    expect(result).toEqual({ id: "job_1", status: "QUEUED" });
+    // One deduplicated recipient → one job, carrying the copies.
     expect(send).toHaveBeenCalledOnce();
     const arg = send.mock.calls[0][0];
     expect(arg.origin).toBe("MANUAL");
     expect(arg.createdByUserId).toBe("user_1");
-    // Deduplicated, joined To.
     expect(arg.to).toBe("a@x.com");
     expect(arg.cc).toEqual(["cc@x.com"]);
     expect(arg.bcc).toEqual(["bcc@x.com"]);
+    // A single-recipient send needs no group.
+    expect(arg.sendGroupId).toBeNull();
     // Body rendered through the MJML email-safe layer.
     expect(arg.html).toBe("<safe><p>Body</p></safe>");
   });
 
-  it("joins multiple To recipients into one message", async () => {
-    await manualEmailService.send(
+  it("fans out one job per To recipient, copies riding the first only", async () => {
+    send
+      .mockResolvedValueOnce({ id: "job_a", status: "QUEUED" })
+      .mockResolvedValueOnce({ id: "job_b", status: "QUEUED" });
+
+    const result = await manualEmailService.send(
       {
         organizationId: "org_1",
         to: ["a@x.com", "b@x.com"],
+        cc: ["cc@x.com"],
         subject: "Hi",
         html: "<p>Hi</p>"
       },
       "user_1"
     );
-    expect(send.mock.calls[0][0].to).toBe("a@x.com, b@x.com");
+
+    expect(send).toHaveBeenCalledTimes(2);
+    const [first, second] = send.mock.calls.map((call) => call[0]);
+    expect(first.to).toBe("a@x.com");
+    expect(second.to).toBe("b@x.com");
+    // CC rides exactly one job — one copy per copy-recipient, not one per To.
+    expect(first.cc).toEqual(["cc@x.com"]);
+    expect(second.cc).toBeUndefined();
+    // Jobs share a group so delivery status can be aggregated.
+    expect(first.sendGroupId).toEqual(expect.any(String));
+    expect(second.sendGroupId).toBe(first.sendGroupId);
+    // The carrier job is the one the composer polls.
+    expect(result).toEqual({ id: "job_a", status: "QUEUED" });
   });
 
-  it("passes attachmentIds through to the shared pipeline", async () => {
+  it("moves the CC carrier past a suppressed first recipient", async () => {
+    // a@x.com is suppressed: copies must ride a job that will actually send.
+    prismaMock.suppression.findMany.mockResolvedValue([
+      { email: "a@x.com" }
+    ] as never);
+    send
+      .mockResolvedValueOnce({ id: "job_a", status: "SUPPRESSED" })
+      .mockResolvedValueOnce({ id: "job_b", status: "QUEUED" });
+
+    const result = await manualEmailService.send(
+      {
+        organizationId: "org_1",
+        to: ["a@x.com", "b@x.com"],
+        cc: ["cc@x.com"],
+        subject: "Hi",
+        html: "<p>Hi</p>"
+      },
+      "user_1"
+    );
+
+    const [first, second] = send.mock.calls.map((call) => call[0]);
+    expect(first.cc).toBeUndefined();
+    expect(second.cc).toEqual(["cc@x.com"]);
+    // The carrier (second job) is the primary the composer polls.
+    expect(result).toEqual({ id: "job_b", status: "QUEUED" });
+  });
+
+  it("links attachments on the first job and copies them onto siblings", async () => {
     await manualEmailService.send(
       {
         organizationId: "org_1",
-        to: ["a@x.com"],
+        to: ["a@x.com", "b@x.com"],
         subject: "Hi",
         html: "<p>Hi</p>",
         attachmentIds: ["att_1", "att_2"]
       },
       "user_1"
     );
-    expect(send.mock.calls[0][0].attachmentIds).toEqual(["att_1", "att_2"]);
+
+    const [first, second] = send.mock.calls.map((call) => call[0]);
+    expect(first.attachmentIds).toEqual(["att_1", "att_2"]);
+    expect(first.attachmentMode).toBe("link");
+    expect(second.attachmentIds).toEqual(["att_1", "att_2"]);
+    expect(second.attachmentMode).toBe("copy");
   });
 
   it("logs an error when MJML compilation falls back to the raw body", async () => {
@@ -274,6 +327,111 @@ describe("manualEmailService.deliveryStatus", () => {
     expect(result.recipients).toEqual([
       { email: "a@x.com", field: "to", status: "failed" }
     ]);
+  });
+
+  it("aggregates a fanned-out send across its sibling jobs", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue({
+      id: "job_a",
+      status: "SENT",
+      sentAt: new Date("2026-06-15T10:00:00.000Z"),
+      toEmail: "a@x.com",
+      cc: ["cc@x.com"],
+      bcc: [],
+      sendGroupId: "grp_1",
+      createdAt: new Date("2026-06-15T09:59:00.000Z"),
+      events: []
+    } as never);
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      {
+        id: "job_a",
+        status: "SENT",
+        sentAt: new Date("2026-06-15T10:00:00.000Z"),
+        toEmail: "a@x.com",
+        cc: ["cc@x.com"],
+        bcc: [],
+        sendGroupId: "grp_1",
+        createdAt: new Date("2026-06-15T09:59:00.000Z"),
+        events: [
+          {
+            type: "SENT",
+            metadata: { accepted: ["a@x.com", "cc@x.com"], rejected: [] }
+          },
+          { type: "OPENED", metadata: null }
+        ]
+      },
+      {
+        id: "job_b",
+        status: "SUPPRESSED",
+        sentAt: null,
+        toEmail: "b@x.com",
+        cc: [],
+        bcc: [],
+        sendGroupId: "grp_1",
+        createdAt: new Date("2026-06-15T09:59:01.000Z"),
+        events: []
+      }
+    ] as never);
+
+    const result = await manualEmailService.deliveryStatus("job_a", "org_1");
+
+    expect(prismaMock.emailJob.findMany.mock.calls[0][0]).toMatchObject({
+      where: { organizationId: "org_1", sendGroupId: "grp_1" }
+    });
+    expect(result.recipients).toEqual([
+      { email: "a@x.com", field: "to", status: "delivered" },
+      { email: "cc@x.com", field: "cc", status: "delivered" },
+      { email: "b@x.com", field: "to", status: "suppressed" }
+    ]);
+    // A send happened, so the aggregate reports SENT (terminal for the poll).
+    expect(result.status).toBe("SENT");
+    expect(result.opens).toBe(1);
+  });
+
+  it("stays non-terminal while any sibling job is still queued", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue({
+      id: "job_a",
+      status: "SENT",
+      sentAt: null,
+      toEmail: "a@x.com",
+      cc: [],
+      bcc: [],
+      sendGroupId: "grp_1",
+      createdAt: new Date(),
+      events: []
+    } as never);
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      {
+        id: "job_a",
+        status: "SENT",
+        sentAt: null,
+        toEmail: "a@x.com",
+        cc: [],
+        bcc: [],
+        sendGroupId: "grp_1",
+        createdAt: new Date(),
+        events: []
+      },
+      {
+        id: "job_b",
+        status: "QUEUED",
+        sentAt: null,
+        toEmail: "b@x.com",
+        cc: [],
+        bcc: [],
+        sendGroupId: "grp_1",
+        createdAt: new Date(),
+        events: []
+      }
+    ] as never);
+
+    const result = await manualEmailService.deliveryStatus("job_a", "org_1");
+
+    expect(result.status).toBe("QUEUED");
+    expect(result.recipients).toContainEqual({
+      email: "b@x.com",
+      field: "to",
+      status: "pending"
+    });
   });
 });
 

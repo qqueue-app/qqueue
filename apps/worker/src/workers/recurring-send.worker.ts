@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Worker } from "bullmq";
 import { nextCronRun } from "@qqueue/shared";
 import { renderHtmlAsEmailSafe } from "@qqueue/email-engine";
@@ -157,44 +158,56 @@ export async function processRecurringSend(job: {
       html = rendered.html;
     }
 
-    // An ordinary EmailJob: the email-sending worker performs the actual
-    // delivery, including the suppression re-check, so this stays a new entry
-    // point into the one pipeline rather than a parallel send path.
-    const emailJob = await prisma.emailJob.create({
-      data: {
-        organizationId: send.organizationId,
-        smtpConnectionId: send.smtpConnectionId,
-        templateId: send.templateId,
-        toEmail: recipients.to.join(", "),
-        cc: recipients.cc,
-        bcc: recipients.bcc,
-        replyTo: send.replyTo,
-        subject,
-        html,
-        text,
-        origin: "MANUAL",
-        createdByUserId: send.createdByUserId,
-        status: "QUEUED",
-        events: {
-          create: { organizationId: send.organizationId, type: "QUEUED" }
+    // Ordinary EmailJobs — **one per To recipient** — through the shared
+    // pipeline: the email-sending worker performs the delivery, so the
+    // suppression check, per-domain throttle, and bounce accounting apply to
+    // each recipient individually. CC/BCC ride the first recipient's job only
+    // (one copy per copy-recipient, not one per To); a suppressed first
+    // recipient is settled by the send worker like any other. Recurring sends
+    // are bulk mail, so every job carries List-Unsubscribe headers (isBulk).
+    const sendGroupId = recipients.to.length > 1 ? randomUUID() : null;
+    let primaryJobId: string | null = null;
+
+    for (const [index, recipient] of recipients.to.entries()) {
+      const emailJob = await prisma.emailJob.create({
+        data: {
+          organizationId: send.organizationId,
+          smtpConnectionId: send.smtpConnectionId,
+          templateId: send.templateId,
+          toEmail: recipient,
+          cc: index === 0 ? recipients.cc : [],
+          bcc: index === 0 ? recipients.bcc : [],
+          replyTo: send.replyTo,
+          subject,
+          html,
+          text,
+          origin: "MANUAL",
+          isBulk: true,
+          sendGroupId,
+          createdByUserId: send.createdByUserId,
+          status: "QUEUED",
+          events: {
+            create: { organizationId: send.organizationId, type: "QUEUED" }
+          }
         }
-      }
-    });
+      });
+      primaryJobId ??= emailJob.id;
+
+      await emailSendingQueue.add(
+        "send-email",
+        { emailJobId: emailJob.id },
+        {
+          jobId: `email-${emailJob.id}`,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 30_000 }
+        }
+      );
+    }
 
     await prisma.recurringSendRun.update({
       where: { id: run.id },
-      data: { emailJobId: emailJob.id }
+      data: { emailJobId: primaryJobId }
     });
-
-    await emailSendingQueue.add(
-      "send-email",
-      { emailJobId: emailJob.id },
-      {
-        jobId: `email-${emailJob.id}`,
-        attempts: 3,
-        backoff: { type: "exponential", delay: 30_000 }
-      }
-    );
   }
 
   await prisma.recurringSend.update({

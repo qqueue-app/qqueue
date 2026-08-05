@@ -15,7 +15,10 @@ describe("unsubscribeService.unsubscribe", () => {
       reason: "UNSUBSCRIBE"
     });
     expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
-      where: { organizationId: "org_1", email: "u@x.com" },
+      where: {
+        organizationId: "org_1",
+        email: { equals: "u@x.com", mode: "insensitive" }
+      },
       data: { status: "UNSUBSCRIBED" }
     });
   });

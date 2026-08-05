@@ -25,7 +25,10 @@ export const suppressionService = {
    * manual endpoint and by bounce/complaint/unsubscribe handling.
    */
   addSuppression(input: AddSuppressionInput) {
-    const { organizationId, email, reason, source } = input;
+    const { organizationId, reason, source } = input;
+    // Stored lowercase so the exact-match lookups downstream are effectively
+    // case-insensitive (the migration lowercased existing rows).
+    const email = input.email.trim().toLowerCase();
     return prisma.suppression.upsert({
       where: { organizationId_email: { organizationId, email } },
       create: { organizationId, email, reason, source },
@@ -36,10 +39,36 @@ export const suppressionService = {
   /** True when the address is on the org's suppression list. */
   async isSuppressed(organizationId: string, email: string) {
     const hit = await prisma.suppression.findUnique({
-      where: { organizationId_email: { organizationId, email } },
+      where: {
+        organizationId_email: {
+          organizationId,
+          email: email.trim().toLowerCase()
+        }
+      },
       select: { id: true }
     });
     return Boolean(hit);
+  },
+
+  /**
+   * Which of these addresses are suppressed, as a lowercase Set. One query for
+   * callers that need to screen a whole recipient list (manual fan-out).
+   */
+  async suppressedAmong(
+    organizationId: string,
+    emails: string[]
+  ): Promise<Set<string>> {
+    if (emails.length === 0) {
+      return new Set();
+    }
+    const rows = await prisma.suppression.findMany({
+      where: {
+        organizationId,
+        email: { in: emails.map((email) => email.trim().toLowerCase()) }
+      },
+      select: { email: true }
+    });
+    return new Set(rows.map((row) => row.email.toLowerCase()));
   },
 
   async remove(id: string, userId: string) {
@@ -105,7 +134,7 @@ export const suppressionService = {
         organizationId: input.organizationId,
         type: "BOUNCED",
         occurredAt: { gte: windowStart },
-        emailJob: { toEmail: input.email },
+        emailJob: { toEmail: input.email.trim().toLowerCase() },
         metadata: { path: ["bounceType"], equals: "SOFT" }
       }
     });

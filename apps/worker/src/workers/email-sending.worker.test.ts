@@ -151,6 +151,8 @@ beforeEach(() => {
   // Default: domain throttle allows the send. Tests override to assert holding.
   reserveDomainSlot.mockReset().mockResolvedValue({ allowed: true });
   classifyBounce.mockReset().mockReturnValue("HARD");
+  // Default: no suppressed CC/BCC copies. Tests override to assert stripping.
+  prismaMock.suppression.findMany.mockResolvedValue([] as never);
 });
 
 describe("email-sending worker", () => {
@@ -213,6 +215,79 @@ describe("email-sending worker", () => {
       data: { status: "PROCESSING" }
     });
     expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
+  });
+
+  it("matches a suppression case-insensitively (lookup is lowercased)", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      toEmail: "Mixed@Example.com"
+    } as never);
+    prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
+
+    await run(makeJob());
+
+    // The unique lookup normalizes to the stored lowercase form.
+    expect(prismaMock.suppression.findUnique).toHaveBeenCalledWith({
+      where: {
+        organizationId_email: {
+          organizationId: "org1",
+          email: "mixed@example.com"
+        }
+      },
+      select: { id: true }
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
+      where: { id: "ej1" },
+      data: { status: "SUPPRESSED" }
+    });
+  });
+
+  it("sends SYSTEM mail to a suppressed recipient (suppression bypass)", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "SYSTEM"
+    } as never);
+    // A suppression row exists, but SYSTEM mail must still go out.
+    prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid-sys",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    // The suppression list is never even consulted.
+    expect(prismaMock.suppression.findUnique).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledOnce();
+    expect(prismaMock.emailJob.update).not.toHaveBeenCalledWith({
+      where: { id: "ej1" },
+      data: { status: "SUPPRESSED" }
+    });
+  });
+
+  it("does not inject tracking into SYSTEM mail", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "SYSTEM"
+    } as never);
+    prismaMock.suppression.findUnique.mockResolvedValue(null as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid-sys",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(injectTracking).not.toHaveBeenCalled();
+    // The stored body is delivered verbatim (account links untouched).
+    expect(send.mock.calls[0][0].html).toBe("<p>Body</p>");
+    // And SYSTEM mail never carries List-Unsubscribe headers.
+    expect(send.mock.calls[0][0].headers).toBeUndefined();
   });
 
   it("holds the job (DelayedError) when the recipient domain is over its throttle", async () => {
@@ -365,10 +440,11 @@ describe("email-sending worker", () => {
     expect(sendArgs.references).toBeUndefined();
   });
 
-  it("adds List-Unsubscribe headers for CAMPAIGN origin", async () => {
+  it("adds List-Unsubscribe headers for bulk mail (campaign or recurring)", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      origin: "CAMPAIGN"
+      origin: "MANUAL",
+      isBulk: true
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
@@ -391,10 +467,11 @@ describe("email-sending worker", () => {
     });
   });
 
-  it("omits List-Unsubscribe headers for non-campaign origin", async () => {
+  it("omits List-Unsubscribe headers for non-bulk mail", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      origin: "TRANSACTIONAL"
+      origin: "TRANSACTIONAL",
+      isBulk: false
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
@@ -407,6 +484,58 @@ describe("email-sending worker", () => {
 
     expect(h.buildListUnsubscribeHeaders).not.toHaveBeenCalled();
     expect(send.mock.calls[0][0].headers).toBeUndefined();
+  });
+
+  it("strips suppressed CC/BCC addresses and records what was stripped", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      cc: ["keep@example.com", "Blocked@example.com"],
+      bcc: ["hidden@example.com"]
+    } as never);
+    // To recipient is not suppressed; the CC "blocked@example.com" is.
+    prismaMock.suppression.findUnique.mockResolvedValue(null as never);
+    prismaMock.suppression.findMany.mockResolvedValue([
+      { email: "blocked@example.com" }
+    ] as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    const sendArgs = send.mock.calls[0][0];
+    expect(sendArgs.cc).toEqual(["keep@example.com"]);
+    expect(sendArgs.bcc).toEqual(["hidden@example.com"]);
+
+    // The strip is recorded on the SENT event's metadata.
+    const sentUpdate = prismaMock.emailJob.update.mock.calls.find(
+      (call) => call[0].data?.status === "SENT"
+    );
+    expect(sentUpdate?.[0].data.events.create.metadata).toMatchObject({
+      strippedCc: ["Blocked@example.com"]
+    });
+  });
+
+  it("does not screen CC/BCC for SYSTEM mail", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "SYSTEM",
+      cc: ["copy@example.com"]
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(prismaMock.suppression.findMany).not.toHaveBeenCalled();
+    expect(send.mock.calls[0][0].cc).toEqual(["copy@example.com"]);
   });
 
   it("uses bare fromEmail when fromName is null", async () => {

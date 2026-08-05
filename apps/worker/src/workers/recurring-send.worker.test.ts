@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 
 describe("processRecurringSend", () => {
-  it("creates an EmailJob with origin MANUAL and enqueues it", async () => {
+  it("creates a bulk EmailJob with origin MANUAL and enqueues it", async () => {
     prismaMock.recurringSend.findUnique.mockResolvedValue(makeSend() as never);
 
     await processRecurringSend(job);
@@ -70,18 +70,54 @@ describe("processRecurringSend", () => {
       smtpConnectionId: "smtp-1",
       toEmail: "a@example.com",
       origin: "MANUAL",
+      // Recurring sends are bulk mail: the worker attaches List-Unsubscribe.
+      isBulk: true,
       createdByUserId: "user-1",
       status: "QUEUED",
       // {{company}} substituted from the stored variables.
       subject: "Digest for Acme",
       html: "<mjml-rendered/>"
     });
+    // A single-recipient occurrence needs no group.
+    expect(data.sendGroupId).toBeNull();
 
     expect(h.emailSendingQueue.add).toHaveBeenCalledWith(
       "send-email",
       { emailJobId: "ej-1" },
       expect.objectContaining({ jobId: "email-ej-1", attempts: 3 })
     );
+  });
+
+  it("fans out one job per recipient, copies riding the first only", async () => {
+    prismaMock.recurringSend.findUnique.mockResolvedValue(
+      makeSend({ to: ["a@example.com", "b@example.com"], cc: ["cc@example.com"] }) as never
+    );
+    prismaMock.emailJob.create
+      .mockResolvedValueOnce({ id: "ej-a" } as never)
+      .mockResolvedValueOnce({ id: "ej-b" } as never);
+
+    await processRecurringSend(job);
+
+    expect(prismaMock.emailJob.create).toHaveBeenCalledTimes(2);
+    const [first, second] = prismaMock.emailJob.create.mock.calls.map(
+      (call) => call[0].data
+    );
+    expect(first.toEmail).toBe("a@example.com");
+    expect(second.toEmail).toBe("b@example.com");
+    // CC rides exactly one job — one copy per copy-recipient, not one per To.
+    expect(first.cc).toEqual(["cc@example.com"]);
+    expect(second.cc).toEqual([]);
+    // Both are bulk and share a group.
+    expect(first.isBulk).toBe(true);
+    expect(second.isBulk).toBe(true);
+    expect(first.sendGroupId).toEqual(expect.any(String));
+    expect(second.sendGroupId).toBe(first.sendGroupId);
+    // Every job is enqueued; the run records the first as primary.
+    expect(h.emailSendingQueue.add).toHaveBeenCalledTimes(2);
+    expect(prismaMock.recurringSendRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: { emailJobId: "ej-a" }
+    });
   });
 
   it("does nothing when the send is paused", async () => {
@@ -160,8 +196,12 @@ describe("processRecurringSend", () => {
 
     await processRecurringSend(job);
 
-    const data = prismaMock.emailJob.create.mock.calls[0][0].data;
-    expect(data.toEmail).toBe("a@example.com, b@example.com");
+    // Deduplicated case-insensitively, one job per remaining recipient.
+    expect(prismaMock.emailJob.create).toHaveBeenCalledTimes(2);
+    const recipients = prismaMock.emailJob.create.mock.calls.map(
+      (call) => call[0].data.toEmail
+    );
+    expect(recipients).toEqual(["a@example.com", "b@example.com"]);
   });
 
   it("advances lastRunAt and nextRunAt after a firing", async () => {

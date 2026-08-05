@@ -25,7 +25,8 @@ const CANCELLABLE = new Set(["PENDING", "QUEUED"]);
 const ORIGIN_LABEL: Record<OutboxEmail["origin"], string> = {
   MANUAL: "Written by you",
   CAMPAIGN: "Campaign",
-  TRANSACTIONAL: "App or API"
+  TRANSACTIONAL: "App or API",
+  SYSTEM: "Account email"
 };
 
 function formatWhen(email: OutboxEmail) {

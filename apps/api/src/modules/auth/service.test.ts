@@ -5,13 +5,12 @@ import { hashPassword, verifyPassword } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
 import { createAuthTokens } from "../../lib/tokens.js";
 
-const providerSend = vi
+// System mail rides the shared send pipeline; mock it at that seam.
+const pipelineSend = vi
   .fn()
-  .mockResolvedValue({ messageId: "m", accepted: [], rejected: [], provider: "smtp" });
-vi.mock("../smtp-connections/service.js", () => ({
-  smtpConnectionService: {
-    getProviderForConnection: vi.fn(() => ({ send: providerSend }))
-  }
+  .mockResolvedValue({ id: "job_reset", status: "QUEUED" });
+vi.mock("../transactional-email/service.js", () => ({
+  transactionalEmailService: { send: pipelineSend }
 }));
 
 const { authService } = await import("./service.js");
@@ -35,7 +34,7 @@ const smtpConnection = {
 };
 
 beforeEach(() => {
-  providerSend.mockClear();
+  pipelineSend.mockClear();
   invalidateInstanceSettingsCache();
 });
 
@@ -262,7 +261,7 @@ describe("authService.requestPasswordReset", () => {
     expect(result.message).toContain("If an account exists");
     expect(result).not.toHaveProperty("resetToken");
     expect(prismaMock.passwordResetToken.create).not.toHaveBeenCalled();
-    expect(providerSend).not.toHaveBeenCalled();
+    expect(pipelineSend).not.toHaveBeenCalled();
   });
 
   it("creates a reset token for an existing user in non-production", async () => {
@@ -307,7 +306,7 @@ describe("authService.requestPasswordReset", () => {
     }
   });
 
-  it("emails the reset link via the org SMTP connection", async () => {
+  it("queues the reset email through the send pipeline as SYSTEM mail", async () => {
     prismaMock.user.findUnique.mockResolvedValue({
       id: "user_1",
       email: "a@b.com",
@@ -318,10 +317,17 @@ describe("authService.requestPasswordReset", () => {
 
     await authService.requestPasswordReset("a@b.com");
 
-    expect(providerSend).toHaveBeenCalledOnce();
-    const payload = providerSend.mock.calls[0][0];
+    expect(pipelineSend).toHaveBeenCalledOnce();
+    const payload = pipelineSend.mock.calls[0][0];
     expect(payload.to).toBe("a@b.com");
-    expect(payload.from).toBe("QQueue <no-reply@example.com>");
+    // Pinned to the exact connection found (which may not be the org default),
+    // in the org that owns it.
+    expect(payload.organizationId).toBe("org_1");
+    expect(payload.smtpConnectionId).toBe("smtp_1");
+    // SYSTEM origin: skips suppression checks and tracking injection so account
+    // mail always goes out with its links untouched.
+    expect(payload.origin).toBe("SYSTEM");
+    expect(payload.createdByUserId).toBe("user_1");
     expect(payload.html).toContain("/reset-password?token=");
     expect(payload.text).toContain("/reset-password?token=");
   });
@@ -339,9 +345,27 @@ describe("authService.requestPasswordReset", () => {
     const result = await authService.requestPasswordReset("a@b.com");
 
     expect(result.message).toContain("If an account exists");
-    expect(providerSend).not.toHaveBeenCalled();
+    expect(pipelineSend).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("still succeeds when queueing the reset email fails", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: "user_1",
+      email: "a@b.com",
+      name: "A"
+    } as never);
+    prismaMock.passwordResetToken.create.mockResolvedValue({ id: "prt_1" } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    pipelineSend.mockRejectedValueOnce(new Error("queue down"));
+
+    const result = await authService.requestPasswordReset("a@b.com");
+
+    expect(result.message).toContain("If an account exists");
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });
 

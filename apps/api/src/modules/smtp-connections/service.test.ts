@@ -201,27 +201,3 @@ describe("smtpConnectionService.delete", () => {
   });
 });
 
-describe("smtpConnectionService.getProviderForConnection", () => {
-  it("builds a provider from decrypted credentials", () => {
-    const provider = smtpConnectionService.getProviderForConnection({
-      host: "h",
-      port: 1,
-      secure: true,
-      usernameEncrypted: encryptSecret("u"),
-      passwordEncrypted: encryptSecret("p")
-    });
-    expect(provider).toBeDefined();
-  });
-
-  it("throws a clear HttpError when credentials cannot be decrypted", () => {
-    expect(() =>
-      smtpConnectionService.getProviderForConnection({
-        host: "h",
-        port: 1,
-        secure: true,
-        usernameEncrypted: "not-a-valid-secret",
-        passwordEncrypted: encryptSecret("p")
-      })
-    ).toThrow(SECRET_DECRYPTION_MESSAGE);
-  });
-});

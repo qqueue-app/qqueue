@@ -166,6 +166,45 @@ export const attachmentService = {
   },
 
   /**
+   * Copy attachment metadata rows onto another job of the same fanned-out
+   * send. A multi-recipient manual send becomes one EmailJob per recipient,
+   * but an uploaded EmailAttachment row can only link to a single job — so
+   * sibling jobs get their own rows pointing at the same stored blob. The blob
+   * itself is not duplicated; only its Postgres metadata is.
+   */
+  async copyToJob(
+    attachmentIds: string[] | undefined,
+    organizationId: string,
+    emailJobId: string
+  ): Promise<void> {
+    if (!attachmentIds?.length) {
+      return;
+    }
+    const unique = Array.from(new Set(attachmentIds));
+    const rows = await prisma.emailAttachment.findMany({
+      where: { id: { in: unique }, organizationId }
+    });
+    if (rows.length !== unique.length) {
+      throw new HttpError(
+        400,
+        "One or more attachments are unavailable (unknown or from another organization)",
+        "validation_error"
+      );
+    }
+    await prisma.emailAttachment.createMany({
+      data: rows.map((row) => ({
+        organizationId: row.organizationId,
+        emailJobId,
+        filename: row.filename,
+        contentType: row.contentType,
+        size: row.size,
+        storageKey: row.storageKey,
+        createdByUserId: row.createdByUserId
+      }))
+    });
+  },
+
+  /**
    * Load an EmailJob's attachments as Nodemailer-ready payloads (filename +
    * blob + content type) for the synchronous send path. The worker loads them
    * independently for queued sends.

@@ -75,7 +75,7 @@ export type EmailEventType =
   | "BOUNCED"
   | "COMPLAINED"
   | "FAILED";
-export type EmailOrigin = "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL";
+export type EmailOrigin = "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
 export type ApiErrorCode =
   | "invalid_api_key"
   | "missing_smtp_connection"
@@ -1399,7 +1399,8 @@ export type RecipientDeliveryStatus =
   | "delivered"
   | "rejected"
   | "pending"
-  | "failed";
+  | "failed"
+  | "suppressed";
 
 export interface RecipientDelivery {
   email: string;

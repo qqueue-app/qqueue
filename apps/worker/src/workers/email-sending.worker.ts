@@ -15,7 +15,8 @@ import { prisma } from "../lib/prisma.js";
 import {
   addSuppression,
   isSuppressed,
-  shouldSuppressBounce
+  shouldSuppressBounce,
+  suppressedAmong
 } from "../lib/suppression.js";
 import { reserveDomainSlot } from "../lib/throttle.js";
 import type { EmailSendingJob } from "../queues/email-sending.queue.js";
@@ -56,8 +57,14 @@ export function startEmailSendingWorker() {
 
       // Defense-in-depth: an address can be suppressed (bounce, complaint,
       // unsubscribe, manual) between enqueue and send. Skip without sending and
-      // without counting it as a failure.
-      if (await isSuppressed(emailJob.organizationId, emailJob.toEmail)) {
+      // without counting it as a failure. SYSTEM mail (password resets,
+      // invitations) deliberately bypasses this — a user who unsubscribed from
+      // marketing must still receive account mail. The API-side pre-check in
+      // transactionalEmailService.send carries the same bypass.
+      if (
+        emailJob.origin !== "SYSTEM" &&
+        (await isSuppressed(emailJob.organizationId, emailJob.toEmail))
+      ) {
         await prisma.emailJob.update({
           where: { id: emailJob.id },
           data: { status: "SUPPRESSED" }
@@ -78,6 +85,44 @@ export function startEmailSendingWorker() {
         throw new DelayedError();
       }
 
+      // CC/BCC recipients get the same suppression protection as the To
+      // recipient: strip suppressed copy-addresses instead of failing the whole
+      // job (the To recipient still deserves their message). What was stripped
+      // is recorded on the outcome event's metadata below. SYSTEM mail skips
+      // this along with every other suppression check.
+      let cc = emailJob.cc;
+      let bcc = emailJob.bcc;
+      let strippedCc: string[] = [];
+      let strippedBcc: string[] = [];
+      if (
+        emailJob.origin !== "SYSTEM" &&
+        (cc.length > 0 || bcc.length > 0)
+      ) {
+        const suppressedCopies = await suppressedAmong(
+          emailJob.organizationId,
+          [...cc, ...bcc]
+        );
+        if (suppressedCopies.size > 0) {
+          strippedCc = cc.filter((email) =>
+            suppressedCopies.has(email.toLowerCase())
+          );
+          strippedBcc = bcc.filter((email) =>
+            suppressedCopies.has(email.toLowerCase())
+          );
+          cc = cc.filter((email) => !suppressedCopies.has(email.toLowerCase()));
+          bcc = bcc.filter(
+            (email) => !suppressedCopies.has(email.toLowerCase())
+          );
+        }
+      }
+      const strippedMetadata =
+        strippedCc.length > 0 || strippedBcc.length > 0
+          ? {
+              ...(strippedCc.length > 0 ? { strippedCc } : {}),
+              ...(strippedBcc.length > 0 ? { strippedBcc } : {})
+            }
+          : {};
+
       await prisma.emailJob.update({
         where: { id: emailJob.id },
         data: { status: "PROCESSING" }
@@ -94,31 +139,37 @@ export function startEmailSendingWorker() {
           }
         });
 
-        const html = injectTracking(emailJob.html, {
-          emailJobId: emailJob.id,
-          baseUrl: env.APP_URL,
-          secret: env.TRACKING_SECRET
-        });
+        // SYSTEM mail keeps its links untouched: rewriting a password-reset or
+        // invite URL through the tracking redirect would make account mail look
+        // like (and depend on) marketing infrastructure.
+        const html =
+          emailJob.origin === "SYSTEM"
+            ? (emailJob.html ?? undefined)
+            : injectTracking(emailJob.html, {
+                emailJobId: emailJob.id,
+                baseUrl: env.APP_URL,
+                secret: env.TRACKING_SECRET
+              });
 
         const attachments = await loadAttachmentsForJob(emailJob.id);
 
-        // Marketing (campaign) mail carries RFC 8058 one-click unsubscribe
-        // headers; transactional/manual sends do not.
-        const headers =
-          emailJob.origin === "CAMPAIGN"
-            ? buildListUnsubscribeHeaders(
-                env.APP_URL,
-                emailJob.organizationId,
-                emailJob.toEmail,
-                env.TRACKING_SECRET
-              )
-            : undefined;
+        // Bulk mail (campaign fan-out, recurring sends — flagged at job
+        // creation) carries RFC 8058 one-click unsubscribe headers;
+        // transactional, one-off manual, and SYSTEM sends do not.
+        const headers = emailJob.isBulk
+          ? buildListUnsubscribeHeaders(
+              env.APP_URL,
+              emailJob.organizationId,
+              emailJob.toEmail,
+              env.TRACKING_SECRET
+            )
+          : undefined;
 
         const result = await provider.send({
           from: formatFrom(emailJob.smtpConnection),
           to: emailJob.toEmail,
-          cc: emailJob.cc.length ? emailJob.cc : undefined,
-          bcc: emailJob.bcc.length ? emailJob.bcc : undefined,
+          cc: cc.length ? cc : undefined,
+          bcc: bcc.length ? bcc : undefined,
           replyTo: emailJob.replyTo ?? undefined,
           inReplyTo: emailJob.inReplyTo ?? undefined,
           references: emailJob.references.length ? emailJob.references : undefined,
@@ -153,7 +204,8 @@ export function startEmailSendingWorker() {
                     bounceType,
                     ...(result.rejectionResponse
                       ? { reason: result.rejectionResponse }
-                      : {})
+                      : {}),
+                    ...strippedMetadata
                   }
                 }
               }
@@ -172,7 +224,8 @@ export function startEmailSendingWorker() {
             await prisma.contact.updateMany({
               where: {
                 organizationId: emailJob.organizationId,
-                email: emailJob.toEmail
+                // Insensitive: pre-normalization contacts may carry mixed case.
+                email: { equals: emailJob.toEmail, mode: "insensitive" }
               },
               data: { status: "BOUNCED" }
             });
@@ -208,7 +261,8 @@ export function startEmailSendingWorker() {
                   provider: result.provider,
                   messageId: result.messageId,
                   accepted: result.accepted,
-                  rejected: result.rejected
+                  rejected: result.rejected,
+                  ...strippedMetadata
                 }
               }
             }

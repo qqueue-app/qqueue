@@ -10,7 +10,7 @@ import {
 } from "../../lib/instance-settings.js";
 import { prisma } from "../../lib/prisma.js";
 import { createAuthTokens, verifyRefreshToken } from "../../lib/tokens.js";
-import { smtpConnectionService } from "../smtp-connections/service.js";
+import { transactionalEmailService } from "../transactional-email/service.js";
 
 function serializeUser(user: {
   id: string;
@@ -48,9 +48,12 @@ function buildResetUrl(token: string) {
 /**
  * Deliver a password reset link over email. Reuses the requesting user's
  * organization SMTP connection (preferring the default) so production never
- * has to expose the raw token in the API response. Best-effort: callers wrap
- * this so a missing connection or transient SMTP failure does not leak whether
- * an account exists or break the request flow.
+ * has to expose the raw token in the API response. Routed through the shared
+ * send pipeline as `origin: "SYSTEM"`: the message becomes a queued EmailJob
+ * like every other send, but skips suppression checks and tracking injection
+ * (account mail must reach unsubscribed users, with its links untouched).
+ * Best-effort: callers wrap this so a missing connection or a queue failure
+ * does not leak whether an account exists or break the request flow.
  */
 async function sendPasswordResetEmail(
   user: { id: string; email: string; name: string | null },
@@ -70,16 +73,16 @@ async function sendPasswordResetEmail(
 
   const resetUrl = buildResetUrl(token);
   const greeting = user.name ? `Hi ${user.name},` : "Hi,";
-  const provider = smtpConnectionService.getProviderForConnection(connection);
 
-  await provider.send({
-    from: connection.fromName
-      ? `${connection.fromName} <${connection.fromEmail}>`
-      : connection.fromEmail,
+  await transactionalEmailService.send({
+    organizationId: connection.organizationId,
+    smtpConnectionId: connection.id,
     to: user.email,
     subject: "Reset your QQueue password",
     text: `${greeting}\n\nWe received a request to reset your QQueue password. Use the link below within the next hour to choose a new password:\n\n${resetUrl}\n\nIf you did not request this, you can safely ignore this email.`,
-    html: `<p>${greeting}</p><p>We received a request to reset your QQueue password. Use the link below within the next hour to choose a new password:</p><p><a href="${resetUrl}">Reset your password</a></p><p>If you did not request this, you can safely ignore this email.</p>`
+    html: `<p>${greeting}</p><p>We received a request to reset your QQueue password. Use the link below within the next hour to choose a new password:</p><p><a href="${resetUrl}">Reset your password</a></p><p>If you did not request this, you can safely ignore this email.</p>`,
+    origin: "SYSTEM",
+    createdByUserId: user.id
   });
 }
 

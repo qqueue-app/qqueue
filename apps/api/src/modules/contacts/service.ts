@@ -136,7 +136,9 @@ export function parseContactsCsv(csv: string): {
     );
 
     rows.push({
-      email,
+      // Lowercased at parse time so previews, duplicate matching, and the
+      // stored contact all agree on the canonical form.
+      email: email.toLowerCase(),
       firstName: record.firstname?.trim() || undefined,
       lastName: record.lastname?.trim() || undefined,
       tags
@@ -290,6 +292,9 @@ export const contactService = {
     return prisma.contact.create({
       data: {
         ...input,
+        // Stored lowercase: suppression checks and bounce accounting compare
+        // exact strings, so casing must be canonical at rest.
+        email: input.email.trim().toLowerCase(),
         metadata: input.metadata as InputJsonValue | undefined
       }
     });
@@ -307,7 +312,7 @@ export const contactService = {
     return prisma.contact.update({
       where: { id },
       data: {
-        email: input.email,
+        email: input.email.trim().toLowerCase(),
         firstName: input.firstName,
         lastName: input.lastName,
         tags: input.tags,

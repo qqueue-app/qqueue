@@ -476,3 +476,53 @@ transactional sends. The pure DNS/record helpers (`shouldSignManagedDkim`,
 This keeps DKIM signing an AGPL-core capability (not cloud-only) and means no
 send path re-derives From headers or DKIM options — the invariant called out in
 `CLAUDE.md`.
+
+## One Send Path: the Worker Is the Only Place SMTP Is Spoken (Phase 1 evolution)
+
+The API's inline send branch was removed: every send — transactional, manual,
+campaign, recurring, and system mail — creates a `QUEUED` EmailJob and is
+delivered by the email-sending worker (an unscheduled send is simply a queued
+job with no delay). The API's answer means "accepted", not "delivered"; callers
+poll job status or consume webhooks. This is what makes throttling, suppression
+re-checks, bounce classification, retries, and cancellation apply uniformly —
+the inline path silently had none of them, and an SMTP rejection there was
+recorded as SENT.
+
+System mail (password resets, invitations) rides the same pipeline under
+`origin: "SYSTEM"` with two explicit bypasses at the chokepoints: no
+suppression checks (a user who unsubscribed from marketing must still get
+account mail) and no tracking injection (account links stay untouched).
+
+## Manual Sends Fan Out Per Recipient; CC/BCC Ride One Carrier Job (Phase 2 evolution)
+
+A multi-recipient manual or recurring send becomes **one EmailJob per To
+recipient** (linked by `EmailJob.sendGroupId`), never a comma-joined To. The
+joined string silently defeated three per-recipient mechanisms at once: the
+suppression check (exact-match lookup could never hit), the soft-bounce counter
+(joined `toEmail` never matched), and the per-domain throttle (only the last
+recipient's domain was counted).
+
+CC/BCC attach to exactly one job — the **carrier**, the first To recipient not
+already suppressed at send time — so copy-recipients receive one copy of the
+message rather than one per To. If every To recipient is suppressed, nothing is
+sent, copies included (an email has no To to carry them). A recipient
+suppressed *between* carrier selection and the worker's send loses the copies
+with the job; that race is accepted. Uploaded attachments are claimed by the
+first job and metadata-copied onto siblings (same stored blob).
+
+Two related choices made at the same time:
+
+- **List-Unsubscribe follows bulkness, not origin.** `EmailJob.isBulk` is set
+  where the job is created (campaign fan-out and recurring sends); the worker
+  attaches RFC 8058 headers for bulk jobs only. Recurring sends previously
+  shipped with no unsubscribe header because they shared `origin: "MANUAL"`
+  with one-off composer mail.
+- **Emails are normalized to lowercase at every write** (suppressions,
+  contacts, job recipients), with a one-time migration lowercasing existing
+  rows. Suppression duplicates keep the earliest row; contacts whose lowercase
+  forms collide are left untouched rather than silently merged — each may carry
+  real history, so operators reconcile those by hand.
+- **`GET /unsubscribe` no longer mutates.** Mail clients and scanners prefetch
+  GET links, silently unsubscribing recipients. GET renders a confirmation page
+  whose button POSTs; the POST (also the RFC 8058 one-click target) performs
+  the unsubscribe. Both are rate limited.

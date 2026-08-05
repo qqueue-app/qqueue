@@ -258,3 +258,55 @@ describe("attachmentService.linkToJob", () => {
     ).toEqual({ in: ["a1"] });
   });
 });
+
+describe("attachmentService.copyToJob", () => {
+  it("does nothing when there are no attachment ids", async () => {
+    await attachmentService.copyToJob(undefined, "org_1", "job_2");
+    await attachmentService.copyToJob([], "org_1", "job_2");
+
+    expect(prismaMock.emailAttachment.createMany).not.toHaveBeenCalled();
+  });
+
+  it("clones metadata rows onto the sibling job, sharing the stored blob", async () => {
+    prismaMock.emailAttachment.findMany.mockResolvedValue([
+      {
+        id: "a1",
+        organizationId: "org_1",
+        emailJobId: "job_1",
+        filename: "report.pdf",
+        contentType: "application/pdf",
+        size: 3,
+        storageKey: "org/org_1/k-report.pdf",
+        createdByUserId: "user_1"
+      }
+    ] as never);
+    prismaMock.emailAttachment.createMany.mockResolvedValue({
+      count: 1
+    } as never);
+
+    await attachmentService.copyToJob(["a1"], "org_1", "job_2");
+
+    expect(prismaMock.emailAttachment.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          organizationId: "org_1",
+          emailJobId: "job_2",
+          filename: "report.pdf",
+          contentType: "application/pdf",
+          size: 3,
+          storageKey: "org/org_1/k-report.pdf",
+          createdByUserId: "user_1"
+        }
+      ]
+    });
+  });
+
+  it("throws when an id is unknown or belongs to another org", async () => {
+    prismaMock.emailAttachment.findMany.mockResolvedValue([] as never);
+
+    await expect(
+      attachmentService.copyToJob(["a1"], "org_1", "job_2")
+    ).rejects.toThrow(HttpError);
+    expect(prismaMock.emailAttachment.createMany).not.toHaveBeenCalled();
+  });
+});

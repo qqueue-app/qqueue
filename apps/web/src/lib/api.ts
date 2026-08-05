@@ -423,7 +423,8 @@ export type RecipientDeliveryStatus =
   | "delivered"
   | "rejected"
   | "pending"
-  | "failed";
+  | "failed"
+  | "suppressed";
 
 export interface RecipientDelivery {
   email: string;
@@ -459,7 +460,7 @@ export interface OutboxEmail {
   ccCount: number;
   bccCount: number;
   status: "PENDING" | "QUEUED" | "PROCESSING";
-  origin: "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL";
+  origin: "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
   scheduledAt?: string | null;
   createdAt: string;
   campaignName?: string | null;

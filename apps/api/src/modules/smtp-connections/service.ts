@@ -201,22 +201,5 @@ export const smtpConnectionService = {
   async delete(id: string, userId: string) {
     await findOwned(id, userId);
     await prisma.sMTPConnection.delete({ where: { id } });
-  },
-
-  getProviderForConnection(connection: {
-    host: string;
-    port: number;
-    secure: boolean;
-    usernameEncrypted: string;
-    passwordEncrypted: string;
-  }) {
-    try {
-      return toProvider(connection);
-    } catch (error) {
-      if (error instanceof SecretDecryptionError) {
-        throw new HttpError(500, SECRET_DECRYPTION_MESSAGE, "smtp_failure");
-      }
-      throw error;
-    }
   }
 };

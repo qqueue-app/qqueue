@@ -3,13 +3,39 @@ import type { BounceType } from "@qqueue/email-engine";
 import { env } from "../config/env.js";
 import { prisma } from "./prisma.js";
 
+// Suppression rows are stored lowercase; normalize lookups so a mixed-case
+// recipient still matches.
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
 /** True when the address is on the org's suppression list. */
 export async function isSuppressed(organizationId: string, email: string) {
   const hit = await prisma.suppression.findUnique({
-    where: { organizationId_email: { organizationId, email } },
+    where: {
+      organizationId_email: { organizationId, email: normalizeEmail(email) }
+    },
     select: { id: true }
   });
   return Boolean(hit);
+}
+
+/**
+ * Which of these addresses are suppressed, as a lowercase Set. One query for
+ * the send worker's CC/BCC screen.
+ */
+export async function suppressedAmong(
+  organizationId: string,
+  emails: string[]
+): Promise<Set<string>> {
+  if (emails.length === 0) {
+    return new Set();
+  }
+  const rows = await prisma.suppression.findMany({
+    where: { organizationId, email: { in: emails.map(normalizeEmail) } },
+    select: { email: true }
+  });
+  return new Set(rows.map((row) => row.email.toLowerCase()));
 }
 
 /**
@@ -23,7 +49,8 @@ export function addSuppression(input: {
   reason: SuppressionReason;
   source?: string;
 }) {
-  const { organizationId, email, reason, source } = input;
+  const { organizationId, reason, source } = input;
+  const email = normalizeEmail(input.email);
   return prisma.suppression.upsert({
     where: { organizationId_email: { organizationId, email } },
     create: { organizationId, email, reason, source },
@@ -63,7 +90,7 @@ export async function shouldSuppressBounce(input: {
       organizationId: input.organizationId,
       type: "BOUNCED",
       occurredAt: { gte: windowStart },
-      emailJob: { toEmail: input.email },
+      emailJob: { toEmail: normalizeEmail(input.email) },
       metadata: { path: ["bounceType"], equals: "SOFT" }
     }
   });

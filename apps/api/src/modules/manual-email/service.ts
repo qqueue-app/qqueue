@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { injectTracking, renderHtmlAsEmailSafe } from "@qqueue/email-engine";
 import type {
   EmailPreviewInput,
@@ -12,6 +13,7 @@ import type {
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { suppressionService } from "../suppressions/service.js";
 import { transactionalEmailService } from "../transactional-email/service.js";
 
 interface RecipientSource {
@@ -211,9 +213,18 @@ export const manualEmailService = {
 
   /**
    * Send a manually composed email. Recipients are resolved + deduplicated, the
-   * body is rendered through MJML, and the message is handed to the shared send
-   * pipeline with `origin: "MANUAL"` and the authoring user recorded — reusing
-   * the same EmailJob/queue/tracking/SMTP/analytics path as every other send.
+   * body is rendered through MJML, and the message becomes **one EmailJob per
+   * To recipient** in the shared send pipeline (`origin: "MANUAL"`), so
+   * suppression checks, per-domain throttling, and bounce accounting apply to
+   * each recipient individually — a comma-joined To defeated all three.
+   *
+   * CC/BCC ride exactly one job (the "carrier": the first To recipient not
+   * already suppressed), so copy-recipients get one copy of the message, not
+   * one per To. If every To recipient is suppressed, nothing is sent — copies
+   * included. See docs/DECISIONS.md ("Manual sends fan out per recipient").
+   *
+   * Returns the carrier job: it's the one whose delivery status the composer
+   * polls, and `deliveryStatus` aggregates its siblings via `sendGroupId`.
    */
   async send(
     input: ManualEmailSendInput,
@@ -231,11 +242,22 @@ export const manualEmailService = {
 
     const html = await renderBody(input.html);
 
-    return transactionalEmailService.send({
+    // The carrier must be a recipient that will actually send, or the CC/BCC
+    // copies would silently die with a suppressed To. (Recipients suppressed
+    // *after* this check are handled by the worker; that race is accepted.)
+    const suppressed = await suppressionService.suppressedAmong(
+      input.organizationId,
+      recipients.to
+    );
+    const firstDeliverable = recipients.to.findIndex(
+      (email) => !suppressed.has(email)
+    );
+    const carrierIndex = Math.max(0, firstDeliverable);
+
+    const sendGroupId = recipients.to.length > 1 ? randomUUID() : null;
+
+    const base = {
       organizationId: input.organizationId,
-      to: recipients.to.join(", "),
-      cc: recipients.cc.length ? recipients.cc : undefined,
-      bcc: recipients.bcc.length ? recipients.bcc : undefined,
       replyTo: input.replyTo,
       smtpConnectionId: input.smtpConnectionId,
       templateId: input.templateId,
@@ -246,10 +268,29 @@ export const manualEmailService = {
       inReplyTo: input.inReplyTo,
       references: input.references,
       scheduledAt: input.scheduledAt,
-      attachmentIds: input.attachmentIds,
-      origin: "MANUAL",
-      createdByUserId: userId
-    });
+      origin: "MANUAL" as const,
+      createdByUserId: userId,
+      sendGroupId
+    };
+
+    const results: TransactionalSendResponse[] = [];
+    for (const [index, recipient] of recipients.to.entries()) {
+      const isCarrier = index === carrierIndex;
+      results.push(
+        await transactionalEmailService.send({
+          ...base,
+          to: recipient,
+          cc: isCarrier && recipients.cc.length ? recipients.cc : undefined,
+          bcc: isCarrier && recipients.bcc.length ? recipients.bcc : undefined,
+          attachmentIds: input.attachmentIds,
+          // The first job claims the uploaded attachment rows; siblings get
+          // metadata copies pointing at the same stored blobs.
+          attachmentMode: index === 0 ? "link" : "copy"
+        })
+      );
+    }
+
+    return results[carrierIndex];
   },
 
   /**
@@ -277,97 +318,150 @@ export const manualEmailService = {
   },
 
   /**
-   * Derive per-recipient delivery status for a sent manual email. A manual send
-   * is one EmailJob to many recipients, so per-recipient granularity comes from
-   * the SMTP accepted/rejected lists recorded on the SENT/BOUNCED events, with
-   * thread-level engagement counts (opens/clicks/bounces/complaints) alongside.
+   * Derive per-recipient delivery status for a manual send. A multi-recipient
+   * send is one EmailJob per To recipient (linked by `sendGroupId`), so each To
+   * row reports its own job's status; CC/BCC rows come from the carrier job.
+   * Engagement counts aggregate across the whole group. Pre-fan-out jobs (a
+   * comma-joined To on one job) still resolve per recipient via the SMTP
+   * accepted/rejected lists recorded on their events.
    */
   async deliveryStatus(
     emailJobId: string,
     organizationId: string
   ): Promise<ManualEmailDeliveryStatus> {
+    const jobSelect = {
+      id: true,
+      status: true,
+      sentAt: true,
+      toEmail: true,
+      cc: true,
+      bcc: true,
+      sendGroupId: true,
+      createdAt: true,
+      events: { select: { type: true, metadata: true } }
+    } as const;
+
     const job = await prisma.emailJob.findFirst({
       where: { id: emailJobId, organizationId },
-      select: {
-        id: true,
-        status: true,
-        sentAt: true,
-        toEmail: true,
-        cc: true,
-        bcc: true,
-        events: { select: { type: true, metadata: true } }
-      }
+      select: jobSelect
     });
 
     if (!job) {
       throw new HttpError(404, "Email not found", "not_found");
     }
 
-    const accepted = new Set<string>();
-    const rejected = new Set<string>();
+    const jobs = job.sendGroupId
+      ? await prisma.emailJob.findMany({
+          where: { organizationId, sendGroupId: job.sendGroupId },
+          select: jobSelect,
+          orderBy: { createdAt: "asc" }
+        })
+      : [job];
+
     let opens = 0;
     let clicks = 0;
     let bounces = 0;
     let complaints = 0;
+    const recipients: RecipientDelivery[] = [];
 
-    for (const event of job.events) {
-      const metadata = (event.metadata ?? {}) as {
-        accepted?: unknown;
-        rejected?: unknown;
+    for (const groupJob of jobs) {
+      const accepted = new Set<string>();
+      const rejected = new Set<string>();
+
+      for (const event of groupJob.events) {
+        const metadata = (event.metadata ?? {}) as {
+          accepted?: unknown;
+          rejected?: unknown;
+        };
+        if (Array.isArray(metadata.accepted)) {
+          for (const address of metadata.accepted) {
+            accepted.add(String(address).toLowerCase());
+          }
+        }
+        if (Array.isArray(metadata.rejected)) {
+          for (const address of metadata.rejected) {
+            rejected.add(String(address).toLowerCase());
+          }
+        }
+        if (event.type === "OPENED") opens += 1;
+        else if (event.type === "CLICKED") clicks += 1;
+        else if (event.type === "BOUNCED") bounces += 1;
+        else if (event.type === "COMPLAINED") complaints += 1;
+      }
+
+      // Accepted/rejected from the SMTP result decide first; the job status
+      // fills in only for outcomes that never reach SMTP (suppressed,
+      // cancelled) or produced no per-address result (failed).
+      const statusFor = (email: string): RecipientDeliveryStatus => {
+        const key = email.toLowerCase();
+        if (rejected.has(key)) return "rejected";
+        if (accepted.has(key)) return "delivered";
+        if (groupJob.status === "SUPPRESSED") return "suppressed";
+        if (
+          groupJob.status === "FAILED" ||
+          groupJob.status === "CANCELLED"
+        ) {
+          return "failed";
+        }
+        return "pending";
       };
-      if (Array.isArray(metadata.accepted)) {
-        for (const address of metadata.accepted) {
-          accepted.add(String(address).toLowerCase());
-        }
-      }
-      if (Array.isArray(metadata.rejected)) {
-        for (const address of metadata.rejected) {
-          rejected.add(String(address).toLowerCase());
-        }
-      }
-      if (event.type === "OPENED") opens += 1;
-      else if (event.type === "CLICKED") clicks += 1;
-      else if (event.type === "BOUNCED") bounces += 1;
-      else if (event.type === "COMPLAINED") complaints += 1;
+
+      // toEmail is one address per job after fan-out; older jobs may still
+      // carry the legacy comma-joined To set.
+      const toList = groupJob.toEmail
+        .split(",")
+        .map((email) => email.trim())
+        .filter(Boolean);
+
+      recipients.push(
+        ...toList.map((email) => ({
+          email,
+          field: "to" as const,
+          status: statusFor(email)
+        })),
+        ...groupJob.cc.map((email) => ({
+          email,
+          field: "cc" as const,
+          status: statusFor(email)
+        })),
+        ...groupJob.bcc.map((email) => ({
+          email,
+          field: "bcc" as const,
+          status: statusFor(email)
+        }))
+      );
     }
 
-    const jobFailed = job.status === "FAILED";
-    const statusFor = (email: string): RecipientDeliveryStatus => {
-      const key = email.toLowerCase();
-      if (rejected.has(key)) return "rejected";
-      if (accepted.has(key)) return "delivered";
-      if (jobFailed) return "failed";
-      return "pending";
-    };
+    // One aggregate status for the group, chosen so the composer's poll
+    // terminates correctly: stay non-terminal while any job is still moving,
+    // then prefer reporting a send over a failure over a suppression.
+    const TERMINAL = new Set(["SENT", "FAILED", "SUPPRESSED", "CANCELLED"]);
+    const allTerminal = jobs.every((groupJob) =>
+      TERMINAL.has(groupJob.status)
+    );
+    const aggregateStatus = !allTerminal
+      ? jobs.some((groupJob) => groupJob.status === "PROCESSING")
+        ? "PROCESSING"
+        : "QUEUED"
+      : jobs.some((groupJob) => groupJob.status === "SENT")
+        ? "SENT"
+        : jobs.some((groupJob) => groupJob.status === "FAILED")
+          ? "FAILED"
+          : jobs.some((groupJob) => groupJob.status === "CANCELLED")
+            ? "CANCELLED"
+            : "SUPPRESSED";
 
-    // toEmail is the comma-joined deduplicated To set; cc/bcc are arrays.
-    const toList = job.toEmail
-      .split(",")
-      .map((email) => email.trim())
-      .filter(Boolean);
-
-    const recipients: RecipientDelivery[] = [
-      ...toList.map((email) => ({
-        email,
-        field: "to" as const,
-        status: statusFor(email)
-      })),
-      ...job.cc.map((email) => ({
-        email,
-        field: "cc" as const,
-        status: statusFor(email)
-      })),
-      ...job.bcc.map((email) => ({
-        email,
-        field: "bcc" as const,
-        status: statusFor(email)
-      }))
-    ];
+    const sentAtTimes = jobs
+      .map((groupJob) => groupJob.sentAt)
+      .filter((value): value is Date => Boolean(value))
+      .map((value) => value.getTime());
 
     return {
       id: job.id,
-      status: job.status,
-      sentAt: job.sentAt ? job.sentAt.toISOString() : null,
+      status: aggregateStatus,
+      sentAt: sentAtTimes.length
+        ? new Date(Math.max(...sentAtTimes)).toISOString()
+        : null,
       recipients,
       opens,
       clicks,

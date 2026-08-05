@@ -14,7 +14,9 @@ export const unsubscribeService = {
       source: "list-unsubscribe"
     });
     await prisma.contact.updateMany({
-      where: { organizationId, email },
+      // Insensitive: tokens minted before email normalization may carry the
+      // original casing, and pre-normalization contacts may too.
+      where: { organizationId, email: { equals: email, mode: "insensitive" } },
       data: { status: "UNSUBSCRIBED" }
     });
   }

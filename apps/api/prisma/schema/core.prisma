@@ -92,6 +92,11 @@ enum EmailOrigin {
   CAMPAIGN
   TRANSACTIONAL
   MANUAL
+  // Instance-generated mail (password resets, invitations). SYSTEM jobs skip
+  // suppression checks and tracking injection: a user who unsubscribed from
+  // marketing must still receive account mail, and account links must not be
+  // rewritten through the tracking redirect.
+  SYSTEM
 }
 
 enum AbWinnerMetric {
@@ -553,6 +558,15 @@ model EmailJob {
   createdByUserId  String?
   // For A/B campaign sends: which CampaignVariant's subject this job used.
   variantId        String?
+  // Bulk mail (campaign fan-out, recurring sends) carries RFC 8058
+  // List-Unsubscribe headers; transactional, one-off manual, and SYSTEM mail
+  // does not. A flag rather than an origin check so the decision is made where
+  // the job is created, not inferred later in the worker.
+  isBulk           Boolean           @default(false)
+  // Groups the per-recipient jobs of one multi-recipient manual/recurring send
+  // so the composer's delivery panel can aggregate them. NULL for single-job
+  // sends (campaign jobs group via campaignRunId instead).
+  sendGroupId      String?
   status           EmailJobStatus    @default(PENDING)
   // Threading metadata (RFC 5322). `messageId` is the Message-ID assigned to the
   // sent message; `inReplyTo`/`references` let a reply thread correctly in the
@@ -583,6 +597,7 @@ model EmailJob {
   @@unique([organizationId, idempotencyKey])
   @@index([messageId])
   @@index([organizationId, origin])
+  @@index([organizationId, sendGroupId])
   // Newest-first reads scoped to one org: the outbox, the dashboard's recent
   // activity, and the composer's recipient suggestions all page backwards
   // through this table and would otherwise scan every job the org has ever sent.

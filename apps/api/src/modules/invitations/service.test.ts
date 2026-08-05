@@ -1,16 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../../test/prisma-mock.js";
 
-const providerSend = vi.fn().mockResolvedValue({
-  messageId: "m",
-  accepted: [],
-  rejected: [],
-  provider: "smtp"
+// Invite mail rides the shared send pipeline; mock it at that seam.
+const pipelineSend = vi.fn().mockResolvedValue({
+  id: "job_invite",
+  status: "QUEUED"
 });
-vi.mock("../smtp-connections/service.js", () => ({
-  smtpConnectionService: {
-    getProviderForConnection: vi.fn(() => ({ send: providerSend }))
-  }
+vi.mock("../transactional-email/service.js", () => ({
+  transactionalEmailService: { send: pipelineSend }
 }));
 
 const { invitationService } = await import("./service.js");
@@ -28,7 +25,7 @@ const smtpConnection = {
 };
 
 beforeEach(() => {
-  providerSend.mockClear();
+  pipelineSend.mockClear();
 });
 
 describe("invitationService.create", () => {
@@ -61,7 +58,14 @@ describe("invitationService.create", () => {
     // Email is lower-cased before persisting.
     const createArg = prismaMock.organizationInvite.create.mock.calls[0][0];
     expect(createArg.data.email).toBe("new@example.com");
-    expect(providerSend).toHaveBeenCalledOnce();
+    expect(pipelineSend).toHaveBeenCalledOnce();
+    const payload = pipelineSend.mock.calls[0][0];
+    expect(payload.organizationId).toBe("org_1");
+    expect(payload.smtpConnectionId).toBe("smtp_1");
+    // SYSTEM origin: invite mail skips suppression checks and tracking.
+    expect(payload.origin).toBe("SYSTEM");
+    expect(payload.createdByUserId).toBe("user_1");
+    expect(payload.html).toContain("/accept-invite?token=");
   });
 
   it("still returns the invite when no SMTP connection exists", async () => {
@@ -83,7 +87,7 @@ describe("invitationService.create", () => {
     );
 
     expect(result.acceptUrl).toContain("/accept-invite?token=");
-    expect(providerSend).not.toHaveBeenCalled();
+    expect(pipelineSend).not.toHaveBeenCalled();
   });
 
   it("rejects a MEMBER actor with 403", async () => {

@@ -1,17 +1,14 @@
 import type { InputJsonValue } from "@prisma/client/runtime/library";
-import { injectTracking } from "@qqueue/email-engine";
 import type {
   EmailOrigin,
   SendEmailInput,
   TransactionalSendResponse
 } from "@qqueue/shared";
-import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 import { attachmentService } from "../attachments/service.js";
-import { smtpConnectionService } from "../smtp-connections/service.js";
 import { suppressionService } from "../suppressions/service.js";
 import { webhookEndpointService } from "../webhooks/service.js";
 
@@ -27,14 +24,6 @@ function renderVariables(
     const variable = variables[key];
     return variable === undefined || variable === null ? "" : String(variable);
   });
-}
-
-function formatFrom(connection: { fromEmail: string; fromName: string | null }) {
-  if (!connection.fromName) {
-    return connection.fromEmail;
-  }
-
-  return `${connection.fromName} <${connection.fromEmail}>`;
 }
 
 function parseScheduledAt(value: string | undefined) {
@@ -96,8 +85,9 @@ async function createEmailJob(
 /**
  * Internal send options. `origin`/`createdByUserId` are not part of the public
  * API schema: the transactional endpoint leaves them unset (defaults to
- * TRANSACTIONAL), while a future manual-composer route (Phase B) will pass
- * `origin: "MANUAL"` and the authenticated dashboard user.
+ * TRANSACTIONAL); the Email Studio composer passes `origin: "MANUAL"` and the
+ * authenticated dashboard user; instance mail (password resets, invitations)
+ * passes `origin: "SYSTEM"`.
  */
 export type TransactionalSendInput = SendEmailInput & {
   origin?: EmailOrigin;
@@ -105,13 +95,33 @@ export type TransactionalSendInput = SendEmailInput & {
   // Client-supplied retry key (from the `Idempotency-Key` header). When set, a
   // repeat send with the same key for the same org returns the original job.
   idempotencyKey?: string | null;
+  // Internal: groups the per-recipient jobs of one multi-recipient manual send
+  // so delivery status can be aggregated. Set by manualEmailService.send.
+  sendGroupId?: string | null;
+  // Internal: how attachmentIds bind to the created job. "link" (default)
+  // claims the uploaded rows for this job; "copy" clones their metadata onto
+  // this job, for sibling jobs of a fanned-out send whose originals were
+  // already claimed by the first job. Copies are made before the job is
+  // enqueued, so the worker never races an attachment write.
+  attachmentMode?: "link" | "copy";
 };
+
+// Email addresses are case-insensitive in practice; every comparison downstream
+// (suppression lookups, soft-bounce counting, the worker's cc/bcc strip) is an
+// exact string match, so recipients are normalized once at the door.
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
 
 export const transactionalEmailService = {
   async send(
     input: TransactionalSendInput
   ): Promise<TransactionalSendResponse> {
     const idempotencyKey = input.idempotencyKey?.trim() || null;
+
+    const to = normalizeEmail(input.to);
+    const cc = (input.cc ?? []).map(normalizeEmail).filter(Boolean);
+    const bcc = (input.bcc ?? []).map(normalizeEmail).filter(Boolean);
 
     // Idempotency replay: a retry with a key we've already seen for this org
     // returns the original job without doing any work or sending again.
@@ -180,22 +190,28 @@ export const transactionalEmailService = {
 
     // Suppression guard: if the recipient is on the org's "never send" list,
     // record a SUPPRESSED job (not a failure, not delivered) and stop before
-    // enqueuing or sending.
-    if (await suppressionService.isSuppressed(input.organizationId, input.to)) {
+    // enqueuing. SYSTEM mail (password resets, invitations) deliberately
+    // bypasses this: a user who unsubscribed from marketing must still be able
+    // to reset their password. The worker's re-check carries the same bypass.
+    if (
+      origin !== "SYSTEM" &&
+      (await suppressionService.isSuppressed(input.organizationId, to))
+    ) {
       const { job: suppressed } = await createEmailJob(
         {
           organizationId: input.organizationId,
           smtpConnectionId: smtpConnection.id,
           templateId: template?.id,
-          toEmail: input.to,
-          cc: input.cc ?? [],
-          bcc: input.bcc ?? [],
+          toEmail: to,
+          cc,
+          bcc,
           replyTo: input.replyTo,
           inReplyTo: input.inReplyTo,
           references: input.references ?? [],
           idempotencyKey,
           origin,
           createdByUserId: input.createdByUserId,
+          sendGroupId: input.sendGroupId,
           subject,
           html,
           text,
@@ -208,88 +224,33 @@ export const transactionalEmailService = {
       return { id: suppressed.id, status: suppressed.status };
     }
 
-    // Send later: queue the email for a future time instead of sending inline.
-    if (scheduledAt) {
-      const { job: queuedJob, replayed } = await createEmailJob(
-        {
-          organizationId: input.organizationId,
-          smtpConnectionId: smtpConnection.id,
-          templateId: template?.id,
-          toEmail: input.to,
-          cc: input.cc ?? [],
-          bcc: input.bcc ?? [],
-          replyTo: input.replyTo,
-          inReplyTo: input.inReplyTo,
-          references: input.references ?? [],
-          idempotencyKey,
-          origin,
-          createdByUserId: input.createdByUserId,
-          subject,
-          html,
-          text,
-          variables: input.variables as InputJsonValue | undefined,
-          status: "QUEUED",
-          scheduledAt,
-          events: {
-            create: {
-              organizationId: input.organizationId,
-              type: "QUEUED"
-            }
-          }
-        },
-        input.organizationId,
-        idempotencyKey
-      );
-
-      if (replayed) {
-        return { id: queuedJob.id, status: queuedJob.status };
-      }
-
-      await attachmentService.linkToJob(
-        input.attachmentIds,
-        input.organizationId,
-        queuedJob.id
-      );
-
-      await emailSendingQueue.add(
-        "send-email",
-        { emailJobId: queuedJob.id },
-        {
-          delay: Math.max(0, scheduledAt.getTime() - Date.now()),
-          jobId: `email-${queuedJob.id}`,
-          attempts: 3,
-          backoff: { type: "exponential", delay: 30_000 }
-        }
-      );
-
-      await webhookEndpointService.enqueueLatestForEmailEvent({
-        organizationId: input.organizationId,
-        emailJobId: queuedJob.id,
-        type: "QUEUED"
-      });
-
-      return { id: queuedJob.id, status: queuedJob.status };
-    }
-
-    const { job: emailJob, replayed } = await createEmailJob(
+    // Every send is queued: the email-sending worker is the single place SMTP
+    // is spoken, so throttling, suppression re-checks, bounce classification,
+    // retries, and cancellation all apply uniformly. A send without
+    // `scheduledAt` is simply a queued job with no delay. The API's answer is
+    // therefore "accepted", not "delivered" — callers poll the job status (or
+    // consume webhooks) for the outcome.
+    const { job: queuedJob, replayed } = await createEmailJob(
       {
         organizationId: input.organizationId,
         smtpConnectionId: smtpConnection.id,
         templateId: template?.id,
-        toEmail: input.to,
-        cc: input.cc ?? [],
-        bcc: input.bcc ?? [],
+        toEmail: to,
+        cc,
+        bcc,
         replyTo: input.replyTo,
         inReplyTo: input.inReplyTo,
         references: input.references ?? [],
         idempotencyKey,
         origin,
         createdByUserId: input.createdByUserId,
+        sendGroupId: input.sendGroupId,
         subject,
         html,
         text,
         variables: input.variables as InputJsonValue | undefined,
-        status: "PROCESSING",
+        status: "QUEUED",
+        scheduledAt,
         events: {
           create: {
             organizationId: input.organizationId,
@@ -302,104 +263,42 @@ export const transactionalEmailService = {
     );
 
     if (replayed) {
-      return { id: emailJob.id, status: emailJob.status };
+      return { id: queuedJob.id, status: queuedJob.status };
     }
 
-    await attachmentService.linkToJob(
-      input.attachmentIds,
-      input.organizationId,
-      emailJob.id
+    if (input.attachmentMode === "copy") {
+      await attachmentService.copyToJob(
+        input.attachmentIds,
+        input.organizationId,
+        queuedJob.id
+      );
+    } else {
+      await attachmentService.linkToJob(
+        input.attachmentIds,
+        input.organizationId,
+        queuedJob.id
+      );
+    }
+
+    await emailSendingQueue.add(
+      "send-email",
+      { emailJobId: queuedJob.id },
+      {
+        delay: scheduledAt
+          ? Math.max(0, scheduledAt.getTime() - Date.now())
+          : 0,
+        jobId: `email-${queuedJob.id}`,
+        attempts: 3,
+        backoff: { type: "exponential", delay: 30_000 }
+      }
     );
 
     await webhookEndpointService.enqueueLatestForEmailEvent({
       organizationId: input.organizationId,
-      emailJobId: emailJob.id,
+      emailJobId: queuedJob.id,
       type: "QUEUED"
     });
 
-    try {
-      const provider =
-        smtpConnectionService.getProviderForConnection(smtpConnection);
-      const attachments = await attachmentService.loadForJob(emailJob.id);
-      const result = await provider.send({
-        from: formatFrom(smtpConnection),
-        to: input.to,
-        cc: input.cc,
-        bcc: input.bcc,
-        replyTo: input.replyTo,
-        inReplyTo: input.inReplyTo,
-        references: input.references,
-        subject,
-        html: injectTracking(html, {
-          emailJobId: emailJob.id,
-          baseUrl: env.APP_URL,
-          secret: env.TRACKING_SECRET
-        }),
-        text,
-        attachments
-      });
-
-      const sentJob = await prisma.emailJob.update({
-        where: { id: emailJob.id },
-        data: {
-          status: "SENT",
-          sentAt: new Date(),
-          messageId: result.messageId,
-          events: {
-            create: {
-              organizationId: input.organizationId,
-              type: "SENT",
-              metadata: {
-                provider: result.provider,
-                messageId: result.messageId,
-                accepted: result.accepted,
-                rejected: result.rejected
-              }
-            }
-          }
-        }
-      });
-
-      await webhookEndpointService.enqueueLatestForEmailEvent({
-        organizationId: input.organizationId,
-        emailJobId: emailJob.id,
-        type: "SENT"
-      });
-
-      return { id: sentJob.id, status: sentJob.status };
-    } catch (error) {
-      await prisma.emailJob.update({
-        where: { id: emailJob.id },
-        data: {
-          status: "FAILED",
-          events: {
-            create: {
-              organizationId: input.organizationId,
-              type: "FAILED",
-              metadata: {
-                message:
-                  error instanceof Error ? error.message : "Unknown send error"
-              }
-            }
-          }
-        }
-      });
-
-      await webhookEndpointService.enqueueLatestForEmailEvent({
-        organizationId: input.organizationId,
-        emailJobId: emailJob.id,
-        type: "FAILED"
-      });
-
-      const message =
-        error instanceof Error ? error.message : "Unknown send error";
-      throw new HttpError(
-        502,
-        env.NODE_ENV === "production"
-          ? "SMTP send failed"
-          : `SMTP send failed: ${message}`,
-        "smtp_failure"
-      );
-    }
+    return { id: queuedJob.id, status: queuedJob.status };
   }
 };

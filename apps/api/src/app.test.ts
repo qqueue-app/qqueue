@@ -489,21 +489,21 @@ describe("contacts CSV routes", () => {
 });
 
 describe("unsubscribe routes (public)", () => {
-  it("records an unsubscribe and returns an HTML confirmation on GET", async () => {
+  it("GET renders a confirmation page and does NOT unsubscribe", async () => {
+    // Mail clients and scanners prefetch GET links; a mutating GET silently
+    // unsubscribed those recipients. GET must only render the confirm form.
     const token = signUnsubscribeToken(
       { o: "org_1", e: "u@x.com" },
       "test-tracking-secret"
     );
-    prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
-    prismaMock.contact.updateMany.mockResolvedValue({ count: 1 } as never);
 
     const res = await request(app).get(`/api/v1/unsubscribe?token=${token}`);
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
-    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
-      where: { organizationId: "org_1", email: "u@x.com" },
-      data: { status: "UNSUBSCRIBED" }
-    });
+    // The page posts back with the same token.
+    expect(res.text).toContain(`action="/api/v1/unsubscribe?token=`);
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.contact.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns 400 for an invalid GET token without touching the db", async () => {
@@ -512,9 +512,9 @@ describe("unsubscribe routes (public)", () => {
     expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
   });
 
-  it("handles RFC 8058 one-click POST and returns JSON", async () => {
+  it("POST (RFC 8058 one-click or form submit) performs the unsubscribe", async () => {
     const token = signUnsubscribeToken(
-      { o: "org_1", e: "u@x.com" },
+      { o: "org_1", e: "U@x.com" },
       "test-tracking-secret"
     );
     prismaMock.suppression.upsert.mockResolvedValue({ id: "s1" } as never);
@@ -524,7 +524,20 @@ describe("unsubscribe routes (public)", () => {
       .post(`/api/v1/unsubscribe?token=${token}`)
       .send("List-Unsubscribe=One-Click");
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ unsubscribed: true });
+    expect(res.headers["content-type"]).toContain("text/html");
+    // Suppression stored lowercase even for a mixed-case token payload.
+    expect(prismaMock.suppression.upsert.mock.calls[0][0].create).toMatchObject({
+      organizationId: "org_1",
+      email: "u@x.com",
+      reason: "UNSUBSCRIBE"
+    });
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org_1",
+        email: { equals: "U@x.com", mode: "insensitive" }
+      },
+      data: { status: "UNSUBSCRIBED" }
+    });
   });
 
   it("returns 400 for an invalid POST token", async () => {
