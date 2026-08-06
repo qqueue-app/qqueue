@@ -3,30 +3,68 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
+/**
+ * Button.
+ *
+ * Three real variants, in descending loudness:
+ *
+ *   primary    accent background, white text. ONE per view — the main action
+ *              ("Send email", "Save changes"). A second one competes with it
+ *              and the view stops having an obvious next step.
+ *   secondary  surface background, strong border. Everything else.
+ *   ghost      text only. Minor and destructive-adjacent actions.
+ *
+ * `destructive` is a ghost that names its consequence in --err-text; a delete
+ * button that shouts in solid red draws the eye to the one thing nobody should
+ * click by accident.
+ *
+ * Labels are verbs that name the outcome — "Create key", "Invite teammate" —
+ * never "Submit" or "OK".
+ *
+ * `default` and `outline` are aliases kept so the 64 existing call sites keep
+ * compiling while pages migrate; they are not part of the design vocabulary.
+ */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  [
+    "inline-flex items-center justify-center gap-2 whitespace-nowrap",
+    "rounded-control font-medium",
+    "transition-colors duration-fast ease-out",
+    "disabled:pointer-events-none disabled:opacity-50",
+    "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+    /*
+      Touch slop. The button keeps its 36px visual height on desktop, but below
+      the tablet breakpoint the tappable area grows to 44px via an invisible
+      pseudo-element rather than by making the control bigger — the system asks
+      for both, and padding alone cannot deliver them at once.
+    */
+    "relative after:absolute after:inset-x-0 after:top-1/2 after:h-touch",
+    "after:-translate-y-1/2 after:content-[''] sm:after:hidden"
+  ],
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground shadow-sm shadow-primary/20 hover:bg-primary/90",
-        destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
-        outline:
-          "border border-input bg-card shadow-sm hover:bg-accent hover:text-accent-foreground",
+        primary: "bg-primary text-primary-foreground hover:bg-primary-hover",
         secondary:
-          "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline"
+          "border border-border-strong bg-surface text-text hover:bg-surface-sunken",
+        ghost: "text-text-secondary hover:bg-surface-sunken hover:text-text",
+        destructive: "text-err hover:bg-err-bg",
+        link: "text-primary underline-offset-4 hover:underline",
+
+        // ---- Back-compat aliases (pre-migration call sites) ----
+        default: "bg-primary text-primary-foreground hover:bg-primary-hover",
+        outline:
+          "border border-border-strong bg-surface text-text hover:bg-surface-sunken"
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 px-3",
-        lg: "h-11 px-8",
-        icon: "h-10 w-10"
+        // 36px is the system height. `sm` exists for dense toolbars and table
+        // rows; there is deliberately no `lg`.
+        default: "h-control px-4 text-body",
+        sm: "h-8 px-3 text-ui",
+        icon: "h-control w-control"
       }
     },
     defaultVariants: {
-      variant: "default",
+      variant: "primary",
       size: "default"
     }
   }
@@ -38,6 +76,11 @@ export interface ButtonProps
   asChild?: boolean;
 }
 
+/*
+  Note: `type` is deliberately left to the native default. A <button> inside a
+  <form> submits it, and 19 call sites depend on that — overriding it here would
+  quietly turn "Send email" into a no-op.
+*/
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";

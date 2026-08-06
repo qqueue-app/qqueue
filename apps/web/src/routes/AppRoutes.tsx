@@ -109,6 +109,15 @@ const Segments = lazy(() =>
     default: module.Segments,
   }))
 );
+/*
+  The design-system reference page. Dev-only: it documents the foundation for
+  whoever is building on it, and has no place in a production bundle.
+*/
+const DesignSystem = lazy(() =>
+  import("../pages/DesignSystem.js").then((module) => ({
+    default: module.DesignSystem,
+  }))
+);
 const Deliverability = lazy(() =>
   import("../pages/Deliverability.js").then((module) => ({
     default: module.Deliverability,
@@ -136,6 +145,9 @@ export function AppRoutes() {
         <Route path="/forgot-password" element={<Login mode="forgot" />} />
         <Route path="/reset-password" element={<Login mode="reset" />} />
         <Route path="/accept-invite" element={<AcceptInvite />} />
+        {import.meta.env.DEV ? (
+          <Route path="/design-system" element={<DesignSystem />} />
+        ) : null}
         <Route path="/terms" element={<LegalPage kind="terms" />} />
         <Route path="/privacy" element={<LegalPage kind="privacy" />} />
         <Route path="/licensing" element={<LegalPage kind="licensing" />} />

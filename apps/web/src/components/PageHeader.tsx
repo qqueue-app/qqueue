@@ -6,14 +6,18 @@ interface PageHeaderProps {
   actions?: ReactNode;
 }
 
+/**
+ * Page header — 20px title over a 13px description.
+ *
+ * Deliberately not larger: a 32px headline reads as a landing page, and this is
+ * a tool someone opens forty times a day.
+ */
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
-    <div className="flex flex-col gap-4 border-b bg-card/80 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[1.7rem]">
-          {title}
-        </h1>
-        <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
+    <div className="flex flex-col gap-4 border-b border-border px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <h1 className="text-title font-semibold text-text">{title}</h1>
+        <p className="mt-1 max-w-[45rem] text-ui leading-6 text-text-secondary">
           {description}
         </p>
       </div>

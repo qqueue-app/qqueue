@@ -96,7 +96,7 @@ export function RowActions({ actions, rowLabel, className }: RowActionsProps) {
                   key={action.label}
                   disabled={action.disabled}
                   onSelect={action.onSelect}
-                  className="text-destructive focus:text-destructive"
+                  className="text-err focus:text-err"
                 >
                   <Icon />
                   {action.label}

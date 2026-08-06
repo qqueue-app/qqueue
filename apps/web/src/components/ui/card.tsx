@@ -1,12 +1,20 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Card — a surface sitting on the page background, separated by a hairline
+ * rather than by a shadow. The page background is `--bg`, not white, which is
+ * what makes a 1px border enough.
+ *
+ * Cards never nest inside cards. If a card needs internal structure, use a
+ * section title and 24px of space, not a second border.
+ */
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
       className={cn(
-        "rounded-xl border bg-card text-card-foreground shadow-sm shadow-slate-950/[0.03]",
+        "rounded-card border border-border bg-surface text-text shadow-card",
         className
       )}
       {...props}
@@ -21,19 +29,20 @@ const CardHeader = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("flex flex-col space-y-1.5 p-5 sm:p-6", className)}
+    className={cn("flex flex-col gap-1 p-6", className)}
     {...props}
   />
 ));
 CardHeader.displayName = "CardHeader";
 
+/** Section title inside a card — 16px/600. */
 const CardTitle = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("font-semibold leading-tight tracking-tight", className)}
+    className={cn("text-section font-semibold leading-tight text-text", className)}
     {...props}
   />
 ));
@@ -45,7 +54,7 @@ const CardDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
+    className={cn("text-ui text-text-secondary", className)}
     {...props}
   />
 ));
@@ -65,7 +74,7 @@ const CardFooter = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("flex items-center p-6 pt-0", className)}
+    className={cn("flex items-center gap-3 p-6 pt-0", className)}
     {...props}
   />
 ));

@@ -234,8 +234,8 @@ export function DataGrid<TData>({
       {searchable || toolbar || hideableColumns.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           {searchable ? (
-            <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <div className="relative w-full xs:w-field-search">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
               <Input
                 value={globalFilter}
                 onChange={(event) => setGlobalFilter(event.target.value)}
@@ -270,14 +270,14 @@ export function DataGrid<TData>({
                 </IconButton>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-56">
-                <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="px-1 pb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
                   Columns
                 </p>
                 <div className="flex flex-col gap-1">
                   {hideableColumns.map((column) => (
                     <label
                       key={column.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 text-sm hover:bg-accent"
+                      className="flex cursor-pointer items-center gap-2 rounded-control px-1 py-1.5 text-body hover:bg-accent"
                     >
                       <Checkbox
                         checked={column.getIsVisible()}
@@ -296,8 +296,8 @@ export function DataGrid<TData>({
       ) : null}
 
       {enableSelection && selectedRows.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
-          <span className="text-sm font-medium">
+        <div className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-accent px-3 py-2">
+          <span className="text-ui font-medium text-accent-foreground">
             {selectedRows.length} selected
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -310,15 +310,13 @@ export function DataGrid<TData>({
       ) : null}
 
       {loading ? (
-        <div className="space-y-2 rounded-xl border p-4">
+        <div className="space-y-2 rounded-card border border-border p-4">
           {Array.from({ length: 5 }).map((_, index) => (
             <Skeleton key={index} className="h-10 w-full" />
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border">
-          {isFiltered ? (noResults ?? empty) : empty}
-        </div>
+        <div>{isFiltered ? (noResults ?? empty) : empty}</div>
       ) : (
         <>
           {/*
@@ -335,12 +333,12 @@ export function DataGrid<TData>({
                     <button
                       type="button"
                       onClick={() => onRowClick(row.original)}
-                      className="w-full rounded-xl border bg-card p-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="w-full rounded-card border border-border bg-surface p-3 text-left transition-colors duration-fast ease-out hover:bg-surface-sunken"
                     >
                       {renderMobileRow(row.original)}
                     </button>
                   ) : (
-                    <div className="rounded-xl border bg-card p-3">
+                    <div className="rounded-card border border-border bg-surface p-3">
                       {renderMobileRow(row.original)}
                     </div>
                   )}
@@ -350,11 +348,11 @@ export function DataGrid<TData>({
           ) : null}
 
           {renderMobileRow && isMobile ? null : (
-          <div className="relative overflow-x-auto rounded-xl border">
-            <table className="w-full caption-bottom text-sm" aria-label={label}>
-              <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur">
+          <div className="relative overflow-x-auto rounded-card border border-border">
+            <table className="w-full caption-bottom text-ui" aria-label={label}>
+              <thead className="sticky top-0 z-10 bg-surface-sunken">
                 {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id} className="border-b">
+                  <tr key={headerGroup.id} className="border-b border-border">
                     {headerGroup.headers.map((header) => {
                       const meta = header.column.columnDef.meta as
                         | DataGridColumnMeta
@@ -375,7 +373,7 @@ export function DataGrid<TData>({
                                   : undefined
                           }
                           className={cn(
-                            "h-10 whitespace-nowrap px-3 align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground",
+                            "h-10 whitespace-nowrap px-3 align-middle text-meta font-medium uppercase tracking-eyebrow text-text-tertiary",
                             alignmentClass(meta),
                             responsiveClass(meta),
                             meta?.headerClassName
@@ -385,7 +383,7 @@ export function DataGrid<TData>({
                             <button
                               type="button"
                               onClick={header.column.getToggleSortingHandler()}
-                              className="inline-flex items-center gap-1 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              className="inline-flex items-center gap-1 rounded-control transition-colors duration-fast ease-out hover:text-text"
                             >
                               {flexRender(
                                 header.column.columnDef.header,
@@ -420,7 +418,7 @@ export function DataGrid<TData>({
                       onRowClick ? () => onRowClick(row.original) : undefined
                     }
                     className={cn(
-                      "border-b transition-colors last:border-0 hover:bg-muted/50 data-[state=selected]:bg-primary/5",
+                      "border-b border-border transition-colors duration-fast ease-out last:border-0 hover:bg-surface-sunken data-[state=selected]:bg-accent",
                       onRowClick && "cursor-pointer"
                     )}
                   >
@@ -432,7 +430,8 @@ export function DataGrid<TData>({
                         <td
                           key={cell.id}
                           className={cn(
-                            "px-3 py-2.5 align-middle",
+                            "px-3 py-3 align-middle",
+                            meta?.align === "right" && "tabular-nums",
                             alignmentClass(meta),
                             responsiveClass(meta),
                             meta?.cellClassName
@@ -455,8 +454,8 @@ export function DataGrid<TData>({
       )}
 
       {paginated && !loading && table.getPageCount() > 1 ? (
-        <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
-          <span>
+        <div className="flex items-center justify-between gap-2 text-ui text-text-secondary">
+          <span data-numeric>
             Page {table.getState().pagination.pageIndex + 1} of{" "}
             {table.getPageCount()} · {table.getFilteredRowModel().rows.length}{" "}
             {table.getFilteredRowModel().rows.length === 1 ? "row" : "rows"}

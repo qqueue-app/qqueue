@@ -1,44 +1,137 @@
+/*
+  Inter, self-hosted. A CDN <link> would fail in an air-gapped self-hosted
+  install and add a third-party request to every page load of a product whose
+  whole point is that you run it yourself. The variable font covers 450/500/600
+  from one file, which is every weight the design system uses.
+*/
+@import "@fontsource-variable/inter";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+  ============================================================================
+  DESIGN TOKENS — the single source of truth.
+  ============================================================================
+
+  Every colour, radius, and elevation in the app resolves to one of these. A
+  component that needs a value it cannot find here is telling you the scale is
+  missing a step: add it here rather than reaching for a literal.
+
+  Colours are stored as bare HSL triplets (`H S% L%`) rather than hex so they
+  can be consumed as `hsl(var(--token) / <alpha>)` — that is what lets a badge
+  tint itself at 10% opacity without a second token. Tailwind's theme maps every
+  utility onto these; see tailwind.config.ts.
+
+  The palette is warm gray, not blue gray. That is deliberate and easy to undo
+  by accident: `slate`/`zinc` are cooler and will look wrong beside these.
+*/
 @layer base {
   :root {
-    /* Page + surfaces */
-    --background: 150 24% 97%;
-    --foreground: 218 32% 14%;
-    --card: 0 0% 100%;
-    --card-foreground: 221 38% 15%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 221 38% 15%;
+    /* ---- Neutrals ------------------------------------------------------ */
+    --bg: 60 17% 98%; /* #FAFAF8 — app background */
+    --surface: 0 0% 100%; /* #FFFFFF — cards, panels */
+    --surface-sunken: 60 12% 95%; /* #F4F4F1 — inputs, code, table header */
+    --border: 48 9% 90%; /* #E7E6E2 — default hairline */
+    --border-strong: 50 7% 82%; /* #D4D3CE — interactive borders */
+    --text: 140 5% 11%; /* #1A1D1B — primary text */
+    --text-secondary: 144 3% 37%; /* #5C615E — labels, descriptions */
+    --text-tertiary: 132 2% 55%; /* #8B908C — meta, placeholders */
 
-    /* Brand: moss green */
-    --primary: 164 40% 31%;
-    --primary-foreground: 0 0% 100%;
+    /* ---- Brand --------------------------------------------------------- */
+    /* Demoted on purpose: an accent, not a paint bucket. Buttons, active nav,
+       focus rings and small badges only — never a large background. */
+    --accent: 165 50% 24%; /* #1F5C4D */
+    --accent-hover: 166 52% 19%; /* #17493D */
+    --accent-soft: 160 24% 93%; /* #E8F1EE — selected rows, subtle badges */
+    --accent-contrast: 0 0% 100%; /* text on --accent */
 
-    /* Neutral surfaces */
-    --secondary: 150 14% 94%;
-    --secondary-foreground: 218 32% 14%;
-    --muted: 150 14% 94%;
-    --muted-foreground: 215 14% 43%;
-    --accent: 154 24% 92%;
-    --accent-foreground: 164 40% 24%;
+    /* ---- Status -------------------------------------------------------- */
+    /* Paired tinted-bg + dark-text. Both halves are tokens so a badge never has
+       to guess an opacity to stay legible. */
+    --ok-bg: 137 39% 93%;
+    --ok-text: 143 56% 27%;
+    --warn-bg: 39 78% 93%;
+    --warn-text: 37 79% 30%;
+    --err-bg: 6 71% 95%;
+    --err-text: 6 63% 38%;
+    --info-bg: 217 69% 95%;
+    --info-text: 217 60% 41%;
 
-    /* Coral for destructive actions */
-    --destructive: 14 68% 54%;
-    --destructive-foreground: 0 0% 100%;
+    /* ---- Identity tints ------------------------------------------------
+       Avatars need to tell people apart at a glance. The design system doesn't
+       specify a palette for this, so here is the smallest one that works: four
+       tints sharing the neutrals' lightness and the accent's low saturation, so
+       a list of avatars reads as texture rather than as confetti. They carry no
+       status meaning — deliberately not reusing ok/warn/err, which do. */
+    --identity-1-bg: 165 24% 92%;
+    --identity-1-text: 165 45% 28%;
+    --identity-2-bg: 217 34% 93%;
+    --identity-2-text: 217 45% 38%;
+    --identity-3-bg: 39 44% 92%;
+    --identity-3-text: 37 55% 30%;
+    --identity-4-bg: 340 30% 94%;
+    --identity-4-text: 340 40% 38%;
 
-    /* Status tones (shared by badges, setup health, etc.) */
-    --success: 158 64% 30%;
-    --success-foreground: 0 0% 100%;
-    --warning: 32 80% 38%;
-    --warning-foreground: 0 0% 100%;
+    /* ---- Radius -------------------------------------------------------- */
+    /* One radius per element type, everywhere. */
+    --radius-control: 6px; /* inputs, buttons, checkboxes */
+    --radius-card: 10px; /* cards, tables, panels */
+    --radius-dialog: 12px; /* dialogs, sheets, popovers */
+    --radius-pill: 999px; /* badges, avatars, toggles */
 
-    --border: 154 16% 87%;
-    --input: 154 16% 87%;
-    --ring: 164 40% 31%;
+    /* ---- Elevation ----------------------------------------------------- */
+    /* Cards get a hairline and a whisper of shadow — the border does the work.
+       Only overlays get a shadow you can actually see. */
+    --shadow-card: 0 1px 2px hsl(var(--text) / 0.04);
+    --shadow-overlay: 0 8px 24px hsl(var(--text) / 0.1);
 
-    --radius: 0.75rem;
+    /* ---- Motion -------------------------------------------------------- */
+    /* Colour and background transitions only; never slide or scale page content. */
+    --motion-fast: 120ms;
+    --motion-base: 150ms;
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+    /*
+      shadcn/ui compatibility layer.
+
+      Every existing component and page addresses colours through these names
+      (`bg-background`, `text-muted-foreground`, `border-input`, …). Re-pointing
+      them at the tokens above migrates the whole app's vocabulary without a
+      find-and-replace across 18k lines, and keeps this file the only place a
+      colour is decided.
+    */
+    --background: var(--bg);
+    --foreground: var(--text);
+    --card: var(--surface);
+    --card-foreground: var(--text);
+    --popover: var(--surface);
+    --popover-foreground: var(--text);
+    --primary: var(--accent);
+    --primary-foreground: var(--accent-contrast);
+    --secondary: var(--surface-sunken);
+    --secondary-foreground: var(--text);
+    --muted: var(--surface-sunken);
+    --muted-foreground: var(--text-secondary);
+    /*
+      Note the vocabulary mismatch, because it bites: shadcn's `accent` utility
+      means the *soft hover/selected tint*, while the design system's `--accent`
+      means the brand green. tailwind.config.ts therefore maps `bg-primary` to
+      --accent and `bg-accent` to --accent-soft. Point the `accent` utility at
+      the brand instead and every hover surface in the app turns dark green with
+      dark text on it.
+    */
+    --destructive: var(--err-text);
+    --destructive-foreground: var(--accent-contrast);
+    --success: var(--ok-text);
+    --success-foreground: var(--accent-contrast);
+    --warning: var(--warn-text);
+    --warning-foreground: var(--accent-contrast);
+    --info: var(--info-text);
+    --info-foreground: var(--accent-contrast);
+    --input: var(--border-strong);
+    --ring: var(--accent);
 
     color-scheme: light;
   }
@@ -49,16 +142,67 @@
     @apply border-border;
   }
 
+  /*
+    Paint the background on the root element, not just body. In a standalone
+    PWA the overscroll area reveals whatever html is painted — leave it unset
+    and a rubber-band scroll flashes white against a warm-gray app.
+  */
+  html {
+    background-color: hsl(var(--bg));
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
     margin: 0;
     font-family:
-      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-      sans-serif;
+      "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system,
+      BlinkMacSystemFont, "Segoe UI", sans-serif;
+    /* cv11 gives a single-storey lowercase g and ss01 a disambiguated 1/l — both
+       matter in a UI full of addresses, IDs and counts. */
+    font-feature-settings: "cv11", "ss01";
+    font-size: 0.875rem; /* 14px — the body default */
+    line-height: 1.5;
+  }
+
+  /*
+    Tabular numerals wherever digits are meant to line up between rows.
+
+    Proportional figures make a column of counts or timestamps jitter, which
+    reads as sloppiness in a table you scan every day. Applying it structurally
+    here means a component gets it right by default instead of relying on
+    someone remembering a utility class:
+
+      <time>            every timestamp
+      [data-numeric]    opt-in for a value that isn't in one of the above
+      .tabular-nums     Tailwind's utility, for one-off cases
+
+    Prose and headings are deliberately excluded — tabular figures look too
+    wide in running text.
+  */
+  time,
+  [data-numeric],
+  [data-numeric] * {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+    One focus treatment for the entire app.
+
+    `outline` rather than a box-shadow ring: outline follows the element's
+    border-radius, never gets clipped by an ancestor's overflow, and survives
+    on a transformed element. Anything that removes it must replace it.
+  */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 
   ::selection {
-    background: hsl(var(--primary) / 0.18);
+    background: hsl(var(--accent) / 0.18);
+  }
+
+  ::placeholder {
+    color: hsl(var(--text-tertiary));
   }
 }
 
@@ -70,13 +214,13 @@
   .qq-raw-block {
     margin: 0.75rem 0;
     border: 1px dashed hsl(var(--border));
-    border-radius: calc(var(--radius) - 2px);
-    background: hsl(var(--muted) / 0.35);
+    border-radius: var(--radius-control);
+    background: hsl(var(--surface-sunken) / 0.6);
   }
 
   .qq-raw-block--selected {
-    border-color: hsl(var(--primary) / 0.6);
-    box-shadow: 0 0 0 2px hsl(var(--primary) / 0.15);
+    border-color: hsl(var(--accent) / 0.6);
+    box-shadow: 0 0 0 2px hsl(var(--accent) / 0.15);
   }
 
   .qq-raw-block__bar {
@@ -85,7 +229,7 @@
     gap: 0.5rem;
     padding: 0.25rem 0.5rem;
     border-bottom: 1px dashed hsl(var(--border));
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
   }
 
   /* A block that renders nothing — a bare <style> — has no preview under the
@@ -97,24 +241,24 @@
   .qq-raw-block__label {
     margin-right: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: hsl(var(--muted-foreground));
+    color: hsl(var(--text-secondary));
   }
 
   .qq-raw-block__action {
-    border-radius: calc(var(--radius) - 4px);
+    border-radius: var(--radius-control);
     padding: 0.125rem 0.375rem;
-    color: hsl(var(--muted-foreground));
+    color: hsl(var(--text-secondary));
   }
 
   .qq-raw-block__action:hover {
-    background: hsl(var(--accent));
-    color: hsl(var(--accent-foreground));
+    background: hsl(var(--accent-soft));
+    color: hsl(var(--accent));
   }
 
   .qq-raw-block__preview {
     overflow-x: auto;
     padding: 0.5rem;
-    background: hsl(var(--background));
+    background: hsl(var(--bg));
   }
 }
 
@@ -159,12 +303,12 @@
   @keyframes dashboard-splash-node {
     0%,
     100% {
-      border-color: hsl(var(--primary) / 0.2);
+      border-color: hsl(var(--accent) / 0.2);
       transform: translateY(0);
     }
 
     50% {
-      border-color: hsl(var(--primary) / 0.65);
+      border-color: hsl(var(--accent) / 0.65);
       transform: translateY(-5px);
     }
   }
@@ -190,13 +334,20 @@
       transform: translate(-50%, -50%) scale(1.25);
     }
   }
+}
 
-  @media (prefers-reduced-motion: reduce) {
-    .dashboard-splash-mark,
-    .dashboard-splash-node,
-    .dashboard-splash-progress,
-    .dashboard-splash-pulse {
-      animation: none;
-    }
+/*
+  Motion is a courtesy, never a requirement. This is deliberately outside the
+  splash-specific rule it replaces: Radix animates every dialog, sheet, dropdown
+  and drawer via tailwindcss-animate, and none of that was covered before.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

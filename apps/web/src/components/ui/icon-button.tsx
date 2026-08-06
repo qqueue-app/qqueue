@@ -5,22 +5,31 @@ import { cn } from "@/lib/utils";
 import { Hint } from "./tooltip.js";
 
 const iconButtonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center rounded-lg ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  [
+    "relative inline-flex shrink-0 items-center justify-center rounded-control",
+    "transition-colors duration-fast ease-out",
+    "disabled:pointer-events-none disabled:opacity-50",
+    "[&_svg]:pointer-events-none [&_svg]:shrink-0",
+    /*
+      Every size below is smaller than the 44px touch minimum, so the hit area
+      is grown with an invisible pseudo-element instead of by drawing a bigger
+      button. Desktop keeps the compact control; a thumb still gets 44px.
+    */
+    "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
+    "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden",
+  ],
   {
     variants: {
       variant: {
-        ghost: "text-muted-foreground hover:bg-accent hover:text-foreground",
+        ghost: "text-text-secondary hover:bg-surface-sunken hover:text-text",
         outline:
-          "border border-input bg-card text-foreground shadow-sm hover:bg-accent hover:text-accent-foreground",
-        solid:
-          "bg-primary text-primary-foreground shadow-sm shadow-primary/20 hover:bg-primary/90",
-        destructive:
-          "text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+          "border border-border-strong bg-surface text-text hover:bg-surface-sunken",
+        solid: "bg-primary text-primary-foreground hover:bg-primary-hover",
+        destructive: "text-text-secondary hover:bg-err-bg hover:text-err",
       },
       size: {
-        // 44px — the minimum comfortable touch target on mobile.
-        lg: "h-11 w-11 [&_svg]:size-5",
-        md: "h-9 w-9 [&_svg]:size-4",
+        lg: "h-touch w-touch [&_svg]:size-5",
+        md: "h-control w-control [&_svg]:size-4",
         sm: "h-8 w-8 [&_svg]:size-4",
       },
     },

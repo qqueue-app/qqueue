@@ -3,14 +3,21 @@ import type { ReactNode } from "react";
 import { cn } from "../lib/utils.js";
 
 interface EmptyStateProps {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   title: string;
   description?: string;
   action?: ReactNode;
   className?: string;
 }
 
-/** Centered empty state used across list pages and empty tables. */
+/**
+ * Empty state — compact and useful, not a monument.
+ *
+ * One line stating the fact, one line saying what will put content here, one
+ * *secondary* button. Deliberately no bordered container and no icon tile: a
+ * big outlined box with an icon adrift in it makes "you have nothing yet" look
+ * like an error, and the caller usually already sits inside a bordered surface.
+ */
 export function EmptyState({
   icon: Icon,
   title,
@@ -21,22 +28,18 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-12 text-center",
+        "mx-auto flex max-w-[25rem] flex-col items-center gap-2 px-6 py-12 text-center",
         className
       )}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border bg-accent/60 text-primary shadow-sm">
-        <Icon className="h-6 w-6" />
-      </div>
-      <div>
-        <div className="font-medium">{title}</div>
-        {description ? (
-          <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
-            {description}
-          </p>
-        ) : null}
-      </div>
-      {action ? <div className="mt-1">{action}</div> : null}
+      {Icon ? (
+        <Icon className="h-5 w-5 text-text-tertiary" aria-hidden />
+      ) : null}
+      <p className="text-body font-medium text-text">{title}</p>
+      {description ? (
+        <p className="text-ui leading-6 text-text-secondary">{description}</p>
+      ) : null}
+      {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
 }
