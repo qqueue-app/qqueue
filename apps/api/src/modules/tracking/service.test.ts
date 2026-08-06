@@ -8,31 +8,38 @@ describe("trackingService.recordOpen", () => {
   it("does nothing when the email job is unknown", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(null);
     await trackingService.recordOpen("missing");
-    expect(prismaMock.emailEvent.createMany).not.toHaveBeenCalled();
+    expect(prismaMock.emailEvent.create).not.toHaveBeenCalled();
   });
 
-  it("records DELIVERED and OPENED on the first open", async () => {
+  it("records OPENED and never claims delivery", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
-    prismaMock.emailEvent.findFirst.mockResolvedValue(null);
-    prismaMock.emailEvent.createMany.mockResolvedValue({ count: 2 } as never);
+    prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
 
     await trackingService.recordOpen("job_1");
-    const data = prismaMock.emailEvent.createMany.mock.calls[0][0].data as Array<{
-      type: string;
-    }>;
-    expect(data.map((d) => d.type)).toEqual(["DELIVERED", "OPENED"]);
+
+    const created = prismaMock.emailEvent.create.mock.calls.map(
+      (call) => (call[0].data as { type: string }).type
+    );
+    // An open used to synthesize a DELIVERED alongside itself. With no ESP
+    // webhook that made the open pixel the sole author of every DELIVERED row,
+    // so "delivery rate" on the dashboard was the open rate renamed.
+    expect(created).toEqual(["OPENED"]);
+    expect(created).not.toContain("DELIVERED");
   });
 
-  it("records only OPENED when already delivered", async () => {
+  it("records an open every time, not only the first", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(job as never);
-    prismaMock.emailEvent.findFirst.mockResolvedValue({ id: "d1" } as never);
-    prismaMock.emailEvent.createMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
 
     await trackingService.recordOpen("job_1");
-    const data = prismaMock.emailEvent.createMany.mock.calls[0][0].data as Array<{
-      type: string;
-    }>;
-    expect(data.map((d) => d.type)).toEqual(["OPENED"]);
+    await trackingService.recordOpen("job_1");
+
+    // Reporting dedupes to distinct jobs, so the raw log stays complete.
+    expect(prismaMock.emailEvent.create).toHaveBeenCalledTimes(2);
+    const created = prismaMock.emailEvent.create.mock.calls.map(
+      (call) => (call[0].data as { type: string }).type
+    );
+    expect(created).toEqual(["OPENED", "OPENED"]);
   });
 });
 

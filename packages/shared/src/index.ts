@@ -1327,9 +1327,9 @@ export const abTestConfigSchema = z
 
 export type AbTestConfigInput = z.infer<typeof abTestConfigSchema>;
 
-// Phase D — deliverability tooling. A time-windowed view over EmailEvent +
-// Suppression. `from`/`to` are ISO datetimes; the service defaults to the last
-// 30 days when omitted.
+// Phase D — deliverability tooling. A time-windowed view over the send funnel.
+// `from`/`to` are ISO datetimes; the service defaults to the last 30 days when
+// omitted.
 export const deliverabilityQuerySchema = z.object({
   organizationId: z.string().min(1),
   from: z.string().datetime().optional(),
@@ -1339,6 +1339,147 @@ export const deliverabilityQuerySchema = z.object({
 export type DeliverabilityQueryInput = z.infer<
   typeof deliverabilityQuerySchema
 >;
+
+// ---------------------------------------------------------------------------
+// Deliverability reporting contract, shared by apps/api and apps/web.
+//
+// The funnel is counted from EmailJob rows — exactly one per recipient, each
+// carrying a terminal status — and never from EmailEvent totals. Events are
+// many-per-recipient (one address can produce a synchronous SMTP rejection, a
+// later DSN, and an ESP webhook for the same send), they arrive well after the
+// attempt, and for some signals they never arrive at all. Counting them gives a
+// numerator and a denominator that describe different populations: an SMTP
+// rejection writes BOUNCED and no SENT, so 50 rejections out of 100 attempts
+// once rendered as a 100% bounce rate. Jobs don't have that failure mode.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether this organization has ever received delivery confirmation from a
+ * source that actually observes delivery: an ESP webhook, or an RFC 3464 DSN
+ * reporting a `delivered`/`relayed` action.
+ *
+ * A successful SMTP handoff proves the next hop accepted the message, not that
+ * it reached a mailbox — so an install with neither source has *no* delivery
+ * signal, and must be shown that fact rather than a percentage. Notably, an
+ * open is not a delivery source: deriving delivery from the tracking pixel
+ * silently reports the open rate under a delivery label.
+ */
+export type DeliverySignal = "none" | "confirmed";
+
+export interface DeliverabilityOverview {
+  window: { from: string; to: string };
+  deliverySignal: DeliverySignal;
+  totals: {
+    /** Reached a terminal send attempt: SENT + FAILED. The denominator. */
+    attempted: number;
+    sent: number;
+    failed: number;
+    /** Never attempted — on the suppression list, or cancelled before send. */
+    suppressedAtSend: number;
+    cancelled: number;
+    /** Still in flight at query time (PENDING/QUEUED/PROCESSING). */
+    inFlight: number;
+    confirmedDelivered: number;
+    /**
+     * Distinct jobs, not events. A recipient that bounced soft and then hard
+     * counts once here and in both class buckets below, so the three classes
+     * can sum to more than `bounced`.
+     */
+    bounced: number;
+    hardBounced: number;
+    softBounced: number;
+    blockBounced: number;
+    complained: number;
+    opened: number;
+    clicked: number;
+    /** Suppression-list growth in the window, and the list's total size. */
+    suppressedInWindow: number;
+    suppressedTotal: number;
+  };
+  /**
+   * `null` means the denominator was zero, or (for `confirmedDelivery`) that
+   * no delivery signal exists. Render it as "—"; rendering it as 0% claims a
+   * measurement that was never taken.
+   */
+  rates: {
+    accepted: number | null;
+    confirmedDelivery: number | null;
+    bounce: number | null;
+    complaint: number | null;
+    open: number | null;
+    click: number | null;
+  };
+}
+
+export interface DeliverabilityDomainRow {
+  domain: string;
+  attempted: number;
+  sent: number;
+  bounced: number;
+  complained: number;
+  bounceRate: number | null;
+  complaintRate: number | null;
+}
+
+export interface DeliverabilityDomains {
+  domains: DeliverabilityDomainRow[];
+}
+
+export interface ReputationAlert {
+  level: "warning" | "critical";
+  metric: "bounceRate" | "complaintRate";
+  value: number;
+  threshold: number;
+  message: string;
+}
+
+/** The industry red lines that get a sender throttled or blocklisted. */
+export const BOUNCE_RATE_ALERT = 0.05;
+export const COMPLAINT_RATE_ALERT = 0.001;
+
+/**
+ * Below this many attempts the rates are noise — three bounces out of five
+ * sends is 60%, and alerting on it trains people to ignore the banner.
+ */
+export const MIN_ATTEMPTS_FOR_ALERT = 50;
+
+/**
+ * Reputation alerts, derived purely from an overview. Pure so both sides can
+ * run it: the API serves it at `/deliverability/alerts` for external consumers,
+ * and the dashboard derives it from the overview it already fetched instead of
+ * paying for a second full aggregation.
+ */
+export function deriveReputationAlerts(
+  overview: DeliverabilityOverview,
+): ReputationAlert[] {
+  const alerts: ReputationAlert[] = [];
+  if (overview.totals.attempted < MIN_ATTEMPTS_FOR_ALERT) {
+    return alerts;
+  }
+
+  const { bounce, complaint } = overview.rates;
+  if (bounce !== null && bounce > BOUNCE_RATE_ALERT) {
+    alerts.push({
+      level: "critical",
+      metric: "bounceRate",
+      value: bounce,
+      threshold: BOUNCE_RATE_ALERT,
+      message:
+        "Bounce rate is above 5%. Clean your list and verify addresses to protect sender reputation.",
+    });
+  }
+  if (complaint !== null && complaint > COMPLAINT_RATE_ALERT) {
+    alerts.push({
+      level: "critical",
+      metric: "complaintRate",
+      value: complaint,
+      threshold: COMPLAINT_RATE_ALERT,
+      message:
+        "Complaint rate is above 0.1%. Review targeting and unsubscribe handling.",
+    });
+  }
+  return alerts;
+}
 
 export const campaignScheduleSchema = z.object({
   scheduledAt: z.string().datetime(),

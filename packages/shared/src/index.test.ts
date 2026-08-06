@@ -8,6 +8,8 @@ import {
   campaignUpdateSchema,
   contactActivityQuerySchema,
   contactListSchema,
+  deriveReputationAlerts,
+  type DeliverabilityOverview,
   resolveSuppressionPolicy,
   shouldSuppressBounce,
   contactListUpdateSchema,
@@ -1163,5 +1165,80 @@ describe("suppression policy helpers", () => {
         countSoftBouncesSince
       })
     ).resolves.toBe(true);
+  });
+});
+
+describe("deriveReputationAlerts", () => {
+  function overview(
+    attempted: number,
+    rates: Partial<DeliverabilityOverview["rates"]> = {},
+  ): DeliverabilityOverview {
+    return {
+      window: { from: "2026-01-01T00:00:00.000Z", to: "2026-01-31T00:00:00.000Z" },
+      deliverySignal: "none",
+      totals: {
+        attempted,
+        sent: attempted,
+        failed: 0,
+        suppressedAtSend: 0,
+        cancelled: 0,
+        inFlight: 0,
+        confirmedDelivered: 0,
+        bounced: 0,
+        hardBounced: 0,
+        softBounced: 0,
+        blockBounced: 0,
+        complained: 0,
+        opened: 0,
+        clicked: 0,
+        suppressedInWindow: 0,
+        suppressedTotal: 0,
+      },
+      rates: {
+        accepted: 1,
+        confirmedDelivery: null,
+        bounce: 0,
+        complaint: 0,
+        open: 0,
+        click: 0,
+        ...rates,
+      },
+    };
+  }
+
+  it("flags a bounce rate above 5%", () => {
+    const alerts = deriveReputationAlerts(overview(1000, { bounce: 0.06 }));
+    expect(alerts.map((a) => a.metric)).toEqual(["bounceRate"]);
+    expect(alerts[0].level).toBe("critical");
+  });
+
+  it("flags a complaint rate above 0.1%", () => {
+    const alerts = deriveReputationAlerts(overview(1000, { complaint: 0.002 }));
+    expect(alerts.map((a) => a.metric)).toEqual(["complaintRate"]);
+  });
+
+  it("stays quiet exactly at the threshold", () => {
+    expect(deriveReputationAlerts(overview(1000, { bounce: 0.05 }))).toEqual([]);
+    expect(
+      deriveReputationAlerts(overview(1000, { complaint: 0.001 })),
+    ).toEqual([]);
+  });
+
+  it("does not cry wolf below the minimum volume", () => {
+    // 40% of 5 sends is past every line and means nothing.
+    expect(
+      deriveReputationAlerts(overview(5, { bounce: 0.4, complaint: 0.2 })),
+    ).toEqual([]);
+    // ...but the same rate on real volume is a genuine emergency.
+    expect(
+      deriveReputationAlerts(overview(50, { bounce: 0.4, complaint: 0.2 })),
+    ).toHaveLength(2);
+  });
+
+  it("treats a null rate as unmeasured, not as zero", () => {
+    // A rate with no denominator must never be compared against a threshold.
+    expect(
+      deriveReputationAlerts(overview(1000, { bounce: null, complaint: null })),
+    ).toEqual([]);
   });
 });

@@ -410,7 +410,7 @@ describe("applyDsnBounce", () => {
     expect(prismaMock.suppression.upsert).toHaveBeenCalled();
   });
 
-  it("ignores non-failed actions entirely", async () => {
+  it("ignores a delayed action: it is not an outcome yet", async () => {
     await applyDsnBounce({
       organizationId: "org-1",
       inboundMessageId: "in-1",
@@ -429,5 +429,75 @@ describe("applyDsnBounce", () => {
     expect(prismaMock.emailJob.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.emailEvent.create).not.toHaveBeenCalled();
     expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+  });
+
+  // A DSN is the only delivery confirmation a self-hosted install gets without
+  // an ESP webhook. These reports were parsed and discarded, which left the
+  // dashboard with no honest delivery number and the open pixel filling in.
+  it.each(["delivered", "relayed"])(
+    "records a DELIVERED event for a %s report",
+    async (action) => {
+      prismaMock.emailJob.findUnique.mockResolvedValue(jobRow as never);
+
+      await applyDsnBounce({
+        organizationId: "org-1",
+        inboundMessageId: "in-1",
+        threadEmailJobId: "job-1",
+        dsn: dsn({
+          recipients: [
+            { recipient: "bob@example.com", action, status: "2.0.0" },
+          ],
+        }),
+      });
+
+      expect(prismaMock.emailEvent.create).toHaveBeenCalledWith({
+        data: {
+          organizationId: "org-1",
+          emailJobId: "job-1",
+          type: "DELIVERED",
+          metadata: {
+            // The source tag is what separates an observed delivery from the
+            // open-derived rows the reporting must not count.
+            source: "dsn",
+            inboundMessageId: "in-1",
+            correlation: "in-reply-to",
+            finalRecipient: "bob@example.com",
+            action,
+            status: "2.0.0",
+          },
+        },
+      });
+
+      expect(h.enqueueLatestWebhookDeliveries).toHaveBeenCalledWith({
+        organizationId: "org-1",
+        emailJobId: "job-1",
+        type: "DELIVERED",
+      });
+
+      // A delivery is not a bounce: nothing flips status, nothing suppresses.
+      expect(prismaMock.emailJob.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it("drops an uncorrelated delivery report", async () => {
+    // Unlike a bounce, a delivery carries no consequence for the address on its
+    // own, so there is nothing to record when no job matches.
+    prismaMock.emailJob.findUnique.mockResolvedValue(null);
+    prismaMock.emailJob.findFirst.mockResolvedValue(null);
+
+    await applyDsnBounce({
+      organizationId: "org-1",
+      inboundMessageId: "in-1",
+      threadEmailJobId: null,
+      dsn: dsn({
+        recipients: [
+          { recipient: "ghost@example.com", action: "delivered", status: "2.0.0" },
+        ],
+        originalMessageId: null,
+      }),
+    });
+
+    expect(prismaMock.emailEvent.create).not.toHaveBeenCalled();
   });
 });

@@ -501,6 +501,10 @@ describe("campaignService.analytics", () => {
         { type: "DELIVERED", _count: { _all: 78 } },
         { type: "COMPLAINED", _count: { _all: 1 } }
       ] as never)
+      // Confirmed deliveries: distinct jobs with a DELIVERED event from a
+      // source that observes delivery. Fewer than the 78 DELIVERED events
+      // above, because most of those came from the open pixel.
+      .mockResolvedValueOnce([{ emailJobId: "j1" }, { emailJobId: "j2" }] as never)
       .mockResolvedValueOnce([{ emailJobId: "j1" }, { emailJobId: "j2" }] as never)
       .mockResolvedValueOnce([{ emailJobId: "j1" }] as never);
     prismaMock.emailEvent.findMany
@@ -525,7 +529,8 @@ describe("campaignService.analytics", () => {
     expect(result.totals.opened).toBe(40);
     expect(result.totals.uniqueOpened).toBe(2);
     expect(result.totals.uniqueClicked).toBe(1);
-    expect(result.totals.delivered).toBe(78);
+    // Not 78: a bare DELIVERED count includes the open-pixel-derived rows.
+    expect(result.totals.confirmedDelivered).toBe(2);
     expect(result.links).toEqual([
       { url: "https://a.com", clicks: 2 },
       { url: "https://b.com", clicks: 1 }

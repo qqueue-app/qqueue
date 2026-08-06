@@ -1,16 +1,26 @@
+import { Prisma } from "@prisma/client";
+import {
+  type DeliverabilityDomains,
+  type DeliverabilityOverview,
+  type DeliverySignal,
+  deriveReputationAlerts
+} from "@qqueue/shared";
 import { prisma } from "../../lib/prisma.js";
 
-// Reputation alert thresholds. Bounce/complaint rates above these are the
-// industry red lines that get a sender throttled or blocklisted.
-const BOUNCE_RATE_ALERT = 0.05;
-const COMPLAINT_RATE_ALERT = 0.001;
-// Cap on events scanned for the per-domain breakdown; surfaced as `truncated`.
-const DOMAIN_SCAN_CAP = 5000;
+/**
+ * A DELIVERED event only counts as delivery confirmation when it came from a
+ * source that observes delivery. `recordOpen` used to synthesize DELIVERED from
+ * the tracking pixel, which made "delivery rate" a relabelled open rate; those
+ * legacy rows carry no `metadata.source` and are excluded here by construction.
+ */
+const CONFIRMED_DELIVERY_SOURCES = ["webhook", "dsn"] as const;
 
-function recipientDomain(email: string): string {
-  const at = email.lastIndexOf("@");
-  return at === -1 ? "(unknown)" : email.slice(at + 1).toLowerCase();
-}
+const confirmedDeliveryFilter = {
+  type: "DELIVERED" as const,
+  OR: CONFIRMED_DELIVERY_SOURCES.map((source) => ({
+    metadata: { path: ["source"], equals: source }
+  }))
+};
 
 function resolveWindow(input: { from?: string; to?: string }) {
   const to = input.to ? new Date(input.to) : new Date();
@@ -20,151 +30,220 @@ function resolveWindow(input: { from?: string; to?: string }) {
   return { from, to };
 }
 
-const rate = (value: number, total: number) => (total > 0 ? value / total : 0);
+/**
+ * The job cohort for a window: everything whose send attempt happened in it.
+ *
+ * Anchored on the job's own timeline (`sentAt`, falling back to `createdAt` for
+ * jobs that never reached a send) rather than on event timestamps. A DSN that
+ * arrives on Tuesday for Monday's send belongs to Monday's cohort — anchoring
+ * on the event would score it against Tuesday's sends, which is how a numerator
+ * and denominator end up describing different populations.
+ */
+function jobCohort(organizationId: string, from: Date, to: Date) {
+  return {
+    organizationId,
+    OR: [
+      { sentAt: { gte: from, lte: to } },
+      { sentAt: null, createdAt: { gte: from, lte: to } }
+    ]
+  };
+}
+
+/** `null` rather than 0 when there is no denominator — see the shared type. */
+const rate = (value: number, total: number): number | null =>
+  total > 0 ? value / total : null;
+
+/** Distinct *jobs* matching an event filter, never a raw event count. */
+async function distinctJobs(
+  cohort: ReturnType<typeof jobCohort>,
+  where: Prisma.EmailEventWhereInput
+): Promise<number> {
+  const rows = await prisma.emailEvent.groupBy({
+    by: ["emailJobId"],
+    where: { ...where, emailJob: cohort }
+  });
+  return rows.length;
+}
+
+const bounceClass = (bounceType: "HARD" | "SOFT" | "BLOCK") => ({
+  type: "BOUNCED" as const,
+  metadata: { path: ["bounceType"], equals: bounceType }
+});
 
 export const deliverabilityService = {
-  async overview(input: { organizationId: string; from?: string; to?: string }) {
+  async overview(input: {
+    organizationId: string;
+    from?: string;
+    to?: string;
+  }): Promise<DeliverabilityOverview> {
     const { from, to } = resolveWindow(input);
-    const where = {
-      organizationId: input.organizationId,
-      occurredAt: { gte: from, lte: to }
-    };
+    const cohort = jobCohort(input.organizationId, from, to);
 
-    const [byType, hardBounced, softBounced, uniqueOpens, uniqueClicks, suppressed] =
-      await Promise.all([
-        prisma.emailEvent.groupBy({
-          by: ["type"],
-          where,
-          _count: { _all: true }
-        }),
-        prisma.emailEvent.count({
-          where: { ...where, type: "BOUNCED", metadata: { path: ["bounceType"], equals: "HARD" } }
-        }),
-        prisma.emailEvent.count({
-          where: { ...where, type: "BOUNCED", metadata: { path: ["bounceType"], equals: "SOFT" } }
-        }),
-        prisma.emailEvent.groupBy({
-          by: ["emailJobId"],
-          where: { ...where, type: "OPENED" }
-        }),
-        prisma.emailEvent.groupBy({
-          by: ["emailJobId"],
-          where: { ...where, type: "CLICKED" }
-        }),
-        prisma.suppression.count({ where: { organizationId: input.organizationId } })
-      ]);
+    const [
+      byStatus,
+      confirmedDelivered,
+      deliverySource,
+      bounced,
+      hardBounced,
+      softBounced,
+      blockBounced,
+      complained,
+      opened,
+      clicked,
+      suppressedInWindow,
+      suppressedTotal
+    ] = await Promise.all([
+      prisma.emailJob.groupBy({
+        by: ["status"],
+        where: cohort,
+        _count: { _all: true }
+      }),
+      distinctJobs(cohort, confirmedDeliveryFilter),
+      // Org-wide and all-time: distinguishes "no deliveries confirmed in this
+      // window" from "nothing here can confirm a delivery at all".
+      prisma.emailEvent.findFirst({
+        where: { organizationId: input.organizationId, ...confirmedDeliveryFilter },
+        select: { id: true }
+      }),
+      distinctJobs(cohort, { type: "BOUNCED" }),
+      distinctJobs(cohort, bounceClass("HARD")),
+      distinctJobs(cohort, bounceClass("SOFT")),
+      distinctJobs(cohort, bounceClass("BLOCK")),
+      distinctJobs(cohort, { type: "COMPLAINED" }),
+      distinctJobs(cohort, { type: "OPENED" }),
+      distinctJobs(cohort, { type: "CLICKED" }),
+      prisma.suppression.count({
+        where: {
+          organizationId: input.organizationId,
+          createdAt: { gte: from, lte: to }
+        }
+      }),
+      prisma.suppression.count({ where: { organizationId: input.organizationId } })
+    ]);
 
-    const counts = Object.fromEntries(
-      byType.map((row: { type: string; _count: { _all: number } }) => [
-        row.type,
+    const jobs = Object.fromEntries(
+      byStatus.map((row: { status: string; _count: { _all: number } }) => [
+        row.status,
         row._count._all
       ])
     ) as Partial<Record<string, number>>;
 
-    const sent = counts.SENT ?? 0;
-    const delivered = counts.DELIVERED ?? 0;
-    const bounced = counts.BOUNCED ?? 0;
-    const complained = counts.COMPLAINED ?? 0;
+    const sent = jobs.SENT ?? 0;
+    const failed = jobs.FAILED ?? 0;
+    // Suppressed and cancelled recipients were never attempted, so they belong
+    // in neither the numerator nor the denominator of a delivery rate.
+    const suppressedAtSend = jobs.SUPPRESSED ?? 0;
+    const cancelled = jobs.CANCELLED ?? 0;
+    const inFlight =
+      (jobs.PENDING ?? 0) + (jobs.QUEUED ?? 0) + (jobs.PROCESSING ?? 0);
+    const attempted = sent + failed;
+
+    const deliverySignal: DeliverySignal = deliverySource ? "confirmed" : "none";
 
     return {
       window: { from: from.toISOString(), to: to.toISOString() },
+      deliverySignal,
       totals: {
+        attempted,
         sent,
-        delivered,
-        opened: uniqueOpens.length,
-        clicked: uniqueClicks.length,
+        failed,
+        suppressedAtSend,
+        cancelled,
+        inFlight,
+        confirmedDelivered,
         bounced,
         hardBounced,
         softBounced,
+        blockBounced,
         complained,
-        suppressed
+        opened,
+        clicked,
+        suppressedInWindow,
+        suppressedTotal
       },
       rates: {
-        delivery: rate(delivered, sent),
-        bounce: rate(bounced, sent),
-        complaint: rate(complained, sent),
-        open: rate(uniqueOpens.length, sent),
-        click: rate(uniqueClicks.length, sent)
+        accepted: rate(sent, attempted),
+        confirmedDelivery:
+          deliverySignal === "none" ? null : rate(confirmedDelivered, sent),
+        bounce: rate(bounced, attempted),
+        complaint: rate(complained, attempted),
+        open: rate(opened, sent),
+        click: rate(clicked, sent)
       }
     };
   },
 
-  /** Per-recipient-domain event breakdown. Bounded by DOMAIN_SCAN_CAP. */
-  async domains(input: { organizationId: string; from?: string; to?: string }) {
+  /**
+   * Per-recipient-domain funnel, aggregated in Postgres.
+   *
+   * Grouped in SQL rather than by scanning events in Node. The old scan took
+   * the newest 5,000 events of *every* type, so opens and clicks consumed the
+   * cap, and because the slice was time-ordered a domain's later bounces could
+   * survive while its earlier sends were cut — leaving `bounced / 0`, which the
+   * rate helper rendered as a reassuring 0.0% on the worst domain in the table.
+   */
+  async domains(input: {
+    organizationId: string;
+    from?: string;
+    to?: string;
+  }): Promise<DeliverabilityDomains> {
     const { from, to } = resolveWindow(input);
-    const events = await prisma.emailEvent.findMany({
-      where: {
-        organizationId: input.organizationId,
-        occurredAt: { gte: from, lte: to }
-      },
-      select: { type: true, emailJob: { select: { toEmail: true } } },
-      orderBy: { occurredAt: "desc" },
-      take: DOMAIN_SCAN_CAP + 1
-    });
 
-    const truncated = events.length > DOMAIN_SCAN_CAP;
-    const scanned = truncated ? events.slice(0, DOMAIN_SCAN_CAP) : events;
+    const rows = await prisma.$queryRaw<
+      Array<{
+        domain: string;
+        attempted: bigint;
+        sent: bigint;
+        bounced: bigint;
+        complained: bigint;
+      }>
+    >(Prisma.sql`
+      SELECT
+        COALESCE(NULLIF(split_part(lower(j."toEmail"), '@', 2), ''), '(unknown)')
+          AS domain,
+        COUNT(*) FILTER (WHERE j.status IN ('SENT', 'FAILED')) AS attempted,
+        COUNT(*) FILTER (WHERE j.status = 'SENT') AS sent,
+        COUNT(*) FILTER (WHERE EXISTS (
+          SELECT 1 FROM "EmailEvent" e
+          WHERE e."emailJobId" = j.id AND e.type = 'BOUNCED'
+        )) AS bounced,
+        COUNT(*) FILTER (WHERE EXISTS (
+          SELECT 1 FROM "EmailEvent" e
+          WHERE e."emailJobId" = j.id AND e.type = 'COMPLAINED'
+        )) AS complained
+      FROM "EmailJob" j
+      WHERE j."organizationId" = ${input.organizationId}
+        AND (
+          (j."sentAt" >= ${from} AND j."sentAt" <= ${to})
+          OR (j."sentAt" IS NULL AND j."createdAt" >= ${from} AND j."createdAt" <= ${to})
+        )
+      GROUP BY 1
+      HAVING COUNT(*) FILTER (WHERE j.status IN ('SENT', 'FAILED')) > 0
+      ORDER BY attempted DESC, domain ASC
+    `);
 
-    const byDomain = new Map<
-      string,
-      { sent: number; delivered: number; bounced: number; complained: number }
-    >();
-    for (const event of scanned) {
-      const domain = recipientDomain(event.emailJob.toEmail);
-      const row =
-        byDomain.get(domain) ??
-        { sent: 0, delivered: 0, bounced: 0, complained: 0 };
-      if (event.type === "SENT") row.sent += 1;
-      else if (event.type === "DELIVERED") row.delivered += 1;
-      else if (event.type === "BOUNCED") row.bounced += 1;
-      else if (event.type === "COMPLAINED") row.complained += 1;
-      byDomain.set(domain, row);
-    }
-
-    const domains = [...byDomain.entries()]
-      .map(([domain, row]) => ({
-        domain,
-        ...row,
-        bounceRate: rate(row.bounced, row.sent),
-        complaintRate: rate(row.complained, row.sent)
-      }))
-      .sort((a, b) => b.sent - a.sent);
-
-    return { truncated, domains };
+    return {
+      domains: rows.map((row) => {
+        const attempted = Number(row.attempted);
+        const bounced = Number(row.bounced);
+        const complained = Number(row.complained);
+        return {
+          domain: row.domain,
+          attempted,
+          sent: Number(row.sent),
+          bounced,
+          complained,
+          bounceRate: rate(bounced, attempted),
+          complaintRate: rate(complained, attempted)
+        };
+      })
+    };
   },
 
-  /** Structured reputation alerts derived from the overview rates. */
+  /** Structured reputation alerts. Served for API consumers; the dashboard
+   * derives the same list from the overview it already has. */
   async alerts(input: { organizationId: string; from?: string; to?: string }) {
     const overview = await this.overview(input);
-    const alerts: Array<{
-      level: "warning" | "critical";
-      metric: string;
-      value: number;
-      threshold: number;
-      message: string;
-    }> = [];
-
-    if (overview.rates.bounce > BOUNCE_RATE_ALERT) {
-      alerts.push({
-        level: "critical",
-        metric: "bounceRate",
-        value: overview.rates.bounce,
-        threshold: BOUNCE_RATE_ALERT,
-        message:
-          "Bounce rate is above 5%. Clean your list and verify addresses to protect sender reputation."
-      });
-    }
-    if (overview.rates.complaint > COMPLAINT_RATE_ALERT) {
-      alerts.push({
-        level: "critical",
-        metric: "complaintRate",
-        value: overview.rates.complaint,
-        threshold: COMPLAINT_RATE_ALERT,
-        message:
-          "Complaint rate is above 0.1%. Review targeting and unsubscribe handling."
-      });
-    }
-
-    return { alerts };
+    return { alerts: deriveReputationAlerts(overview) };
   }
 };

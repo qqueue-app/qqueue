@@ -313,49 +313,127 @@ export interface Segment {
   createdAt?: string;
 }
 
+// Mirrors the deliverability contract in @qqueue/shared; kept local so the web
+// app stays free of the shared package (and its Zod bundle), the same way
+// `components/editor/starters.ts` mirrors STARTER_TEMPLATES.
+//
+// The funnel these describe is counted from EmailJob rows — one per recipient,
+// each with a terminal status — never from EmailEvent totals. Events are
+// many-per-recipient and arrive late, so counting them gave a numerator and
+// denominator describing different populations.
+
+/**
+ * Whether the org has ever had a delivery confirmed by something that observes
+ * delivery: an ESP webhook, or a DSN. A successful SMTP handoff proves the next
+ * hop accepted the message, not that it reached a mailbox — and an open is not
+ * a delivery source, however tempting the inference.
+ */
+export type DeliverySignal = "none" | "confirmed";
+
 export interface DeliverabilityOverview {
   window: { from: string; to: string };
+  deliverySignal: DeliverySignal;
   totals: {
+    /** Reached a terminal send attempt: SENT + FAILED. The denominator. */
+    attempted: number;
     sent: number;
-    delivered: number;
-    opened: number;
-    clicked: number;
+    failed: number;
+    /** Never attempted — suppressed, or cancelled before send. */
+    suppressedAtSend: number;
+    cancelled: number;
+    inFlight: number;
+    confirmedDelivered: number;
+    /** Distinct jobs, not events: one recipient can bounce more than once. */
     bounced: number;
     hardBounced: number;
     softBounced: number;
+    blockBounced: number;
     complained: number;
-    suppressed: number;
+    opened: number;
+    clicked: number;
+    suppressedInWindow: number;
+    suppressedTotal: number;
   };
+  /** `null` means no denominator, or no delivery signal. Render it as "—". */
   rates: {
-    delivery: number;
-    bounce: number;
-    complaint: number;
-    open: number;
-    click: number;
+    accepted: number | null;
+    confirmedDelivery: number | null;
+    bounce: number | null;
+    complaint: number | null;
+    open: number | null;
+    click: number | null;
   };
+}
+
+export interface DeliverabilityDomainRow {
+  domain: string;
+  attempted: number;
+  sent: number;
+  bounced: number;
+  complained: number;
+  bounceRate: number | null;
+  complaintRate: number | null;
 }
 
 export interface DeliverabilityDomains {
-  truncated: boolean;
-  domains: Array<{
-    domain: string;
-    sent: number;
-    delivered: number;
-    bounced: number;
-    complained: number;
-    bounceRate: number;
-    complaintRate: number;
-  }>;
+  domains: DeliverabilityDomainRow[];
+}
+
+export interface ReputationAlert {
+  level: "warning" | "critical";
+  metric: "bounceRate" | "complaintRate";
+  value: number;
+  threshold: number;
+  message: string;
 }
 
 export interface DeliverabilityAlerts {
-  alerts: Array<{
-    level: "warning" | "critical";
-    metric: string;
-    value: number;
-    threshold: number;
-    message: string;
-  }>;
+  alerts: ReputationAlert[];
+}
+
+/** Keep in step with the same constants in @qqueue/shared. */
+const BOUNCE_RATE_ALERT = 0.05;
+const COMPLAINT_RATE_ALERT = 0.001;
+const MIN_ATTEMPTS_FOR_ALERT = 50;
+
+/**
+ * Reputation alerts, derived from an overview the page already has. The API
+ * serves the same list at `/deliverability/alerts` for external consumers, but
+ * that endpoint recomputes the whole aggregation to produce it — asking for
+ * both doubled the query cost of every dashboard load.
+ */
+export function deriveReputationAlerts(
+  overview: DeliverabilityOverview
+): ReputationAlert[] {
+  const alerts: ReputationAlert[] = [];
+  // Below this volume the rates are noise: 3 bounces out of 5 is 60%, and
+  // alerting on it trains people to ignore the banner.
+  if (overview.totals.attempted < MIN_ATTEMPTS_FOR_ALERT) {
+    return alerts;
+  }
+
+  const { bounce, complaint } = overview.rates;
+  if (bounce !== null && bounce > BOUNCE_RATE_ALERT) {
+    alerts.push({
+      level: "critical",
+      metric: "bounceRate",
+      value: bounce,
+      threshold: BOUNCE_RATE_ALERT,
+      message:
+        "Bounce rate is above 5%. Clean your list and verify addresses to protect sender reputation."
+    });
+  }
+  if (complaint !== null && complaint > COMPLAINT_RATE_ALERT) {
+    alerts.push({
+      level: "critical",
+      metric: "complaintRate",
+      value: complaint,
+      threshold: COMPLAINT_RATE_ALERT,
+      message:
+        "Complaint rate is above 0.1%. Review targeting and unsubscribe handling."
+    });
+  }
+  return alerts;
 }
 
 export interface TemplateVariable {
@@ -677,7 +755,8 @@ export interface CampaignAnalytics {
     recipients: number;
     sent: number;
     failed: number;
-    delivered: number;
+    /** Only from sources that observe delivery (ESP webhook / DSN). */
+    confirmedDelivered: number;
     opened: number;
     uniqueOpened: number;
     clicked: number;

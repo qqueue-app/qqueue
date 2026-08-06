@@ -426,6 +426,7 @@ export const campaignService = {
       sent,
       failed,
       byType,
+      confirmedDeliveries,
       uniqueOpens,
       uniqueClicks,
       clickEvents,
@@ -438,6 +439,20 @@ export const campaignService = {
         by: ["type"],
         where,
         _count: { _all: true }
+      }),
+      // Distinct jobs with a DELIVERED event from a source that observes
+      // delivery. A bare DELIVERED is not enough: the open pixel used to
+      // synthesize one, so counting every DELIVERED reported the open rate.
+      prisma.emailEvent.groupBy({
+        by: ["emailJobId"],
+        where: {
+          ...where,
+          type: "DELIVERED",
+          OR: [
+            { metadata: { path: ["source"], equals: "webhook" } },
+            { metadata: { path: ["source"], equals: "dsn" } }
+          ]
+        }
       }),
       prisma.emailEvent.groupBy({ by: ["emailJobId"], where: { ...where, type: "OPENED" } }),
       prisma.emailEvent.groupBy({ by: ["emailJobId"], where: { ...where, type: "CLICKED" } }),
@@ -526,7 +541,7 @@ export const campaignService = {
         recipients,
         sent,
         failed,
-        delivered: counts.DELIVERED ?? 0,
+        confirmedDelivered: confirmedDeliveries.length,
         opened,
         uniqueOpened,
         clicked,

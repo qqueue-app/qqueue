@@ -416,14 +416,79 @@ run never settles while the remainder is held.
 
 ## Deliverability Tooling Reads Existing Events; No New Writes (Phase D5)
 
-The deliverability dashboards are pure aggregation over `EmailEvent` +
-`Suppression` — no new send-path writes or tables. The overview and alerts use
-efficient `groupBy`/`count` queries (including a hard/soft split via the
-`metadata.bounceType` written in D1). The per-domain breakdown has no indexable
-domain column, so it aggregates events in memory bounded by a scan cap and
-returns a `truncated` flag rather than silently capping. Reputation alerts are
-derived against fixed thresholds (bounce > 5%, complaint > 0.1%) and the view is
-restricted to OWNER/ADMIN, like queue operations.
+The deliverability dashboards are pure aggregation — no new tables. Reputation
+alerts are derived against fixed thresholds (bounce > 5%, complaint > 0.1%) and
+the view is restricted to OWNER/ADMIN, like queue operations.
+
+The funnel was originally aggregated over `EmailEvent` counts. It is now
+counted from `EmailJob` rows; see the entry below for why.
+
+## The Send Funnel Is Counted From Jobs, and Delivery Is Only Ever Reported
+
+`EmailEvent` is the wrong unit for a rate, and using it produced numbers that
+were not merely imprecise but backwards.
+
+**Events are many-per-recipient.** One address can emit a synchronous SMTP
+rejection, a later DSN, and an ESP webhook for a single send. **They arrive
+after the attempt**, so a window filtered on `occurredAt` scores Tuesday's DSN
+against Tuesday's sends rather than Monday's. And critically, **an SMTP
+rejection writes `BOUNCED` and never writes `SENT`** — the send worker returns
+before the success path. Dividing bounce events by sent events therefore
+removed the failures from the very population they were divided by: 50
+rejections out of 100 attempts rendered as a **100% bounce rate**.
+
+The funnel is now a **job cohort**. `EmailJob` is exactly one row per recipient
+with a terminal status, anchored on `sentAt` (falling back to `createdAt` for
+jobs that never reached a send), so a late DSN scores against the window its
+send belongs to. `attempted` is `SENT + FAILED`; suppressed and cancelled
+recipients were never attempted and appear on neither side of a rate. Events are
+still the source for bounce classes and engagement, but always counted as
+**distinct jobs**, never as rows.
+
+**Delivery is reported only by sources that observe it.** `recordOpen` used to
+synthesize a one-time `DELIVERED` alongside the first open, reasoning that an
+open implies delivery. It does — but with no ESP webhook configured, which is
+the normal self-hosted case, that line was the *only* author of `DELIVERED` in
+the entire system. "Delivery rate" was the open rate wearing another label, and
+a healthy server reporting 24% read as though three quarters of its mail had
+failed. The pixel no longer claims delivery; consumers who want the open signal
+already get `OPENED`.
+
+That leaves two honest surfaces, and one honest absence:
+
+- **Accepted by server** (`SENT / attempted`) — genuinely knowable from SMTP,
+  and what "did it go out" actually asks. It is not delivery: it means the next
+  hop took the message.
+- **Confirmed delivered** — distinct jobs with a `DELIVERED` event carrying
+  `metadata.source` of `webhook` or `dsn`. The source tag is load-bearing; it is
+  also what excludes the legacy open-derived rows, which carry no metadata.
+- **`deliverySignal: "none"`** — when the org has never received a confirmation
+  from either source, the API returns `null` for the rate and the dashboard says
+  no confirmation source is configured. A dash is the correct answer to a
+  question nobody measured; 0% is a lie and 100% is a worse one.
+
+DSNs became a real delivery source in the same pass: `applyDsnBounce` parsed
+`delivered` and `relayed` actions and discarded them, which is why nothing but
+the pixel was left to fill the gap.
+
+Three supporting choices:
+
+- **Rates are `number | null`.** A rate with no denominator returns `null` and
+  renders as "—". The old helper returned `0`, which is how a domain with 40
+  bounces and no surviving sends displayed a reassuring `0.0%` bounce rate.
+- **Alerts have a minimum volume** (50 attempts). Two bounces out of five is
+  40%, far past the red line, and means nothing; alerting on it teaches people
+  to ignore the banner.
+- **The per-domain breakdown aggregates in Postgres** (`split_part` on the
+  recipient address), replacing an in-memory scan capped at 5,000 events. The
+  cap was consumed by opens and clicks, and because the slice was ordered by
+  time a domain's later bounces survived while its earlier sends were cut. The
+  `truncated` flag that reported this is gone because the truncation is gone.
+
+`EmailEvent` also carried **no indexes at all** — foreign keys don't create them
+in Postgres — so every tile, every campaign analytics panel, and the per-open
+lookup on the tracking hot path were sequential scans of the largest table in
+the schema.
 
 ## Inbox Stays Conversation-Focused
 

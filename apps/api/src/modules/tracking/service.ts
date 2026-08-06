@@ -34,44 +34,32 @@ async function findJob(emailJobId: string) {
 }
 
 export const trackingService = {
-  /** Record an open (and a one-time DELIVERED, since an open implies delivery). */
+  /**
+   * Record an open. An open is an open — it does not also record DELIVERED.
+   *
+   * This used to synthesize a one-time DELIVERED alongside the first open, on
+   * the reasoning that an open implies delivery. It does, but the converse is
+   * what the reporting then assumed: with no ESP webhook configured (the normal
+   * self-hosted case) the *only* author of DELIVERED was this line, so the
+   * deliverability dashboard's "delivery rate" was the open rate wearing
+   * another label, and read as though most mail had failed. Delivery is
+   * reported only from sources that observe it — an ESP webhook, or a DSN.
+   * Consumers who want the open signal already receive the OPENED event.
+   */
   async recordOpen(emailJobId: string) {
     const job = await findJob(emailJobId);
     if (!job) {
       return;
     }
 
-    const delivered = await prisma.emailEvent.findFirst({
-      where: { emailJobId, type: "DELIVERED" },
-      select: { id: true }
-    });
-
-    await prisma.emailEvent.createMany({
-      data: [
-        ...(delivered
-          ? []
-          : [
-              {
-                organizationId: job.organizationId,
-                emailJobId,
-                type: "DELIVERED" as const
-              }
-            ]),
-        {
-          organizationId: job.organizationId,
-          emailJobId,
-          type: "OPENED" as const
-        }
-      ]
-    });
-
-    if (!delivered) {
-      await webhookEndpointService.enqueueLatestForEmailEvent({
+    await prisma.emailEvent.create({
+      data: {
         organizationId: job.organizationId,
         emailJobId,
-        type: "DELIVERED"
-      });
-    }
+        type: "OPENED"
+      }
+    });
+
     await webhookEndpointService.enqueueLatestForEmailEvent({
       organizationId: job.organizationId,
       emailJobId,

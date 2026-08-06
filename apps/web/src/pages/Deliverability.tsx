@@ -1,10 +1,10 @@
-import { FormEvent, useEffect, useState } from "react";
-import { AlertTriangle, Gauge, Plus, Trash2 } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Gauge, Info, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import {
   api,
-  type DeliverabilityAlerts,
+  deriveReputationAlerts,
   type DeliverabilityDomains,
   type DeliverabilityOverview,
   type DomainThrottle
@@ -25,12 +25,17 @@ import {
   TableRow
 } from "../components/ui/table.js";
 
-const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
+/**
+ * A rate of `null` has no denominator — no sends, or no delivery signal at all.
+ * It renders as an em dash: showing 0.0% would claim a measurement nobody took,
+ * which is the failure mode this whole page was rebuilt to avoid.
+ */
+const pct = (value: number | null) =>
+  value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 
 export function Deliverability() {
   const { currentOrganizationId: organizationId } = useSession();
   const [overview, setOverview] = useState<DeliverabilityOverview | null>(null);
-  const [alerts, setAlerts] = useState<DeliverabilityAlerts["alerts"]>([]);
   const [domains, setDomains] = useState<DeliverabilityDomains | null>(null);
   const [throttles, setThrottles] = useState<DomainThrottle[]>([]);
   const [defaultPerMinute, setDefaultPerMinute] = useState<number>(60);
@@ -49,16 +54,17 @@ export function Deliverability() {
     }
     setLoading(true);
     try {
-      const [overviewData, alertsData, domainsData, policy, throttleData] =
+      // Alerts are derived from the overview rather than fetched: the endpoint
+      // recomputes the entire overview aggregation to produce them, so asking
+      // for both doubled the query cost for a list we can compute here.
+      const [overviewData, domainsData, policy, throttleData] =
         await Promise.all([
           api.deliverabilityOverview(organizationId),
-          api.deliverabilityAlerts(organizationId),
           api.deliverabilityDomains(organizationId),
           api.getSuppressionPolicy(organizationId),
           api.listDomainThrottles(organizationId)
         ]);
       setOverview(overviewData);
-      setAlerts(alertsData.alerts);
       setDomains(domainsData);
       setThreshold(String(policy.softBounceThreshold));
       setWindowDays(String(policy.softBounceWindowDays));
@@ -76,6 +82,11 @@ export function Deliverability() {
   useEffect(() => {
     void load();
   }, [organizationId]);
+
+  const alerts = useMemo(
+    () => (overview ? deriveReputationAlerts(overview) : []),
+    [overview]
+  );
 
   async function savePolicy(event: FormEvent) {
     event.preventDefault();
@@ -155,63 +166,145 @@ export function Deliverability() {
             )}
 
             {overview && (
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                {[
-                  { label: "Sent", value: String(overview.totals.sent) },
-                  { label: "Delivery rate", value: pct(overview.rates.delivery) },
-                  { label: "Bounce rate", value: pct(overview.rates.bounce) },
-                  {
-                    label: "Complaint rate",
-                    value: pct(overview.rates.complaint)
-                  },
-                  { label: "Opens", value: String(overview.totals.opened) },
-                  { label: "Clicks", value: String(overview.totals.clicked) },
-                  {
-                    label: "Hard / soft bounces",
-                    value: `${overview.totals.hardBounced} / ${overview.totals.softBounced}`
-                  },
-                  {
-                    label: "Suppressed",
-                    value: String(overview.totals.suppressed)
-                  }
-                ].map((stat) => (
-                  <Card key={stat.label} className="p-4">
-                    <div className="text-xs text-muted-foreground">
-                      {stat.label}
-                    </div>
-                    <div className="mt-1 text-2xl font-semibold">
-                      {stat.value}
-                    </div>
+              <>
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                  {[
+                    {
+                      label: "Attempted",
+                      value: String(overview.totals.attempted),
+                      hint: "Recipients your server tried to send to."
+                    },
+                    {
+                      label: "Accepted by server",
+                      value: pct(overview.rates.accepted),
+                      hint: "Handed off to the next hop without rejection."
+                    },
+                    {
+                      label: "Confirmed delivered",
+                      value:
+                        overview.deliverySignal === "none"
+                          ? "—"
+                          : pct(overview.rates.confirmedDelivery),
+                      hint:
+                        overview.deliverySignal === "none"
+                          ? "No delivery confirmation source configured."
+                          : "Confirmed by an ESP webhook or a delivery notification."
+                    },
+                    {
+                      label: "Bounce rate",
+                      value: pct(overview.rates.bounce),
+                      hint: `${overview.totals.bounced} of ${overview.totals.attempted} attempted`
+                    },
+                    {
+                      label: "Complaint rate",
+                      value: pct(overview.rates.complaint),
+                      hint: `${overview.totals.complained} marked as spam`
+                    },
+                    {
+                      label: "Open rate",
+                      value: pct(overview.rates.open),
+                      hint: `${overview.totals.opened} of ${overview.totals.sent} sent`
+                    },
+                    {
+                      label: "Click rate",
+                      value: pct(overview.rates.click),
+                      hint: `${overview.totals.clicked} of ${overview.totals.sent} sent`
+                    },
+                    {
+                      label: "Hard / soft / block",
+                      value: `${overview.totals.hardBounced} / ${overview.totals.softBounced} / ${overview.totals.blockBounced}`,
+                      hint: "Bounces by class."
+                    }
+                  ].map((stat) => (
+                    <Card key={stat.label} className="p-4">
+                      <div className="text-xs text-muted-foreground">
+                        {stat.label}
+                      </div>
+                      <div className="mt-1 text-2xl font-semibold">
+                        {stat.value}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {stat.hint}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* An install with no ESP webhook and no DSNs cannot observe
+                    delivery at all. Saying so is the honest alternative to
+                    printing a number derived from open tracking. */}
+                {overview.deliverySignal === "none" && (
+                  <Card className="flex items-start gap-2 p-4 text-sm text-muted-foreground">
+                    <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p>
+                      <span className="font-medium text-foreground">
+                        No delivery confirmation yet.
+                      </span>{" "}
+                      A successful SMTP handoff means the next server accepted
+                      the message, not that it reached the mailbox. Confirmed
+                      delivery appears once an ESP posts delivery webhooks to
+                      QQueue, or once your inbox account starts receiving
+                      delivery notifications. Until then, use{" "}
+                      <span className="font-medium text-foreground">
+                        accepted
+                      </span>{" "}
+                      and{" "}
+                      <span className="font-medium text-foreground">
+                        bounce rate
+                      </span>{" "}
+                      as your signal.
+                    </p>
                   </Card>
-                ))}
-              </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
+                  {[
+                    ["Sent", overview.totals.sent],
+                    ["Failed", overview.totals.failed],
+                    ["Skipped (suppressed)", overview.totals.suppressedAtSend],
+                    ["Still in flight", overview.totals.inFlight]
+                  ].map(([label, value]) => (
+                    <div
+                      key={String(label)}
+                      className="flex items-baseline justify-between rounded border px-3 py-2"
+                    >
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="font-medium">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
 
             <Card className="overflow-hidden">
               <div className="border-b p-4 font-medium">By recipient domain</div>
               {domains && domains.domains.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Domain</TableHead>
-                      <TableHead>Sent</TableHead>
-                      <TableHead>Bounced</TableHead>
-                      <TableHead>Bounce rate</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {domains.domains.map((row) => (
-                      <TableRow key={row.domain}>
-                        <TableCell className="font-medium">
-                          {row.domain}
-                        </TableCell>
-                        <TableCell>{row.sent}</TableCell>
-                        <TableCell>{row.bounced}</TableCell>
-                        <TableCell>{pct(row.bounceRate)}</TableCell>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Domain</TableHead>
+                        <TableHead>Attempted</TableHead>
+                        <TableHead>Accepted</TableHead>
+                        <TableHead>Bounced</TableHead>
+                        <TableHead>Bounce rate</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {domains.domains.map((row) => (
+                        <TableRow key={row.domain}>
+                          <TableCell className="font-medium">
+                            {row.domain}
+                          </TableCell>
+                          <TableCell>{row.attempted}</TableCell>
+                          <TableCell>{row.sent}</TableCell>
+                          <TableCell>{row.bounced}</TableCell>
+                          <TableCell>{pct(row.bounceRate)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               ) : (
                 <p className="p-4 text-sm text-muted-foreground">
                   No sends in this window yet.
@@ -225,6 +318,14 @@ export function Deliverability() {
                   <Gauge className="h-4 w-4" />
                   Auto-suppression policy
                 </div>
+                {overview && (
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    {overview.totals.suppressedTotal} address
+                    {overview.totals.suppressedTotal === 1 ? "" : "es"}{" "}
+                    suppressed in total, {overview.totals.suppressedInWindow}{" "}
+                    added in this window.
+                  </p>
+                )}
                 <form onSubmit={savePolicy} className="space-y-3">
                   <div className="space-y-1">
                     <Label htmlFor="soft-threshold">Soft-bounce threshold</Label>

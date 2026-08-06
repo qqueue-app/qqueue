@@ -332,15 +332,23 @@ function classifyDsnBounce(report: DsnRecipientReport): BounceType {
 }
 
 /**
- * Feed a parsed DSN into the bounce pipeline: for each failed recipient,
- * correlate the originating EmailJob, record a BOUNCED event, flip the job
- * SENT -> FAILED, and run the auto-suppression policy — the same sequence the
- * send worker performs for a synchronous rejection. Non-"failed" actions
- * (delayed, relayed, delivered) are ignored.
+ * Feed a parsed DSN into the delivery pipeline.
  *
- * When no job can be correlated the bounce still counts against the address:
- * org-level suppression proceeds from the recipient alone (the org comes from
- * the inbox account that received the DSN).
+ * For each *failed* recipient: correlate the originating EmailJob, record a
+ * BOUNCED event, flip the job SENT -> FAILED, and run the auto-suppression
+ * policy — the same sequence the send worker performs for a synchronous
+ * rejection. When no job can be correlated the bounce still counts against the
+ * address: org-level suppression proceeds from the recipient alone (the org
+ * comes from the inbox account that received the DSN).
+ *
+ * For each *delivered* or *relayed* recipient: record a DELIVERED event tagged
+ * `source: "dsn"`. This is the only delivery confirmation a self-hosted install
+ * gets without an ESP webhook, and it was previously parsed and discarded — so
+ * the dashboard had no honest delivery number to show at all. `relayed` counts:
+ * the message left for a gateway that doesn't itself report, which is as far as
+ * the delivery chain is observable from here.
+ *
+ * `delayed` and `expanded` remain non-events: neither is an outcome yet.
  */
 export async function applyDsnBounce(input: {
   organizationId: string;
@@ -349,6 +357,42 @@ export async function applyDsnBounce(input: {
   dsn: ParsedDsn;
 }): Promise<void> {
   for (const report of input.dsn.recipients) {
+    if (report.action === "delivered" || report.action === "relayed") {
+      const correlated = await correlateEmailJob({
+        organizationId: input.organizationId,
+        recipient: report.recipient,
+        threadEmailJobId: input.threadEmailJobId,
+        originalMessageId: input.dsn.originalMessageId,
+      });
+
+      // An uncorrelated delivery report has nothing to attach to — unlike a
+      // bounce, it carries no consequence for the address on its own.
+      if (correlated) {
+        await prisma.emailEvent.create({
+          data: {
+            organizationId: input.organizationId,
+            emailJobId: correlated.job.id,
+            type: "DELIVERED",
+            metadata: {
+              source: "dsn",
+              inboundMessageId: input.inboundMessageId,
+              correlation: correlated.method,
+              finalRecipient: report.recipient,
+              action: report.action,
+              ...(report.status ? { status: report.status } : {}),
+            },
+          },
+        });
+
+        await enqueueLatestWebhookDeliveries({
+          organizationId: input.organizationId,
+          emailJobId: correlated.job.id,
+          type: "DELIVERED",
+        });
+      }
+      continue;
+    }
+
     if (report.action !== "failed") {
       continue;
     }
