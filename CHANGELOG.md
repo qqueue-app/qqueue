@@ -4,6 +4,27 @@ Notable changes to QQueue. Phases refer to the evolution plan; each entry lands
 with green `typecheck`/`lint`/`test` and, where the send pipeline or migrations
 are touched, a passing Docker smoke test.
 
+## Send-as grant backfill for existing members (2026-08-06)
+
+- **Upgrading no longer revokes every member's ability to send.** Phase 4's
+  `20260806000000_add_smtp_connection_grants` created the grant table empty,
+  but `assertMayUseConnection` denies a MEMBER any connection they hold no
+  grant for — so on an instance that already had members, the upgrade silently
+  took away campaign starts, Email Studio sends, draft saves, recurring-send
+  edits and JWT transactional sends, with no error that pointed at the cause.
+  New migration `20260806210000_backfill_smtp_connection_grants` grants each
+  existing MEMBER the connections their org already had, restoring exactly the
+  access they had before. It is a no-op on a fresh install, idempotent against
+  the unique index, scoped per-organization, and grants nothing for members or
+  connections created afterwards — those stay an admin's explicit decision.
+- **Point-in-time reports removed**: `AUDIT.md`, `DIAGNOSIS.md` and
+  `VERIFICATION.md` were snapshots of one moment in the evolution plan and had
+  already gone stale. Their conclusions live in `docs/DECISIONS.md` and the
+  shipped code; their still-open items moved into the `docs/ROADMAP.md`
+  deferred backlog (Phase 2c bounce observability, the suppression reconcile
+  script, the non-bulk unsubscribe-footer decision, the stale `STATUS.md`
+  verification block).
+
 ## Domain access for mailbox provisioning (2026-08-06)
 
 - **Owners provision on every Mailcow domain; admins only on granted ones.**

@@ -333,7 +333,7 @@ credential, and let QQueue optionally own DKIM for domains it sends from.
 The August 2026 evolution plan (unified send path → per-recipient correctness →
 async bounces → security gaps → Mailcow provisioning → operational hygiene) is
 **complete through Phase 5**. `CHANGELOG.md` records exactly what each phase
-shipped and why; `AUDIT.md` was kept accurate inline as behavior changed.
+shipped and why.
 
 - [x] Phase 1 — one send path: every email flows through the worker pipeline
 - [x] Phase 2 — per-recipient jobs, cc/bcc suppression, List-Unsubscribe by bulkness
@@ -356,10 +356,9 @@ reason — so future work starts from a decision, not a rediscovery:
   (`configureAbTest`, variant analytics) but no page calls it and
   `CampaignAnalytics` doesn't render `variantBreakdown`. Also unify the two
   "opens" definitions first (winner decision counts raw run-scoped events;
-  variant analytics counts unique unscoped events — AUDIT §5.2).
-- **EmailEvent table indexes + analytics query limits** — the highest-volume
-  table has no declared indexes and the per-URL click breakdown loads every
-  CLICKED event unbounded (AUDIT §2.3, §5.7). Schedule when volume grows.
+  variant analytics counts unique unscoped events).
+- **EmailEvent analytics query limits** — the per-URL click breakdown loads
+  every `CLICKED` event unbounded. Schedule when volume grows.
 - **Inbox UI beyond what exists / ticketing** — ticketing was built once and
   removed (`remove_inbox_ticketing` migration); don't resurrect casually.
 - **ESP relay providers (SES/Resend/Brevo/Postmark/Mailcow-API)** — the classes
@@ -370,15 +369,29 @@ reason — so future work starts from a decision, not a rediscovery:
 - **MFA, SSO, email verification** — deliberately out of the self-hosted beta's
   scope.
 - **Worker-side per-key idempotency TTL** — `Idempotency-Key` rows never expire
-  (unbounded growth, AUDIT §8.6 item 7); revisit alongside the EmailEvent
-  index work.
+  (unbounded growth); revisit alongside the EmailEvent analytics work.
+- **Phase 2c — make async bounce accounting observable.** Phase 2b's DSN parser
+  (`apps/worker/src/lib/dsn.ts`) only sees bounces that arrive in a synced
+  `InboxAccount` mailbox. An instance whose DSNs predate that account — or that
+  has no inbox account at all — reports a structural zero for bounces, which is
+  indistinguishable from perfect delivery. Needs a `scripts/backfill-dsn-bounces.ts`
+  re-scan and a setup-time check that bounce accounting is reachable at all.
+- **`scripts/reconcile-suppressions.ts`** — a dry-run-by-default repair script
+  for instances whose unsubscribes predate the suppression list, so the
+  Suppressions total reflects reality rather than only post-upgrade activity.
+- **Unsubscribe footer on non-bulk mail** — List-Unsubscribe is attached by
+  bulkness (Phase 2), so one-off and transactional mail deliberately offers
+  recipients no unsubscribe path. That is a compliance posture worth deciding
+  on purpose; it is currently true by omission.
 
 ### Smaller known gaps (fine to pick up any time)
 
 - Segments UI builds only a flat rule list and omits `createdAt` rules; the API
-  supports nested AND/OR trees (AUDIT §5.3).
-- Campaign fan-out does not apply template variable *defaults* (preview does) —
-  AUDIT §5.4.
+  supports nested AND/OR trees.
+- Campaign fan-out does not apply template variable *defaults* (preview does).
 - `Contact.metadata`/tags are not available as campaign merge fields.
-- CSV import writes contacts one row at a time (AUDIT §5.6).
+- CSV import writes contacts one row at a time.
 - No API to grant `User.isInstanceAdmin` after the first user.
+- `docs/STATUS.md`'s verification block understates the suite (it predates a
+  large run of migrations and test files); refresh it the next time that doc is
+  touched.
