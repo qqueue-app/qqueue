@@ -33,9 +33,10 @@ In the dashboard, open **Sending accounts → New connection** and fill in:
 QQueue **verifies** the credentials before saving and **encrypts** them at rest
 with `ENCRYPTION_KEY`.
 
-> **Footgun:** changing `ENCRYPTION_KEY` after a connection is saved makes the
-> stored credentials undecryptable. Back the key up, and if you must rotate it,
-> re-enter every SMTP connection's username/password afterward.
+> **Footgun:** *losing* `ENCRYPTION_KEY` makes the stored credentials
+> undecryptable — back it up. Rotating it is safe since the keyring landed:
+> set `ENCRYPTION_KEYS=new-key,old-key` (new first), restart, run
+> `pnpm rotate-secrets`, then drop the old key.
 
 Test any connection from the API with:
 

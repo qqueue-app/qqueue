@@ -73,7 +73,7 @@ Validated with Zod at import time (`envSchema.parse(process.env)` — missing re
 - **`phase7-guardrails.yml`** — push/PR to main: `cloud:boundary`, `license:audit`, and a PR-only `Signed-off-by` commit check (DCO).
 - **`publish-sdk.yml`** — on `qqueue-sdk-v*` tags: verifies tag matches `packages/sdk/package.json` version, tests/typechecks/builds, `npm publish --provenance`.
 
-**CI gaps**: no workflow runs `pnpm lint`, `pnpm typecheck`, `pnpm build`, or `pnpm test:smoke:docker` — those are local-only.
+**CI parity (Phase 5)**: `ci.yml` runs lint, typecheck, build, the unit suites, and the Docker smoke test on every PR/push to main, alongside the coverage and guardrail workflows.
 
 ---
 
@@ -97,6 +97,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 - **`User`** (line 127) — `email @unique`, `name?`, `passwordHash?`, `isInstanceAdmin` (default false), timestamps. Relations: `members[]`, `apiKeys[]`, `passwordResetTokens[]`, `invitesSent[]`.
 - **`InstanceSetting`** (147) — `key @id` (the key *is* the PK), `value Json`, `updatedAt`. Sparse rows: absent key = use env/default.
 - **`PasswordResetToken`** (153) — `userId` (Cascade), `tokenHash @unique` (sha256), `expiresAt`, `usedAt?`. Indexes on `userId`, `expiresAt`.
+- **`RefreshToken`** (Phase 5) — `userId` (Cascade), `tokenHash @unique` (sha256), `expiresAt`, `revokedAt?`. Refresh requires a live row; rotation on use; deleted wholesale on password reset. Indexes on `userId`, `expiresAt`.
 - **`Organization`** (166) — `name`, timestamps; the tenant root with ~25 back-reference collections, including two into cloud.prisma (`subscription?`, `usageCounters[]`).
 - **`OrganizationMember`** (200) — `organizationId` + `userId` (`@@unique` pair), `role UserRole @default(MEMBER)`.
 - **`OrganizationInvite`** (216) — `email`, `role`, `tokenHash @unique`, `status InviteStatus`, `invitedByUserId`, `expiresAt`, `acceptedAt?`. Indexes: org, email, expiresAt.
@@ -135,7 +136,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 
 ### 2.5 Migrations
 
-- **36 migrations** in `apps/api/prisma/schema/migrations/` (32 at audit time; phases 1, 2, 2b, and 4 added `add_system_email_origin`, `per_recipient_sends_and_bulk_flag`, `add_inbound_message_is_dsn`, `add_smtp_connection_grants`) (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
+- **37 migrations** in `apps/api/prisma/schema/migrations/` (32 at audit time; phases 1–5 added `add_system_email_origin`, `per_recipient_sends_and_bulk_flag`, `add_inbound_message_is_dsn`, `add_smtp_connection_grants`, `add_refresh_tokens`) (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
 - Run paths: dev `pnpm db:migrate` (`migrate dev`); production via a one-shot `migrate` compose service running `prisma migrate deploy`; smoke test and `pnpm setup` also run deploy/dev respectively.
 - **No drift check in CI** — no `migrate diff`/`migrate status` anywhere automated; drift verification is a documented manual practice (`docs/TROUBLESHOOTING.md:126-133`, `docs/BETA_CHECKLIST.md:30`). No seed script.
 
@@ -172,7 +173,7 @@ The only overlap: password-reset and invitation emails are *delivered through* t
 - `authService.login` (`apps/api/src/modules/auth/service.ts`): unique email lookup → `verifyPassword` → generic 401 on failure (though a missing user short-circuits before the scrypt call — a timing side-channel). Returns user + org memberships + token pair.
 - **Password hashing** (`apps/api/src/lib/crypto.ts`): Node built-in `crypto.scrypt` — **no bcrypt/argon2 anywhere**. Stored as `scrypt:<salt>:<hexkey>`, Node's default cost params (N=16384, r=8, p=1), `timingSafeEqual` compare. Password rule is just `min(8)`.
 - **Tokens** (`apps/api/src/lib/tokens.ts`): **hand-rolled JWTs — no JWT library**. HMAC-SHA256, header hardcoded `{alg:"HS256"}`, payload `{sub, email, type, exp}` (no `iat`/`jti`/`iss`). Access token **15 min** (`JWT_ACCESS_SECRET`), refresh **30 days** (`JWT_REFRESH_SECRET`). `verifyToken` never reads `alg` from the header, so alg-confusion isn't exploitable; compares with a length-guarded `timingSafeEqual`.
-- **Refresh tokens are stateless and non-revocable** — no refresh-token table, no rotation, no logout endpoint server-side, no `jti` denylist. A leaked refresh token is valid for its full 30 days; password reset does not invalidate it.
+- **Refresh tokens are revocable as of Phase 5** — a `RefreshToken` table records each issued token (sha256 hash); refresh requires the signed JWT plus a live row, rotates the row on use (60s race-grace for concurrent tabs), `POST /auth/logout` revokes server-side, and a password reset deletes every row for the user. Stale rows are pruned opportunistically at login.
 - **Web session**: stored in `window.localStorage` under `"qqueue.session"` (`apps/web/src/lib/session.ts` + `session-context.tsx`). **No cookies anywhere** (verified by grep) — everything is `Authorization: Bearer`, so CSRF is structurally not applicable. Silent refresh: `apps/web/src/lib/api.ts` intercepts 401, refreshes once, retries once, else clears session and hard-redirects to `/login`. There is **no client-side route guard** — unauthenticated users render dashboard shells until the first API call 401s (the API is the enforcement point).
 
 ### 3.3 Registration & bootstrap
@@ -193,7 +194,7 @@ The only overlap: password-reset and invitation emails are *delivered through* t
 ### 3.6 SMTP connection credentials
 
 - `SMTPConnection` (core.prisma:236): encrypted with **AES-256-GCM** (`apps/api/src/lib/crypto.ts`, decrypt-only mirror in `apps/worker/src/lib/crypto.ts`); fresh 12-byte IV per encryption, stored `iv.authTag.ciphertext` base64url.
-- Key derivation is a **plain SHA-256 of `ENCRYPTION_KEY`** — no KDF, no salt, no key versioning; rotating the key permanently bricks stored credentials (documented in `docs/DEPLOY.md`, `docs/SMTP_PROVIDER_GUIDE.md`). `ENCRYPTION_KEY` and JWT secrets are validated only as `min(1)` — no entropy floor.
+- Key derivation is a plain SHA-256 of each keyring entry (unchanged for ciphertext compatibility). **Rotation exists as of Phase 5**: `ENCRYPTION_KEYS` is a comma-separated keyring (first encrypts, all decrypt), ciphertexts carry a `v1.` envelope prefix (legacy format still decrypts), and `pnpm rotate-secrets` re-encrypts all stored secrets. Crypto lives once in `packages/crypto`; api/worker are thin keyring bindings. JWT secrets are still validated only as `min(1)` — no entropy floor.
 - Credentials never leave the API: `smtpConnectionSelect` omits the encrypted columns on every read path. SMTP verification (`transporter.verify()`, 15s timeout) is **mandatory on create and update**.
 - Same scheme reused for `InboxAccount` (IMAP) credentials and `WebhookEndpoint.secretEncrypted`.
 - Writes are OWNER/ADMIN as of Phase 3: create via `requireOrgRole` on the route, update/delete via `assertOrgRole` in the service (no org id in the request until the row loads). Reads stay membership.
@@ -281,8 +282,8 @@ Outcomes: rejected recipients → `classifyBounce` → FAILED + BOUNCED event + 
 `CampaignStatus`: DRAFT → SCHEDULED/SENDING → SENT (or PAUSED/CANCELLED). Endpoint semantics: `update` and `configureAbTest` are DRAFT-only; `delete` is DRAFT/CANCELLED-only; `sendNow` enqueues `occurrenceKey = manual-<ts>`; `schedule` enqueues a delayed job (`scheduled-<ISO>`); `setRecurrence` registers a BullMQ job scheduler `campaign-recurring-<id>`; `pause`/`resume` manage the scheduler and status. `CampaignRun` (`@@unique([campaignId, occurrenceKey])`) is the idempotency unit; `settleRunIfComplete` closes runs and re-arms cron `nextRunAt`. There is **no cancel endpoint** — only the worker's failure path sets CANCELLED.
 
 Notable gaps (factual, verified):
-- **Segment-targeted campaigns cannot be started.** `sendNow` (service.ts:248), `schedule` (:269) and `setRecurrence` (:312) all require `campaign.templateId && campaign.contactListId` — a campaign targeting a `segmentId` fails with "Campaign requires a template and contact list", even though the worker fully supports segment resolution. No test covers the segment case.
-- `duplicate()` copies only `templateId` + `contactListId` — it **silently drops `segmentId`, variants, and all A/B config**.
+- Segment-targeted campaigns start normally as of Phase 5: `sendNow`/`schedule`/`setRecurrence` accept a template plus either a contact list or a segment, with the segment path tested.
+- `duplicate()` copies the audience (list or segment) and the full A/B config with variants as of Phase 5; run state (winner flags, `abTestStatus`, schedules) deliberately does not travel.
 - `CampaignRun.status` is an untyped `String` (every other status is an enum).
 
 ### 5.2 A/B testing
@@ -405,7 +406,8 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 |---|---|---|
 | GET `/health` | Liveness (not under `/api/v1`) | public |
 | POST `/api/v1/auth/register` `/login` `/password-reset/request` `/password-reset/confirm` | Account flows | public, 20/15min |
-| POST `/api/v1/auth/refresh` | Token refresh | public, 60/15min |
+| POST `/api/v1/auth/refresh` | Token refresh (rotating; needs a live server-side row as of Phase 5) | public, 60/15min |
+| POST `/api/v1/auth/logout` | Revoke a refresh token server-side (Phase 5) | public, 60/15min |
 | GET `/api/v1/setup/status` | First-run probe | public, 60/60s |
 | POST `/api/v1/setup/complete` | Finish wizard | JWT + inst-admin (in service) |
 | GET `/api/v1/track/open/:token`, `/track/click/:token` | Open pixel / click redirect | public (signed token), **no rate limit** |
@@ -475,11 +477,11 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 
 - Hand-rolled `HttpError` (no `http-errors` package), single terminal handler in `apps/api/src/middleware/error-handler.ts` (duplicated in trimmed form in `apps/cloud`). `apps/api/src/lib/prisma-error.ts` deliberately shape-matches instead of `instanceof` — its 15-line comment documents a real shipped bug (ESM/CJS dual copies of Prisma's error class made P2002/P2025 degrade to 500s while tests passed). **This trap will reappear if anyone "simplifies" back to `instanceof`** — and the idempotency replay path depends on it (regression = duplicate sends).
 - Worker: `DelayedError` for holds (no attempt consumed), final-attempt accounting, rethrow for backoff — solid.
-- **No `unhandledRejection`/`uncaughtException`/`SIGTERM`/`SIGINT` handlers anywhere** (grep-verified, zero matches). The worker uses top-level `await` at boot with no catch; container restarts kill workers mid-send with no `worker.close()` — in-flight jobs are recovered only by BullMQ stall timeout, and **`EmailJob` rows can be stranded in `PROCESSING`** (startup recovery does not pick those up, §4.6). The web app has **no React error boundary** — a render throw blanks the dashboard.
+- **Shutdown and crash handling landed in Phase 5**: both apps register `unhandledRejection` (logged) and `uncaughtException` (fatal) handlers; SIGTERM/SIGINT drain the API server and `worker.close()` in-flight jobs. Startup recovery (`apps/worker/src/lib/recovery.ts`) also re-queues `EmailJob` rows stranded in `PROCESSING` 15+ minutes (status re-read in the processor guards double-send; a crash after SMTP accepted and before the SENT write can still double-send — documented). The web app has a root React error boundary (`components/ErrorBoundary`, post-plan cleanup): a render throw shows a reload card instead of blanking the dashboard.
 
 ### 8.3 Logging
 
-**No logging library** — 20 `console.*` call sites total. Request logging is one unstructured line (`METHOD url status ms`). No request IDs, no user/org context, no levels, no redaction — and `req.originalUrl` is logged **verbatim including query strings**, so signed tracking/unsubscribe tokens (which encode recipient identity) land in plaintext logs. No way to correlate an API request with the worker job it spawned.
+**API logging is structured as of Phase 5** (pino): one JSON line per request with `reqId`, method/url/status/duration and user/org context; tracking token path segments and the unsubscribe query string are redacted; the transactional/manual send controllers log the enqueued `emailJobId` for request→job correlation; unexpected 500s log with the request id. The worker uses the same pino setup (queue/jobId fields on completions and failures) as of the post-plan cleanup.
 
 ### 8.4 Hardcoded values & TODOs
 
@@ -497,8 +499,8 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 
 ### 8.6 Refactoring risks (implicit contracts)
 
-1. **Duplicated crypto across the api/worker process boundary** — `apps/api/src/lib/crypto.ts` and `apps/worker/src/lib/crypto.ts` are byte-identical for decryption; the ciphertext format (`iv.tag.ct` base64url AES-256-GCM) is an **undeclared wire contract**. Changing one side breaks the other at send time, not build time. Same duplication pattern: queue definitions (`apps/api/src/queues/*` ↔ `apps/worker/src/queues/*`), redis config, suppression logic, env schemas (5 "must match" vars with independent defaults), `HttpError`/error handler (api ↔ cloud), variable-substitution regex (×4).
-2. **No `ENCRYPTION_KEY` rotation path** — no key ID/version in the ciphertext envelope, no re-encryption tooling; rotation means every tenant re-enters every SMTP/IMAP credential. Cheapest to fix *before* more data exists.
+1. **Crypto duplication resolved (Phase 5)** — the ciphertext format lives once in `packages/crypto` (versioned `v1.iv.tag.ct` envelope; legacy format still decrypts); api/worker `lib/crypto.ts` are thin keyring bindings. Remaining duplication pattern: queue definitions (`apps/api/src/queues/*` ↔ `apps/worker/src/queues/*`), redis config, env schemas ("must match" vars with independent defaults), `HttpError`/error handler (api ↔ cloud), variable-substitution regex (suppression decision logic was consolidated into `packages/shared` in Phase 2b).
+2. **`ENCRYPTION_KEY` rotation exists (Phase 5)** — `ENCRYPTION_KEYS` keyring + versioned envelope + `pnpm rotate-secrets` re-encryption script. Rotation is prepend-new-key → run script → drop old key.
 3. **Editor extension list is load-bearing and order-sensitive** (`apps/web/src/components/editor/editor-extensions.ts`): the partitioner round-trips through this exact schema; StarterKit must stay first. A reorder/alphabetize pass breaks Enter/lists or freezes content. Well-documented in-code; do not "simplify".
 4. **CANCELLED re-check in workers looks redundant but is the race guard** (`email-sending.worker.ts:42`, mirrored in campaign-processing and webhook-delivery) — exactly the kind of line a cleanup pass deletes.
 5. **Recovery job-ID templates are duplicated strings** — `recoverQueuedWork()` reconstructs `email-<id>`/`campaign-<id>-scheduled-<iso>`/`webhook-<id>` as literals that must match the API's enqueue templates or restarts create **duplicate sends**. Not shared constants.

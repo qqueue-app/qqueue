@@ -6,7 +6,17 @@ config();
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
-  ENCRYPTION_KEY: z.string().min(1),
+  // Single encryption key, or a comma-separated keyring (first entry
+  // encrypts, every entry decrypts) for rotation. One of the two must be set;
+  // must match the API. See packages/crypto for the envelope format.
+  ENCRYPTION_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  ENCRYPTION_KEYS: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
   REDIS_HOST: z.string().default("localhost"),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   // Optional auth/TLS for hosted Redis (e.g. Upstash); must match the API.
@@ -66,4 +76,18 @@ const envSchema = z.object({
     .default(25 * 1024 * 1024),
 });
 
-export const env = envSchema.parse(process.env);
+const parsed = envSchema.parse(process.env);
+
+// The effective keyring: ENCRYPTION_KEYS wins, ENCRYPTION_KEY is the
+// single-key fallback. Must match the API's derivation.
+const encryptionKeys = (parsed.ENCRYPTION_KEYS ?? parsed.ENCRYPTION_KEY ?? "")
+  .split(",")
+  .map((key) => key.trim())
+  .filter(Boolean);
+if (encryptionKeys.length === 0) {
+  throw new Error(
+    "Set ENCRYPTION_KEY (or an ENCRYPTION_KEYS keyring) in the environment"
+  );
+}
+
+export const env = { ...parsed, ENCRYPTION_KEYS: encryptionKeys };

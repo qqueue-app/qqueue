@@ -5,6 +5,7 @@ import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { env } from "../config/env.js";
 import { decryptSecret } from "./crypto.js";
 import { applyDsnBounce, parseDsn } from "./dsn.js";
+import { logger } from "./logger.js";
 import { prisma } from "./prisma.js";
 import { storage } from "./storage.js";
 
@@ -102,8 +103,9 @@ async function storeAttachments(input: {
       continue;
     }
     if (content.length > env.INBOUND_ATTACHMENT_MAX_BYTES) {
-      console.warn(
-        `[inbox-sync] skipping oversized attachment (${content.length} bytes) on message ${inboundMessageId}`
+      logger.warn(
+        { inboundMessageId, bytes: content.length },
+        "skipping oversized inbound attachment"
       );
       continue;
     }
@@ -122,9 +124,9 @@ async function storeAttachments(input: {
     } catch (error) {
       // Storage is best-effort here; losing one blob shouldn't cost us the
       // message body we already stored.
-      console.error(
-        `[inbox-sync] failed to store attachment for message ${inboundMessageId}`,
-        error
+      logger.error(
+        { inboundMessageId, err: error },
+        "failed to store inbound attachment"
       );
       continue;
     }
@@ -249,9 +251,9 @@ async function storeParsedMessage(input: {
         dsn,
       });
     } catch (error) {
-      console.error(
-        `[inbox-sync] failed to process DSN on message ${stored.id}`,
-        error
+      logger.error(
+        { inboundMessageId: stored.id, err: error },
+        "failed to process DSN"
       );
     }
   }

@@ -25,7 +25,17 @@ const envSchema = z.object({
   WEB_ORIGIN: z.string().url().optional(),
   JWT_ACCESS_SECRET: z.string().min(1),
   JWT_REFRESH_SECRET: z.string().min(1),
-  ENCRYPTION_KEY: z.string().min(1),
+  // Single encryption key, or a comma-separated keyring (first entry
+  // encrypts, every entry decrypts) for rotation. One of the two must be set;
+  // must match the worker. See packages/crypto for the envelope format.
+  ENCRYPTION_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  ENCRYPTION_KEYS: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
   // Absolute public base URL used to build open/click tracking links that land
   // back on this API. In production this is `https://<DOMAIN>`.
   APP_URL: z.string().url().default("http://localhost:4000"),
@@ -114,4 +124,18 @@ const envSchema = z.object({
   MAILCOW_IMAP_PORT: z.coerce.number().int().positive().default(993),
 });
 
-export const env = envSchema.parse(process.env);
+const parsed = envSchema.parse(process.env);
+
+// The effective keyring: ENCRYPTION_KEYS wins, ENCRYPTION_KEY is the
+// single-key fallback. Must match the worker's derivation.
+const encryptionKeys = (parsed.ENCRYPTION_KEYS ?? parsed.ENCRYPTION_KEY ?? "")
+  .split(",")
+  .map((key) => key.trim())
+  .filter(Boolean);
+if (encryptionKeys.length === 0) {
+  throw new Error(
+    "Set ENCRYPTION_KEY (or an ENCRYPTION_KEYS keyring) in the environment"
+  );
+}
+
+export const env = { ...parsed, ENCRYPTION_KEYS: encryptionKeys };

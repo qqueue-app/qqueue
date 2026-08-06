@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
 import { HttpError } from "../lib/http-error.js";
+import { logger } from "../lib/logger.js";
 import {
   isPrismaKnownRequestError,
   uniqueConstraintFields,
@@ -55,7 +56,7 @@ function conflictMessage(error: PrismaKnownRequestError): string {
 
 export function errorHandler(
   error: unknown,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ) {
@@ -100,7 +101,9 @@ export function errorHandler(
     return;
   }
 
-  console.error(error);
+  // Unexpected: log with the request id so the 500 a user reports can be
+  // matched to its stack trace.
+  logger.error({ reqId: req.id, err: error }, "unhandled request error");
 
   res.status(500).json({
     error: {

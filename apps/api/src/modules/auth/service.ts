@@ -10,6 +10,12 @@ import {
 } from "../../lib/instance-settings.js";
 import { prisma } from "../../lib/prisma.js";
 import { createAuthTokens, verifyRefreshToken } from "../../lib/tokens.js";
+import {
+  ROTATION_GRACE_MS,
+  hashRefreshToken,
+  persistRefreshToken,
+  pruneRefreshTokens
+} from "../../lib/refresh-tokens.js";
 import { transactionalEmailService } from "../transactional-email/service.js";
 
 function serializeUser(user: {
@@ -135,10 +141,13 @@ export const authService = {
       return { user, organization };
     });
 
+    const tokens = createAuthTokens(result.user);
+    await persistRefreshToken(result.user.id, tokens.refreshToken);
+
     return {
       user: serializeUser(result.user),
       organization: result.organization,
-      tokens: createAuthTokens(result.user)
+      tokens
     };
   },
 
@@ -158,6 +167,11 @@ export const authService = {
       throw new HttpError(401, "Invalid email or password");
     }
 
+    const tokens = createAuthTokens(user);
+    await persistRefreshToken(user.id, tokens.refreshToken);
+    // Opportunistic cleanup so the table doesn't grow without a cron.
+    await pruneRefreshTokens(user.id);
+
     return {
       user: serializeUser(user),
       organizations: user.members.map((member: UserOrganizationMember) => ({
@@ -165,12 +179,33 @@ export const authService = {
         name: member.organization.name,
         role: member.role
       })),
-      tokens: createAuthTokens(user)
+      tokens
     };
   },
 
+  /**
+   * Refresh requires the signed JWT *and* a live server-side row (Phase 5):
+   * a leaked token dies with logout/password-reset instead of surviving its
+   * full 30 days. Each use rotates the row; a just-rotated token keeps
+   * working within a short grace window so two tabs racing a refresh don't
+   * log the loser out.
+   */
   async refresh(refreshToken: string) {
     const payload = verifyRefreshToken(refreshToken);
+
+    const stored = await prisma.refreshToken.findUnique({
+      where: { tokenHash: hashRefreshToken(refreshToken) }
+    });
+    const now = Date.now();
+    const usable =
+      stored &&
+      stored.userId === payload.sub &&
+      stored.expiresAt.getTime() > now &&
+      (!stored.revokedAt ||
+        now - stored.revokedAt.getTime() <= ROTATION_GRACE_MS);
+    if (!usable) {
+      throw new HttpError(401, "Invalid refresh token");
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: payload.sub }
@@ -180,7 +215,29 @@ export const authService = {
       throw new HttpError(401, "Invalid refresh token");
     }
 
-    return { tokens: createAuthTokens(user) };
+    const tokens = createAuthTokens(user);
+    if (!stored.revokedAt) {
+      await prisma.refreshToken.update({
+        where: { id: stored.id },
+        data: { revokedAt: new Date() }
+      });
+    }
+    await persistRefreshToken(user.id, tokens.refreshToken);
+
+    return { tokens };
+  },
+
+  /**
+   * Server-side logout: revoke the presented refresh token. Deliberately
+   * silent about whether the token existed — logout must be idempotent and
+   * reveal nothing.
+   */
+  async logout(refreshToken: string) {
+    await prisma.refreshToken.updateMany({
+      where: { tokenHash: hashRefreshToken(refreshToken), revokedAt: null },
+      data: { revokedAt: new Date() }
+    });
+    return { message: "Signed out." };
   },
 
   async requestPasswordReset(email: string) {
@@ -248,6 +305,11 @@ export const authService = {
       prisma.passwordResetToken.update({
         where: { id: resetToken.id },
         data: { usedAt: new Date() }
+      }),
+      // Whoever held the old password may hold refresh tokens too — a reset
+      // must end every existing session (Phase 5).
+      prisma.refreshToken.deleteMany({
+        where: { userId: resetToken.userId }
       })
     ]);
 

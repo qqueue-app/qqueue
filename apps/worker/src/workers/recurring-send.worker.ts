@@ -5,6 +5,7 @@ import { renderHtmlAsEmailSafe } from "@qqueue/email-engine";
 import { redisConnection } from "../config/redis.js";
 import { emailSendingQueue } from "../queues/email-sending.queue.js";
 import type { RecurringSendJob } from "../queues/recurring-send.queue.js";
+import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 
 function renderVariables(
@@ -151,8 +152,9 @@ export async function processRecurringSend(job: {
     if (rawHtml) {
       const rendered = await renderHtmlAsEmailSafe(rawHtml);
       if (rendered.usedFallback) {
-        console.error(
-          `[recurring-send] MJML compilation failed for ${send.id}; sending unwrapped body. ${rendered.errors.join("; ")}`
+        logger.error(
+          { recurringSendId: send.id, errors: rendered.errors },
+          "MJML compilation failed; sending unwrapped body"
         );
       }
       html = rendered.html;

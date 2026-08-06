@@ -1,6 +1,18 @@
 import { env } from "./config/env.js";
 import { createApp } from "./app.js";
+import { prisma } from "./lib/prisma.js";
 import { storage } from "./lib/storage.js";
+
+// Crash visibility (Phase 5): log unhandled rejections loudly (per-request
+// errors already flow through the error handler); uncaught exceptions are
+// fatal — state after one is unknowable.
+process.on("unhandledRejection", (reason) => {
+  console.error("[api] unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("[api] uncaught exception, exiting:", error);
+  process.exit(1);
+});
 
 const app = createApp();
 
@@ -31,3 +43,25 @@ server.on("error", (error: NodeJS.ErrnoException) => {
   }
   throw error;
 });
+
+// Graceful shutdown (Phase 5): stop accepting connections, let in-flight
+// requests finish, then release the database pool.
+let shuttingDown = false;
+function shutdown(signal: string) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`[api] ${signal} received; draining connections...`);
+  server.close(() => {
+    void prisma
+      .$disconnect()
+      .catch(() => undefined)
+      .then(() => {
+        console.log("[api] shut down cleanly.");
+        process.exit(0);
+      });
+  });
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

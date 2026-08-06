@@ -225,18 +225,96 @@ describe("authService.login", () => {
 });
 
 describe("authService.refresh", () => {
-  it("issues new tokens for a valid refresh token", async () => {
+  // Phase 5: refresh needs both the signed JWT and a live server-side row.
+  const liveRow = (overrides: Record<string, unknown> = {}) =>
+    ({
+      id: "rt_1",
+      userId: "user_1",
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: null,
+      ...overrides
+    }) as never;
+
+  it("issues new tokens and rotates the stored row", async () => {
     const { refreshToken } = createAuthTokens({
       id: "user_1",
       email: "a@b.com"
     });
+    prismaMock.refreshToken.findUnique.mockResolvedValue(liveRow());
     prismaMock.user.findUnique.mockResolvedValue({
       id: "user_1",
       email: "a@b.com"
     } as never);
 
     const result = await authService.refresh(refreshToken);
+
     expect(result.tokens.accessToken).toEqual(expect.any(String));
+    // Rotation: the presented token's row is revoked and the new one stored.
+    expect(prismaMock.refreshToken.update).toHaveBeenCalledWith({
+      where: { id: "rt_1" },
+      data: { revokedAt: expect.any(Date) }
+    });
+    expect(prismaMock.refreshToken.create).toHaveBeenCalled();
+  });
+
+  it("rejects a refresh token with no server-side row (revoked or never issued)", async () => {
+    const { refreshToken } = createAuthTokens({
+      id: "user_1",
+      email: "a@b.com"
+    });
+    prismaMock.refreshToken.findUnique.mockResolvedValue(null);
+
+    await expect(authService.refresh(refreshToken)).rejects.toThrow(
+      "Invalid refresh token"
+    );
+  });
+
+  it("rejects a token revoked longer ago than the rotation grace window", async () => {
+    const { refreshToken } = createAuthTokens({
+      id: "user_1",
+      email: "a@b.com"
+    });
+    prismaMock.refreshToken.findUnique.mockResolvedValue(
+      liveRow({ revokedAt: new Date(Date.now() - 5 * 60_000) })
+    );
+
+    await expect(authService.refresh(refreshToken)).rejects.toThrow(
+      "Invalid refresh token"
+    );
+  });
+
+  it("accepts a just-rotated token within the grace window (two tabs racing)", async () => {
+    const { refreshToken } = createAuthTokens({
+      id: "user_1",
+      email: "a@b.com"
+    });
+    prismaMock.refreshToken.findUnique.mockResolvedValue(
+      liveRow({ revokedAt: new Date(Date.now() - 1_000) })
+    );
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: "user_1",
+      email: "a@b.com"
+    } as never);
+
+    const result = await authService.refresh(refreshToken);
+
+    expect(result.tokens.refreshToken).toEqual(expect.any(String));
+    // Already revoked: no second revocation write.
+    expect(prismaMock.refreshToken.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired server-side row even with a valid JWT", async () => {
+    const { refreshToken } = createAuthTokens({
+      id: "user_1",
+      email: "a@b.com"
+    });
+    prismaMock.refreshToken.findUnique.mockResolvedValue(
+      liveRow({ expiresAt: new Date(Date.now() - 1_000) })
+    );
+
+    await expect(authService.refresh(refreshToken)).rejects.toThrow(
+      "Invalid refresh token"
+    );
   });
 
   it("throws when the refresh token's user no longer exists", async () => {
@@ -244,11 +322,32 @@ describe("authService.refresh", () => {
       id: "ghost",
       email: "ghost@b.com"
     });
+    prismaMock.refreshToken.findUnique.mockResolvedValue(
+      liveRow({ userId: "ghost" })
+    );
     prismaMock.user.findUnique.mockResolvedValue(null);
 
     await expect(authService.refresh(refreshToken)).rejects.toThrow(
       "Invalid refresh token"
     );
+  });
+});
+
+describe("authService.logout", () => {
+  it("revokes the presented token and stays silent about unknown ones", async () => {
+    prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 } as never);
+    await expect(authService.logout("some-token")).resolves.toMatchObject({
+      message: expect.any(String)
+    });
+    expect(prismaMock.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { tokenHash: expect.any(String), revokedAt: null },
+      data: { revokedAt: expect.any(Date) }
+    });
+
+    prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 0 } as never);
+    await expect(authService.logout("unknown")).resolves.toMatchObject({
+      message: expect.any(String)
+    });
   });
 });
 
@@ -411,6 +510,10 @@ describe("authService.resetPassword", () => {
     expect(prismaMock.passwordResetToken.update).toHaveBeenCalledWith({
       where: { id: "prt_1" },
       data: { usedAt: expect.any(Date) }
+    });
+    // Phase 5: a reset ends every existing session for the account.
+    expect(prismaMock.refreshToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "user_1" }
     });
   });
 

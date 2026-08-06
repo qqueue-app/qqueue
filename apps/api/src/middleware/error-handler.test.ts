@@ -128,15 +128,11 @@ describe("errorHandler", () => {
     });
   });
 
-  it("maps an unknown error to 500 and logs it", () => {
-    const errorSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
+  it("maps an unknown error to 500", () => {
+    // Logged through the structured logger (silent under test), not console.
     const res = run(new Error("boom"));
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({ error: { message: "Internal server error" } });
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
   });
 
   it("treats an unrecognised Prisma error code as a 500", () => {

@@ -611,6 +611,13 @@ describe("auth login/refresh success", () => {
 
   it("refreshes tokens", async () => {
     const { refreshToken } = createAuthTokens({ id: "user_1", email: "a@b.com" });
+    // Phase 5: refresh also requires a live server-side token row.
+    prismaMock.refreshToken.findUnique.mockResolvedValue({
+      id: "rt_1",
+      userId: "user_1",
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: null
+    } as never);
     prismaMock.user.findUnique.mockResolvedValue({
       id: "user_1",
       email: "a@b.com"
@@ -619,6 +626,15 @@ describe("auth login/refresh success", () => {
       .post("/api/v1/auth/refresh")
       .send({ refreshToken });
     expect(res.status).toBe(200);
+  });
+
+  it("revokes a refresh token on logout", async () => {
+    prismaMock.refreshToken.updateMany.mockResolvedValue({ count: 1 } as never);
+    const res = await request(app)
+      .post("/api/v1/auth/logout")
+      .send({ refreshToken: "some-refresh-token" });
+    expect(res.status).toBe(200);
+    expect(prismaMock.refreshToken.updateMany).toHaveBeenCalled();
   });
 });
 
@@ -656,6 +672,8 @@ describe("campaigns mutations", () => {
 
   it("duplicates a campaign (201)", async () => {
     prismaMock.campaign.findFirst.mockResolvedValue(owned as never);
+    // duplicate() copies A/B variants (Phase 5); none here.
+    prismaMock.campaignVariant.findMany.mockResolvedValue([] as never);
     prismaMock.campaign.create.mockResolvedValue(owned as never);
     const res = await request(app)
       .post("/api/v1/campaigns/c1/duplicate")

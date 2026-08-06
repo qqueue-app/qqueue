@@ -9,6 +9,7 @@
     "schema": "prisma/schema"
   },
   "scripts": {
+    "rotate-secrets": "tsx scripts/rotate-secrets.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
@@ -21,6 +22,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",
+    "@qqueue/crypto": "workspace:*",
     "@qqueue/email-engine": "workspace:*",
     "@qqueue/shared": "workspace:*",
     "@qqueue/storage": "workspace:*",
@@ -34,6 +36,7 @@
     "imapflow": "^1.4.1",
     "ioredis": "^5.10.1",
     "multer": "^2.0.1",
+    "pino": "^10.3.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {

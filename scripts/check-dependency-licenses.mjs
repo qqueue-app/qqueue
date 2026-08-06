@@ -25,6 +25,10 @@ const reviewedPackageExceptions = new Set([
   // "MIT (http://mootools.net/license.txt)" — it is MIT-licensed. Pulled in
   // transitively via mjml -> juice. Reviewed and accepted.
   "slick@1.12.2",
+  // `@zone-eu/mailsplit` is dual-licensed "(MIT OR EUPL-1.1+)" — a
+  // disjunction, so we elect the MIT option. Pulled in transitively via
+  // mailparser. Reviewed and accepted under MIT.
+  "@zone-eu/mailsplit@5.4.12",
 ]);
 
 function allPackagesExcepted(packages) {

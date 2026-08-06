@@ -49,6 +49,9 @@ vi.mock("imapflow", () => ({ ImapFlow: h.ImapFlow }));
 vi.mock("mailparser", () => ({ simpleParser: h.simpleParser }));
 vi.mock("./crypto.js", () => ({ decryptSecret: (v: string) => `dec:${v}` }));
 vi.mock("./storage.js", () => ({ storage: h.storage }));
+vi.mock("./logger.js", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+}));
 // dsn.ts runs for real; only its webhook fan-out (which would pull in BullMQ)
 // is stubbed.
 vi.mock("./outbound-webhooks.js", () => ({
@@ -520,19 +523,16 @@ describe("DSN handling", () => {
   it("contains a DSN processing failure instead of crashing the sync", async () => {
     syncWithParsedMail(dsnMail);
     prismaMock.emailJob.findFirst.mockRejectedValue(new Error("db down"));
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => {});
+    const { logger } = await import("./logger.js");
 
     await syncInboxAccount(makeAccount());
 
-    expect(consoleError).toHaveBeenCalledWith(
-      expect.stringContaining("failed to process DSN"),
-      expect.any(Error)
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      "failed to process DSN"
     );
     // The message is stored and the account's cursor still advances.
     expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledTimes(1);
     expect(prismaMock.inboxAccount.update).toHaveBeenCalledTimes(1);
-    consoleError.mockRestore();
   });
 });

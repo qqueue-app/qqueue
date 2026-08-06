@@ -3,6 +3,8 @@ import type { UserRole } from "@qqueue/shared";
 declare global {
   namespace Express {
     interface Request {
+      // Set by requestLogger; correlates log lines for one request.
+      id?: string;
       // Set by requireAuth once the access token is verified.
       userId?: string;
       userEmail?: string;

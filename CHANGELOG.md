@@ -4,6 +4,71 @@ Notable changes to QQueue. Phases refer to the evolution plan; each entry lands
 with green `typecheck`/`lint`/`test` and, where the send pipeline or migrations
 are touched, a passing Docker smoke test.
 
+## Post-plan cleanup — worker logging + error boundary (2026-08-06)
+
+- **Worker logs are structured now too**: the worker gets the same pino setup
+  as the API — job completions/failures log queue + jobId as fields, inbox
+  sync and recovery log with `inboundMessageId`/counts, and MJML fallbacks log
+  the recurring send id. The last `console.*` call sites are gone from both
+  runtime apps.
+- **A React error boundary wraps the dashboard** (`components/ErrorBoundary`):
+  a render-time throw now shows a "Something went wrong" card with a reload
+  button instead of silently blanking the whole app. Mounted outside the
+  session/router providers so a throw inside the chrome is still caught.
+- **The deferred backlog is now committed**: `docs/ROADMAP.md` gained an
+  "Evolution plan (2026-08)" section recording phase completion and every
+  deliberately-deferred item with its reason (SMTP pooling, A/B UI,
+  EmailEvent indexes, ESP relay stubs, cloud auth, MFA/SSO, idempotency TTL),
+  plus the smaller known gaps — previously this list lived only in the
+  planning conversation.
+
+## Phase 5 — Operational hygiene (2026-08-06)
+
+- **Encryption keys can now be rotated.** Secret crypto moved into a new
+  `packages/crypto` (deleting the byte-identical api/worker copies whose
+  format was an undeclared wire contract). Ciphertexts now carry a versioned
+  envelope (`v1.iv.tag.ct`; the legacy unversioned format still decrypts), and
+  both apps read `ENCRYPTION_KEYS` as a keyring — first key encrypts, every
+  key decrypts (GCM's auth tag identifies the right one, so no key id is
+  needed and trial decryption is exact). Rotate with
+  `ENCRYPTION_KEYS=new,old` → `pnpm rotate-secrets` (re-encrypts every
+  SMTPConnection/InboxAccount/WebhookEndpoint secret, idempotent, reports
+  undecryptable rows) → drop the old key. `ENCRYPTION_KEY` keeps working as
+  the single-key form.
+- **Graceful shutdown + crash visibility.** SIGTERM/SIGINT now drain the API's
+  connections and let the worker finish in-flight jobs (`worker.close()`)
+  before exiting; both apps log unhandled rejections and treat uncaught
+  exceptions as fatal. Startup recovery (extracted to
+  `apps/worker/src/lib/recovery.ts`, now unit-tested) additionally re-queues
+  `EmailJob` rows stranded in `PROCESSING` for 15+ minutes by a hard crash —
+  previously invisible forever. The processor's status re-read guards against
+  double-send, with the residual crash-after-SMTP-accept window documented.
+- **Refresh tokens are revocable.** New `RefreshToken` table (migration
+  `20260806120000_add_refresh_tokens`): refresh now requires the signed JWT
+  *and* a live server-side row, rotates the row on every use (with a 60s
+  grace window so two tabs racing a refresh don't log the loser out), a new
+  `POST /auth/logout` revokes server-side (the web app calls it best-effort
+  on sign-out), and a password reset deletes every session for the account.
+  Expired/stale rows are pruned opportunistically at login.
+- **Structured logging (API).** pino replaces the one-line console logger:
+  each request gets a `reqId` and one JSON line with method/url/status/
+  duration/user/org; tracking and unsubscribe URLs are redacted (signed
+  tokens encode recipient identity and used to land in logs verbatim); the
+  transactional and manual send controllers log the enqueued `emailJobId` so
+  a request can be correlated with its worker job; unexpected 500s log with
+  the request id. Silent under test; worker logging unchanged for now.
+- **CI parity.** New `ci.yml` workflow runs lint, typecheck, build, the unit
+  suites, and the Docker smoke test on every PR and push to main — previously
+  local-only.
+- **Segment-targeted campaigns can start.** `sendNow`/`schedule`/
+  `setRecurrence` now accept a template plus *either* a contact list or a
+  segment (the worker has resolved segments all along; the guards predated
+  it). `duplicate()` now copies the segment audience and the full A/B
+  configuration with variants — it silently dropped both — while run state
+  (winner flags, `abTestStatus`, schedules) deliberately stays behind.
+- Dependency note: `@zone-eu/mailsplit` (via mailparser) is dual-licensed
+  `MIT OR EUPL-1.1+`; recorded in the license-audit exceptions electing MIT.
+
 ## Phase 4 — Mailcow provisioning + send-as permissions (2026-08-06)
 
 - **Mailboxes page (OWNER/ADMIN)**: with `MAILCOW_API_URL`/`MAILCOW_API_KEY`

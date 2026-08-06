@@ -7,6 +7,7 @@ import { hashPassword } from "../../lib/crypto.js";
 import { assertOrgRole, getMembership } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { createAuthTokens } from "../../lib/tokens.js";
+import { persistRefreshToken } from "../../lib/refresh-tokens.js";
 import { transactionalEmailService } from "../transactional-email/service.js";
 
 // Invitations are valid for a week. Long enough to survive a weekend, short
@@ -322,6 +323,9 @@ export const invitationService = {
       }
     );
 
+    const tokens = createAuthTokens(user);
+    await persistRefreshToken(user.id, tokens.refreshToken);
+
     return {
       user: {
         id: user.id,
@@ -332,7 +336,7 @@ export const invitationService = {
       organization,
       role: invite.role,
       requiresSignIn: false,
-      tokens: createAuthTokens(user)
+      tokens
     };
   }
 };

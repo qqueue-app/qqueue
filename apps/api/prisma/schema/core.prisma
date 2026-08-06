@@ -141,6 +141,7 @@ model User {
   members             OrganizationMember[]
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
+  refreshTokens       RefreshToken[]
   invitesSent         OrganizationInvite[] @relation("InvitesSent")
   smtpGrants          SmtpConnectionGrant[]
   createdAt           DateTime             @default(now())
@@ -154,6 +155,23 @@ model InstanceSetting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+/// Server-side record of an issued refresh token (Phase 5). The JWT signature
+/// alone no longer grants a refresh: the token's hash must exist here,
+/// unexpired and unrevoked — so tokens rotate on use, die on logout, and are
+/// all invalidated by a password reset.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model PasswordResetToken {

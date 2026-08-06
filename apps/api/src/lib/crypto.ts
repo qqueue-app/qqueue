@@ -1,87 +1,23 @@
 import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-  scrypt as scryptCallback,
-  timingSafeEqual
-} from "node:crypto";
-import { promisify } from "node:util";
+  SECRET_DECRYPTION_MESSAGE,
+  SecretDecryptionError,
+  createSecretCipher,
+  hashPassword,
+  verifyPassword
+} from "@qqueue/crypto";
 import { env } from "../config/env.js";
 
-const scrypt = promisify(scryptCallback);
-const encryptionKey = createHash("sha256").update(env.ENCRYPTION_KEY).digest();
+// Thin binding of the shared crypto package to this app's keyring (Phase 5
+// replaced the api/worker duplicated implementations — the envelope format
+// lives in packages/crypto now). Call sites keep the same imports as before.
+const cipher = createSecretCipher(env.ENCRYPTION_KEYS);
 
-export const SECRET_DECRYPTION_MESSAGE =
-  "Stored SMTP credentials cannot be decrypted. Check ENCRYPTION_KEY; changing it invalidates existing SMTP credentials.";
-
-export class SecretDecryptionError extends Error {
-  constructor() {
-    super(SECRET_DECRYPTION_MESSAGE);
-    this.name = "SecretDecryptionError";
-  }
-}
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex");
-  const derivedKey = (await scrypt(password, salt, 64)) as Buffer;
-  return `scrypt:${salt}:${derivedKey.toString("hex")}`;
-}
-
-export async function verifyPassword(
-  password: string,
-  passwordHash: string | null
-): Promise<boolean> {
-  if (!passwordHash) {
-    return false;
-  }
-
-  const [algorithm, salt, storedHash] = passwordHash.split(":");
-
-  if (algorithm !== "scrypt" || !salt || !storedHash) {
-    return false;
-  }
-
-  const storedKey = Buffer.from(storedHash, "hex");
-  const derivedKey = (await scrypt(password, salt, storedKey.length)) as Buffer;
-
-  return (
-    storedKey.length === derivedKey.length && timingSafeEqual(storedKey, derivedKey)
-  );
-}
-
-export function encryptSecret(value: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", encryptionKey, iv);
-  const encrypted = Buffer.concat([
-    cipher.update(value, "utf8"),
-    cipher.final()
-  ]);
-  const tag = cipher.getAuthTag();
-
-  return [iv, tag, encrypted].map((part) => part.toString("base64url")).join(".");
-}
-
-export function decryptSecret(value: string): string {
-  const [ivText, tagText, encryptedText] = value.split(".");
-
-  if (!ivText || !tagText || !encryptedText) {
-    throw new SecretDecryptionError();
-  }
-
-  try {
-    const decipher = createDecipheriv(
-      "aes-256-gcm",
-      encryptionKey,
-      Buffer.from(ivText, "base64url")
-    );
-    decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-
-    return Buffer.concat([
-      decipher.update(Buffer.from(encryptedText, "base64url")),
-      decipher.final()
-    ]).toString("utf8");
-  } catch {
-    throw new SecretDecryptionError();
-  }
-}
+export const encryptSecret = cipher.encryptSecret;
+export const decryptSecret = cipher.decryptSecret;
+export const needsRotation = cipher.needsRotation;
+export {
+  SECRET_DECRYPTION_MESSAGE,
+  SecretDecryptionError,
+  hashPassword,
+  verifyPassword
+};

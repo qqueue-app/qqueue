@@ -27,6 +27,12 @@ export const authController = {
     res.json({ data: result });
   },
 
+  async logout(req: Request, res: Response) {
+    const input = refreshSchema.parse(req.body);
+    const result = await authService.logout(input.refreshToken);
+    res.json({ data: result });
+  },
+
   async requestPasswordReset(req: Request, res: Response) {
     const input = passwordResetRequestSchema.parse(req.body);
     const result = await authService.requestPasswordReset(input.email);

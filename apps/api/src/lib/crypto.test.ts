@@ -41,7 +41,9 @@ describe("hashPassword / verifyPassword", () => {
 describe("encryptSecret / decryptSecret", () => {
   it("round-trips a secret value", () => {
     const cipher = encryptSecret("my-password");
-    expect(cipher.split(".")).toHaveLength(3);
+    // Phase 5: writes use the versioned envelope (v1.iv.tag.ct).
+    expect(cipher.split(".")).toHaveLength(4);
+    expect(cipher.startsWith("v1.")).toBe(true);
     expect(decryptSecret(cipher)).toBe("my-password");
   });
 

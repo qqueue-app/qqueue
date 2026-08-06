@@ -71,6 +71,9 @@ importers:
       '@prisma/client':
         specifier: ^6.1.0
         version: 6.19.3(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
+      '@qqueue/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@qqueue/email-engine':
         specifier: workspace:*
         version: link:../../packages/email-engine
@@ -110,6 +113,9 @@ importers:
       multer:
         specifier: ^2.0.1
         version: 2.2.0
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -290,6 +296,9 @@ importers:
       '@prisma/client':
         specifier: ^6.1.0
         version: 6.19.3(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
+      '@qqueue/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@qqueue/email-engine':
         specifier: workspace:*
         version: link:../../packages/email-engine
@@ -317,6 +326,9 @@ importers:
       mailparser:
         specifier: ^3.9.10
         version: 3.9.10
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -330,6 +342,12 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.22.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/crypto:
+    devDependencies:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

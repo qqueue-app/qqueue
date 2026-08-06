@@ -13,6 +13,7 @@ import {
   type SessionData,
   type SessionOrganization
 } from "./session.js";
+import { api } from "./api.js";
 
 interface SessionContextValue {
   session: SessionData;
@@ -74,6 +75,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(() => {
+    // Revoke the refresh token server-side too (Phase 5) — best-effort, and
+    // read before the local session is cleared. Local sign-out never waits on
+    // (or fails because of) the network.
+    const { refreshToken } = getSession();
+    if (refreshToken) {
+      void api.logout(refreshToken).catch(() => undefined);
+    }
     clearSession();
     setSessionState({ organizations: [] });
   }, []);

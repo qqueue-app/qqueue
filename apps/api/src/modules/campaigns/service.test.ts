@@ -183,6 +183,45 @@ describe("campaignService.duplicate", () => {
       "Copy of Camp"
     );
   });
+
+  // Phase 5: duplicate() used to silently drop the segment and all A/B config.
+  it("copies the segment audience and A/B configuration with variants", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      contactListId: null,
+      segmentId: "seg_1",
+      abTestEnabled: true,
+      abTestPercent: 20,
+      abWinnerMetric: "OPEN",
+      abTestWindowMin: 120,
+      abTestStatus: "SENT"
+    } as never);
+    prismaMock.campaignVariant.findMany.mockResolvedValue([
+      { label: "A", subject: "Subject A" },
+      { label: "B", subject: "Subject B" }
+    ] as never);
+    prismaMock.campaign.create.mockResolvedValue(draft as never);
+
+    await campaignService.duplicate("c1", "user_1");
+
+    const data = prismaMock.campaign.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      segmentId: "seg_1",
+      contactListId: null,
+      abTestEnabled: true,
+      abTestPercent: 20,
+      abWinnerMetric: "OPEN",
+      abTestWindowMin: 120,
+      variants: {
+        create: [
+          { label: "A", subject: "Subject A" },
+          { label: "B", subject: "Subject B" }
+        ]
+      }
+    });
+    // Run state does not travel: the copy is a fresh draft.
+    expect(data.abTestStatus).toBeUndefined();
+  });
 });
 
 describe("campaignService.delete", () => {
@@ -246,7 +285,33 @@ describe("campaignService.sendNow", () => {
       templateId: null
     } as never);
     await expect(campaignService.sendNow("c1", "user_1")).rejects.toThrow(
-      "Campaign requires a template and contact list"
+      /requires a template and an audience/
+    );
+  });
+
+  // Phase 5: segment-targeted campaigns could never be started even though the
+  // worker fully supports resolving them.
+  it("starts a segment-targeted campaign", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      contactListId: null,
+      segmentId: "seg_1"
+    } as never);
+    prismaMock.campaign.update.mockResolvedValue(draft as never);
+
+    await campaignService.sendNow("c1", "user_1");
+
+    expect(add).toHaveBeenCalledOnce();
+  });
+
+  it("throws 400 with no audience at all", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      contactListId: null,
+      segmentId: null
+    } as never);
+    await expect(campaignService.sendNow("c1", "user_1")).rejects.toThrow(
+      /requires a template and an audience/
     );
   });
 });
@@ -278,7 +343,7 @@ describe("campaignService.schedule", () => {
     } as never);
     await expect(
       campaignService.schedule("c1", "user_1", { scheduledAt: future })
-    ).rejects.toThrow("Campaign requires a template and contact list");
+    ).rejects.toThrow(/requires a template and an audience/);
   });
 
   it("throws 400 when the scheduled time is in the past", async () => {
@@ -318,7 +383,7 @@ describe("campaignService.setRecurrence", () => {
     } as never);
     await expect(
       campaignService.setRecurrence("c1", "user_1", input)
-    ).rejects.toThrow("Campaign requires a template and contact list");
+    ).rejects.toThrow(/requires a template and an audience/);
   });
 
   it("throws 400 when the cron expression is invalid", async () => {

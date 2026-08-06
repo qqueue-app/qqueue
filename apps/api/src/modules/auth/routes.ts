@@ -21,6 +21,9 @@ const refreshLimit = rateLimit({
 authRouter.post("/register", authWriteLimit, authController.register);
 authRouter.post("/login", authWriteLimit, authController.login);
 authRouter.post("/refresh", refreshLimit, authController.refresh);
+// Revokes the presented refresh token server-side (Phase 5). Public like
+// refresh — the token itself is the credential.
+authRouter.post("/logout", refreshLimit, authController.logout);
 authRouter.post(
   "/password-reset/request",
   authWriteLimit,

@@ -19,6 +19,7 @@ const GROUPS = {
   backend: [
     "apps/api",
     "apps/worker",
+    "packages/crypto",
     "packages/email-engine",
     "packages/shared",
     "packages/sdk"

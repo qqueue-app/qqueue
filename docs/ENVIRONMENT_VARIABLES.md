@@ -19,7 +19,7 @@ keys that cannot be recreated later.
 
 | Variable | What it is | Why changing it hurts |
 | --- | --- | --- |
-| `ENCRYPTION_KEY` | The key that locks the sending-account (SMTP) passwords you save inside QQueue. | If it is lost or changed, QQueue can no longer unlock any saved sending passwords. You would have to re-enter every one of them. |
+| `ENCRYPTION_KEY` | The key that locks the sending-account (SMTP) passwords you save inside QQueue. | If it is **lost**, QQueue can no longer unlock any saved sending passwords and you must re-enter every one. It **can** be rotated safely: set `ENCRYPTION_KEYS=new-key,old-key` (new first), restart, run `pnpm rotate-secrets`, then drop the old key. |
 | `TRACKING_SECRET` | A random password QQueue uses to sign the links that track email opens and clicks. | If it changes, tracking in emails you've **already sent** stops working — those links are signed with the old secret. |
 
 Both are generated for you by `pnpm setup`. Treat them like the keys to the
@@ -32,6 +32,7 @@ building.
 | `JWT_ACCESS_SECRET` | Signs the short-lived login sessions for the dashboard. |
 | `JWT_REFRESH_SECRET` | Signs the longer-lived "keep me signed in" tokens. |
 | `ENCRYPTION_KEY` | See above — encrypts saved SMTP passwords at rest. |
+| `ENCRYPTION_KEYS` | Optional. A comma-separated keyring for key rotation: the first key encrypts, every key can decrypt. Overrides `ENCRYPTION_KEY` when set. |
 | `TRACKING_SECRET` | See above — signs open/click tracking links. |
 | `INBOUND_ESP_WEBHOOK_ENABLED` | Optional, default `false`. Turns on the inbound ESP webhook endpoint (`POST /api/v1/webhooks/email-events`). Leave it off unless you relay through an email provider that posts bounce reports to QQueue — QQueue detects bounces on its own for normal SMTP sending (rejected sends and bounce emails read from a synced inbox). |
 | `WEBHOOK_SECRET` | Optional. The shared password an email provider must send with each report when `INBOUND_ESP_WEBHOOK_ENABLED=true`. With the endpoint enabled but no secret set, every request is rejected. |

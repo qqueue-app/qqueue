@@ -1,5 +1,11 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// signOut best-effort-revokes the refresh token server-side (Phase 5); stub
+// the api so tests never touch the network.
+const logout = vi.hoisted(() => vi.fn().mockResolvedValue({ message: "ok" }));
+vi.mock("./api.js", () => ({ api: { logout } }));
+
 import { SessionProvider, useSession } from "./session-context.js";
 import { getSession } from "./session.js";
 
@@ -81,6 +87,23 @@ describe("SessionProvider", () => {
     expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.organizations).toEqual([]);
     expect(getSession().accessToken).toBeUndefined();
+  });
+
+  it("signOut revokes the refresh token server-side, best-effort", () => {
+    logout.mockClear();
+    const { result } = renderHook(() => useSession(), { wrapper });
+    act(() =>
+      result.current.setSession({
+        user: { id: "u1", email: "a@b.com" },
+        accessToken: "tok",
+        refreshToken: "refresh-tok",
+        organizations: []
+      })
+    );
+    act(() => result.current.signOut());
+    expect(logout).toHaveBeenCalledWith("refresh-tok");
+    // Local sign-out never depends on the request succeeding.
+    expect(result.current.isAuthenticated).toBe(false);
   });
 
   it("throws when useSession is used outside the provider", () => {

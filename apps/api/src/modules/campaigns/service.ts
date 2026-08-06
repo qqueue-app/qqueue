@@ -225,15 +225,31 @@ export const campaignService = {
     return this.get(id, userId);
   },
 
+  /**
+   * Copy a campaign as a fresh draft: audience (list or segment) and A/B
+   * configuration travel with it; run state (abTestStatus, winner flags,
+   * schedules) deliberately does not.
+   */
   async duplicate(id: string, userId: string) {
     const existing = await findOwned(id, userId);
+    const variants = await prisma.campaignVariant.findMany({
+      where: { campaignId: id },
+      select: { label: true, subject: true },
+      orderBy: { label: "asc" }
+    });
 
     return prisma.campaign.create({
       data: {
         organizationId: existing.organizationId,
         name: `Copy of ${existing.name}`,
         templateId: existing.templateId,
-        contactListId: existing.contactListId
+        contactListId: existing.contactListId,
+        segmentId: existing.segmentId,
+        abTestEnabled: existing.abTestEnabled,
+        abTestPercent: existing.abTestPercent,
+        abWinnerMetric: existing.abWinnerMetric,
+        abTestWindowMin: existing.abTestWindowMin,
+        ...(variants.length > 0 ? { variants: { create: variants } } : {})
       },
       include: campaignInclude
     });
@@ -256,8 +272,14 @@ export const campaignService = {
       throw new HttpError(400, "Campaign cannot be sent from its current status");
     }
 
-    if (!campaign.templateId || !campaign.contactListId) {
-      throw new HttpError(400, "Campaign requires a template and contact list");
+    // Phase 5: a segment is a first-class audience — the worker has resolved
+    // segments since Phase D, but these guards predated that and locked
+    // segment-targeted campaigns out of ever starting.
+    if (!campaign.templateId || (!campaign.contactListId && !campaign.segmentId)) {
+      throw new HttpError(
+        400,
+        "Campaign requires a template and an audience (contact list or segment)"
+      );
     }
 
     await assertMayStartCampaign(userId, campaign.organizationId);
@@ -279,8 +301,14 @@ export const campaignService = {
       throw new HttpError(400, "Only draft or scheduled campaigns can be scheduled");
     }
 
-    if (!campaign.templateId || !campaign.contactListId) {
-      throw new HttpError(400, "Campaign requires a template and contact list");
+    // Phase 5: a segment is a first-class audience — the worker has resolved
+    // segments since Phase D, but these guards predated that and locked
+    // segment-targeted campaigns out of ever starting.
+    if (!campaign.templateId || (!campaign.contactListId && !campaign.segmentId)) {
+      throw new HttpError(
+        400,
+        "Campaign requires a template and an audience (contact list or segment)"
+      );
     }
 
     await assertMayStartCampaign(userId, campaign.organizationId);
@@ -324,8 +352,14 @@ export const campaignService = {
       );
     }
 
-    if (!campaign.templateId || !campaign.contactListId) {
-      throw new HttpError(400, "Campaign requires a template and contact list");
+    // Phase 5: a segment is a first-class audience — the worker has resolved
+    // segments since Phase D, but these guards predated that and locked
+    // segment-targeted campaigns out of ever starting.
+    if (!campaign.templateId || (!campaign.contactListId && !campaign.segmentId)) {
+      throw new HttpError(
+        400,
+        "Campaign requires a template and an audience (contact list or segment)"
+      );
     }
 
     await assertMayStartCampaign(userId, campaign.organizationId);
