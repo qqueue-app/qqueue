@@ -5,8 +5,8 @@
 QQueue is a feature-complete self-hosted beta candidate undergoing launch
 preparation. The repository contains an implemented TypeScript monorepo with an
 Express API, React dashboard, BullMQ worker processes, Prisma/PostgreSQL data
-model, Redis queues, SMTP sending, sender identities and sending domains with
-managed DKIM signing, tracking, transactional API keys, outbound webhooks, an
+model, Redis queues, SMTP sending, invitations and send-as grants, Mailcow
+mailbox provisioning, tracking, transactional API keys, outbound webhooks, an
 MIT-licensed SDK package, tests, deployment files, and open-core licensing
 guardrails.
 
@@ -94,12 +94,15 @@ refactor that precedes the larger UI work.
 
 - Authentication
 - Organizations
+- Invitations and Member Management
 - SMTP Connections
-- Sender Identities and Sending Domains (managed DKIM)
+- Send-As Grants
+- Mailcow Mailbox Provisioning
 - Contacts
 - Contact Lists
 - Templates
 - Campaigns
+- Recurring Sends
 - Transactional API
 - API Keys
 - Tracking
@@ -122,8 +125,8 @@ operational and abuse-control gaps from the original audit have been closed.
 
 - `apps/api`: Express API. It owns HTTP routing, auth/session tokens, password
   reset, organization access checks, Prisma access, product modules,
-  sender-identity and sending-domain management (with managed-DKIM keypair
-  generation and DNS verification), transactional sends, the `manual-email`
+  invitations and member management, send-as grant enforcement, Mailcow
+  mailbox provisioning, transactional sends, the `manual-email`
   module (Email Studio send + preview +
   per-recipient delivery status + recipient autocomplete, cached per org for
   60s over an `(organizationId, createdAt)` index), `email-drafts`
@@ -151,8 +154,13 @@ operational and abuse-control gaps from the original audit have been closed.
   production cloud behavior.
 - `packages/shared`: shared TypeScript domain types and Zod schemas for auth,
   organizations, contacts, lists, templates, campaigns, transactional sends, API
-  keys, webhooks, SMTP connections, sender identities and sending domains, cron
-  validation, timezones, and the pure DKIM DNS-record helpers.
+  keys, webhooks, SMTP connections, invitations, recurring sends, Mailcow
+  provisioning, instance settings, cron validation, and timezones. Browser-safe
+  by contract — no `node:*` code.
+- `packages/crypto`: Node-only secret primitives shared by the API and worker
+  (`createSecretCipher` for SMTP credentials at rest, `hashPassword`/
+  `verifyPassword`). Deliberately separate from `packages/shared`, which must
+  stay browser-safe.
 - `packages/email-engine`: email provider abstraction, Nodemailer-backed SMTP
   provider (with per-message DKIM signing), tracking URL/token helpers, the MJML
   email-safe render layer, and explicit placeholder provider classes for
@@ -162,16 +170,17 @@ operational and abuse-control gaps from the original audit have been closed.
 - `packages/sdk`: MIT-licensed TypeScript SDK package. It currently wraps the
   public transactional email send endpoint.
 - `apps/api/prisma`: PostgreSQL schema and migrations for users,
-  organizations, SMTP connections, sending domains and sender identities
-  (`DkimMode`/`DkimStatus`), contacts (with `tags`), contact lists,
+  organizations, organization members and invitations, SMTP connections,
+  send-as grants (`SmtpConnectionGrant`) and Mailcow domain grants
+  (`MailDomainGrant`), contacts (with `tags`), contact lists,
   explicit contact-list membership (`ContactListMember`), templates (with MJML
-  source), campaigns, campaign runs, email jobs (with `origin`,
-  `senderIdentityId`, and threading metadata:
+  source), campaigns, campaign runs, recurring sends and their runs, email jobs
+  (with `origin` and threading metadata:
   `messageId`/`inReplyTo`/`references`), email events, API keys,
   webhook endpoints, webhook deliveries, email drafts (Email Studio composer
   state), email attachments (metadata for blobs in object storage), image assets
-  (publicly-served images embedded in email HTML), and
-  password reset tokens.
+  (publicly-served images embedded in email HTML), inbox accounts and inbound
+  messages, and refresh/password-reset tokens.
 - `scripts`: coverage badge generation, dependency license audit, cloud
   boundary guardrail checks, and the Docker-backed smoke test (`docker-smoke.ts`).
 - `.github/workflows`: coverage, Phase 7 guardrails, and SDK publish workflows.
@@ -263,8 +272,14 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Organization model and membership model exist.
 - [x] Organization CRUD routes/services exist.
 - [x] Access and role helpers exist.
-- [~] Organization members beyond initial owner are modeled but no invitation or
-  member-management UI/workflow exists yet.
+- [x] Invitations (`OrganizationInvite`): an OWNER/ADMIN invites by email and
+  role; the raw token exists only in the emailed accept link (sha256 hash
+  persisted, same shape as `PasswordResetToken`), valid 7 days, revocable.
+  Public `/accept-invite` page creates the account and membership in one step.
+- [x] Invitations are the sanctioned exception to closed public registration —
+  an OWNER/ADMIN deliberately vouches for the invitee.
+- [x] Member management (list, role change, remove) under
+  `/organizations/:id/members`, surfaced by the Settings `TeamCard`.
 
 ### SMTP Connections
 
@@ -275,18 +290,40 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Dashboard page exists.
 - [x] Dedicated Mailcow setup documentation.
 
-### Sending Domains and Sender Identities
+> **Removed:** Sending Domains, Sender Identities and managed DKIM were part of
+> the product until `bcb3475` and are gone from core. Every send now resolves
+> *who it sends as* from the SMTP connection — an explicit `smtpConnectionId`
+> on the request, else the org's default. Don't resurrect them without a fresh
+> decision.
 
-- [x] Sending domains with `EXTERNAL` and `MANAGED` DKIM modes.
-- [x] Managed mode generates an RSA-2048 keypair, signs DKIM in-process, and
-  surfaces the DNS records to publish.
-- [x] DKIM verification worker moves managed domains `PENDING → VERIFIED/FAILED`,
-  on demand and on a daily recheck.
-- [x] Sender identities (concrete From name+email under a domain, bound to an
-  SMTP connection); one org default.
-- [x] All send paths resolve the From identity and DKIM options through
-  `resolveSender`/`dkimSignOptionsFor`; UI send surfaces pick a sender identity.
-- [x] Dashboard page for sending domains and DKIM setup.
+### Send-As Grants
+
+- [x] `SmtpConnectionGrant` + `apps/api/src/lib/send-as.ts`: OWNER/ADMIN may
+  send from any org connection; a MEMBER only from ones they hold a grant for.
+- [x] Enforced once, at creation time, on every send surface (transactional,
+  manual, drafts, recurring sends, campaign start). Jobs are created after the
+  check, so the worker deliberately does not re-verify.
+- [x] Sends with no acting user (API-key sends, SYSTEM mail) pass
+  `userId: null` and are not gated — an API key is an org-scoped credential.
+- [x] Migration `20260806210000_backfill_smtp_connection_grants` grants existing
+  MEMBERs the connections their org already had, so upgrading an instance does
+  not silently revoke their ability to send.
+
+### Mailcow Mailbox Provisioning
+
+- [x] `/mailboxes` page + `modules/mailcow`: one flow creates the Mailcow
+  mailbox, an app password held only by QQueue, the `SMTPConnection`, a
+  sync-enabled `InboxAccount`, and optionally a send-as grant.
+- [x] The `InboxAccount` is mandatory — it is what gives that identity DSN
+  bounce visibility.
+- [x] Post-provision SMTP verification retries briefly (Mailcow needs a moment
+  to activate a fresh app password); rollback is reserved for "we couldn't
+  record what we created", never "the handshake didn't work yet".
+- [x] `MailDomainGrant` scopes which domains an admin may provision on —
+  default deny, validated against Mailcow's active domains, stored lowercase.
+  Grant management is OWNER-only.
+- [x] Members never touch SMTP credentials or the Mailcow UI; they read mail
+  with the mailbox password in their own client.
 
 ### Contacts, Templates, and Campaigns
 
@@ -434,8 +471,8 @@ End-to-end, the app can currently support a self-hosted operator who:
 3. Logs into the React dashboard.
 4. Recovers an account through the password reset flow.
 5. Creates and verifies an SMTP connection.
-6. Adds sending domains and sender identities — publishing DNS records and
-   verifying managed DKIM, and choosing a default identity.
+6. Invites teammates by email, sets their role, and grants a member the
+   sending accounts they may send as.
 7. Creates contacts, contact lists, and templates.
 8. Sends a transactional email from Compose (Email Studio), the API, or the SDK.
 9. Creates campaigns, sends now, schedules one-shot campaigns, configures
@@ -452,8 +489,8 @@ End-to-end, the app can currently support a self-hosted operator who:
 
 ### Product
 
-- [ ] Organization invitation flow
-- [ ] Member management UI
+- [x] Organization invitation flow
+- [x] Member management UI
 - [ ] Usage metrics dashboard
 - [x] Transactional send idempotency keys
 - [ ] Provider-specific inbound webhook adapters
@@ -490,13 +527,10 @@ End-to-end, the app can currently support a self-hosted operator who:
   QQueue, and a simplified inbox UI without ticketing.
 - [~] Richer team collaboration on conversations remains out of scope for the
   core inbox.
-- [x] Phase F: sending domains & sender identities — decouple the visible From
-  from the authenticating SMTP credential; `EXTERNAL` vs `MANAGED` DKIM;
-  managed-mode RSA-2048 keygen + in-process signing + published DNS records; a
-  verification worker (`PENDING → VERIFIED/FAILED`, daily recheck); send-time
-  resolution via `resolveSender`/`dkimSignOptionsFor` (transactional, manual, and
-  campaign); a from-picker and Sending Domains page in the dashboard; and
-  backward-compatible public API/SDK `senderIdentityId` support.
+- [–] Phase F (sending domains & sender identities, managed DKIM) shipped on
+  2026-06-30 and was **removed from core in `bcb3475`**. Every send now resolves
+  who it sends as from the SMTP connection. Kept here only so the history is
+  legible; see the removal note under "Send-As Grants" above.
 
 ### UX
 
@@ -540,16 +574,36 @@ End-to-end, the app can currently support a self-hosted operator who:
 2. Record demo video using `docs/DEMO_SCRIPT.md`.
 3. Open-source public release preparation.
 4. Gather first beta users.
-5. Add organization invitations.
-6. Add member management.
-7. Add usage metrics dashboard.
-8. Expand SDK functionality.
-9. Improve onboarding UX.
-10. Collect feedback from real installations.
+5. Make bounce accounting observable (ROADMAP "Phase 2c") — a setup-time check
+   that DSN parsing is reachable, plus a backfill for DSNs that predate the
+   inbox account. Until then a bounce count of zero is indistinguishable from
+   perfect delivery.
+6. Add usage metrics dashboard.
+7. Expand SDK functionality.
+8. Improve onboarding UX.
+9. Collect feedback from real installations.
 
 ## Verification
 
-### Phase F sending domains & sender identities (2026-06-30)
+Entries below are **dated records of the run at that time**, newest first — not
+a claim about the suite as it stands today. For the current state, run the gates
+yourself (`pnpm typecheck`, `lint`, `build`, `test`, plus `test:smoke:docker`
+for send-pipeline or migration changes).
+
+### Current suite (2026-08-06)
+
+- `pnpm test` — **154 test files, 1,815 tests**, all passing:
+  api 75/881, web 52/575, worker 12/127, shared 1/118, email-engine 6/62,
+  cloud 5/26, crypto 1/11, storage 1/8, sdk 1/7.
+- `pnpm typecheck`, `pnpm lint`, `pnpm build` — green across 13 tasks.
+- `pnpm test:smoke:docker` — passing (Postgres + Redis + API + worker,
+  all migrations applied, one job reaching `SENT`).
+
+### Phase F sending domains & sender identities (2026-06-30) — since REMOVED
+
+> This feature was removed from core in `bcb3475`. The entry below is the
+> original verification record, kept for history only. Nothing it describes
+> still exists.
 
 - [x] Added the `SendingDomain` and `SenderIdentity` models with the `DkimMode`
   (`EXTERNAL`/`MANAGED`) and `DkimStatus` (`PENDING`/`VERIFIED`/`FAILED`/`NA`)
