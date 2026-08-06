@@ -24,6 +24,9 @@ vi.mock("../lib/api.js", () => ({
     addConnectionGrant: vi.fn(),
     removeConnectionGrant: vi.fn(),
     provisionMailbox: vi.fn(),
+    listMailDomainGrants: vi.fn(),
+    addMailDomainGrant: vi.fn(),
+    removeMailDomainGrant: vi.fn(),
   },
 }));
 
@@ -89,6 +92,9 @@ beforeEach(() => {
     },
   ]);
   mockedApi.removeConnectionGrant.mockResolvedValue(undefined);
+  mockedApi.listMailDomainGrants.mockResolvedValue([]);
+  mockedApi.addMailDomainGrant.mockResolvedValue({ id: "dg_1" });
+  mockedApi.removeMailDomainGrant.mockResolvedValue(undefined);
   mockedApi.provisionMailbox.mockResolvedValue({
     smtpConnection: { ...connection, id: "s2", fromEmail: "new@acme.test" },
     inboxAccountId: "inbox_1",
@@ -212,5 +218,71 @@ describe("Mailboxes", () => {
     expect(
       screen.getByRole("button", { name: /Grant send-as/i })
     ).toBeDisabled();
+  });
+
+  // Domain access: owners manage which domains each admin may provision on.
+  it("shows owners the Domain access editor and removes a grant", async () => {
+    const user = userEvent.setup();
+    session.current = {
+      currentOrganizationId: "org_1",
+      currentOrganization: { id: "org_1", name: "Acme", role: "OWNER" },
+    };
+    mockedApi.listOrganizationMembers.mockResolvedValue([
+      ...members,
+      {
+        id: "m3",
+        organizationId: "org_1",
+        userId: "user_admin",
+        role: "ADMIN",
+        createdAt: "2026-01-01",
+        user: { id: "user_admin", email: "admin@acme.test", name: "Adjoa" },
+      },
+    ]);
+    mockedApi.listMailDomainGrants.mockResolvedValue([
+      {
+        id: "dg_1",
+        organizationId: "org_1",
+        userId: "user_admin",
+        domain: "acme.test",
+        createdAt: "2026-01-02",
+        user: { id: "user_admin", email: "admin@acme.test", name: "Adjoa" },
+      },
+    ]);
+    render(<Mailboxes />);
+
+    expect(await screen.findByText("Domain access")).toBeInTheDocument();
+    // The admin row lists their granted domain as a removable chip.
+    expect(
+      screen.getByLabelText("Remove acme.test for admin@acme.test")
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByLabelText("Remove acme.test for admin@acme.test")
+    );
+    await waitFor(() =>
+      expect(mockedApi.removeMailDomainGrant).toHaveBeenCalledWith(
+        "dg_1",
+        "org_1"
+      )
+    );
+  });
+
+  it("hides the Domain access editor from admins", async () => {
+    render(<Mailboxes />); // default session role is ADMIN
+    expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    expect(screen.queryByText("Domain access")).not.toBeInTheDocument();
+    expect(mockedApi.listMailDomainGrants).not.toHaveBeenCalled();
+  });
+
+  it("tells an admin with no granted domains to ask the owner", async () => {
+    mockedApi.getMailcowStatus.mockResolvedValue({
+      ...status,
+      domains: [],
+      restricted: true,
+    });
+    render(<Mailboxes />);
+    expect(
+      await screen.findByText(/granted you access to any domains/i)
+    ).toBeInTheDocument();
   });
 });

@@ -4,6 +4,22 @@ Notable changes to QQueue. Phases refer to the evolution plan; each entry lands
 with green `typecheck`/`lint`/`test` and, where the send pipeline or migrations
 are touched, a passing Docker smoke test.
 
+## Domain access for mailbox provisioning (2026-08-06)
+
+- **Owners provision on every Mailcow domain; admins only on granted ones.**
+  New `MailDomainGrant` model (migration
+  `20260806150000_add_mail_domain_grants`): the Mailboxes status endpoint
+  returns each caller only the domains they may use (with a `restricted`
+  flag when narrowed), and `provision` enforces the grant server-side
+  (`403 domain_not_granted`) — default deny for admins. Grant management
+  (list/add/remove) is **OWNER-only**, since the grant is exactly what
+  separates an admin's reach from an owner's; grants are validated against
+  Mailcow's active domains and stored lowercase, idempotently.
+- The Mailboxes page gains a "Domain access" card for owners (per-admin
+  domain chips with grant/revoke), and an admin with no granted domains sees
+  guidance instead of an empty picker. Deliberately DB-backed and UI-managed —
+  no environment variable involved.
+
 ## Post-plan cleanup — worker logging + error boundary (2026-08-06)
 
 - **Worker logs are structured now too**: the worker gets the same pino setup

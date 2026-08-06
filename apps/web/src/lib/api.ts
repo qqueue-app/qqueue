@@ -506,9 +506,21 @@ export interface SmtpConnectionGrant {
 export interface MailcowStatus {
   configured: boolean;
   reachable: boolean;
+  /** Domains the caller may provision under (owners: all; admins: granted). */
   domains: string[];
   mailHost: string | null;
+  /** True when the list was narrowed by domain grants (admin caller). */
+  restricted?: boolean;
   error?: string;
+}
+
+export interface MailDomainGrant {
+  id: string;
+  organizationId: string;
+  userId: string;
+  domain: string;
+  createdAt: string;
+  user?: { id: string; email: string; name?: string | null };
 }
 
 export interface MailboxProvisionResult {
@@ -1004,6 +1016,30 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+
+  listMailDomainGrants(organizationId: string) {
+    return request<MailDomainGrant[]>(
+      `/api/v1/mailcow/domain-grants?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  addMailDomainGrant(input: {
+    organizationId: string;
+    userId: string;
+    domain: string;
+  }) {
+    return request<MailDomainGrant>("/api/v1/mailcow/domain-grants", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  removeMailDomainGrant(id: string, organizationId: string) {
+    return request<void>(
+      `/api/v1/mailcow/domain-grants/${encodeURIComponent(id)}?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "DELETE" }
+    );
   },
 
   createSMTPConnection(input: Record<string, unknown>) {

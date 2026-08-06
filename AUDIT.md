@@ -102,6 +102,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 - **`OrganizationMember`** (200) — `organizationId` + `userId` (`@@unique` pair), `role UserRole @default(MEMBER)`.
 - **`OrganizationInvite`** (216) — `email`, `role`, `tokenHash @unique`, `status InviteStatus`, `invitedByUserId`, `expiresAt`, `acceptedAt?`. Indexes: org, email, expiresAt.
 - **`SMTPConnection`** (236) — `name`, `host`, `port`, `secure` (default true), `usernameEncrypted`, `passwordEncrypted`, `fromEmail`, `fromName?`, `isDefault` (default false). **No `@@index([organizationId])`.**
+- **`MailDomainGrant`** — provisioning domain access: `organizationId` + `userId` + `domain` (`@@unique` triple, lowercase domains). OWNERs provision under any active Mailcow domain; ADMINs only under granted ones (default deny; enforced in `mailcowService.status`/`provision`). Grant CRUD is OWNER-only.
 - **`SmtpConnectionGrant`** (Phase 4) — send-as permission: `smtpConnectionId` + `userId` (`@@unique` pair, both FK Cascade, plus denormalized `organizationId`). MEMBERs may only send from granted connections; OWNER/ADMIN need no row. Enforced at the service layer on every send surface (`apps/api/src/lib/send-as.ts`); the worker does not re-verify.
 - **`RecurringSend`** (269) — `name`, `subject`, `html?`, `text?`, `to[]`/`cc[]`/`bcc[]`, `contactIds[]`/`listIds[]` (resolved fresh per occurrence), `replyTo?`, `smtpConnectionId` (**plain string, no FK relation**), `templateId?` (same), `variables Json?`, `cronExpression`, `timezone` (default "UTC"), `status`, `nextRunAt?`, `lastRunAt?`, `createdByUserId?`. Index `[status, nextRunAt]`.
 - **`RecurringSendRun`** (309) — `@@unique([recurringSendId, occurrenceKey])` (idempotency), `emailJobId?` (no FK).
@@ -136,7 +137,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 
 ### 2.5 Migrations
 
-- **37 migrations** in `apps/api/prisma/schema/migrations/` (32 at audit time; phases 1–5 added `add_system_email_origin`, `per_recipient_sends_and_bulk_flag`, `add_inbound_message_is_dsn`, `add_smtp_connection_grants`, `add_refresh_tokens`) (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
+- **38 migrations** in `apps/api/prisma/schema/migrations/` (32 at audit time; phases 1–5 and follow-ups added `add_system_email_origin`, `per_recipient_sends_and_bulk_flag`, `add_inbound_message_is_dsn`, `add_smtp_connection_grants`, `add_refresh_tokens`, `add_mail_domain_grants`) (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
 - Run paths: dev `pnpm db:migrate` (`migrate dev`); production via a one-shot `migrate` compose service running `prisma migrate deploy`; smoke test and `pnpm setup` also run deploy/dev respectively.
 - **No drift check in CI** — no `migrate diff`/`migrate status` anywhere automated; drift verification is a documented manual practice (`docs/TROUBLESHOOTING.md:126-133`, `docs/BETA_CHECKLIST.md:30`). No seed script.
 
@@ -423,7 +424,7 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 | `/api/v1/instance-settings` (GET, PATCH, GET `/env-status`) | Registration policy + env health | inst-admin |
 | `/api/v1/queue-operations` (GET, POST `/:queueName/jobs/:jobId/retry`) | BullMQ inspector/retry | JWT +O/A |
 | `/api/v1/smtp-connections` (full CRUD + GET `/sendable`, POST `/:id/verify`, grants CRUD under `/:id/grants`) | Sending accounts + on-demand credential test + send-as grants | reads and `/:id/verify` JWT +org / svc; writes and grant management +O/A (Phases 3–4); `/sendable` returns only what the caller may send as |
-| `/api/v1/mailcow` (GET `/status`, POST `/provision`) | Mailcow mailbox provisioning | JWT +O/A; 404 unless `MAILCOW_API_URL`/`MAILCOW_API_KEY` configured |
+| `/api/v1/mailcow` (GET `/status`, POST `/provision`, domain-grants CRUD under `/domain-grants`) | Mailcow mailbox provisioning + per-admin domain access | status/provision JWT +O/A (ADMINs limited to granted domains); domain-grant management OWNER-only; 404 unless `MAILCOW_API_URL`/`MAILCOW_API_KEY` configured |
 | `/api/v1/contacts` (CRUD + `/import`, `/import/preview`, `/export`, `/bulk-delete`, `/segment/preview`, `/:id/activity`) | Contacts | JWT +org / svc |
 | `/api/v1/contact-lists` (CRUD + `/from-segment`) | Lists | JWT +org / svc |
 | `/api/v1/segments` (CRUD + `/preview`) | Rule-tree segments | JWT +org / svc |

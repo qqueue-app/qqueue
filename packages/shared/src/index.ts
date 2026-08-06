@@ -89,6 +89,7 @@ export type ApiErrorCode =
   | "not_found"
   | "conflict"
   | "send_as_denied"
+  | "domain_not_granted"
   | "mailcow_not_configured"
   | "mailcow_unreachable"
   | "mailcow_auth_failed"
@@ -326,12 +327,37 @@ export interface SmtpConnectionGrant {
 export interface MailcowStatus {
   configured: boolean;
   reachable: boolean;
-  /** Active Mailcow domains a mailbox can be provisioned under. */
+  /**
+   * Active Mailcow domains the *caller* may provision under. OWNERs get every
+   * server domain; ADMINs only their granted ones.
+   */
   domains: string[];
   /** Host provisioned mailboxes use for SMTP/IMAP (for mail-client setup). */
   mailHost: string | null;
+  /** True when `domains` was narrowed by domain grants (ADMIN caller). */
+  restricted?: boolean;
   error?: string;
 }
+
+/** Grants an ADMIN provisioning access to one Mailcow domain. */
+export interface MailDomainGrant {
+  id: string;
+  organizationId: string;
+  userId: string;
+  domain: string;
+  createdAt: string;
+  user?: { id: string; email: string; name?: string | null };
+}
+
+export const mailDomainGrantCreateSchema = z.object({
+  organizationId: z.string().min(1),
+  userId: z.string().min(1),
+  domain: z.string().min(1),
+});
+
+export type MailDomainGrantCreateInput = z.infer<
+  typeof mailDomainGrantCreateSchema
+>;
 
 /** Result of provisioning a mailbox; the password is shown exactly once. */
 export interface MailboxProvisionResult {

@@ -5,6 +5,7 @@ import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import {
   api,
+  type MailDomainGrant,
   type MailboxProvisionResult,
   type MailcowStatus,
   type OrganizationMember,
@@ -53,6 +54,7 @@ export function Mailboxes() {
   const canManage =
     currentOrganization?.role === "OWNER" ||
     currentOrganization?.role === "ADMIN";
+  const isOwner = currentOrganization?.role === "OWNER";
 
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<MailcowStatus | null>(null);
@@ -75,6 +77,10 @@ export function Mailboxes() {
   // Per-connection grant picker state.
   const [grantPick, setGrantPick] = useState<Record<string, string>>({});
 
+  // Domain-access state (OWNER only): which domains each ADMIN may use.
+  const [domainGrants, setDomainGrants] = useState<MailDomainGrant[]>([]);
+  const [domainPick, setDomainPick] = useState<Record<string, string>>({});
+
   const load = useCallback(async () => {
     if (!organizationId || !canManage) {
       setLoading(false);
@@ -94,6 +100,12 @@ export function Mailboxes() {
         setDomain("");
       } else if (statusData.domains.length > 0) {
         setDomain((current) => current || statusData.domains[0]);
+      }
+
+      if (isOwner) {
+        setDomainGrants(
+          await api.listMailDomainGrants(organizationId).catch(() => [])
+        );
       }
 
       const grantLists = await Promise.all(
@@ -116,7 +128,7 @@ export function Mailboxes() {
     } finally {
       setLoading(false);
     }
-  }, [organizationId, canManage]);
+  }, [organizationId, canManage, isOwner]);
 
   useEffect(() => {
     void load();
@@ -173,6 +185,37 @@ export function Mailboxes() {
         ),
       }));
       toast.success("Send-as access removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to remove.");
+    }
+  }
+
+  async function addDomainGrant(userId: string) {
+    if (!organizationId) return;
+    const domainName = domainPick[userId];
+    if (!domainName) return;
+    try {
+      await api.addMailDomainGrant({
+        organizationId,
+        userId,
+        domain: domainName,
+      });
+      setDomainPick((current) => ({ ...current, [userId]: "" }));
+      setDomainGrants(await api.listMailDomainGrants(organizationId));
+      toast.success("Domain access granted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to grant.");
+    }
+  }
+
+  async function removeDomainGrant(grant: MailDomainGrant) {
+    if (!organizationId) return;
+    try {
+      await api.removeMailDomainGrant(grant.id, organizationId);
+      setDomainGrants((current) =>
+        current.filter((candidate) => candidate.id !== grant.id)
+      );
+      toast.success("Domain access removed.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to remove.");
     }
@@ -249,6 +292,12 @@ export function Mailboxes() {
                     bounce tracking, and can grant a member send-as access — all
                     in one step.
                   </p>
+                  {status.restricted && status.domains.length === 0 ? (
+                    <p className="mt-4 text-sm text-muted-foreground">
+                      The owner hasn&apos;t granted you access to any domains
+                      yet — ask them to add you under Domain access.
+                    </p>
+                  ) : null}
                   <form
                     className="mt-4 grid gap-4 sm:grid-cols-2"
                     onSubmit={provision}
@@ -325,6 +374,117 @@ export function Mailboxes() {
                 </CardContent>
               </Card>
             )}
+
+            {isOwner ? (
+              <div className="space-y-3">
+                <h2 className="font-semibold">Domain access</h2>
+                <Card>
+                  <CardContent className="p-5">
+                    <p className="text-sm text-muted-foreground">
+                      Owners can provision on every domain. Admins can only use
+                      domains you grant them here.
+                    </p>
+                    {members.filter((member) => member.role === "ADMIN")
+                      .length === 0 ? (
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        No admins in this organization yet.
+                      </p>
+                    ) : (
+                      members
+                        .filter((member) => member.role === "ADMIN")
+                        .map((member) => {
+                          const memberGrants = domainGrants.filter(
+                            (grant) => grant.userId === member.userId
+                          );
+                          const grantedDomains = new Set(
+                            memberGrants.map((grant) => grant.domain)
+                          );
+                          const grantable = status.domains.filter(
+                            (candidate) =>
+                              !grantedDomains.has(candidate.toLowerCase())
+                          );
+                          return (
+                            <div
+                              key={member.userId}
+                              className="mt-4 border-t pt-4 first:mt-3"
+                            >
+                              <div className="font-medium">
+                                {memberLabel(member)}
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {memberGrants.length === 0 ? (
+                                  <span className="text-sm text-muted-foreground">
+                                    No domains granted.
+                                  </span>
+                                ) : (
+                                  memberGrants.map((grant) => (
+                                    <Badge
+                                      key={grant.id}
+                                      variant="secondary"
+                                      className="flex items-center gap-1"
+                                    >
+                                      {grant.domain}
+                                      <button
+                                        type="button"
+                                        aria-label={`Remove ${grant.domain} for ${member.user.email}`}
+                                        onClick={() => removeDomainGrant(grant)}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </Badge>
+                                  ))
+                                )}
+                              </div>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <Select
+                                  value={domainPick[member.userId] ?? ""}
+                                  onValueChange={(value) =>
+                                    setDomainPick((current) => ({
+                                      ...current,
+                                      [member.userId]: value,
+                                    }))
+                                  }
+                                >
+                                  <SelectTrigger
+                                    className="w-64"
+                                    aria-label={`Grant domain for ${member.user.email}`}
+                                  >
+                                    <SelectValue placeholder="Choose a domain" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {grantable.length === 0 ? (
+                                      <SelectItem value="__empty__" disabled>
+                                        Every domain already granted
+                                      </SelectItem>
+                                    ) : (
+                                      grantable.map((candidate) => (
+                                        <SelectItem
+                                          key={candidate}
+                                          value={candidate}
+                                        >
+                                          {candidate}
+                                        </SelectItem>
+                                      ))
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  disabled={!domainPick[member.userId]}
+                                  onClick={() => addDomainGrant(member.userId)}
+                                >
+                                  Grant domain
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            ) : null}
 
             <div className="space-y-3">
               <h2 className="font-semibold">Send-as access</h2>

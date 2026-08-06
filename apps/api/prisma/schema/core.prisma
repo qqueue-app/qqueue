@@ -144,6 +144,7 @@ model User {
   refreshTokens       RefreshToken[]
   invitesSent         OrganizationInvite[] @relation("InvitesSent")
   smtpGrants          SmtpConnectionGrant[]
+  mailDomainGrants    MailDomainGrant[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 }
@@ -194,6 +195,7 @@ model Organization {
   invites           OrganizationInvite[]
   smtpConnections   SMTPConnection[]
   smtpConnectionGrants SmtpConnectionGrant[]
+  mailDomainGrants  MailDomainGrant[]
   contacts          Contact[]
   contactLists      ContactList[]
   suppressions      Suppression[]
@@ -275,6 +277,23 @@ model SMTPConnection {
   grants            SmtpConnectionGrant[]
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
+}
+
+/// Mailbox-provisioning domain access: an org OWNER may provision Mailcow
+/// mailboxes under any domain the server offers; an ADMIN only under domains
+/// granted here (default deny). Managed by OWNERs from the Mailboxes page.
+model MailDomainGrant {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  /// Stored lowercase; must be an active domain on the Mailcow server.
+  domain         String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, userId, domain])
+  @@index([organizationId, userId])
 }
 
 /// Send-as permission (Phase 4): MEMBERs may only send from connections they

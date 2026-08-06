@@ -44,6 +44,26 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Domain access (per-role): an OWNER may provision under any active Mailcow
+ * domain; an ADMIN only under domains an owner granted them (default deny).
+ * The route already restricts callers to OWNER/ADMIN.
+ */
+async function visibleDomains(
+  actor: { organizationId: string; userId: string; role: string },
+  activeDomains: string[]
+): Promise<string[]> {
+  if (actor.role === "OWNER") {
+    return activeDomains;
+  }
+  const grants = await prisma.mailDomainGrant.findMany({
+    where: { organizationId: actor.organizationId, userId: actor.userId },
+    select: { domain: true },
+  });
+  const granted = new Set(grants.map((grant) => grant.domain));
+  return activeDomains.filter((domain) => granted.has(domain.toLowerCase()));
+}
+
 async function probeProvisionedConnection(connection: {
   host: string;
   port: number;
@@ -67,7 +87,11 @@ async function probeProvisionedConnection(connection: {
 
 export const mailcowService = {
   /** Instance provisioning status + the domains a mailbox can live under. */
-  async status(): Promise<MailcowStatus> {
+  async status(actor: {
+    organizationId: string;
+    userId: string;
+    role: string;
+  }): Promise<MailcowStatus> {
     const client = getMailcowClient();
     const mailHost = mailcowMailHost();
     if (!client) {
@@ -75,13 +99,16 @@ export const mailcowService = {
     }
     try {
       const domains = await client.listDomains();
+      const active = domains
+        .filter((domain) => domain.active)
+        .map((domain) => domain.domain_name);
+      const visible = await visibleDomains(actor, active);
       return {
         configured: true,
         reachable: true,
-        domains: domains
-          .filter((domain) => domain.active)
-          .map((domain) => domain.domain_name),
+        domains: visible,
         mailHost,
+        ...(visible.length !== active.length ? { restricted: true } : {}),
       };
     } catch (error) {
       return {
@@ -96,7 +123,8 @@ export const mailcowService = {
   },
 
   async provision(
-    input: MailboxProvisionInput
+    input: MailboxProvisionInput,
+    actor: { userId: string; role: string }
   ): Promise<MailboxProvisionResult> {
     const client = getMailcowClient();
     const mailHost = mailcowMailHost();
@@ -125,6 +153,28 @@ export const mailcowService = {
         `${domain} is not an active domain on the Mailcow server`,
         "validation_error"
       );
+    }
+
+    // Domain access: OWNERs may use any domain; an ADMIN needs a grant. The
+    // filtered status keeps the UI honest, but this is the enforcement.
+    if (actor.role !== "OWNER") {
+      const grant = await prisma.mailDomainGrant.findUnique({
+        where: {
+          organizationId_userId_domain: {
+            organizationId: input.organizationId,
+            userId: actor.userId,
+            domain,
+          },
+        },
+        select: { id: true },
+      });
+      if (!grant) {
+        throw new HttpError(
+          403,
+          "You do not have access to provision mailboxes on this domain",
+          "domain_not_granted"
+        );
+      }
     }
 
     if (input.assignToUserId) {
@@ -258,5 +308,85 @@ export const mailcowService = {
       });
       throw error;
     }
+  },
+
+  // Domain-grant management. Routes restrict all three to org OWNERs — the
+  // grant is what separates an ADMIN's provisioning reach from an OWNER's,
+  // so admins must not be able to grant themselves.
+
+  listDomainGrants(organizationId: string) {
+    return prisma.mailDomainGrant.findMany({
+      where: { organizationId },
+      include: { user: { select: { id: true, email: true, name: true } } },
+      orderBy: [{ userId: "asc" }, { domain: "asc" }],
+    });
+  },
+
+  async addDomainGrant(input: {
+    organizationId: string;
+    userId: string;
+    domain: string;
+  }) {
+    const domain = input.domain.trim().toLowerCase();
+
+    const granteeMembership = await getMembership(
+      input.userId,
+      input.organizationId
+    );
+    if (!granteeMembership) {
+      throw new HttpError(
+        400,
+        "That user is not a member of this organization",
+        "validation_error"
+      );
+    }
+
+    // Only real, active Mailcow domains are grantable — a typo here would
+    // silently grant nothing.
+    const client = getMailcowClient();
+    if (!client) {
+      throw new HttpError(
+        404,
+        "Mailcow provisioning is not configured on this instance",
+        "mailcow_not_configured"
+      );
+    }
+    const domains = await client.listDomains();
+    if (
+      !domains.some(
+        (candidate) =>
+          candidate.active && candidate.domain_name.toLowerCase() === domain
+      )
+    ) {
+      throw new HttpError(
+        400,
+        `${domain} is not an active domain on the Mailcow server`,
+        "validation_error"
+      );
+    }
+
+    // Idempotent: re-granting is a no-op rather than an error.
+    return prisma.mailDomainGrant.upsert({
+      where: {
+        organizationId_userId_domain: {
+          organizationId: input.organizationId,
+          userId: input.userId,
+          domain,
+        },
+      },
+      create: {
+        organizationId: input.organizationId,
+        userId: input.userId,
+        domain,
+      },
+      update: {},
+      include: { user: { select: { id: true, email: true, name: true } } },
+    });
+  },
+
+  async removeDomainGrant(id: string, organizationId: string) {
+    await prisma.mailDomainGrant.deleteMany({
+      where: { id, organizationId },
+    });
   },
 };

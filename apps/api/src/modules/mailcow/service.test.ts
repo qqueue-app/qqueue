@@ -35,6 +35,17 @@ vi.mock("../smtp-connections/service.js", async () => {
 const { mailcowService } = await import("./service.js");
 const { decryptSecret } = await import("../../lib/crypto.js");
 
+const ownerActor = {
+  organizationId: "org_1",
+  userId: "owner_1",
+  role: "OWNER",
+};
+const adminActor = {
+  organizationId: "org_1",
+  userId: "admin_1",
+  role: "ADMIN",
+};
+
 const provisionInput = {
   organizationId: "org_1",
   localPart: "Ama",
@@ -80,7 +91,7 @@ describe("mailcowService.status", () => {
   it("reports unconfigured when the instance has no Mailcow env", async () => {
     h.getMailcowClient.mockReturnValue(null);
     h.mailcowMailHost.mockReturnValue(null);
-    await expect(mailcowService.status()).resolves.toEqual({
+    await expect(mailcowService.status(ownerActor)).resolves.toEqual({
       configured: false,
       reachable: false,
       domains: [],
@@ -89,7 +100,7 @@ describe("mailcowService.status", () => {
   });
 
   it("lists only active domains when reachable", async () => {
-    await expect(mailcowService.status()).resolves.toMatchObject({
+    await expect(mailcowService.status(ownerActor)).resolves.toMatchObject({
       configured: true,
       reachable: true,
       domains: ["acme.test"],
@@ -99,7 +110,7 @@ describe("mailcowService.status", () => {
 
   it("reports unreachable with the error message", async () => {
     h.client.listDomains.mockRejectedValue(new Error("connect timeout"));
-    await expect(mailcowService.status()).resolves.toMatchObject({
+    await expect(mailcowService.status(ownerActor)).resolves.toMatchObject({
       configured: true,
       reachable: false,
       error: "connect timeout",
@@ -109,7 +120,10 @@ describe("mailcowService.status", () => {
 
 describe("mailcowService.provision", () => {
   it("provisions mailbox + app password + connection + inbox + grant in one flow", async () => {
-    const result = await mailcowService.provision(provisionInput);
+    const result = await mailcowService.provision(provisionInput, {
+      userId: "owner_1",
+      role: "OWNER",
+    });
 
     // Address is normalized to lowercase everywhere.
     expect(h.client.createMailbox).toHaveBeenCalledWith({
@@ -175,7 +189,10 @@ describe("mailcowService.provision", () => {
       // Mailbox not active yet: every probe attempt fails.
       h.verifyConnection.mockRejectedValue(new Error("535 auth failed"));
 
-      const promise = mailcowService.provision(provisionInput);
+      const promise = mailcowService.provision(provisionInput, {
+        userId: "owner_1",
+        role: "OWNER",
+      });
       await vi.runAllTimersAsync(); // skip the probe's backoff sleeps
       const result = await promise;
 
@@ -199,7 +216,10 @@ describe("mailcowService.provision", () => {
         .mockRejectedValueOnce(new Error("535 auth failed"))
         .mockResolvedValueOnce(undefined);
 
-      const promise = mailcowService.provision(provisionInput);
+      const promise = mailcowService.provision(provisionInput, {
+        userId: "owner_1",
+        role: "OWNER",
+      });
       await vi.runAllTimersAsync();
       const result = await promise;
 
@@ -211,17 +231,23 @@ describe("mailcowService.provision", () => {
   });
 
   it("skips the grant when no assignee is named", async () => {
-    await mailcowService.provision({
-      ...provisionInput,
-      assignToUserId: undefined,
-    });
+    await mailcowService.provision(
+      {
+        ...provisionInput,
+        assignToUserId: undefined,
+      },
+      { userId: "owner_1", role: "OWNER" }
+    );
     expect(prismaMock.smtpConnectionGrant.create).not.toHaveBeenCalled();
   });
 
   it("404s when the instance has no Mailcow configured", async () => {
     h.getMailcowClient.mockReturnValue(null);
     await expect(
-      mailcowService.provision(provisionInput)
+      mailcowService.provision(provisionInput, {
+        userId: "owner_1",
+        role: "OWNER",
+      })
     ).rejects.toMatchObject({
       statusCode: 404,
       code: "mailcow_not_configured",
@@ -230,14 +256,20 @@ describe("mailcowService.provision", () => {
 
   it("rejects a domain Mailcow does not serve, before any mutation", async () => {
     await expect(
-      mailcowService.provision({ ...provisionInput, domain: "other.test" })
+      mailcowService.provision(
+        { ...provisionInput, domain: "other.test" },
+        { userId: "owner_1", role: "OWNER" }
+      )
     ).rejects.toMatchObject({ statusCode: 400 });
     expect(h.client.createMailbox).not.toHaveBeenCalled();
   });
 
   it("rejects an inactive domain", async () => {
     await expect(
-      mailcowService.provision({ ...provisionInput, domain: "inactive.test" })
+      mailcowService.provision(
+        { ...provisionInput, domain: "inactive.test" },
+        { userId: "owner_1", role: "OWNER" }
+      )
     ).rejects.toMatchObject({ statusCode: 400 });
     expect(h.client.createMailbox).not.toHaveBeenCalled();
   });
@@ -245,7 +277,10 @@ describe("mailcowService.provision", () => {
   it("rejects an assignee who is not an org member, before any mutation", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue(null);
     await expect(
-      mailcowService.provision(provisionInput)
+      mailcowService.provision(provisionInput, {
+        userId: "owner_1",
+        role: "OWNER",
+      })
     ).rejects.toMatchObject({ statusCode: 400 });
     expect(h.client.createMailbox).not.toHaveBeenCalled();
   });
@@ -255,7 +290,10 @@ describe("mailcowService.provision", () => {
       id: "existing",
     } as never);
     await expect(
-      mailcowService.provision(provisionInput)
+      mailcowService.provision(provisionInput, {
+        userId: "owner_1",
+        role: "OWNER",
+      })
     ).rejects.toMatchObject({ statusCode: 409 });
     expect(h.client.createMailbox).not.toHaveBeenCalled();
   });
@@ -263,9 +301,12 @@ describe("mailcowService.provision", () => {
   it("deletes the Mailcow mailbox when the QQueue side fails (no orphans)", async () => {
     prismaMock.sMTPConnection.create.mockRejectedValue(new Error("db down"));
 
-    await expect(mailcowService.provision(provisionInput)).rejects.toThrow(
-      "db down"
-    );
+    await expect(
+      mailcowService.provision(provisionInput, {
+        userId: "owner_1",
+        role: "OWNER",
+      })
+    ).rejects.toThrow("db down");
     expect(h.client.deleteMailbox).toHaveBeenCalledWith("ama@acme.test");
   });
 
@@ -276,10 +317,152 @@ describe("mailcowService.provision", () => {
       .spyOn(console, "error")
       .mockImplementation(() => {});
 
-    await expect(mailcowService.provision(provisionInput)).rejects.toThrow(
-      "db down"
-    );
+    await expect(
+      mailcowService.provision(provisionInput, {
+        userId: "owner_1",
+        role: "OWNER",
+      })
+    ).rejects.toThrow("db down");
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+});
+
+// Domain access: OWNERs see and use every active domain; ADMINs only granted
+// ones (default deny).
+describe("domain access", () => {
+  it("filters status domains for an ADMIN and flags the restriction", async () => {
+    prismaMock.mailDomainGrant.findMany.mockResolvedValue([
+      { domain: "acme.test" },
+    ] as never);
+    h.client.listDomains.mockResolvedValue([
+      { domain_name: "acme.test", active: true },
+      { domain_name: "other.test", active: true },
+    ]);
+
+    await expect(mailcowService.status(adminActor)).resolves.toMatchObject({
+      domains: ["acme.test"],
+      restricted: true,
+    });
+  });
+
+  it("shows an ADMIN with no grants an empty, restricted list", async () => {
+    prismaMock.mailDomainGrant.findMany.mockResolvedValue([] as never);
+    await expect(mailcowService.status(adminActor)).resolves.toMatchObject({
+      domains: [],
+      restricted: true,
+    });
+  });
+
+  it("never marks an OWNER restricted", async () => {
+    const status = await mailcowService.status(ownerActor);
+    expect(status.restricted).toBeUndefined();
+    expect(prismaMock.mailDomainGrant.findMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks an ADMIN provisioning on an ungranted domain", async () => {
+    prismaMock.mailDomainGrant.findUnique.mockResolvedValue(null);
+
+    await expect(
+      mailcowService.provision(provisionInput, {
+        userId: "admin_1",
+        role: "ADMIN",
+      })
+    ).rejects.toMatchObject({ statusCode: 403, code: "domain_not_granted" });
+    expect(h.client.createMailbox).not.toHaveBeenCalled();
+  });
+
+  it("lets an ADMIN provision on a granted domain", async () => {
+    prismaMock.mailDomainGrant.findUnique.mockResolvedValue({
+      id: "dg_1",
+    } as never);
+
+    const result = await mailcowService.provision(provisionInput, {
+      userId: "admin_1",
+      role: "ADMIN",
+    });
+
+    expect(result.email).toBe("ama@acme.test");
+    expect(prismaMock.mailDomainGrant.findUnique).toHaveBeenCalledWith({
+      where: {
+        organizationId_userId_domain: {
+          organizationId: "org_1",
+          userId: "admin_1",
+          domain: "acme.test",
+        },
+      },
+      select: { id: true },
+    });
+  });
+});
+
+describe("domain-grant management", () => {
+  it("adds an idempotent lowercase grant for an org member on a real domain", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN",
+    } as never);
+    prismaMock.mailDomainGrant.upsert.mockResolvedValue({
+      id: "dg_1",
+    } as never);
+
+    await mailcowService.addDomainGrant({
+      organizationId: "org_1",
+      userId: "admin_1",
+      domain: "Acme.Test",
+    });
+
+    expect(prismaMock.mailDomainGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId_userId_domain: {
+            organizationId: "org_1",
+            userId: "admin_1",
+            domain: "acme.test",
+          },
+        },
+        create: {
+          organizationId: "org_1",
+          userId: "admin_1",
+          domain: "acme.test",
+        },
+      })
+    );
+  });
+
+  it("rejects granting a domain Mailcow does not serve", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN",
+    } as never);
+
+    await expect(
+      mailcowService.addDomainGrant({
+        organizationId: "org_1",
+        userId: "admin_1",
+        domain: "not-ours.test",
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(prismaMock.mailDomainGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects granting to a non-member", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue(null);
+
+    await expect(
+      mailcowService.addDomainGrant({
+        organizationId: "org_1",
+        userId: "stranger",
+        domain: "acme.test",
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it("removes a grant scoped to the org", async () => {
+    prismaMock.mailDomainGrant.deleteMany.mockResolvedValue({
+      count: 1,
+    } as never);
+    await mailcowService.removeDomainGrant("dg_1", "org_1");
+    expect(prismaMock.mailDomainGrant.deleteMany).toHaveBeenCalledWith({
+      where: { id: "dg_1", organizationId: "org_1" },
+    });
   });
 });
