@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
-  ImageOff,
   Inbox as InboxIcon,
   Mail,
   MailOpen,
@@ -92,15 +91,6 @@ function snippet(message: InboundMessage) {
   return stripped ? stripped.slice(0, 180) : "No preview available";
 }
 
-/**
- * Does the body pull an image off the network? Inline (`cid:`) parts came with
- * the message and always render, so a mail that only uses those must not be
- * fronted by a "remote images are blocked" prompt for images that aren't there.
- */
-function hasRemoteImages(html?: string | null) {
-  return /<img[^>]+src\s*=\s*["']?\s*https?:/i.test(html ?? "");
-}
-
 function threadKeyForMessage(message: InboundMessage) {
   return (
     message.references[0] ??
@@ -183,12 +173,6 @@ export function Inbox() {
   const [mobileShowDetail, setMobileShowDetail] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
-  // Per-message opt-in to loading remote images. Deliberately not persisted:
-  // the choice lasts for the session, so a tracking pixel fires at most once
-  // and only after the reader explicitly asked for images.
-  const [remoteContentAllowed, setRemoteContentAllowed] = useState<Set<string>>(
-    () => new Set()
-  );
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     attachment: InboundAttachment;
@@ -722,7 +706,16 @@ export function Inbox() {
                   {message.html ? (
                     <InboundHtmlFrame
                       html={message.html}
-                      showRemoteContent={remoteContentAllowed.has(message.id)}
+                      /*
+                        Remote images load without an opt-in. Most mail is
+                        image-heavy and a blocked-image prompt on every message
+                        made the inbox unreadable; the tradeoff is that opening
+                        a message can fire the sender's tracking pixel, exactly
+                        as it does in Gmail's default configuration. The frame
+                        still refuses scripts, frames and network fetches — only
+                        img-src is widened.
+                      */
+                      showRemoteContent
                       inlineImages={inlineImages[message.id]}
                       title={`Message from ${senderLabel(message)}`}
                     />
@@ -780,29 +773,6 @@ export function Inbox() {
                             </Hint>
                           ))}
                       </div>
-                    </div>
-                  ) : null}
-
-                  {hasRemoteImages(message.html) &&
-                  !remoteContentAllowed.has(message.id) ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-dashed bg-muted/40 px-3 py-2">
-                      <ImageOff className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="flex-1 text-xs text-muted-foreground">
-                        Images are hidden so the sender can't tell when you
-                        opened this.
-                      </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setRemoteContentAllowed((current) =>
-                            new Set(current).add(message.id)
-                          )
-                        }
-                      >
-                        Show images
-                      </Button>
                     </div>
                   ) : null}
                 </article>

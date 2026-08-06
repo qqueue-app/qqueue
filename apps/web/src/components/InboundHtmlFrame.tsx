@@ -81,11 +81,11 @@ function prepareBody(
  *   nesting handles both (the parser drops a nested <html>/<body> and keeps the
  *   content), and it guarantees our <meta> CSP is the first thing parsed.
  * - A CSP of `default-src 'none'` blocks scripts, frames, objects and network
- *   fetches outright, independently of the sandbox attribute. Remote images are
- *   allowed only once the reader opts in — otherwise merely opening a message
- *   would fire the sender's tracking pixel and leak a read receipt. Inline
- *   (`cid:`) parts are exempt: they arrived with the message, so displaying
- *   them phones nobody home.
+ *   fetches outright, independently of the sandbox attribute. `showRemoteContent`
+ *   widens img-src alone and nothing else, so a caller that allows remote images
+ *   accepts read receipts and tracking pixels — not script execution. Inline
+ *   (`cid:`) parts render either way: they arrived with the message, so
+ *   displaying them phones nobody home.
  * - `sandbox="allow-same-origin"` carries NO allow-scripts, so no script in the
  *   message can execute; that is what makes reading the document height for
  *   auto-sizing safe. Scripts are blocked twice over (sandbox + CSP).

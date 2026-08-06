@@ -159,27 +159,36 @@ describe("Inbox message body rendering", () => {
     expect(screen.getAllByText("plain text fallback").length).toBeGreaterThan(0);
   });
 
-  it("blocks remote images until the reader opts in", async () => {
-    const user = userEvent.setup();
+  it("loads remote images without an opt-in", async () => {
     setup([makeMessage({ html: '<img src="https://tracker.test/pixel.gif">' })]);
     renderWithProviders(<Inbox />);
 
     const frame = await screen.findByTitle(/^Message from/);
-    // Blocked twice over: the pixel's src is stripped from the body, and
-    // img-src wouldn't permit it anyway. blob: is local inline parts only.
-    expect(frame.getAttribute("srcdoc")).toContain("img-src data: blob:;");
-    expect(frame.getAttribute("srcdoc")).not.toContain("tracker.test");
-
-    await user.click(screen.getByRole("button", { name: /show images/i }));
-
-    const unblocked = await screen.findByTitle(/^Message from/);
-    expect(unblocked.getAttribute("srcdoc")).toContain(
-      "img-src data: blob: https:"
-    );
-    expect(unblocked.getAttribute("srcdoc")).toContain("tracker.test");
+    // Reading the mail is enough: img-src admits remote hosts and the src
+    // survives into the body, so the image renders on open.
+    expect(frame.getAttribute("srcdoc")).toContain("img-src data: blob: https:");
+    expect(frame.getAttribute("srcdoc")).toContain("tracker.test");
+    // No blocked-images prompt stands between the reader and the message.
     expect(
       screen.queryByRole("button", { name: /show images/i })
     ).not.toBeInTheDocument();
+  });
+
+  it("still refuses scripts and network fetches from a message body", async () => {
+    setup([
+      makeMessage({
+        html: '<script>alert(1)</script><img src="https://tracker.test/p.gif">'
+      })
+    ]);
+    renderWithProviders(<Inbox />);
+
+    // Widening img-src must not widen anything else: the frame stays
+    // script-less and default-src stays shut.
+    const frame = await screen.findByTitle(/^Message from/);
+    const srcdoc = frame.getAttribute("srcdoc") ?? "";
+    expect(srcdoc).toContain("default-src 'none'");
+    expect(frame.getAttribute("sandbox")).toBe("allow-same-origin");
+    expect(srcdoc).not.toContain("allow-scripts");
   });
 
   // The reported bug: an embedded image (sender's logo, pasted screenshot)
@@ -215,11 +224,7 @@ describe("Inbox message body rendering", () => {
       attachmentId: "att_1",
       organizationId: "org_1"
     });
-    // Inline parts are not remote content, so no prompt is shown for them...
-    expect(
-      screen.queryByRole("button", { name: /show images/i })
-    ).not.toBeInTheDocument();
-    // ...and they stay out of the downloadable attachment strip.
+    // Inline parts stay out of the downloadable attachment strip.
     expect(screen.queryByText("logo.png")).not.toBeInTheDocument();
   });
 });
