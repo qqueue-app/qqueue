@@ -611,6 +611,20 @@ as launching a campaign. Both surfaces were rebuilt on the new primitives so the
 merge stays open, and the pipeline already treats them as two entry points into
 one path. Don't do it without a fresh decision.
 
+### The sidebar was rebuilt and then reverted
+
+A tooltipped nav rail and a mobile bottom tab bar were built and rejected on
+review — the existing sidebar (grouped sections, a collapsible Settings group,
+a mobile drawer) was preferred. It keeps its original markup, gains an unread
+badge on Inbox, and its "Home" entry now points at `/insights`.
+
+One trap worth recording, because it is invisible until it bites: **do not wrap
+a `NavLink` in a Radix `asChild` trigger** such as `<Hint>`. Radix's slot merges
+`className` by string-joining, and `NavLink` accepts a *function* there — so the
+function is stringified into the class attribute, the element silently loses
+every style, and Tailwind's preflight (`svg { display: block }`) drops the icon
+onto its own line above the label.
+
 ### The Inbox is the home screen
 
 Signing in lands on `/inbox`. The old stats-first home moved to `/insights`

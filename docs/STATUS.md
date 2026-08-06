@@ -63,9 +63,11 @@ learning a new vocabulary. What changed:
   `lib/push.ts` in the worker, fired from inbox sync on a genuinely new,
   non-DSN, unseen message. Off unless VAPID keys are configured. Deep-links
   through `/inbox?message=<id>`.
-- **Mobile-first shell.** Desktop keeps a sidebar; phones get a bottom tab bar,
-  a More sheet, and safe-area insets. `DashboardLayout` and the mobile bar read
-  one nav config (`layouts/nav-config.ts`) so they can't drift.
+- **The sidebar is unchanged.** A tooltipped rail and a mobile bottom tab bar
+  were built and then reverted on 2026-08-07 — the existing sidebar (grouped
+  sections, collapsible Settings, mobile drawer) was preferred. It keeps its
+  original markup plus an unread badge on Inbox. Its "Home" entry now points at
+  `/insights`, since `/` is the inbox.
 - **Every icon action has a tooltip, structurally.** `IconButton` requires a
   `label` prop and renders it as both the tooltip and the `aria-label`, so an
   unlabelled icon-only control cannot be written.

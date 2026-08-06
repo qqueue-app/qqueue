@@ -70,8 +70,11 @@ enforces this; see `docs/CLOUD_BOUNDARY.md`.
     needs a tooltip in `<Hint>`. Never a bare icon `<Button size="icon">`.
   - Row actions go through `<RowActions>`: one or two `primary` inline, the
     rest in the overflow menu.
-  - Nav lives in `layouts/nav-config.ts` — the desktop sidebar and the mobile
-    bottom bar both read it, so add destinations there only.
+  - Nav lives in the `navSections` table at the top of
+    `layouts/DashboardLayout.tsx` — add destinations there, not in the JSX.
+  - Don't wrap a `NavLink` in `<Hint>` (or any `asChild` trigger): Radix's slot
+    string-joins `className`, so `NavLink`'s *function* className gets
+    stringified into garbage classes and the item loses all its styling.
 - `apps/worker` — BullMQ workers (`src/workers/*`); startup recovery re-enqueues
   queued/scheduled work.
 - `apps/cloud` — **proprietary** managed-cloud scaffold; no production behavior yet.

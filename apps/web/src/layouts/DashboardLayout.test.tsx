@@ -69,17 +69,24 @@ describe("DashboardLayout", () => {
 
   it("renders the sidebar nav and the routed outlet", () => {
     renderLayout("/");
-    // The nav is flat now — every destination is visible without expanding a
-    // group. Labels appear in both the sidebar and the mobile More sheet.
-    expect(screen.getAllByText("Inbox").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Compose").length).toBeGreaterThan(0);
+    // nav labels appear (desktop + mobile sidebars both render)
+    expect(screen.getAllByText("Home").length).toBeGreaterThan(0);
     expect(screen.getByText("Inbox page")).toBeInTheDocument();
   });
 
-  it("shows setup destinations without needing to expand a group", () => {
+  it("expands the settings group and shows children when on a child route", () => {
     renderLayout("/smtp-connections");
     expect(screen.getAllByText("Sending accounts").length).toBeGreaterThan(0);
     expect(screen.getByText("Sending accounts page")).toBeInTheDocument();
+  });
+
+  it("toggles the settings nav group on click", async () => {
+    const user = userEvent.setup();
+    renderLayout("/");
+    // the settings group is collapsed initially on "/"; click to expand
+    const settingsButtons = screen.getAllByRole("button", { name: /Settings/ });
+    await user.click(settingsButtons[0]);
+    expect(screen.getAllByText("Sending accounts").length).toBeGreaterThan(0);
   });
 
   it("opens the org switcher and switches organization", async () => {
@@ -108,13 +115,15 @@ describe("DashboardLayout", () => {
     expect(navigate).toHaveBeenCalledWith("/login");
   });
 
-  it("opens the mobile More sheet", async () => {
+  it("opens and closes the mobile drawer", async () => {
     const user = userEvent.setup();
     renderLayout("/");
-    // Navigation on a phone lives in a bottom bar; everything that doesn't fit
-    // is behind More.
-    await user.click(screen.getByRole("button", { name: "More sections" }));
-    expect(await screen.findByText("Everything else")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Open navigation"));
+    const close = await screen.findByLabelText("Close navigation");
+    await user.click(close);
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Close navigation")).not.toBeInTheDocument()
+    );
   });
 
   it("renders a sign-in link when not authenticated", () => {
