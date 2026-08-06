@@ -325,3 +325,60 @@ credential, and let QQueue optionally own DKIM for domains it sends from.
   `Template`.
 - **Future drag-and-drop:** GrapesJS + `grapesjs-mjml` preset in the AGPL core;
   Unlayer only as an optional cloud-only premium editor under `apps/cloud`.
+
+---
+
+## Evolution plan (2026-08) — status and deferred backlog
+
+The August 2026 evolution plan (unified send path → per-recipient correctness →
+async bounces → security gaps → Mailcow provisioning → operational hygiene) is
+**complete through Phase 5**. `CHANGELOG.md` records exactly what each phase
+shipped and why; `AUDIT.md` was kept accurate inline as behavior changed.
+
+- [x] Phase 1 — one send path: every email flows through the worker pipeline
+- [x] Phase 2 — per-recipient jobs, cc/bcc suppression, List-Unsubscribe by bulkness
+- [x] Phase 2b — async bounce processing (DSN parsing in inbox sync)
+- [x] Phase 3 — security gaps (role gates, ESP webhook off, trust proxy, reset-token echo)
+- [x] Phase 4 — Mailcow provisioning + send-as grants
+- [x] Phase 5 — key rotation, graceful shutdown, revocable refresh tokens,
+      structured logging, CI parity, segment-campaign fix
+- [x] Post-plan: worker structured logging (pino) and a React error boundary
+
+### Deferred backlog (deliberately not started)
+
+Items reviewed during the evolution plan and consciously deferred — with the
+reason — so future work starts from a decision, not a rediscovery:
+
+- **SMTP transport pooling / connection reuse** — every send opens a fresh SMTP
+  connection (`packages/email-engine`, no `pool` option anywhere). Worth doing
+  when volume justifies it; **measure first**.
+- **A/B testing UI** — the API supports subject A/B end to end
+  (`configureAbTest`, variant analytics) but no page calls it and
+  `CampaignAnalytics` doesn't render `variantBreakdown`. Also unify the two
+  "opens" definitions first (winner decision counts raw run-scoped events;
+  variant analytics counts unique unscoped events — AUDIT §5.2).
+- **EmailEvent table indexes + analytics query limits** — the highest-volume
+  table has no declared indexes and the per-URL click breakdown loads every
+  CLICKED event unbounded (AUDIT §2.3, §5.7). Schedule when volume grows.
+- **Inbox UI beyond what exists / ticketing** — ticketing was built once and
+  removed (`remove_inbox_ticketing` migration); don't resurrect casually.
+- **ESP relay providers (SES/Resend/Brevo/Postmark/Mailcow-API)** — the classes
+  in `packages/email-engine/src/providers/future-providers.ts` stay stubs until
+  a deliberate decision to support relays beyond direct SMTP.
+- **Cloud app auth/billing** — `apps/cloud` is a scaffold with no auth; gated
+  on a commercial decision, not a technical one.
+- **MFA, SSO, email verification** — deliberately out of the self-hosted beta's
+  scope.
+- **Worker-side per-key idempotency TTL** — `Idempotency-Key` rows never expire
+  (unbounded growth, AUDIT §8.6 item 7); revisit alongside the EmailEvent
+  index work.
+
+### Smaller known gaps (fine to pick up any time)
+
+- Segments UI builds only a flat rule list and omits `createdAt` rules; the API
+  supports nested AND/OR trees (AUDIT §5.3).
+- Campaign fan-out does not apply template variable *defaults* (preview does) —
+  AUDIT §5.4.
+- `Contact.metadata`/tags are not available as campaign merge fields.
+- CSV import writes contacts one row at a time (AUDIT §5.6).
+- No API to grant `User.isInstanceAdmin` after the first user.
