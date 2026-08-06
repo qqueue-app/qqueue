@@ -122,6 +122,21 @@ const envSchema = z.object({
   ),
   MAILCOW_SMTP_PORT: z.coerce.number().int().positive().default(465),
   MAILCOW_IMAP_PORT: z.coerce.number().int().positive().default(993),
+  // Web Push (VAPID). Both unset = push is off: the API reports no public key
+  // and the dashboard hides the "enable notifications" control rather than
+  // asking for permission it cannot honour. `pnpm setup` generates a pair.
+  // The private key must match the worker's, which is what actually sends.
+  VAPID_PUBLIC_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  VAPID_PRIVATE_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  // Contact address the push service can reach the operator on, per RFC 8292.
+  // Must be a mailto: or https: URL.
+  VAPID_SUBJECT: z.string().default("mailto:admin@localhost"),
 });
 
 const parsed = envSchema.parse(process.env);

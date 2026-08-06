@@ -21,6 +21,7 @@ import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { recurringSendRouter } from "../modules/recurring-sends/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { outboxRouter } from "../modules/outbox/routes.js";
+import { pushRouter } from "../modules/push/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { segmentRouter } from "../modules/segments/routes.js";
 import { setupRouter } from "../modules/setup/routes.js";
@@ -107,3 +108,6 @@ v1Router.use("/images", imageRouter);
 v1Router.use("/webhook-endpoints", webhookEndpointRouter);
 // Inbox module: IMAP reply sync, assignment, notes, and reply-from-QQueue.
 v1Router.use("/inbox", inboxRouter);
+// Web Push device registration for the installable dashboard. Sending happens
+// in the worker; the API only records which devices to send to.
+v1Router.use("/push", pushRouter);

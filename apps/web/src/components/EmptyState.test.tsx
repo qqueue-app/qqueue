@@ -1,16 +1,14 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import { Inbox } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import { EmptyState } from "./EmptyState.js";
 
 describe("EmptyState", () => {
-  it("renders the title", () => {
-    render(<EmptyState icon={Inbox} title="No contacts" />);
+  it("renders the title", () => { renderWithProviders(<EmptyState icon={Inbox} title="No contacts" />);
     expect(screen.getByText("No contacts")).toBeInTheDocument();
   });
 
-  it("renders the description and action when provided", () => {
-    render(
+  it("renders the description and action when provided", () => { renderWithProviders(
       <EmptyState
         icon={Inbox}
         title="No contacts"
@@ -23,7 +21,7 @@ describe("EmptyState", () => {
   });
 
   it("omits the description and action when not provided", () => {
-    const { container } = render(<EmptyState icon={Inbox} title="Empty" />);
+    const { container } = renderWithProviders(<EmptyState icon={Inbox} title="Empty" />);
     expect(container.querySelector("p")).toBeNull();
   });
 });

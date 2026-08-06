@@ -1,9 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({
@@ -50,7 +56,7 @@ import { api } from "../lib/api.js";
 const mockedApi = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
 function renderAt(path: string) {
-  return render(
+  return renderWithProviders(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/templates" element={<div>templates list</div>} />
@@ -58,7 +64,7 @@ function renderAt(path: string) {
         <Route path="/templates/:id/edit" element={<TemplateEditor />} />
       </Routes>
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 describe("TemplateEditor", () => {

@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 // Only the network surface is stubbed. `deriveReputationAlerts` stays real, so
@@ -109,8 +115,7 @@ describe("Deliverability", () => {
     mockedApi.deleteDomainThrottle.mockResolvedValue(undefined);
   });
 
-  it("shows the overview, alerts, and per-domain table", async () => {
-    render(<Deliverability />);
+  it("shows the overview, alerts, and per-domain table", async () => { renderWithProviders(<Deliverability />);
     expect(await screen.findByText("Reputation alerts")).toBeInTheDocument();
     expect(screen.getByText(/Bounce rate is above 5%/)).toBeInTheDocument();
     expect(screen.getByText("gmail.com")).toBeInTheDocument();
@@ -118,8 +123,7 @@ describe("Deliverability", () => {
     expect(screen.getAllByText("8.0%").length).toBeGreaterThan(0);
   });
 
-  it("names the acceptance rate as acceptance, not delivery", async () => {
-    render(<Deliverability />);
+  it("names the acceptance rate as acceptance, not delivery", async () => { renderWithProviders(<Deliverability />);
     await screen.findByText("Accepted by server");
     // "Delivery rate" was the open rate relabelled; the tile is gone for good.
     expect(screen.queryByText("Delivery rate")).not.toBeInTheDocument();
@@ -133,7 +137,7 @@ describe("Deliverability", () => {
         rates: { confirmedDelivery: null }
       })
     );
-    render(<Deliverability />);
+    renderWithProviders(<Deliverability />);
 
     expect(
       await screen.findByText("No delivery confirmation yet.")
@@ -159,7 +163,7 @@ describe("Deliverability", () => {
         }
       })
     );
-    render(<Deliverability />);
+    renderWithProviders(<Deliverability />);
 
     await screen.findByText("Accepted by server");
     expect(screen.queryByText("0.0%")).not.toBeInTheDocument();
@@ -174,21 +178,20 @@ describe("Deliverability", () => {
         rates: { bounce: 0.4, complaint: 0.2 }
       })
     );
-    render(<Deliverability />);
+    renderWithProviders(<Deliverability />);
 
     await screen.findByText("Accepted by server");
     expect(screen.queryByText("Reputation alerts")).not.toBeInTheDocument();
   });
 
-  it("derives alerts locally instead of paying for a second aggregation", async () => {
-    render(<Deliverability />);
+  it("derives alerts locally instead of paying for a second aggregation", async () => { renderWithProviders(<Deliverability />);
     await screen.findByText("Reputation alerts");
     expect(mockedApi.deliverabilityAlerts).not.toHaveBeenCalled();
   });
 
   it("saves the auto-suppression policy", async () => {
     const user = userEvent.setup();
-    render(<Deliverability />);
+    renderWithProviders(<Deliverability />);
     await screen.findByText("Reputation alerts");
 
     const threshold = screen.getByLabelText("Soft-bounce threshold");
@@ -207,7 +210,7 @@ describe("Deliverability", () => {
 
   it("adds a per-domain throttle", async () => {
     const user = userEvent.setup();
-    render(<Deliverability />);
+    renderWithProviders(<Deliverability />);
     await screen.findByText("Reputation alerts");
 
     await user.type(screen.getByLabelText("Domain"), "yahoo.com");

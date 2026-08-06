@@ -62,6 +62,11 @@ services:
       MAILCOW_MAIL_HOST: ${MAILCOW_MAIL_HOST:-}
       MAILCOW_SMTP_PORT: ${MAILCOW_SMTP_PORT:-465}
       MAILCOW_IMAP_PORT: ${MAILCOW_IMAP_PORT:-993}
+      # Web Push. Must match the worker's pair exactly — the API hands the
+      # public key to browsers and the worker signs with the private one.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@${DOMAIN}}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -98,6 +103,12 @@ services:
       # Phase 5 additions; must match the API's values.
       ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Web Push. The worker is what actually sends notifications, so it needs
+      # the private key; the pair must match the API's.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@${DOMAIN}}
+      PUBLIC_APP_URL: https://${DOMAIN}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor, within } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RichTextEditor } from "./RichTextEditor.js";
@@ -13,8 +13,7 @@ describe("RichTextEditor", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the toolbar with formatting controls", async () => {
-    render(<RichTextEditor value="<p>Hello</p>" onChange={() => {}} />);
+  it("renders the toolbar with formatting controls", async () => { renderWithProviders(<RichTextEditor value="<p>Hello</p>" onChange={() => {}} />);
     expect(await screen.findByLabelText("Bold")).toBeInTheDocument();
     expect(screen.getByLabelText("Italic")).toBeInTheDocument();
     expect(screen.getByLabelText("Heading 1")).toBeInTheDocument();
@@ -25,7 +24,7 @@ describe("RichTextEditor", () => {
 
   it("exercises formatting toolbar buttons without throwing", async () => {
     const user = userEvent.setup();
-    render(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
+    renderWithProviders(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
     await user.click(await screen.findByLabelText("Bold"));
     await user.click(screen.getByLabelText("Italic"));
     await user.click(screen.getByLabelText("Heading 1"));
@@ -38,7 +37,7 @@ describe("RichTextEditor", () => {
   it("shows the variable menu when showVariables is true and inserts a variable", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <RichTextEditor
         value=""
         onChange={onChange}
@@ -53,8 +52,7 @@ describe("RichTextEditor", () => {
     await waitFor(() => expect(onChange).toHaveBeenCalled());
   });
 
-  it("hides the variable menu when showVariables is false", async () => {
-    render(
+  it("hides the variable menu when showVariables is false", async () => { renderWithProviders(
       <RichTextEditor value="" onChange={() => {}} showVariables={false} />
     );
     await screen.findByLabelText("Bold");
@@ -67,7 +65,7 @@ describe("RichTextEditor", () => {
     const user = userEvent.setup();
     const promptSpy = vi.spyOn(window, "prompt");
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
     await user.click(await screen.findByLabelText("Link"));
 
     const field = await screen.findByLabelText("Link URL");
@@ -87,7 +85,7 @@ describe("RichTextEditor", () => {
   it("inserts a link at the cursor when no text is selected", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
     await user.click(await screen.findByLabelText("Link"));
 
     await user.clear(await screen.findByLabelText("Link URL"));
@@ -104,7 +102,7 @@ describe("RichTextEditor", () => {
   it("uses the given link text as the visible label", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
     await user.click(await screen.findByLabelText("Link"));
 
     await user.clear(await screen.findByLabelText("Link URL"));
@@ -123,7 +121,7 @@ describe("RichTextEditor", () => {
   it("fills in the scheme for a bare domain", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
     await user.click(await screen.findByLabelText("Link"));
 
     await user.type(await screen.findByLabelText("Link URL"), "example.com");
@@ -138,7 +136,7 @@ describe("RichTextEditor", () => {
   it("links a bare email address with mailto:", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
     await user.click(await screen.findByLabelText("Link"));
 
     await user.type(
@@ -158,7 +156,7 @@ describe("RichTextEditor", () => {
   it("refuses a scheme with no address after it", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={onChange} />);
     await user.click(await screen.findByLabelText("Link"));
 
     await user.type(await screen.findByLabelText("Link URL"), "https://");
@@ -171,7 +169,7 @@ describe("RichTextEditor", () => {
 
   it("keeps the link dialog open and says why when the URL is blank", async () => {
     const user = userEvent.setup();
-    render(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
     await user.click(await screen.findByLabelText("Link"));
     await user.clear(await screen.findByLabelText("Link URL"));
     await user.click(screen.getByRole("button", { name: "Insert link" }));
@@ -182,7 +180,7 @@ describe("RichTextEditor", () => {
 
   it("closes the link dialog when cancelled", async () => {
     const user = userEvent.setup();
-    render(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
+    renderWithProviders(<RichTextEditor value="<p>text</p>" onChange={() => {}} />);
     await user.click(await screen.findByLabelText("Link"));
     await screen.findByLabelText("Link URL");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -198,7 +196,7 @@ describe("RichTextEditor", () => {
   it("inserts a styled button from the dialog", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>x</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>x</p>" onChange={onChange} />);
     await user.click(await screen.findByLabelText("Button"));
 
     // Scoped to the dialog: the toolbar has its own text-alignment controls
@@ -221,8 +219,7 @@ describe("RichTextEditor", () => {
     expect(html).toContain("text-align: right");
   });
 
-  it("offers the button control by name, not just an icon", async () => {
-    render(<RichTextEditor value="<p>x</p>" onChange={() => {}} />);
+  it("offers the button control by name, not just an icon", async () => { renderWithProviders(<RichTextEditor value="<p>x</p>" onChange={() => {}} />);
     expect(
       await screen.findByRole("button", { name: "Button" })
     ).toHaveTextContent("Button");
@@ -235,7 +232,7 @@ describe("RichTextEditor", () => {
   it("keeps a button beside the text it was inserted next to", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>Ready to start?</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>Ready to start?</p>" onChange={onChange} />);
 
     await user.click(await screen.findByLabelText("Button"));
     const dialog = within(await screen.findByRole("dialog"));
@@ -265,7 +262,7 @@ describe("RichTextEditor", () => {
       const onPageSubmit = vi.fn((event: React.FormEvent) =>
         event.preventDefault()
       );
-      render(
+      renderWithProviders(
         <form onSubmit={onPageSubmit}>
           <RichTextEditor
             value="<p>text</p>"
@@ -347,7 +344,7 @@ describe("RichTextEditor", () => {
   it("inserts a sanitized custom variable", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="" onChange={onChange} showVariables />);
+    renderWithProviders(<RichTextEditor value="" onChange={onChange} showVariables />);
     await user.click(await screen.findByRole("button", { name: /Variable/i }));
     await user.click(await screen.findByText("Custom…"));
 
@@ -360,7 +357,7 @@ describe("RichTextEditor", () => {
 
   it("exercises the remaining toolbar buttons", async () => {
     const user = userEvent.setup();
-    render(<RichTextEditor value="<p>x</p>" onChange={() => {}} />);
+    renderWithProviders(<RichTextEditor value="<p>x</p>" onChange={() => {}} />);
     await user.click(await screen.findByLabelText("Underline"));
     await user.click(screen.getByLabelText("Strikethrough"));
     await user.click(screen.getByLabelText("Heading 2"));
@@ -375,7 +372,7 @@ describe("RichTextEditor", () => {
   // before anything was ever sent.
   it("keeps table markup instead of flattening it to paragraphs", async () => {
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <RichTextEditor
         value={
           "<table><tbody><tr><th>Quarter</th><td>Q1</td></tr></tbody></table>"
@@ -393,7 +390,7 @@ describe("RichTextEditor", () => {
 
   it("inserts and removes a table from the toolbar", async () => {
     const user = userEvent.setup();
-    render(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
+    renderWithProviders(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
 
     await user.click(await screen.findByLabelText(/Insert table/i));
     await waitFor(() => {
@@ -415,7 +412,7 @@ describe("RichTextEditor", () => {
   it("produces markup that round-trips back into rich text", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<RichTextEditor value="<p>Hello</p>" onChange={onChange} />);
+    renderWithProviders(<RichTextEditor value="<p>Hello</p>" onChange={onChange} />);
 
     await user.click(await screen.findByLabelText("Bold"));
     await user.keyboard("bold text");
@@ -447,7 +444,7 @@ describe("RichTextEditor", () => {
   // inserted from the toolbar carries its borders as inline styles.
   it("gives a table inserted from the toolbar inline borders", async () => {
     const user = userEvent.setup();
-    render(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
+    renderWithProviders(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);
 
     await user.click(await screen.findByLabelText(/Insert table/i));
 
@@ -460,12 +457,11 @@ describe("RichTextEditor", () => {
   });
 
   // …and a table that arrived with no styling of its own keeps none. That
-  // styling used to be a static attribute stamped onto every table on render,
+  // styling used to be a static attribute stamped onto every table on renderWithProviders,
   // which meant a pasted layout table came back carrying borders it never had —
   // a visible change to the email, and enough of one that the table stopped
   // round-tripping and was frozen out of the editor entirely.
-  it("leaves a pasted bare table unstyled", async () => {
-    render(
+  it("leaves a pasted bare table unstyled", async () => { renderWithProviders(
       <RichTextEditor
         value='<table width="600"><tbody><tr><td>A</td></tr></tbody></table>'
         onChange={() => {}}

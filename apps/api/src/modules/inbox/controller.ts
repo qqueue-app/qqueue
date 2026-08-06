@@ -51,6 +51,11 @@ export const inboxController = {
     res.json({ data: messages });
   },
 
+  async unreadCount(req: Request, res: Response) {
+    const result = await inboxService.unreadCount(req.organizationId!);
+    res.json({ data: result });
+  },
+
   async storeInboundMessage(req: Request, res: Response) {
     // Temporary Phase E foundation endpoint. The IMAP sync worker will call the
     // same service directly once real read-only sync is wired.

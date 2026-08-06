@@ -20,7 +20,7 @@
  * Uses Node builtins only (run through the root devDependency `tsx`).
  */
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -46,6 +46,26 @@ const bold = (s: string) => (useColor ? `[1m${s}[22m` : s);
 const ok = (s: string) => `  ✔ ${s}`;
 const warn = (s: string) => `  ⚠ ${s}`;
 const fail = (s: string) => `  ✖ ${s}`;
+
+/**
+ * Generate a VAPID key pair for Web Push (RFC 8292) using Node builtins, so
+ * setup stays dependency-free. A VAPID pair is just a P-256 key: the public
+ * half is the uncompressed EC point (0x04 ‖ x ‖ y) and the private half is the
+ * raw scalar, both base64url — which is exactly what JWK already gives us.
+ */
+function generateVapidKeys(): { publicKey: string; privateKey: string } {
+  const { publicKey, privateKey } = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1"
+  });
+  const pub = publicKey.export({ format: "jwk" }) as { x: string; y: string };
+  const priv = privateKey.export({ format: "jwk" }) as { d: string };
+  const point = Buffer.concat([
+    Buffer.from([0x04]),
+    Buffer.from(pub.x, "base64url"),
+    Buffer.from(pub.y, "base64url")
+  ]);
+  return { publicKey: point.toString("base64url"), privateKey: priv.d };
+}
 
 function heading(title: string) {
   console.log(`\n${bold(title)}\n${"-".repeat(title.length)}`);
@@ -268,6 +288,25 @@ async function main() {
     );
   } else {
     console.log(ok("All security keys are already set — nothing changed."));
+  }
+
+  // Push notification keys. Generated together or not at all: a mismatched
+  // pair means every device subscribes against a key the worker can't sign
+  // with, and notifications fail silently with nothing in the logs to explain
+  // why. Regenerating also invalidates every device already subscribed, which
+  // is why an existing pair is left strictly alone.
+  if (env.isPlaceholder("VAPID_PUBLIC_KEY") || env.isPlaceholder("VAPID_PRIVATE_KEY")) {
+    const vapid = generateVapidKeys();
+    env.set("VAPID_PUBLIC_KEY", vapid.publicKey, "generated VAPID_PUBLIC_KEY");
+    env.set("VAPID_PRIVATE_KEY", vapid.privateKey, "generated VAPID_PRIVATE_KEY");
+    console.log(
+      ok(
+        "Generated push notification keys (VAPID) — your team can now get\n" +
+          "    alerts for new mail on phones and desktops."
+      )
+    );
+  } else {
+    console.log(ok("Push notification keys are already set — nothing changed."));
   }
 
   // 4. Mode-specific configuration.

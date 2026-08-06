@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const { ApiError } = vi.hoisted(() => {
@@ -74,19 +80,18 @@ describe("QueueOperations", () => {
     mockedApi.retryQueueJob.mockResolvedValue(queueSummary[0].failedJobs[0]);
   });
 
-  it("renders queue counts and jobs", async () => {
-    render(<QueueOperations />);
+  it("renders queue counts and jobs", async () => { renderWithProviders(<QueueOperations />);
 
     expect(await screen.findByText("email-sending")).toBeInTheDocument();
-    expect(screen.getByText("Queued 1")).toBeInTheDocument();
+    expect(screen.getByText("1 waiting")).toBeInTheDocument();
     expect(screen.getByText("SMTP failed")).toBeInTheDocument();
   });
 
   it("retries failed jobs", async () => {
     const user = userEvent.setup();
-    render(<QueueOperations />);
+    renderWithProviders(<QueueOperations />);
 
-    await user.click(await screen.findByRole("button", { name: /retry/i }));
+    await user.click(await screen.findByRole("button", { name: /^Run this job again$/ }));
 
     await waitFor(() =>
       expect(mockedApi.retryQueueJob).toHaveBeenCalledWith(
@@ -95,16 +100,16 @@ describe("QueueOperations", () => {
         "org_1"
       )
     );
-    expect(toast.success).toHaveBeenCalledWith("Job queued for retry.");
+    expect(toast.success).toHaveBeenCalledWith("Job queued to run again.");
   });
 
   it("shows an access-restricted message on a 403 response", async () => {
     mockedApi.queueOperations.mockRejectedValue(
       new ApiError("You do not have permission to do this", 403)
     );
-    render(<QueueOperations />);
+    renderWithProviders(<QueueOperations />);
 
-    expect(await screen.findByText("Access restricted")).toBeInTheDocument();
+    expect(await screen.findByText("Owners and admins only")).toBeInTheDocument();
     expect(toast.error).not.toHaveBeenCalled();
   });
 });

@@ -1,11 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog.js";
 
 describe("ConfirmDialog", () => {
-  it("renders the title, description and confirm label when open", () => {
-    render(
+  it("renders the title, description and confirm label when open", () => { renderWithProviders(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -22,8 +21,7 @@ describe("ConfirmDialog", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not render content when closed", () => {
-    render(
+  it("does not render content when closed", () => { renderWithProviders(
       <ConfirmDialog
         open={false}
         onOpenChange={() => {}}
@@ -38,7 +36,7 @@ describe("ConfirmDialog", () => {
   it("fires onConfirm when the action is clicked", async () => {
     const user = userEvent.setup();
     const onConfirm = vi.fn();
-    render(
+    renderWithProviders(
       <ConfirmDialog
         open
         onOpenChange={() => {}}
@@ -51,8 +49,7 @@ describe("ConfirmDialog", () => {
     expect(onConfirm).toHaveBeenCalled();
   });
 
-  it("disables the buttons and shows a spinner while loading", () => {
-    render(
+  it("disables the buttons and shows a spinner while loading", () => { renderWithProviders(
       <ConfirmDialog
         open
         onOpenChange={() => {}}

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import { describe, expect, it } from "vitest";
 import { InboundHtmlFrame } from "./InboundHtmlFrame.js";
 
@@ -6,8 +6,7 @@ function srcdocOf(
   html: string,
   showRemoteContent = false,
   inlineImages?: Record<string, string>
-) {
-  render(
+) { renderWithProviders(
     <InboundHtmlFrame
       html={html}
       showRemoteContent={showRemoteContent}
@@ -19,8 +18,7 @@ function srcdocOf(
 }
 
 describe("InboundHtmlFrame", () => {
-  it("renders the message inside an iframe rather than the page DOM", () => {
-    render(
+  it("renders the message inside an iframe rather than the page DOM", () => { renderWithProviders(
       <InboundHtmlFrame
         html="<p>hello</p>"
         showRemoteContent={false}
@@ -34,8 +32,7 @@ describe("InboundHtmlFrame", () => {
     expect(screen.queryByText("hello")).not.toBeInTheDocument();
   });
 
-  it("never grants allow-scripts", () => {
-    render(
+  it("never grants allow-scripts", () => { renderWithProviders(
       <InboundHtmlFrame
         html="<p>hi</p>"
         showRemoteContent={false}

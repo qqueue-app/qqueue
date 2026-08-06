@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,13 +59,13 @@ function readDraft() {
 }
 
 function renderSetup() {
-  return render(
+  return renderWithProviders(
     <MemoryRouter initialEntries={["/setup"]}>
       <SessionProvider>
         <Setup />
       </SessionProvider>
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 function signInAsAdmin() {
@@ -113,7 +113,7 @@ describe("Setup", () => {
       allowPublicRegistration: true
     });
 
-    render(
+    renderWithProviders(
       <StrictMode>
         <MemoryRouter initialEntries={["/setup"]}>
           <SessionProvider>
@@ -121,7 +121,7 @@ describe("Setup", () => {
           </SessionProvider>
         </MemoryRouter>
       </StrictMode>
-    );
+    , { withRouter: false });
 
     expect(
       await screen.findByText("Set up your QQueue server")
@@ -279,7 +279,7 @@ describe("Setup", () => {
       allowPublicRegistration: true
     });
 
-    render(
+    renderWithProviders(
       <StrictMode>
         <MemoryRouter initialEntries={["/setup"]}>
           <SessionProvider>
@@ -287,7 +287,7 @@ describe("Setup", () => {
           </SessionProvider>
         </MemoryRouter>
       </StrictMode>
-    );
+    , { withRouter: false });
 
     expect(
       await screen.findByText("Create the administrator account")

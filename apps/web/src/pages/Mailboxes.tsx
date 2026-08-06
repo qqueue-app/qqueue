@@ -1,25 +1,43 @@
-import { useCallback, useEffect, useState } from "react";
-import { Copy, Mail, Plus, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  Copy,
+  Globe,
+  Mail,
+  Plus,
+  Server,
+  ShieldCheck,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
+import type { ColumnDef } from "@tanstack/react-table";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
+import { PermissionMatrix } from "../components/PermissionMatrix.js";
 import {
   api,
   type MailDomainGrant,
   type MailboxProvisionResult,
-  type MailcowStatus,
   type OrganizationMember,
   type SMTPConnection,
   type SmtpConnectionGrant,
 } from "../lib/api.js";
+import { qk } from "../lib/query-client.js";
+import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
 import { Card, CardContent } from "../components/ui/card.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { IconButton } from "../components/ui/icon-button.js";
+import { RowActions } from "../components/ui/row-actions.js";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog.js";
@@ -32,218 +50,305 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select.js";
-import { Skeleton } from "../components/ui/skeleton.js";
 import { Spinner } from "../components/ui/spinner.js";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs.js";
+import { Hint } from "../components/ui/tooltip.js";
 
 const NO_ASSIGNEE = "__none__";
 
-function memberLabel(member: OrganizationMember) {
-  return member.user.name
-    ? `${member.user.name} (${member.user.email})`
-    : member.user.email;
+function memberName(member: OrganizationMember) {
+  return member.user.name ?? member.user.email;
+}
+
+function domainOf(email: string) {
+  return email.split("@")[1] ?? "";
 }
 
 /**
- * Mailboxes (Phase 4): OWNER/ADMIN provision team mailboxes on the instance's
- * Mailcow and manage who may send as each connection. Members never see this
- * page (nav hides it; the API enforces).
+ * Mailboxes — where an owner or admin creates team mailboxes and decides who
+ * may send as each one.
+ *
+ * Three questions, three tabs: what mailboxes exist, who can send as them, and
+ * (owners only) which domains each admin may create mailboxes on. The access
+ * question is answered by a people × mailboxes grid rather than a per-mailbox
+ * grant form, so the whole picture is visible at once.
  */
 export function Mailboxes() {
   const { currentOrganizationId: organizationId, currentOrganization } =
     useSession();
+  const queryClient = useQueryClient();
   const canManage =
     currentOrganization?.role === "OWNER" ||
     currentOrganization?.role === "ADMIN";
   const isOwner = currentOrganization?.role === "OWNER";
 
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<MailcowStatus | null>(null);
-  const [connections, setConnections] = useState<SMTPConnection[]>([]);
-  const [members, setMembers] = useState<OrganizationMember[]>([]);
-  const [grants, setGrants] = useState<Record<string, SmtpConnectionGrant[]>>(
-    {}
-  );
-
-  // Provision form state.
-  const [localPart, setLocalPart] = useState("");
-  const [domain, setDomain] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [assignTo, setAssignTo] = useState<string>(NO_ASSIGNEE);
-  const [provisioning, setProvisioning] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [provisioned, setProvisioned] = useState<MailboxProvisionResult | null>(
     null
   );
+  const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
 
-  // Per-connection grant picker state.
-  const [grantPick, setGrantPick] = useState<Record<string, string>>({});
+  const statusQuery = useOrgQuery(
+    canManage ? organizationId : null,
+    qk.mailcowStatus(organizationId ?? ""),
+    (id) => api.getMailcowStatus(id)
+  );
+  const connectionsQuery = useOrgQuery(
+    canManage ? organizationId : null,
+    qk.smtpConnections(organizationId ?? ""),
+    (id) => api.listSMTPConnections(id)
+  );
+  const membersQuery = useOrgQuery(
+    canManage ? organizationId : null,
+    qk.members(organizationId ?? ""),
+    (id) => api.listOrganizationMembers(id)
+  );
+  const domainGrantsQuery = useOrgQuery(
+    isOwner ? organizationId : null,
+    qk.mailDomainGrants(organizationId ?? ""),
+    (id) => api.listMailDomainGrants(id)
+  );
 
-  // Domain-access state (OWNER only): which domains each ADMIN may use.
-  const [domainGrants, setDomainGrants] = useState<MailDomainGrant[]>([]);
-  const [domainPick, setDomainPick] = useState<Record<string, string>>({});
+  const connections = useMemo(
+    () => connectionsQuery.data ?? [],
+    [connectionsQuery.data]
+  );
+  const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
+  const status = statusQuery.data;
 
-  const load = useCallback(async () => {
-    if (!organizationId || !canManage) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+  // One grants query per connection rather than a combined endpoint: each has
+  // its own cache entry, so toggling access on one mailbox refetches only that
+  // mailbox instead of the whole matrix.
+  //
+  // `combine` is essential, not cosmetic: the raw `useQueries` result is a new
+  // array on every render, which would make every memo derived from it — and
+  // therefore the grid's column definitions — change identity each pass and
+  // re-render forever. The combined value is memoised on the query results.
+  const grantLists = useQueries({
+    queries: connections.map((connection) => ({
+      queryKey: qk.connectionGrants(connection.id),
+      queryFn: () => api.listConnectionGrants(connection.id),
+      enabled: canManage,
+    })),
+    combine: (results) => results.map((result) => result.data ?? []),
+  });
+
+  const grantsByConnection = useMemo(() => {
+    const map = new Map<string, SmtpConnectionGrant[]>();
+    connections.forEach((connection, index) => {
+      map.set(connection.id, grantLists[index] ?? []);
+    });
+    return map;
+  }, [connections, grantLists]);
+
+  const grantedUserIds = useMemo(() => {
+    const set = new Set<string>();
+    grantsByConnection.forEach((grants, connectionId) => {
+      grants.forEach((grant) => set.add(`${grant.userId}:${connectionId}`));
+    });
+    return set;
+  }, [grantsByConnection]);
+
+  const loading =
+    statusQuery.isPending ||
+    connectionsQuery.isPending ||
+    membersQuery.isPending;
+
+  async function toggleGrant(
+    userId: string,
+    connectionId: string,
+    next: boolean
+  ) {
+    const key = `${userId}:${connectionId}`;
+    setPendingCells((current) => new Set(current).add(key));
     try {
-      const [statusData, connectionData, memberData] = await Promise.all([
-        api.getMailcowStatus(organizationId),
-        api.listSMTPConnections(organizationId),
-        api.listOrganizationMembers(organizationId),
-      ]);
-      setStatus(statusData);
-      setConnections(connectionData);
-      setMembers(memberData);
-      if (!statusData.configured && statusData.domains.length === 0) {
-        setDomain("");
-      } else if (statusData.domains.length > 0) {
-        setDomain((current) => current || statusData.domains[0]);
+      if (next) {
+        await api.addConnectionGrant(connectionId, userId);
+      } else {
+        await api.removeConnectionGrant(connectionId, userId);
       }
-
-      if (isOwner) {
-        setDomainGrants(
-          await api.listMailDomainGrants(organizationId).catch(() => [])
-        );
-      }
-
-      const grantLists = await Promise.all(
-        connectionData.map((connection) =>
-          api.listConnectionGrants(connection.id).catch(() => [])
-        )
-      );
-      setGrants(
-        Object.fromEntries(
-          connectionData.map((connection, index) => [
-            connection.id,
-            grantLists[index],
-          ])
-        )
-      );
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Couldn't load mailboxes."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [organizationId, canManage, isOwner]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function provision(event: React.FormEvent) {
-    event.preventDefault();
-    if (!organizationId || !domain || !localPart.trim()) return;
-    setProvisioning(true);
-    try {
-      const result = await api.provisionMailbox({
-        organizationId,
-        localPart: localPart.trim(),
-        domain,
-        name: displayName.trim() || undefined,
-        assignToUserId: assignTo === NO_ASSIGNEE ? undefined : assignTo,
+      await queryClient.invalidateQueries({
+        queryKey: qk.connectionGrants(connectionId),
       });
-      setProvisioned(result);
-      setLocalPart("");
-      setDisplayName("");
-      setAssignTo(NO_ASSIGNEE);
-      toast.success(`${result.email} is ready.`);
-      await load();
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Provisioning failed."
+        error instanceof Error ? error.message : "Couldn't change access."
       );
     } finally {
-      setProvisioning(false);
+      setPendingCells((current) => {
+        const updated = new Set(current);
+        updated.delete(key);
+        return updated;
+      });
     }
   }
 
-  async function addGrant(connectionId: string) {
-    const userId = grantPick[connectionId];
-    if (!userId) return;
-    try {
-      await api.addConnectionGrant(connectionId, userId);
-      setGrantPick((current) => ({ ...current, [connectionId]: "" }));
-      const updated = await api.listConnectionGrants(connectionId);
-      setGrants((current) => ({ ...current, [connectionId]: updated }));
-      toast.success("Send-as access granted.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to grant.");
+  const addDomainGrant = useApiMutation(
+    (input: { userId: string; domain: string }) =>
+      api.addMailDomainGrant({
+        organizationId: organizationId as string,
+        ...input,
+      }),
+    {
+      successMessage: "Domain access granted.",
+      errorMessage: "Couldn't grant that domain.",
+      invalidates: [qk.mailDomainGrants(organizationId ?? "")],
     }
-  }
+  );
 
-  async function removeGrant(connectionId: string, userId: string) {
-    try {
-      await api.removeConnectionGrant(connectionId, userId);
-      setGrants((current) => ({
-        ...current,
-        [connectionId]: (current[connectionId] ?? []).filter(
-          (grant) => grant.userId !== userId
+  const removeDomainGrant = useApiMutation(
+    (grant: MailDomainGrant) =>
+      api.removeMailDomainGrant(grant.id, organizationId as string),
+    {
+      successMessage: "Domain access removed.",
+      errorMessage: "Couldn't remove that domain.",
+      invalidates: [qk.mailDomainGrants(organizationId ?? "")],
+    }
+  );
+
+  const mailboxColumns = useMemo<ColumnDef<SMTPConnection, unknown>[]>(
+    () => [
+      {
+        accessorKey: "fromEmail",
+        header: "Address",
+        meta: { title: "Address" },
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate font-medium">
+                {row.original.fromEmail}
+              </span>
+              {row.original.isDefault ? (
+                <Hint label="New mail sends from this account unless another is chosen">
+                  <Badge className="cursor-help">Default</Badge>
+                </Hint>
+              ) : null}
+            </div>
+            <div className="truncate text-xs text-muted-foreground md:hidden">
+              {row.original.name}
+            </div>
+          </div>
         ),
-      }));
-      toast.success("Send-as access removed.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to remove.");
-    }
-  }
-
-  async function addDomainGrant(userId: string) {
-    if (!organizationId) return;
-    const domainName = domainPick[userId];
-    if (!domainName) return;
-    try {
-      await api.addMailDomainGrant({
-        organizationId,
-        userId,
-        domain: domainName,
-      });
-      setDomainPick((current) => ({ ...current, [userId]: "" }));
-      setDomainGrants(await api.listMailDomainGrants(organizationId));
-      toast.success("Domain access granted.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to grant.");
-    }
-  }
-
-  async function removeDomainGrant(grant: MailDomainGrant) {
-    if (!organizationId) return;
-    try {
-      await api.removeMailDomainGrant(grant.id, organizationId);
-      setDomainGrants((current) =>
-        current.filter((candidate) => candidate.id !== grant.id)
-      );
-      toast.success("Domain access removed.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to remove.");
-    }
-  }
-
-  async function copyPassword() {
-    if (!provisioned) return;
-    try {
-      await navigator.clipboard.writeText(provisioned.mailboxPassword);
-      toast.success("Password copied.");
-    } catch {
-      toast.error("Couldn't copy — select and copy it by hand.");
-    }
-  }
+      },
+      {
+        accessorKey: "name",
+        header: "Name",
+        meta: { title: "Name", hideBelowMd: true },
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.original.fromName || row.original.name}
+          </span>
+        ),
+      },
+      {
+        id: "domain",
+        accessorFn: (row) => domainOf(row.fromEmail),
+        header: "Domain",
+        meta: { title: "Domain", hideBelowLg: true },
+        cell: ({ getValue }) => (
+          <span className="text-muted-foreground">{String(getValue())}</span>
+        ),
+      },
+      {
+        id: "server",
+        accessorFn: (row) => `${row.host}:${row.port}`,
+        header: "Server",
+        meta: { title: "Server", hideBelowLg: true },
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs text-muted-foreground">
+            {String(getValue())}
+          </span>
+        ),
+      },
+      {
+        id: "access",
+        header: "Who can send",
+        meta: { title: "Who can send", align: "center" },
+        // Sorts by how many people hold a grant, so "nobody has access to this
+        // mailbox" surfaces at one end of the sort.
+        accessorFn: (row) => grantsByConnection.get(row.id)?.length ?? 0,
+        cell: ({ row, getValue }) => {
+          const count = Number(getValue());
+          const names = (grantsByConnection.get(row.original.id) ?? [])
+            .map((grant) => grant.user?.name ?? grant.user?.email ?? "someone")
+            .join(", ");
+          return (
+            <Hint
+              label={
+                count === 0
+                  ? "Only owners and admins, who can always send as any account"
+                  : `Owners and admins, plus ${names}`
+              }
+            >
+              <span className="inline-flex cursor-help items-center gap-1.5 text-sm text-muted-foreground">
+                <Users className="h-3.5 w-3.5" />
+                {count === 0 ? "Admins only" : `+${count}`}
+              </span>
+            </Hint>
+          );
+        },
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.fromEmail}
+            actions={[
+              {
+                label: "Test connection",
+                icon: ShieldCheck,
+                onSelect: async () => {
+                  const toastId = toast.loading("Testing connection…");
+                  try {
+                    await api.verifySMTPConnection(row.original.id);
+                    toast.success("Connection works.", { id: toastId });
+                  } catch (error) {
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : "Connection failed.",
+                      { id: toastId }
+                    );
+                  }
+                },
+              },
+              {
+                label: "Copy address",
+                icon: Copy,
+                onSelect: async () => {
+                  await navigator.clipboard.writeText(row.original.fromEmail);
+                  toast.success("Address copied.");
+                },
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    [grantsByConnection]
+  );
 
   if (!canManage) {
     return (
       <>
         <PageHeader
           title="Mailboxes"
-          description="Provision team mailboxes and manage who can send as them."
+          description="Create team mailboxes and choose who can send as them."
         />
-        <section className="p-6">
+        <section className="p-4 sm:p-6">
           <Card>
             <EmptyState
               icon={Mail}
               title="Owners and admins only"
-              description="Ask an owner or admin to provision mailboxes or grant you send-as access."
+              description="Ask an owner or admin to create a mailbox for you, or to let you send as an existing one."
             />
           </Card>
         </section>
@@ -251,392 +356,584 @@ export function Mailboxes() {
     );
   }
 
+  const admins = members.filter((member) => member.role === "ADMIN");
+
   return (
     <>
       <PageHeader
         title="Mailboxes"
-        description="Provision team mailboxes on your mail server and choose who can send as each account."
+        description="Create team mailboxes on your mail server and choose who can send as each one."
+        actions={
+          status?.configured && status.reachable ? (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" />
+              New mailbox
+            </Button>
+          ) : null
+        }
       />
 
-      <section className="space-y-6 p-6">
-        {loading ? (
-          <Card>
-            <CardContent className="p-5">
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="mt-2 h-4 w-64" />
-            </CardContent>
-          </Card>
-        ) : !status?.configured ? (
+      <section className="p-4 sm:p-6">
+        {!loading && !status?.configured ? (
           <Card>
             <EmptyState
-              icon={Mail}
-              title="Mailcow is not connected"
-              description="Set MAILCOW_API_URL and MAILCOW_API_KEY in the instance's .env to provision mailboxes from here. Sending accounts can still be added manually."
+              icon={Server}
+              title="Your mail server isn't connected yet"
+              description="Set MAILCOW_API_URL and MAILCOW_API_KEY in this instance's .env to create mailboxes from here. You can still add sending accounts by hand under Sending accounts."
             />
           </Card>
-        ) : (
-          <>
-            {!status.reachable ? (
-              <Card>
-                <CardContent className="p-5 text-sm text-destructive">
-                  Mailcow is configured but unreachable
-                  {status.error ? `: ${status.error}` : "."}
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardContent className="p-5">
-                  <h2 className="font-semibold">New mailbox</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Creates the mailbox in Mailcow, connects it for sending and
-                    bounce tracking, and can grant a member send-as access — all
-                    in one step.
-                  </p>
-                  {status.restricted && status.domains.length === 0 ? (
-                    <p className="mt-4 text-sm text-muted-foreground">
-                      The owner hasn&apos;t granted you access to any domains
-                      yet — ask them to add you under Domain access.
+        ) : !loading && !status?.reachable ? (
+          <Card className="border-destructive/40">
+            <CardContent className="flex items-start gap-3 p-5">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+              <div>
+                <p className="font-medium">Your mail server isn't answering</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  QQueue is configured to talk to Mailcow but couldn't reach it
+                  {status?.error ? `: ${status.error}` : "."} Existing mailboxes
+                  still send; you just can't create new ones until it responds.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <Tabs defaultValue="mailboxes" className="mt-4 first:mt-0">
+          <TabsList>
+            <TabsTrigger value="mailboxes">
+              <Mail className="h-4 w-4" />
+              Mailboxes
+            </TabsTrigger>
+            <TabsTrigger value="access">
+              <Users className="h-4 w-4" />
+              Who can send
+            </TabsTrigger>
+            {isOwner ? (
+              <TabsTrigger value="domains">
+                <Globe className="h-4 w-4" />
+                Domain access
+              </TabsTrigger>
+            ) : null}
+          </TabsList>
+
+          <TabsContent value="mailboxes">
+            <DataGrid
+              label="Mailboxes"
+              data={connections}
+              columns={mailboxColumns}
+              getRowId={(row) => row.id}
+              loading={loading}
+              searchPlaceholder="Search mailboxes…"
+              empty={
+                <EmptyState
+                  icon={Mail}
+                  title="No mailboxes yet"
+                  description="Create one to give your team an address they can send and receive from."
+                />
+              }
+              noResults={
+                <EmptyState
+                  icon={Mail}
+                  title="No matching mailboxes"
+                  description="Try a different search."
+                />
+              }
+              renderMobileRow={(connection) => (
+                <div className="flex items-start gap-3">
+                  <Mail className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium">
+                        {connection.fromEmail}
+                      </span>
+                      {connection.isDefault ? <Badge>Default</Badge> : null}
+                    </div>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {connection.fromName || connection.name}
                     </p>
-                  ) : null}
-                  <form
-                    className="mt-4 grid gap-4 sm:grid-cols-2"
-                    onSubmit={provision}
-                  >
-                    <div className="space-y-2">
-                      <Label htmlFor="mailbox-local-part">Address</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          id="mailbox-local-part"
-                          value={localPart}
-                          onChange={(event) => setLocalPart(event.target.value)}
-                          placeholder="ama"
-                          required
-                        />
-                        <span className="text-muted-foreground">@</span>
-                        <Select value={domain} onValueChange={setDomain}>
-                          <SelectTrigger aria-label="Domain">
-                            <SelectValue placeholder="Domain" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {status.domains.map((candidate) => (
-                              <SelectItem key={candidate} value={candidate}>
-                                {candidate}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {(grantsByConnection.get(connection.id) ?? []).length ===
+                      0
+                        ? "Admins only"
+                        : `${grantsByConnection.get(connection.id)!.length} member(s) can send as this`}
+                    </p>
+                  </div>
+                </div>
+              )}
+            />
+          </TabsContent>
+
+          <TabsContent value="access">
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Tick a box to let someone send as that mailbox. Owners and
+                admins can always send as any of them, so their rows are locked.
+              </p>
+              <PermissionMatrix
+                columnNoun="mailbox"
+                emptyMessage={
+                  connections.length === 0
+                    ? "Create a mailbox first — then you can decide who sends as it."
+                    : "Invite teammates from Settings, then come back to give them access."
+                }
+                columns={connections.map((connection) => ({
+                  id: connection.id,
+                  label: connection.fromEmail,
+                  hint: `${connection.fromName || connection.name} · ${connection.fromEmail}`,
+                }))}
+                rows={members.map((member) => ({
+                  id: member.userId,
+                  name: memberName(member),
+                  secondary: member.user.email,
+                  alwaysAllowed: member.role !== "MEMBER",
+                  alwaysAllowedReason: `${memberName(member)} is an ${member.role.toLowerCase()} and can send as every mailbox.`,
+                }))}
+                isGranted={(userId, connectionId) =>
+                  grantedUserIds.has(`${userId}:${connectionId}`)
+                }
+                onToggle={toggleGrant}
+                pending={pendingCells}
+              />
+            </div>
+          </TabsContent>
+
+          {isOwner ? (
+            <TabsContent value="domains">
+              <DomainAccessPanel
+                admins={admins}
+                domains={status?.domains ?? []}
+                grants={domainGrantsQuery.data ?? []}
+                loading={domainGrantsQuery.isPending}
+                onGrant={(userId, domain) =>
+                  addDomainGrant.mutate({ userId, domain })
+                }
+                onRevoke={(grant) => removeDomainGrant.mutate(grant)}
+              />
+            </TabsContent>
+          ) : null}
+        </Tabs>
+      </section>
+
+      <NewMailboxDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        organizationId={organizationId ?? ""}
+        domains={status?.domains ?? []}
+        restricted={Boolean(status?.restricted)}
+        members={members}
+        onProvisioned={(result) => {
+          setCreateOpen(false);
+          setProvisioned(result);
+          void queryClient.invalidateQueries({
+            queryKey: qk.smtpConnections(organizationId ?? ""),
+          });
+        }}
+      />
+
+      <MailboxPasswordDialog
+        result={provisioned}
+        mailHost={status?.mailHost ?? null}
+        onClose={() => setProvisioned(null)}
+      />
+    </>
+  );
+}
+
+function NewMailboxDialog({
+  open,
+  onOpenChange,
+  organizationId,
+  domains,
+  restricted,
+  members,
+  onProvisioned,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  organizationId: string;
+  domains: string[];
+  restricted: boolean;
+  members: OrganizationMember[];
+  onProvisioned: (result: MailboxProvisionResult) => void;
+}) {
+  const [localPart, setLocalPart] = useState("");
+  const [domain, setDomain] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [assignTo, setAssignTo] = useState(NO_ASSIGNEE);
+
+  // This dialog mounts with the page, before the domain list has loaded, so
+  // the initial state can't come from `domains`. Adopt the first one as soon
+  // as it arrives — without it the form would open with nothing selected and
+  // a permanently disabled submit button.
+  useEffect(() => {
+    if (!domain && domains.length > 0) {
+      setDomain(domains[0]);
+    }
+  }, [domain, domains]);
+
+  const provision = useApiMutation(
+    () =>
+      api.provisionMailbox({
+        organizationId,
+        localPart: localPart.trim(),
+        domain,
+        name: displayName.trim() || undefined,
+        assignToUserId: assignTo === NO_ASSIGNEE ? undefined : assignTo,
+      }) as Promise<MailboxProvisionResult>,
+    {
+      errorMessage: "Couldn't create that mailbox.",
+      onSuccess: (result) => {
+        setLocalPart("");
+        setDisplayName("");
+        setAssignTo(NO_ASSIGNEE);
+        onProvisioned(result);
+      },
+    }
+  );
+
+  const address = localPart.trim() ? `${localPart.trim()}@${domain}` : null;
+  const canSubmit =
+    Boolean(domain) && localPart.trim().length > 0 && !provision.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New mailbox</DialogTitle>
+          <DialogDescription>
+            This creates a real mailbox on your mail server, connects it to
+            QQueue for sending, and starts watching it for replies — all in one
+            step.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/*
+          One form wrapping the fields *and* the footer, so the submit button
+          is a real descendant rather than relying on the `form` attribute.
+        */}
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSubmit) provision.mutate();
+          }}
+        >
+          {restricted && domains.length === 0 ? (
+            <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
+              You don't have access to any domains yet. Ask an owner to add you
+              under Domain access.
+            </p>
+          ) : (
+            <>
+            <div className="space-y-2">
+              <Label htmlFor="mailbox-local-part">Address</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="mailbox-local-part"
+                  value={localPart}
+                  onChange={(event) => setLocalPart(event.target.value)}
+                  placeholder="ama"
+                  autoFocus
+                  required
+                />
+                <span className="text-muted-foreground">@</span>
+                <Select value={domain} onValueChange={setDomain}>
+                  <SelectTrigger aria-label="Domain" className="w-44">
+                    <SelectValue placeholder="Domain" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {domains.map((candidate) => (
+                      <SelectItem key={candidate} value={candidate}>
+                        {candidate}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {address ? (
+                <p className="text-xs text-muted-foreground">
+                  Mail will arrive at <strong>{address}</strong>.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mailbox-name">Display name</Label>
+              <Input
+                id="mailbox-name"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                placeholder="Ama Mensah"
+              />
+              <p className="text-xs text-muted-foreground">
+                What recipients see in the From line. Optional.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Let someone send as this</Label>
+              <Select value={assignTo} onValueChange={setAssignTo}>
+                <SelectTrigger aria-label="Let someone send as this">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ASSIGNEE}>Nobody yet</SelectItem>
+                  {members.map((member) => (
+                    <SelectItem key={member.userId} value={member.userId}>
+                      {memberName(member)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                You can change this any time on the "Who can send" tab.
+              </p>
+            </div>
+            </>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSubmit}>
+              {provision.isPending ? <Spinner /> : <Plus className="h-4 w-4" />}
+              Create mailbox
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MailboxPasswordDialog({
+  result,
+  mailHost,
+  onClose,
+}: {
+  result: MailboxProvisionResult | null;
+  mailHost: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open={result !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{result?.email} is ready</DialogTitle>
+          <DialogDescription>
+            Give this password to whoever owns the mailbox so they can add it to
+            their own mail app
+            {mailHost ? ` (server: ${mailHost})` : ""}. It's shown once and
+            never again — QQueue keeps a separate password of its own for
+            sending, so nothing breaks if this one is lost.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center gap-2">
+          <code className="flex-1 select-all rounded-lg bg-muted px-3 py-2.5 font-mono text-sm">
+            {result?.mailboxPassword}
+          </code>
+          <IconButton
+            label="Copy password"
+            variant="outline"
+            onClick={async () => {
+              if (!result) return;
+              try {
+                await navigator.clipboard.writeText(result.mailboxPassword);
+                toast.success("Password copied.");
+              } catch {
+                toast.error("Couldn't copy — select the text and copy it.");
+              }
+            }}
+          >
+            <Copy />
+          </IconButton>
+        </div>
+
+        {result && !result.verified ? (
+          <p className="rounded-lg bg-warning/10 p-3 text-sm text-warning-foreground">
+            The sending credentials haven't verified yet — your mail server may
+            still be activating the mailbox. Everything is saved; use "Test
+            connection" on this page in a minute to re-check.
+          </p>
+        ) : null}
+
+        <DialogFooter>
+          <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DomainAccessPanel({
+  admins,
+  domains,
+  grants,
+  loading,
+  onGrant,
+  onRevoke,
+}: {
+  admins: OrganizationMember[];
+  domains: string[];
+  grants: MailDomainGrant[];
+  loading: boolean;
+  onGrant: (userId: string, domain: string) => void;
+  onRevoke: (grant: MailDomainGrant) => void;
+}) {
+  const [picks, setPicks] = useState<Record<string, string>>({});
+
+  if (loading) {
+    return <p className="p-6 text-sm text-muted-foreground">Loading…</p>;
+  }
+
+  if (admins.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          icon={Globe}
+          title="No admins to restrict"
+          description="You can create mailboxes on every domain. This tab matters once you have admins — it's how you decide which domains each of them may use."
+        />
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        You can create mailboxes on every domain. Admins can only use the
+        domains you list here.
+      </p>
+
+      <div className="overflow-x-auto rounded-xl border">
+        <table className="w-full text-sm">
+          <thead className="border-b bg-muted/60">
+            <tr>
+              <th
+                scope="col"
+                className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Admin
+              </th>
+              <th
+                scope="col"
+                className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Domains they can use
+              </th>
+              <th
+                scope="col"
+                className="w-72 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Add a domain
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {admins.map((admin) => {
+              const theirs = grants.filter(
+                (grant) => grant.userId === admin.userId
+              );
+              const held = new Set(theirs.map((grant) => grant.domain));
+              const available = domains.filter(
+                (candidate) => !held.has(candidate.toLowerCase())
+              );
+              const pick = picks[admin.userId] ?? "";
+
+              return (
+                <tr key={admin.userId} className="border-b last:border-0">
+                  <td className="px-3 py-3 align-top">
+                    <div className="font-medium">{memberName(admin)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {admin.user.email}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    {theirs.length === 0 ? (
+                      <span className="text-muted-foreground">
+                        None — they can't create mailboxes yet.
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {theirs.map((grant) => (
+                          <Badge
+                            key={grant.id}
+                            variant="secondary"
+                            className="gap-1 pr-1"
+                          >
+                            {grant.domain}
+                            <IconButton
+                              label={`Remove ${grant.domain} from ${memberName(admin)}`}
+                              size="sm"
+                              variant="destructive"
+                              className="h-5 w-5"
+                              onClick={() => onRevoke(grant)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </IconButton>
+                          </Badge>
+                        ))}
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="mailbox-name">Display name</Label>
-                      <Input
-                        id="mailbox-name"
-                        value={displayName}
-                        onChange={(event) => setDisplayName(event.target.value)}
-                        placeholder="Ama Mensah"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Grant send-as to</Label>
-                      <Select value={assignTo} onValueChange={setAssignTo}>
-                        <SelectTrigger aria-label="Grant send-as to">
-                          <SelectValue />
+                    )}
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={pick}
+                        onValueChange={(value) =>
+                          setPicks((current) => ({
+                            ...current,
+                            [admin.userId]: value,
+                          }))
+                        }
+                        disabled={available.length === 0}
+                      >
+                        <SelectTrigger
+                          aria-label={`Choose a domain for ${memberName(admin)}`}
+                        >
+                          <SelectValue
+                            placeholder={
+                              available.length === 0
+                                ? "All domains granted"
+                                : "Choose a domain"
+                            }
+                          />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={NO_ASSIGNEE}>
-                            No one yet
-                          </SelectItem>
-                          {members.map((member) => (
-                            <SelectItem
-                              key={member.userId}
-                              value={member.userId}
-                            >
-                              {memberLabel(member)}
+                          {available.map((candidate) => (
+                            <SelectItem key={candidate} value={candidate}>
+                              {candidate}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div className="flex items-end">
                       <Button
-                        type="submit"
-                        disabled={provisioning || !domain || !localPart.trim()}
+                        variant="outline"
+                        disabled={!pick}
+                        onClick={() => {
+                          onGrant(admin.userId, pick);
+                          setPicks((current) => ({
+                            ...current,
+                            [admin.userId]: "",
+                          }));
+                        }}
                       >
-                        {provisioning ? (
-                          <Spinner />
-                        ) : (
-                          <Plus className="h-4 w-4" />
-                        )}
-                        Provision mailbox
+                        Add
                       </Button>
                     </div>
-                  </form>
-                </CardContent>
-              </Card>
-            )}
-
-            {isOwner ? (
-              <div className="space-y-3">
-                <h2 className="font-semibold">Domain access</h2>
-                <Card>
-                  <CardContent className="p-5">
-                    <p className="text-sm text-muted-foreground">
-                      Owners can provision on every domain. Admins can only use
-                      domains you grant them here.
-                    </p>
-                    {members.filter((member) => member.role === "ADMIN")
-                      .length === 0 ? (
-                      <p className="mt-3 text-sm text-muted-foreground">
-                        No admins in this organization yet.
-                      </p>
-                    ) : (
-                      members
-                        .filter((member) => member.role === "ADMIN")
-                        .map((member) => {
-                          const memberGrants = domainGrants.filter(
-                            (grant) => grant.userId === member.userId
-                          );
-                          const grantedDomains = new Set(
-                            memberGrants.map((grant) => grant.domain)
-                          );
-                          const grantable = status.domains.filter(
-                            (candidate) =>
-                              !grantedDomains.has(candidate.toLowerCase())
-                          );
-                          return (
-                            <div
-                              key={member.userId}
-                              className="mt-4 border-t pt-4 first:mt-3"
-                            >
-                              <div className="font-medium">
-                                {memberLabel(member)}
-                              </div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                {memberGrants.length === 0 ? (
-                                  <span className="text-sm text-muted-foreground">
-                                    No domains granted.
-                                  </span>
-                                ) : (
-                                  memberGrants.map((grant) => (
-                                    <Badge
-                                      key={grant.id}
-                                      variant="secondary"
-                                      className="flex items-center gap-1"
-                                    >
-                                      {grant.domain}
-                                      <button
-                                        type="button"
-                                        aria-label={`Remove ${grant.domain} for ${member.user.email}`}
-                                        onClick={() => removeDomainGrant(grant)}
-                                      >
-                                        <X className="h-3 w-3" />
-                                      </button>
-                                    </Badge>
-                                  ))
-                                )}
-                              </div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <Select
-                                  value={domainPick[member.userId] ?? ""}
-                                  onValueChange={(value) =>
-                                    setDomainPick((current) => ({
-                                      ...current,
-                                      [member.userId]: value,
-                                    }))
-                                  }
-                                >
-                                  <SelectTrigger
-                                    className="w-64"
-                                    aria-label={`Grant domain for ${member.user.email}`}
-                                  >
-                                    <SelectValue placeholder="Choose a domain" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {grantable.length === 0 ? (
-                                      <SelectItem value="__empty__" disabled>
-                                        Every domain already granted
-                                      </SelectItem>
-                                    ) : (
-                                      grantable.map((candidate) => (
-                                        <SelectItem
-                                          key={candidate}
-                                          value={candidate}
-                                        >
-                                          {candidate}
-                                        </SelectItem>
-                                      ))
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  disabled={!domainPick[member.userId]}
-                                  onClick={() => addDomainGrant(member.userId)}
-                                >
-                                  Grant domain
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            ) : null}
-
-            <div className="space-y-3">
-              <h2 className="font-semibold">Send-as access</h2>
-              {connections.length === 0 ? (
-                <Card>
-                  <EmptyState
-                    icon={Mail}
-                    title="No sending accounts yet"
-                    description="Provision a mailbox above, or add a sending account manually."
-                  />
-                </Card>
-              ) : (
-                connections.map((connection) => {
-                  const connectionGrants = grants[connection.id] ?? [];
-                  const grantedIds = new Set(
-                    connectionGrants.map((grant) => grant.userId)
-                  );
-                  const grantable = members.filter(
-                    (member) =>
-                      member.role === "MEMBER" && !grantedIds.has(member.userId)
-                  );
-                  return (
-                    <Card key={connection.id}>
-                      <CardContent className="p-5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold">{connection.name}</h3>
-                          <span className="text-sm text-muted-foreground">
-                            {connection.fromEmail}
-                          </span>
-                          {connection.isDefault ? <Badge>Default</Badge> : null}
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Owners and admins can always send as this account.
-                          Members need a grant.
-                        </p>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          {connectionGrants.length === 0 ? (
-                            <span className="text-sm text-muted-foreground">
-                              No member grants.
-                            </span>
-                          ) : (
-                            connectionGrants.map((grant) => (
-                              <Badge
-                                key={grant.id}
-                                variant="secondary"
-                                className="flex items-center gap-1"
-                              >
-                                {grant.user?.name ??
-                                  grant.user?.email ??
-                                  grant.userId}
-                                <button
-                                  type="button"
-                                  aria-label={`Remove send-as for ${grant.user?.email ?? grant.userId}`}
-                                  onClick={() =>
-                                    removeGrant(connection.id, grant.userId)
-                                  }
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </Badge>
-                            ))
-                          )}
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <Select
-                            value={grantPick[connection.id] ?? ""}
-                            onValueChange={(value) =>
-                              setGrantPick((current) => ({
-                                ...current,
-                                [connection.id]: value,
-                              }))
-                            }
-                          >
-                            <SelectTrigger
-                              className="w-64"
-                              aria-label={`Grant member for ${connection.fromEmail}`}
-                            >
-                              <SelectValue placeholder="Choose a member" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {grantable.length === 0 ? (
-                                <SelectItem value="__empty__" disabled>
-                                  Every member already has access
-                                </SelectItem>
-                              ) : (
-                                grantable.map((member) => (
-                                  <SelectItem
-                                    key={member.userId}
-                                    value={member.userId}
-                                  >
-                                    {memberLabel(member)}
-                                  </SelectItem>
-                                ))
-                              )}
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={!grantPick[connection.id]}
-                            onClick={() => addGrant(connection.id)}
-                          >
-                            Grant send-as
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })
-              )}
-            </div>
-          </>
-        )}
-      </section>
-
-      <Dialog
-        open={provisioned !== null}
-        onOpenChange={(open) => !open && setProvisioned(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{provisioned?.email} is ready</DialogTitle>
-            <DialogDescription>
-              Share the mailbox password with its owner for their mail client
-              {status?.mailHost ? ` (server: ${status.mailHost})` : ""}. It is
-              shown only this once — QQueue keeps its own app password and never
-              stores this one.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm">
-              {provisioned?.mailboxPassword}
-            </code>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={copyPassword}
-              aria-label="Copy mailbox password"
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
-          </div>
-          {provisioned && !provisioned.verified ? (
-            <p className="text-sm text-amber-600 dark:text-amber-500">
-              The sending credentials haven&apos;t verified yet — Mailcow may
-              still be activating the mailbox. Everything is saved; use Test
-              connection on the Sending accounts page to re-check in a minute.
-            </p>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-    </>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

@@ -1,35 +1,38 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  ImageOff,
+  Inbox as InboxIcon,
+  Mail,
   MailOpen,
   MailPlus,
   Paperclip,
-  Plug,
+  RefreshCw,
   Reply,
-  Search,
   Send,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
 import { InboundHtmlFrame } from "../components/InboundHtmlFrame.js";
-import { PageHeader } from "../components/PageHeader.js";
-import { api, type InboxAccount, type InboundMessage } from "../lib/api.js";
+import { ConnectInboxDialog } from "../components/inbox/ConnectInboxDialog.js";
+import { api, type InboundMessage } from "../lib/api.js";
+import { formatFullDate, formatMailDate, formatBytes } from "../lib/format.js";
 import { useInboundInlineImages } from "../lib/inbound-inline-images.js";
+import { qk } from "../lib/query-client.js";
+import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
+import { cn } from "../lib/utils.js";
+import { Avatar } from "../components/ui/avatar.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
-import { Card } from "../components/ui/card.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog.js";
+import { IconButton } from "../components/ui/icon-button.js";
 import { Input } from "../components/ui/input.js";
-import { Label } from "../components/ui/label.js";
+import { Spinner } from "../components/ui/spinner.js";
+import { Textarea } from "../components/ui/textarea.js";
+import { Hint } from "../components/ui/tooltip.js";
 import {
   Select,
   SelectContent,
@@ -37,24 +40,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select.js";
-import { Spinner } from "../components/ui/spinner.js";
-import { Textarea } from "../components/ui/textarea.js";
-import { Switch } from "../components/ui/switch.js";
-import { cn } from "../lib/utils.js";
 
-type ConversationThread = {
+type ReadFilter = "all" | "unread" | "read";
+
+interface ConversationThread {
   threadKey: string;
   messages: InboundMessage[];
   latestMessage: InboundMessage;
-  sender: string;
+  senderName: string;
+  senderEmail: string;
   subject: string;
   unreadCount: number;
-};
+}
 
-function formatDate(value?: string | null) {
-  if (!value) return "Never";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Never" : date.toLocaleString();
+function senderName(message: InboundMessage) {
+  return message.fromName || message.fromEmail;
+}
+
+function senderLabel(message: InboundMessage) {
+  return message.fromName
+    ? `${message.fromName} <${message.fromEmail}>`
+    : message.fromEmail;
 }
 
 function snippet(message: InboundMessage) {
@@ -77,12 +83,6 @@ function snippet(message: InboundMessage) {
   return stripped ? stripped.slice(0, 180) : "No preview available";
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 /**
  * Does the body pull an image off the network? Inline (`cid:`) parts came with
  * the message and always render, so a mail that only uses those must not be
@@ -90,12 +90,6 @@ function formatBytes(bytes: number) {
  */
 function hasRemoteImages(html?: string | null) {
   return /<img[^>]+src\s*=\s*["']?\s*https?:/i.test(html ?? "");
-}
-
-function senderLabel(message: InboundMessage) {
-  return message.fromName
-    ? `${message.fromName} <${message.fromEmail}>`
-    : message.fromEmail;
 }
 
 function threadKeyForMessage(message: InboundMessage) {
@@ -125,7 +119,8 @@ function buildConversationThreads(messages: InboundMessage[]) {
         threadKey,
         messages: [message],
         latestMessage: message,
-        sender: senderLabel(message),
+        senderName: senderName(message),
+        senderEmail: message.fromEmail,
         subject: message.subject || "(no subject)",
         unreadCount: message.readAt ? 0 : 1,
       });
@@ -136,7 +131,8 @@ function buildConversationThreads(messages: InboundMessage[]) {
     current.messages.sort(compareMessages);
     current.latestMessage =
       current.messages[current.messages.length - 1] ?? current.latestMessage;
-    current.sender = senderLabel(current.latestMessage);
+    current.senderName = senderName(current.latestMessage);
+    current.senderEmail = current.latestMessage.fromEmail;
     current.subject = current.latestMessage.subject || current.subject;
     current.unreadCount += message.readAt ? 0 : 1;
   }
@@ -153,26 +149,30 @@ function buildConversationThreads(messages: InboundMessage[]) {
     }));
 }
 
+/**
+ * The inbox — the app's home screen.
+ *
+ * Laid out like a mail client rather than a dashboard page: a list on the left
+ * and the conversation on the right, both filling the viewport, with no page
+ * header eating the top of the screen. On a phone the two become one column
+ * that swaps, which is what every native mail app does.
+ */
 export function Inbox() {
   const { currentOrganizationId: organizationId } = useSession();
-  const [accounts, setAccounts] = useState<InboxAccount[]>([]);
-  const [messages, setMessages] = useState<InboundMessage[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState("all");
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [accountFilter, setAccountFilter] = useState("all");
+  const [readFilter, setReadFilter] = useState<ReadFilter>("all");
+  const [search, setSearch] = useState("");
+  const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
     null
   );
   // On narrow screens the list and reading pane share one column, so we show
-  // one at a time: the list until the user taps a thread, then the reading
-  // pane (with a Back control). The desktop two-pane layout ignores this.
+  // one at a time: the list until a thread is opened, then the reading pane.
   const [mobileShowDetail, setMobileShowDetail] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [replying, setReplying] = useState(false);
-  const [search, setSearch] = useState("");
-  const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">(
-    "all"
-  );
+  const [connectOpen, setConnectOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   // Per-message opt-in to loading remote images. Deliberately not persisted:
   // the choice lasts for the session, so a tracking pixel fires at most once
@@ -181,48 +181,166 @@ export function Inbox() {
     () => new Set()
   );
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    host: "",
-    port: "993",
-    secure: true,
-    username: "",
-    password: "",
-    mailbox: "INBOX",
-  });
 
-  const selectedAccount = useMemo(
-    () => accounts.find((account) => account.id === selectedAccountId) ?? null,
-    [accounts, selectedAccountId]
+  const accountsQuery = useOrgQuery(
+    organizationId,
+    qk.inboxAccounts(organizationId ?? ""),
+    (id) => api.listInboxAccounts(id)
   );
+
+  const messagesQuery = useOrgQuery(
+    organizationId,
+    qk.inboundMessages(organizationId ?? "", {
+      q: submittedSearch,
+      read: readFilter,
+    }),
+    (id) =>
+      api.listInboundMessages({
+        organizationId: id,
+        q: submittedSearch || undefined,
+        read: readFilter,
+      }),
+    {
+      // Mail arrives on the worker's IMAP cadence; refetching while the tab is
+      // open keeps the list live without anyone pressing refresh.
+      refetchInterval: 60_000,
+    }
+  );
+
+  const accounts = useMemo(
+    () => accountsQuery.data ?? [],
+    [accountsQuery.data]
+  );
+  const messages = useMemo(
+    () => messagesQuery.data?.data ?? [],
+    [messagesQuery.data]
+  );
+
   const filteredMessages = useMemo(
     () =>
-      selectedAccountId === "all"
+      accountFilter === "all"
         ? messages
         : messages.filter(
-            (message) => message.inboxAccountId === selectedAccountId
+            (message) => message.inboxAccountId === accountFilter
           ),
-    [messages, selectedAccountId]
+    [messages, accountFilter]
   );
   const threads = useMemo(
     () => buildConversationThreads(filteredMessages),
     [filteredMessages]
   );
   const selectedThread = useMemo(
-    () => threads.find((thread) => thread.threadKey === selectedThreadKey) ?? null,
+    () =>
+      threads.find((thread) => thread.threadKey === selectedThreadKey) ?? null,
     [threads, selectedThreadKey]
   );
-  const unreadCount = useMemo(
-    () => filteredMessages.filter((message) => !message.readAt).length,
-    [filteredMessages]
-  );
+  const unreadCount = filteredMessages.filter(
+    (message) => !message.readAt
+  ).length;
+
   // Only the open thread's inline parts are fetched — the list pane renders no
   // bodies, so downloading blobs for every message would be wasted bandwidth.
   const inlineImages = useInboundInlineImages(
     useMemo(() => selectedThread?.messages ?? [], [selectedThread]),
     organizationId ?? null
   );
+
+  const markRead = useApiMutation(
+    (input: { id: string; read: boolean }) =>
+      api.markInboundMessageRead(input.id, {
+        organizationId: organizationId as string,
+        read: input.read,
+      }),
+    {
+      errorMessage: "Couldn't update that message.",
+      invalidates: () => [
+        qk.inboundMessages(organizationId ?? "", {
+          q: submittedSearch,
+          read: readFilter,
+        }),
+        // The nav badge reads its own query; keep the two in step.
+        qk.inboxUnreadCount(organizationId ?? ""),
+      ],
+    }
+  );
+
+  const removeAccount = useApiMutation(
+    (accountId: string) =>
+      api.deleteInboxAccount(accountId, organizationId as string),
+    {
+      successMessage: "Mailbox disconnected.",
+      errorMessage: "Couldn't disconnect that mailbox.",
+      invalidates: [qk.inboxAccounts(organizationId ?? "")],
+      onSuccess: () => setAccountFilter("all"),
+    }
+  );
+
+  const reply = useApiMutation(
+    (input: { messageId: string; subject: string; text: string }) =>
+      api.replyToInboundMessage(input.messageId, {
+        organizationId: organizationId as string,
+        subject: input.subject,
+        text: input.text,
+      }),
+    {
+      successMessage: "Reply sent.",
+      errorMessage: "Couldn't send that reply.",
+      onSuccess: () => {
+        setReplyBody("");
+        void queryClient.invalidateQueries({ queryKey: ["inbound-messages"] });
+      },
+    }
+  );
+
+  // Deep link from a push notification: /inbox?message=<id>. Select the thread
+  // that message belongs to and open it, then drop the parameter so a later
+  // refresh doesn't yank the reader back to an old message.
+  useEffect(() => {
+    const target = searchParams.get("message");
+    if (!target || messages.length === 0) return;
+    const message = messages.find((candidate) => candidate.id === target);
+    if (!message) return;
+    setSelectedThreadKey(threadKeyForMessage(message));
+    setMobileShowDetail(true);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("message");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [searchParams, messages, setSearchParams]);
+
+  // Keep a valid selection as the list changes, but never auto-select on a
+  // phone — that would drop someone straight into a message they didn't pick.
+  useEffect(() => {
+    if (threads.length === 0) {
+      setSelectedThreadKey(null);
+      return;
+    }
+    if (
+      !selectedThreadKey ||
+      !threads.some((thread) => thread.threadKey === selectedThreadKey)
+    ) {
+      setSelectedThreadKey(threads[0].threadKey);
+    }
+  }, [threads, selectedThreadKey]);
+
+  useEffect(() => {
+    setReplyBody("");
+  }, [selectedThreadKey]);
+
+  function openThread(thread: ConversationThread) {
+    setSelectedThreadKey(thread.threadKey);
+    setMobileShowDetail(true);
+    // Opening a conversation reads every message in it, the way a mail client
+    // does — leaving older messages in a thread unread would keep the badge lit
+    // with nothing left to click.
+    thread.messages
+      .filter((message) => !message.readAt)
+      .forEach((message) => markRead.mutate({ id: message.id, read: true }));
+  }
 
   async function downloadAttachment(
     messageId: string,
@@ -245,704 +363,476 @@ export function Inbox() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch {
-      toast.error("Unable to download attachment");
+      toast.error("Couldn't download that file.");
     } finally {
       setDownloadingId(null);
     }
   }
 
-  function allowRemoteContent(messageId: string) {
-    setRemoteContentAllowed((current) => {
-      const next = new Set(current);
-      next.add(messageId);
-      return next;
+  function submitReply(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedThread || !replyBody.trim()) return;
+    reply.mutate({
+      messageId: selectedThread.latestMessage.id,
+      subject: selectedThread.latestMessage.subject || "(no subject)",
+      text: replyBody,
     });
   }
 
-  async function load() {
-    if (!organizationId) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const [nextAccounts, nextMessages] = await Promise.all([
-        api.listInboxAccounts(organizationId),
-        api.listInboundMessages({
-          organizationId,
-          q: search || undefined,
-          read: readFilter,
-        }),
-      ]);
-      setAccounts(nextAccounts);
-      setMessages(nextMessages.data);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to load inbox"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, [organizationId, readFilter]);
-
-  useEffect(() => {
-    if (
-      selectedAccountId !== "all" &&
-      !accounts.some((account) => account.id === selectedAccountId)
-    ) {
-      setSelectedAccountId("all");
-    }
-  }, [accounts, selectedAccountId]);
-
-  useEffect(() => {
-    if (threads.length === 0) {
-      setSelectedThreadKey(null);
-      setMobileShowDetail(false);
-      return;
-    }
-
-    if (!selectedThreadKey || !threads.some((thread) => thread.threadKey === selectedThreadKey)) {
-      setSelectedThreadKey(threads[0].threadKey);
-    }
-  }, [threads, selectedThreadKey]);
-
-  useEffect(() => {
-    setReplyBody("");
-  }, [selectedThreadKey]);
-
-  async function submitAccount(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId) {
-      toast.error("Select an organization first.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const account = await api.createInboxAccount({
-        organizationId,
-        ...form,
-        port: Number(form.port),
-      });
-      toast.success(`Connected ${account.email}.`);
-      setDialogOpen(false);
-      setForm({
-        name: "",
-        email: "",
-        host: "",
-        port: "993",
-        secure: true,
-        username: "",
-        password: "",
-        mailbox: "INBOX",
-      });
-      await load();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to connect mailbox"
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deleteAccount(account: InboxAccount) {
-    if (!organizationId) return;
-    try {
-      await api.deleteInboxAccount(account.id, organizationId);
-      toast.success("Inbox account removed.");
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to remove.");
-    }
-  }
-
-  async function openThread(thread: ConversationThread) {
-    setSelectedThreadKey(thread.threadKey);
-    setMobileShowDetail(true);
-    if (!organizationId) return;
-
-    const unreadMessages = thread.messages.filter((message) => !message.readAt);
-    if (unreadMessages.length === 0) return;
-
-    try {
-      for (const message of unreadMessages) {
-        const updated = await api.markInboundMessageRead(message.id, {
-          organizationId,
-          read: true,
-        });
-        setMessages((current) =>
-          current.map((item) => (item.id === updated.id ? updated : item))
-        );
-      }
-    } catch {
-      // Keep the local view usable even if the read marker fails.
-    }
-  }
-
-  async function submitReply(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId || !selectedThread || !replyBody.trim()) return;
-
-    setReplying(true);
-    try {
-      await api.replyToInboundMessage(selectedThread.latestMessage.id, {
-        organizationId,
-        subject: selectedThread.latestMessage.subject || "(no subject)",
-        text: replyBody,
-      });
-      setReplyBody("");
-      toast.success("Reply sent.");
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to reply.");
-    } finally {
-      setReplying(false);
-    }
-  }
+  const loading = accountsQuery.isPending || messagesQuery.isPending;
+  // With a single mailbox there is no filter to pick it with, so treat it as
+  // selected — otherwise its status and its Disconnect control would be
+  // unreachable for the most common setup of all.
+  const selectedAccount =
+    accounts.find((account) => account.id === accountFilter) ??
+    (accounts.length === 1 ? accounts[0] : undefined);
 
   return (
-    <>
-      <div className="flex min-h-0 flex-col md:h-full">
-        <PageHeader
-          title="Inbox"
-          description="Read replies to your emails and respond — all in one place."
-          actions={
-            <Button
-              onClick={() => setDialogOpen(true)}
-              disabled={!organizationId}
-            >
-              <MailPlus className="h-4 w-4" />
-              Connect an inbox
-            </Button>
-          }
-        />
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
+      {/* ---------------------------------------------------------------- list */}
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-col border-r md:flex md:w-[22rem] md:shrink-0 lg:w-[24rem]",
+          mobileShowDetail ? "hidden" : "flex flex-1"
+        )}
+      >
+        <header className="shrink-0 border-b px-4 pb-3 pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold tracking-tight">Inbox</h1>
+              <p className="text-xs text-muted-foreground">
+                {unreadCount > 0
+                  ? `${unreadCount} unread of ${filteredMessages.length}`
+                  : `${filteredMessages.length} message${filteredMessages.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+            <div className="flex items-center gap-0.5">
+              <IconButton
+                label="Check for new mail"
+                onClick={() => {
+                  void queryClient.invalidateQueries({
+                    queryKey: ["inbound-messages"],
+                  });
+                }}
+                disabled={messagesQuery.isFetching}
+              >
+                <RefreshCw
+                  className={cn(messagesQuery.isFetching && "animate-spin")}
+                />
+              </IconButton>
+              <IconButton
+                label="Connect a mailbox"
+                onClick={() => setConnectOpen(true)}
+                disabled={!organizationId}
+              >
+                <MailPlus />
+              </IconButton>
+            </div>
+          </div>
 
-        <section className="min-h-0 flex-1 p-5 sm:p-6 xl:overflow-hidden">
+          <form
+            className="mt-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setSubmittedSearch(search.trim());
+            }}
+          >
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onBlur={() => setSubmittedSearch(search.trim())}
+              placeholder="Search mail"
+              aria-label="Search mail"
+              type="search"
+            />
+          </form>
+
+          <div className="mt-3 flex items-center gap-2">
+            <div className="flex flex-1 rounded-lg border bg-muted/40 p-0.5">
+              {(["all", "unread", "read"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setReadFilter(value)}
+                  className={cn(
+                    "flex-1 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors",
+                    readFilter === value
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+
+            {accounts.length > 1 ? (
+              <Select value={accountFilter} onValueChange={setAccountFilter}>
+                <SelectTrigger
+                  className="h-8 w-36 text-xs"
+                  aria-label="Filter by mailbox"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All mailboxes</SelectItem>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+          </div>
+
+          {selectedAccount ? (
+            <div className="mt-2 flex items-center gap-2 text-[0.7rem] text-muted-foreground">
+              <Badge variant="outline" className="text-[0.65rem]">
+                {selectedAccount.status}
+              </Badge>
+              <span className="truncate">
+                Synced {formatFullDate(selectedAccount.lastSyncedAt)}
+              </span>
+              <IconButton
+                label={`Disconnect ${selectedAccount.email}`}
+                size="sm"
+                variant="destructive"
+                className="ml-auto"
+                onClick={() => removeAccount.mutate(selectedAccount.id)}
+              >
+                <Trash2 />
+              </IconButton>
+            </div>
+          ) : null}
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (
-            <div className="flex min-h-60 items-center justify-center">
+            <div className="flex h-40 items-center justify-center">
               <Spinner />
             </div>
+          ) : accounts.length === 0 ? (
+            <EmptyState
+              icon={MailPlus}
+              title="No mailbox connected"
+              description="Connect a mailbox and replies to your emails will show up here."
+              action={
+                <Button onClick={() => setConnectOpen(true)}>
+                  <MailPlus className="h-4 w-4" />
+                  Connect a mailbox
+                </Button>
+              }
+            />
+          ) : threads.length === 0 ? (
+            <EmptyState
+              icon={InboxIcon}
+              title={
+                submittedSearch ? "Nothing matched" : "No conversations yet"
+              }
+              description={
+                submittedSearch
+                  ? "Try a different search, or clear it to see everything."
+                  : "Replies will appear here once your mailbox finishes syncing."
+              }
+            />
           ) : (
-            <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
-              <Card
-                className={cn(
-                  "min-h-[28rem] flex-col overflow-hidden xl:flex xl:min-h-0",
-                  mobileShowDetail ? "hidden" : "flex"
-                )}
-              >
-                <div className="shrink-0 space-y-3 border-b p-4">
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="inbox-mailbox-filter"
-                    className="text-xs text-muted-foreground"
-                  >
-                    Account
-                  </Label>
-                  <div className="flex gap-2">
-                    <Select
-                      value={selectedAccountId}
-                      onValueChange={setSelectedAccountId}
-                      disabled={accounts.length === 0}
-                    >
-                      <SelectTrigger id="inbox-mailbox-filter">
-                        <SelectValue placeholder="Select account" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">
-                          All inboxes ({accounts.length})
-                        </SelectItem>
-                        {accounts.map((account) => (
-                          <SelectItem key={account.id} value={account.id}>
-                            {account.name} ({account.email})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
-                      disabled={!selectedAccount}
-                      onClick={() => {
-                        if (selectedAccount) void deleteAccount(selectedAccount);
-                      }}
-                      aria-label="Remove this inbox"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold">Conversations</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {filteredMessages.length} synced, {unreadCount} unread
-                  </p>
-                </div>
-                {accounts.length === 0 ? (
-                  <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-                      <Plug className="h-4 w-4 shrink-0" />
-                      <span>No inbox connected yet.</span>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setDialogOpen(true)}
-                    >
-                      <MailPlus className="h-4 w-4" />
-                      Connect an inbox
-                    </Button>
-                  </div>
-                ) : selectedAccount ? (
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <Badge variant="outline">{selectedAccount.status}</Badge>
-                    <Badge variant="secondary">{selectedAccount.mailbox}</Badge>
-                    <span>Synced {formatDate(selectedAccount.lastSyncedAt)}</span>
-                  </div>
-                ) : null}
-                <form
-                  className="flex gap-2"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void load();
-                  }}
-                >
-                  <Input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search inbox"
-                    className="min-w-0"
-                  />
-                  <Button type="submit" variant="outline" size="icon" aria-label="Search inbox">
-                    <Search className="h-4 w-4" />
-                  </Button>
-                </form>
-                <div className="grid grid-cols-3 gap-1 rounded-lg border bg-muted/30 p-1">
-                  {(["all", "unread", "read"] as const).map((value) => (
-                    <Button
-                      key={value}
-                      type="button"
-                      size="sm"
-                      variant={readFilter === value ? "secondary" : "ghost"}
-                      onClick={() => setReadFilter(value)}
-                    >
-                      {value[0].toUpperCase()}
-                      {value.slice(1)}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-                {threads.length === 0 ? (
-                  <div className="flex-1">
-                    <EmptyState
-                      icon={MailOpen}
-                      title="No conversations yet"
-                      description="Replies will appear here once your inbox finishes syncing."
-                    />
-                  </div>
-                ) : (
-                  <div className="scrollbar-hidden min-h-0 flex-1 divide-y overflow-y-auto">
-                  {threads.map((thread) => {
-                    const selected = thread.threadKey === selectedThreadKey;
-                    return (
-                      <button
-                        key={thread.threadKey}
-                        type="button"
-                        className={`block w-full px-4 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
-                          selected ? "bg-primary/10" : "bg-card"
-                        }`}
-                        onClick={() => void openThread(thread)}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              {thread.unreadCount > 0 ? (
-                                <span className="h-2 w-2 rounded-full bg-primary" aria-hidden />
-                              ) : null}
-                              <span
-                                className={`truncate text-sm ${
-                                  thread.unreadCount > 0
-                                    ? "font-semibold"
-                                    : "font-normal text-muted-foreground"
-                                }`}
-                              >
-                                {thread.sender}
-                              </span>
-                            </div>
-                            <div
-                              className={`mt-1 truncate text-sm ${
-                                thread.unreadCount > 0
-                                  ? "font-semibold"
-                                  : "font-normal"
-                              }`}
-                            >
-                              {thread.subject}
-                            </div>
-                          </div>
-                          <span className="shrink-0 text-[11px] text-muted-foreground">
-                            {formatDate(thread.latestMessage.receivedAt)}
-                          </span>
-                        </div>
-                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                          {snippet(thread.latestMessage)}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          <Badge variant="outline">
-                            {thread.messages.length} message
-                            {thread.messages.length === 1 ? "" : "s"}
-                          </Badge>
-                          {thread.unreadCount > 0 ? (
-                            <Badge variant="default">
-                              {thread.unreadCount} unread
-                            </Badge>
-                          ) : null}
-                        </div>
-                      </button>
-                    );
-                  })}
-                  </div>
-                )}
-              </Card>
-
-              <Card
-                className={cn(
-                  "min-h-[32rem] flex-col overflow-hidden xl:flex xl:min-h-0",
-                  mobileShowDetail ? "flex" : "hidden"
-                )}
-              >
-                {selectedThread ? (
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="shrink-0 border-b bg-muted/20 p-5">
+            <ul className="divide-y">
+              {threads.map((thread) => {
+                const selected = thread.threadKey === selectedThreadKey;
+                const unread = thread.unreadCount > 0;
+                return (
+                  <li key={thread.threadKey}>
                     <button
                       type="button"
-                      onClick={() => setMobileShowDetail(false)}
-                      className="mb-3 -ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground xl:hidden"
+                      onClick={() => openThread(thread)}
+                      aria-current={selected ? "true" : undefined}
+                      className={cn(
+                        "flex w-full gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                        selected
+                          ? "bg-primary/10"
+                          : "hover:bg-accent/50"
+                      )}
                     >
-                      <ArrowLeft className="h-4 w-4" />
-                      All conversations
-                    </button>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h2 className="truncate text-xl font-semibold tracking-tight">
-                          {selectedThread.subject}
-                        </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Conversation with {selectedThread.sender}
+                      <Avatar name={thread.senderName} size="md" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span
+                            className={cn(
+                              "truncate text-sm",
+                              unread
+                                ? "font-semibold text-foreground"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {thread.senderName}
+                          </span>
+                          <Hint
+                            label={formatFullDate(
+                              thread.latestMessage.receivedAt
+                            )}
+                          >
+                            <span className="shrink-0 cursor-help text-[0.7rem] text-muted-foreground">
+                              {formatMailDate(thread.latestMessage.receivedAt)}
+                            </span>
+                          </Hint>
+                        </div>
+                        <div
+                          className={cn(
+                            "mt-0.5 truncate text-sm",
+                            unread ? "font-semibold" : "text-foreground/80"
+                          )}
+                        >
+                          {thread.subject}
+                        </div>
+                        <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                          {snippet(thread.latestMessage)}
                         </p>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        <Badge variant="outline">
-                          {selectedThread.messages.length} message
-                          {selectedThread.messages.length === 1 ? "" : "s"}
-                        </Badge>
-                        {selectedThread.unreadCount > 0 ? (
-                          <Badge>{selectedThread.unreadCount} unread</Badge>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="scrollbar-hidden min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-                    {selectedThread.messages.map((message) => (
-                      <article
-                        key={message.id}
-                        className="rounded-2xl border bg-background/70 p-4 shadow-sm"
-                      >
-                        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <div className="text-sm font-semibold">
-                              {senderLabel(message)}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatDate(message.receivedAt)}
-                            </div>
-                          </div>
-                          {message.emailJob ? (
-                            <Badge variant="outline">
-                              Reply to {message.emailJob.subject}
-                            </Badge>
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          {unread ? (
+                            <span
+                              className="h-1.5 w-1.5 rounded-full bg-primary"
+                              aria-label="Unread"
+                            />
+                          ) : null}
+                          {thread.messages.length > 1 ? (
+                            <span className="text-[0.65rem] text-muted-foreground">
+                              {thread.messages.length} messages
+                            </span>
+                          ) : null}
+                          {thread.latestMessage.attachments?.some(
+                            (file) => !file.isInline
+                          ) ? (
+                            <Paperclip className="h-3 w-3 text-muted-foreground" />
                           ) : null}
                         </div>
-                        {/*
-                          Prefer the HTML part. It has always been synced into
-                          InboundMessage.html; the pane just never rendered it,
-                          so formatted mail (tables especially) was shown as the
-                          flattened text/plain alternative. Fall back to text
-                          only when there is no HTML part.
-                        */}
-                        {message.html ? (
-                          <InboundHtmlFrame
-                            html={message.html}
-                            showRemoteContent={remoteContentAllowed.has(
-                              message.id
-                            )}
-                            inlineImages={inlineImages[message.id]}
-                            title={`Message from ${senderLabel(message)}`}
-                          />
-                        ) : (
-                          <div className="whitespace-pre-wrap text-sm leading-6">
-                            {message.text || "This message has no body."}
-                          </div>
-                        )}
-                        {/*
-                          Downloadable parts. Inline parts (cid: images the
-                          sender meant to render in the body) are filtered out
-                          so a signature logo doesn't look like an attachment.
-                        */}
-                        {(message.attachments ?? []).filter(
-                          (file) => !file.isInline
-                        ).length > 0 ? (
-                          <div className="mt-4 border-t pt-3">
-                            <div className="mb-2 text-xs font-medium text-muted-foreground">
-                              Attachments
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {(message.attachments ?? [])
-                                .filter((file) => !file.isInline)
-                                .map((file) => (
-                                  <Button
-                                    key={file.id}
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={downloadingId === file.id}
-                                    onClick={() =>
-                                      void downloadAttachment(message.id, file)
-                                    }
-                                    className="h-auto gap-2 py-1.5"
-                                  >
-                                    {downloadingId === file.id ? (
-                                      <Spinner className="h-3.5 w-3.5" />
-                                    ) : (
-                                      <Paperclip className="h-3.5 w-3.5" />
-                                    )}
-                                    <span className="max-w-[220px] truncate">
-                                      {file.filename}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                      {formatBytes(file.size)}
-                                    </span>
-                                  </Button>
-                                ))}
-                            </div>
-                          </div>
-                        ) : null}
-                        {hasRemoteImages(message.html) &&
-                        !remoteContentAllowed.has(message.id) ? (
-                          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed bg-muted/40 px-3 py-2">
-                            <span className="text-xs text-muted-foreground">
-                              Remote images are blocked so the sender can&apos;t
-                              track when you open this.
-                            </span>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => allowRemoteContent(message.id)}
-                            >
-                              Show images
-                            </Button>
-                          </div>
-                        ) : null}
-                      </article>
-                    ))}
-                  </div>
-
-                  <form
-                    className="shrink-0 border-t bg-card p-4"
-                    onSubmit={submitReply}
-                  >
-                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                      <Reply className="h-4 w-4 text-primary" />
-                      Reply
-                    </div>
-                    <Textarea
-                      value={replyBody}
-                      onChange={(event) => setReplyBody(event.target.value)}
-                      placeholder={`Reply to ${selectedThread.latestMessage.fromEmail}`}
-                      rows={5}
-                      className="resize-y"
-                    />
-                    <div className="mt-3 flex justify-end">
-                      <Button
-                        type="submit"
-                        disabled={replying || !replyBody.trim()}
-                      >
-                        {replying ? <Spinner /> : <Send className="h-4 w-4" />}
-                        Send reply
-                      </Button>
-                    </div>
-                  </form>
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={MailOpen}
-                    title="Select a conversation"
-                    description="Choose a thread to read messages and reply."
-                  />
-                )}
-              </Card>
-            </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-        </section>
+        </div>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Connect an inbox</DialogTitle>
-            <DialogDescription>
-              We check the connection and open your inbox read-only — QQueue
-              never sends or deletes from it. You can usually find these details
-              listed under IMAP in your email provider settings.
-            </DialogDescription>
-          </DialogHeader>
-          <form className="space-y-4" onSubmit={submitAccount}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="inbox-name">Name</Label>
-                <Input
-                  id="inbox-name"
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="inbox-email">Email</Label>
-                <Input
-                  id="inbox-email"
-                  type="email"
-                  value={form.email}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      email: event.target.value,
-                      username: current.username || event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="inbox-host">Mail server</Label>
-                <Input
-                  id="inbox-host"
-                  placeholder="imap.gmail.com"
-                  value={form.host}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      host: event.target.value,
-                    }))
-                  }
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Your incoming (IMAP) mail server.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="inbox-port">Port</Label>
-                <Input
-                  id="inbox-port"
-                  inputMode="numeric"
-                  value={form.port}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      port: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="inbox-username">Username</Label>
-                <Input
-                  id="inbox-username"
-                  value={form.username}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      username: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="inbox-password">Password</Label>
-                <Input
-                  id="inbox-password"
-                  type="password"
-                  value={form.password}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      password: event.target.value,
-                    }))
-                  }
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="inbox-mailbox">Folder</Label>
-                <Input
-                  id="inbox-mailbox"
-                  value={form.mailbox}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      mailbox: event.target.value,
-                    }))
-                  }
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Which folder to read. Usually INBOX.
-                </p>
-              </div>
-              <div className="flex items-end justify-between gap-3 rounded-xl border p-3">
-                <div>
-                  <Label>Secure connection (TLS)</Label>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Recommended — leave this on for most providers.
+      {/* -------------------------------------------------------------- reader */}
+      <div
+        className={cn(
+          "min-h-0 min-w-0 flex-1 flex-col md:flex",
+          mobileShowDetail ? "flex" : "hidden"
+        )}
+      >
+        {selectedThread ? (
+          <>
+            <header className="shrink-0 border-b bg-muted/20 px-4 py-3 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setMobileShowDetail(false)}
+                className="mb-2 -ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground md:hidden"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Inbox
+              </button>
+
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-semibold tracking-tight">
+                    {selectedThread.subject}
+                  </h2>
+                  <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                    {selectedThread.senderName} · {selectedThread.senderEmail}
                   </p>
                 </div>
-                <Switch
-                  checked={form.secure}
-                  onCheckedChange={(secure) =>
-                    setForm((current) => ({
-                      ...current,
-                      secure,
-                    }))
-                  }
-                  aria-label="Secure connection (TLS)"
-                />
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <IconButton
+                    label="Mark as unread"
+                    onClick={() =>
+                      markRead.mutate({
+                        id: selectedThread.latestMessage.id,
+                        read: false,
+                      })
+                    }
+                  >
+                    <Mail />
+                  </IconButton>
+                  <IconButton
+                    label="Reply"
+                    onClick={() => {
+                      document
+                        .getElementById("inbox-reply")
+                        ?.scrollIntoView({ behavior: "smooth" });
+                      document.getElementById("inbox-reply")?.focus();
+                    }}
+                  >
+                    <Reply />
+                  </IconButton>
+                </div>
               </div>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+              {selectedThread.messages.map((message) => (
+                <article
+                  key={message.id}
+                  className="rounded-2xl border bg-card p-4 shadow-sm"
+                >
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Avatar name={senderName(message)} size="sm" />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">
+                          {senderLabel(message)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatFullDate(message.receivedAt)}
+                        </div>
+                      </div>
+                    </div>
+                    {message.emailJob ? (
+                      <Hint
+                        label={`This is a reply to the email "${message.emailJob.subject}" that you sent`}
+                      >
+                        <Badge variant="outline" className="cursor-help">
+                          Reply to your email
+                        </Badge>
+                      </Hint>
+                    ) : null}
+                  </div>
+
+                  {/*
+                    Prefer the HTML part — formatted mail (tables especially)
+                    reads badly as the flattened text/plain alternative.
+                  */}
+                  {message.html ? (
+                    <InboundHtmlFrame
+                      html={message.html}
+                      showRemoteContent={remoteContentAllowed.has(message.id)}
+                      inlineImages={inlineImages[message.id]}
+                      title={`Message from ${senderLabel(message)}`}
+                    />
+                  ) : (
+                    <div className="whitespace-pre-wrap text-sm leading-6">
+                      {message.text || "This message has no body."}
+                    </div>
+                  )}
+
+                  {/*
+                    Downloadable parts. Inline parts (cid: images the sender
+                    meant to render in the body) are filtered out so a signature
+                    logo doesn't look like an attachment.
+                  */}
+                  {(message.attachments ?? []).filter((file) => !file.isInline)
+                    .length > 0 ? (
+                    <div className="mt-4 border-t pt-3">
+                      <div className="mb-2 text-xs font-medium text-muted-foreground">
+                        Attachments
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {(message.attachments ?? [])
+                          .filter((file) => !file.isInline)
+                          .map((file) => (
+                            <Hint
+                              key={file.id}
+                              label={`Download ${file.filename} (${formatBytes(file.size)})`}
+                            >
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={downloadingId === file.id}
+                                onClick={() =>
+                                  void downloadAttachment(message.id, file)
+                                }
+                                className="h-auto gap-2 py-1.5"
+                              >
+                                {downloadingId === file.id ? (
+                                  <Spinner className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Paperclip className="h-3.5 w-3.5" />
+                                )}
+                                <span className="max-w-[220px] truncate">
+                                  {file.filename}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {formatBytes(file.size)}
+                                </span>
+                              </Button>
+                            </Hint>
+                          ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {hasRemoteImages(message.html) &&
+                  !remoteContentAllowed.has(message.id) ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-dashed bg-muted/40 px-3 py-2">
+                      <ImageOff className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 text-xs text-muted-foreground">
+                        Images are hidden so the sender can't tell when you
+                        opened this.
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setRemoteContentAllowed((current) =>
+                            new Set(current).add(message.id)
+                          )
+                        }
+                      >
+                        Show images
+                      </Button>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
             </div>
-            <DialogFooter>
-              <Button type="submit" disabled={saving}>
-                {saving ? <Spinner /> : <Plug className="h-4 w-4" />}
-                Connect
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+
+            <form
+              className="shrink-0 border-t bg-card p-4 sm:px-6"
+              onSubmit={submitReply}
+            >
+              <Textarea
+                id="inbox-reply"
+                value={replyBody}
+                onChange={(event) => setReplyBody(event.target.value)}
+                placeholder={`Reply to ${selectedThread.senderName}…`}
+                rows={3}
+                className="resize-y"
+                aria-label={`Reply to ${selectedThread.senderName}`}
+              />
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Sends from the mailbox this arrived in.
+                </p>
+                <Button
+                  type="submit"
+                  disabled={reply.isPending || !replyBody.trim()}
+                >
+                  {reply.isPending ? <Spinner /> : <Send className="h-4 w-4" />}
+                  Send
+                </Button>
+              </div>
+            </form>
+          </>
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <EmptyState
+              icon={MailOpen}
+              title="Nothing selected"
+              description="Pick a conversation on the left to read it."
+            />
+          </div>
+        )}
+      </div>
+
+      <ConnectInboxDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        organizationId={organizationId ?? ""}
+      />
+    </div>
   );
 }

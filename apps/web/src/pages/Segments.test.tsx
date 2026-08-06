@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
@@ -88,14 +94,13 @@ describe("Segments", () => {
     mockedApi.previewSegmentRules.mockResolvedValue({ count: 42, sample: [] });
   });
 
-  it("lists existing segments", async () => {
-    render(<Segments />);
+  it("lists existing segments", async () => { renderWithProviders(<Segments />);
     expect(await screen.findByText("VIP customers")).toBeInTheDocument();
   });
 
   it("previews a tag rule and creates a segment", async () => {
     const user = userEvent.setup();
-    render(<Segments />);
+    renderWithProviders(<Segments />);
     await screen.findByText("VIP customers");
 
     await user.click(screen.getByRole("button", { name: /new smart list/i }));

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +10,13 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => navigate };
 });
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const setSession = vi.hoisted(() => vi.fn());
@@ -32,11 +38,11 @@ const mockedApi = api as unknown as {
 
 function renderAt(token?: string) {
   const path = token ? `/accept-invite?token=${token}` : "/accept-invite";
-  return render(
+  return renderWithProviders(
     <MemoryRouter initialEntries={[path]}>
       <AcceptInvite />
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 const newAccountInvite = {

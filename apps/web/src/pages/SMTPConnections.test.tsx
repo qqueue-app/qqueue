@@ -1,8 +1,20 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  openRowMenu,
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 // Mutable so individual tests can view the page as a MEMBER; the default is
@@ -56,7 +68,7 @@ describe("SMTPConnections", () => {
 
   it("shows the empty state", async () => {
     mockedApi.listSMTPConnections.mockResolvedValue([]);
-    render(<SMTPConnections />);
+    renderWithProviders(<SMTPConnections />);
     expect(
       await screen.findByText("No sending accounts yet")
     ).toBeInTheDocument();
@@ -64,7 +76,7 @@ describe("SMTPConnections", () => {
 
   it("renders connections with badges", async () => {
     mockedApi.listSMTPConnections.mockResolvedValue([connection]);
-    render(<SMTPConnections />);
+    renderWithProviders(<SMTPConnections />);
     expect(await screen.findByText("Primary")).toBeInTheDocument();
     expect(screen.getByText("Default")).toBeInTheDocument();
     expect(screen.getByText("STARTTLS")).toBeInTheDocument();
@@ -75,10 +87,10 @@ describe("SMTPConnections", () => {
     const user = userEvent.setup();
     mockedApi.listSMTPConnections.mockResolvedValue([]);
     mockedApi.createSMTPConnection.mockResolvedValue({ id: "s2" });
-    render(<SMTPConnections />);
+    renderWithProviders(<SMTPConnections />);
     await screen.findByText("No sending accounts yet");
     await user.click(
-      screen.getAllByRole("button", { name: /New connection/i })[0]
+      screen.getAllByRole("button", { name: /New account/i })[0]
     );
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Host"), "smtp.test.com");
@@ -86,13 +98,13 @@ describe("SMTPConnections", () => {
     await user.type(within(dialog).getByLabelText("Password"), "p");
     await user.type(within(dialog).getByLabelText("From email"), "x@y.com");
     await user.click(
-      within(dialog).getByRole("button", { name: "Test and create" })
+      within(dialog).getByRole("button", { name: "Check and create" })
     );
     await waitFor(() =>
       expect(mockedApi.createSMTPConnection).toHaveBeenCalled()
     );
     expect(toast.success).toHaveBeenCalledWith(
-      "Sending account verified and saved."
+      "Checked the credentials and saved the account."
     );
   });
 
@@ -100,12 +112,16 @@ describe("SMTPConnections", () => {
     const user = userEvent.setup();
     mockedApi.listSMTPConnections.mockResolvedValue([connection]);
     mockedApi.updateSMTPConnection.mockResolvedValue({ id: "s1" });
-    render(<SMTPConnections />);
+    renderWithProviders(<SMTPConnections />);
     await screen.findByText("Primary");
-    await user.click(screen.getByLabelText("Edit connection"));
+    // Editing is a secondary action, so it lives in the row's overflow menu.
+    await openRowMenu(user, "Primary");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Edit this account" })
+    );
     const dialog = await screen.findByRole("dialog");
     await user.click(
-      within(dialog).getByRole("button", { name: "Test and save" })
+      within(dialog).getByRole("button", { name: "Check and save" })
     );
     await waitFor(() =>
       expect(mockedApi.updateSMTPConnection).toHaveBeenCalledWith(
@@ -119,9 +135,12 @@ describe("SMTPConnections", () => {
     const user = userEvent.setup();
     mockedApi.listSMTPConnections.mockResolvedValue([connection]);
     mockedApi.deleteSMTPConnection.mockResolvedValue(undefined);
-    render(<SMTPConnections />);
+    renderWithProviders(<SMTPConnections />);
     await screen.findByText("Primary");
-    await user.click(screen.getByLabelText("Delete connection"));
+    await openRowMenu(user, "Primary");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Delete this account" })
+    );
     await user.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() =>
       expect(mockedApi.deleteSMTPConnection).toHaveBeenCalledWith("s1")
@@ -131,10 +150,10 @@ describe("SMTPConnections", () => {
   it("toggles the secure and default checkboxes in the form", async () => {
     const user = userEvent.setup();
     mockedApi.listSMTPConnections.mockResolvedValue([]);
-    render(<SMTPConnections />);
+    renderWithProviders(<SMTPConnections />);
     await screen.findByText("No sending accounts yet");
     await user.click(
-      screen.getAllByRole("button", { name: /New connection/i })[0]
+      screen.getAllByRole("button", { name: /New account/i })[0]
     );
     const dialog = await screen.findByRole("dialog");
     const checkboxes = within(dialog).getAllByRole("checkbox");
@@ -146,7 +165,7 @@ describe("SMTPConnections", () => {
 
   it("toasts on load failure", async () => {
     mockedApi.listSMTPConnections.mockRejectedValue(new Error("oops"));
-    render(<SMTPConnections />);
+    renderWithProviders(<SMTPConnections />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("oops"));
   });
 
@@ -155,16 +174,19 @@ describe("SMTPConnections", () => {
       const user = userEvent.setup();
       mockedApi.listSMTPConnections.mockResolvedValue([connection]);
       mockedApi.verifySMTPConnection.mockResolvedValue({ verified: true });
-      render(<SMTPConnections />);
+      renderWithProviders(<SMTPConnections />);
       await screen.findByText("Primary");
 
-      await user.click(screen.getByLabelText("Test connection"));
+      await user.click(screen.getByLabelText("Check this account still works"));
 
       await waitFor(() =>
         expect(mockedApi.verifySMTPConnection).toHaveBeenCalledWith("s1")
       );
+      // The success replaces the in-flight "Testing…" toast, so it carries
+      // that toast's id.
       expect(toast.success).toHaveBeenCalledWith(
-        "Primary verified — credentials work."
+        "Primary works.",
+        expect.anything()
       );
     });
 
@@ -175,14 +197,15 @@ describe("SMTPConnections", () => {
         verified: false,
         message: "The mail server rejected the username or password."
       });
-      render(<SMTPConnections />);
+      renderWithProviders(<SMTPConnections />);
       await screen.findByText("Primary");
 
-      await user.click(screen.getByLabelText("Test connection"));
+      await user.click(screen.getByLabelText("Check this account still works"));
 
       await waitFor(() =>
         expect(toast.error).toHaveBeenCalledWith(
-          "The mail server rejected the username or password."
+          "The mail server rejected the username or password.",
+          expect.anything()
         )
       );
     });
@@ -193,9 +216,9 @@ describe("SMTPConnections", () => {
         currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" }
       };
       mockedApi.listSMTPConnections.mockResolvedValue([connection]);
-      render(<SMTPConnections />);
+      renderWithProviders(<SMTPConnections />);
       await screen.findByText("Primary");
-      expect(screen.getByLabelText("Test connection")).toBeInTheDocument();
+      expect(screen.getByLabelText("Check this account still works")).toBeInTheDocument();
     });
   });
 
@@ -211,25 +234,29 @@ describe("SMTPConnections", () => {
 
     it("hides the create, edit, and delete controls", async () => {
       mockedApi.listSMTPConnections.mockResolvedValue([connection]);
-      render(<SMTPConnections />);
+      renderWithProviders(<SMTPConnections />);
       await screen.findByText("Primary");
       expect(
-        screen.queryByRole("button", { name: /New connection/i })
+        screen.queryByRole("button", { name: /New account/i })
       ).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Edit connection")).not.toBeInTheDocument();
+      // A member can still test the account, but every action that would
+      // change it is gone — so there is no overflow menu at all.
       expect(
-        screen.queryByLabelText("Delete connection")
+        screen.getByLabelText("Check this account still works")
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "More actions for Primary" })
       ).not.toBeInTheDocument();
     });
 
     it("points at an owner or admin when there are no accounts", async () => {
       mockedApi.listSMTPConnections.mockResolvedValue([]);
-      render(<SMTPConnections />);
+      renderWithProviders(<SMTPConnections />);
       expect(
         await screen.findByText(/owner or admin needs to add one/i)
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: /New connection/i })
+        screen.queryByRole("button", { name: /New account/i })
       ).not.toBeInTheDocument();
     });
   });

@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const invalidateSetupStatus = vi.hoisted(() => vi.fn());
@@ -59,7 +65,7 @@ describe("InstanceSettingsCard", () => {
     });
     vi.mocked(api.instanceEnvStatus).mockResolvedValue(envStatus);
 
-    render(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettingsCard />);
 
     expect(await screen.findByText("Instance")).toBeInTheDocument();
     expect(
@@ -85,7 +91,7 @@ describe("InstanceSettingsCard", () => {
       setupCompletedAt: null
     });
 
-    render(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettingsCard />);
 
     const toggle = await screen.findByLabelText("Allow public registration");
     await userEvent.click(toggle);
@@ -111,7 +117,7 @@ describe("InstanceSettingsCard", () => {
       new Error("boom")
     );
 
-    render(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettingsCard />);
 
     const toggle = await screen.findByLabelText("Allow public registration");
     await userEvent.click(toggle);
@@ -124,7 +130,7 @@ describe("InstanceSettingsCard", () => {
       new ApiError("Forbidden", 403)
     );
 
-    const { container } = render(<InstanceSettingsCard />);
+    const { container } = renderWithProviders(<InstanceSettingsCard />);
 
     // Give the rejected effect a chance to run, then assert the card is absent.
     await waitFor(() => expect(api.getInstanceSettings).toHaveBeenCalled());
@@ -137,7 +143,7 @@ describe("InstanceSettingsCard", () => {
       new Error("network down")
     );
 
-    render(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettingsCard />);
 
     expect(await screen.findByText("Instance")).toBeInTheDocument();
     expect(toast.error).toHaveBeenCalledWith("network down");

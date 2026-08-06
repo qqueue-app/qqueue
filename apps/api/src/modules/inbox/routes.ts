@@ -29,6 +29,12 @@ inboxRouter.delete(
   inboxController.deleteAccount
 );
 
+// Must be registered before /messages/:id so "unread-count" isn't read as an id.
+inboxRouter.get(
+  "/messages/unread-count",
+  requireOrgMembership,
+  inboxController.unreadCount
+);
 inboxRouter.get(
   "/messages",
   requireOrgMembership,

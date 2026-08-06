@@ -7,6 +7,7 @@ import { decryptSecret } from "./crypto.js";
 import { applyDsnBounce, parseDsn } from "./dsn.js";
 import { logger } from "./logger.js";
 import { prisma } from "./prisma.js";
+import { sendPushToOrganization, truncateForNotification } from "./push.js";
 import { storage } from "./storage.js";
 
 type InboxAccount = Awaited<ReturnType<typeof getActiveInboxAccounts>>[number];
@@ -254,6 +255,33 @@ async function storeParsedMessage(input: {
       logger.error(
         { inboundMessageId: stored.id, err: error },
         "failed to process DSN"
+      );
+    }
+  }
+
+  // Notify only on a genuinely new human message. A DSN is bounce plumbing, a
+  // re-synced UID is not news, and a message already flagged \Seen was read in
+  // another client — alerting on any of those trains people to ignore the
+  // alerts. Push is best-effort: a failure here must never fail the sync.
+  if (!existing && !dsn && !seen) {
+    try {
+      await sendPushToOrganization({
+        organizationId: account.organizationId,
+        payload: {
+          title: from.name
+            ? `${from.name} <${from.email}>`
+            : from.email,
+          body: truncateForNotification(mail.subject || "(no subject)"),
+          url: `/inbox?message=${stored.id}`,
+          // One notification per conversation: a burst of replies to the same
+          // thread collapses instead of stacking.
+          tag: `inbox:${outbound?.id ?? stored.id}`,
+        },
+      });
+    } catch (error) {
+      logger.warn(
+        { inboundMessageId: stored.id, err: error },
+        "failed to send inbox push notification"
       );
     }
   }

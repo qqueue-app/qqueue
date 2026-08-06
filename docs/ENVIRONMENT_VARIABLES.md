@@ -122,6 +122,35 @@ API and worker read the same `.env`, so they always agree.
 | `INBOX_SYNC_INTERVAL_SECONDS` | `120` | How often the worker checks connected IMAP inboxes for replies. |
 | `INBOX_SYNC_MAX_MESSAGES` | `50` | On an inbox's first sync, only the latest N messages are imported. |
 
+## Push notifications
+
+QQueue's dashboard installs as an app (a PWA) and can alert your team when a
+reply arrives, even when it's closed. That needs a **VAPID key pair** —
+`pnpm setup` generates one for you, so most people never touch these.
+
+Both the API and the worker read the same pair: the API hands the public key to
+browsers so they can register, and the worker signs the pushes it sends. If the
+two ever disagree, every device registers against a key the worker can't sign
+with and notifications fail silently.
+
+Leave both blank and push is simply off: the dashboard hides the
+"turn on notifications" control rather than asking for a permission it could
+never act on. Everything else works exactly as before.
+
+| Variable | Default | What it is |
+| --- | --- | --- |
+| `VAPID_PUBLIC_KEY` | *(blank)* | The public half. Handed to browsers when they subscribe. |
+| `VAPID_PRIVATE_KEY` | *(blank)* | The private half. Signs outgoing pushes — treat it like your other secrets. |
+| `VAPID_SUBJECT` | `mailto:admin@localhost` | A `mailto:` or `https:` URL a push service can reach you on if your deliveries misbehave (RFC 8292). |
+
+> **Changing these invalidates every device that has already subscribed.**
+> Back them up with the rest of your `.env`; regenerating means everyone has to
+> turn notifications on again.
+
+**On iPhone and iPad**, Safari only allows notifications for apps added to the
+Home Screen. The dashboard says so in place of the toggle, so people aren't
+left wondering why it doesn't work in a browser tab.
+
 ---
 
 ## Settings that live in the dashboard instead

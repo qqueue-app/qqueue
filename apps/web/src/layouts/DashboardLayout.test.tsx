@@ -1,9 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -34,11 +40,12 @@ vi.mock("../lib/session-context.js", () => ({
 import { DashboardLayout } from "./DashboardLayout.js";
 
 function renderLayout(initial = "/") {
-  return render(
+  return renderWithProviders(
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
         <Route element={<DashboardLayout />}>
-          <Route index element={<div>Home page</div>} />
+          <Route index element={<div>Inbox page</div>} />
+          <Route path="inbox" element={<div>Inbox page</div>} />
           <Route path="campaigns" element={<div>Campaigns page</div>} />
           <Route path="campaigns/lists" element={<div>Lists page</div>} />
           <Route
@@ -48,7 +55,7 @@ function renderLayout(initial = "/") {
         </Route>
       </Routes>
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 describe("DashboardLayout", () => {
@@ -62,26 +69,17 @@ describe("DashboardLayout", () => {
 
   it("renders the sidebar nav and the routed outlet", () => {
     renderLayout("/");
-    // nav labels appear (desktop + mobile sidebars both render)
-    expect(screen.getAllByText("Home").length).toBeGreaterThan(0);
-    expect(screen.getByText("Home page")).toBeInTheDocument();
+    // The nav is flat now — every destination is visible without expanding a
+    // group. Labels appear in both the sidebar and the mobile More sheet.
+    expect(screen.getAllByText("Inbox").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Compose").length).toBeGreaterThan(0);
+    expect(screen.getByText("Inbox page")).toBeInTheDocument();
   });
 
-  it("expands the settings group and shows children when on a child route", () => {
+  it("shows setup destinations without needing to expand a group", () => {
     renderLayout("/smtp-connections");
     expect(screen.getAllByText("Sending accounts").length).toBeGreaterThan(0);
     expect(screen.getByText("Sending accounts page")).toBeInTheDocument();
-  });
-
-  it("toggles the settings nav group on click", async () => {
-    const user = userEvent.setup();
-    renderLayout("/");
-    // the settings group is collapsed initially on "/"; click to expand
-    const settingsButtons = screen.getAllByRole("button", {
-      name: /Settings/
-    });
-    await user.click(settingsButtons[0]);
-    expect(screen.getAllByText("Sending accounts").length).toBeGreaterThan(0);
   });
 
   it("opens the org switcher and switches organization", async () => {
@@ -110,15 +108,13 @@ describe("DashboardLayout", () => {
     expect(navigate).toHaveBeenCalledWith("/login");
   });
 
-  it("opens and closes the mobile drawer", async () => {
+  it("opens the mobile More sheet", async () => {
     const user = userEvent.setup();
     renderLayout("/");
-    await user.click(screen.getByLabelText("Open navigation"));
-    const close = await screen.findByLabelText("Close navigation");
-    await user.click(close);
-    await waitFor(() =>
-      expect(screen.queryByLabelText("Close navigation")).not.toBeInTheDocument()
-    );
+    // Navigation on a phone lives in a bottom bar; everything that doesn't fit
+    // is behind More.
+    await user.click(screen.getByRole("button", { name: "More sections" }));
+    expect(await screen.findByText("Everything else")).toBeInTheDocument();
   });
 
   it("renders a sign-in link when not authenticated", () => {

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ButtonDialog } from "./ButtonDialog.js";
@@ -10,7 +10,7 @@ function renderDialog(
 ) {
   const onSubmit = vi.fn();
   const onClose = vi.fn();
-  render(
+  renderWithProviders(
     <ButtonDialog
       open
       initial={initial}
@@ -134,7 +134,7 @@ describe("ButtonDialog", () => {
     );
   });
 
-  // The caller rebuilds `initial` from live editor attributes on every render,
+  // The caller rebuilds `initial` from live editor attributes on every renderWithProviders,
   // so a re-render while the dialog is open used to reset the form and throw
   // away edits that had not been submitted yet.
   it("keeps in-progress edits when re-rendered with fresh props", async () => {
@@ -145,7 +145,7 @@ describe("ButtonDialog", () => {
       label: "Existing",
       align: "left" as ButtonAlign
     };
-    const { rerender } = render(
+    const { rerender } = renderWithProviders(
       <ButtonDialog
         open
         initial={{ ...props }}

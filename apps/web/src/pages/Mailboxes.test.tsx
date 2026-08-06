@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({
@@ -110,7 +116,7 @@ describe("Mailboxes", () => {
       currentOrganizationId: "org_1",
       currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" },
     };
-    render(<Mailboxes />);
+    renderWithProviders(<Mailboxes />);
     expect(
       await screen.findByText("Owners and admins only")
     ).toBeInTheDocument();
@@ -124,9 +130,9 @@ describe("Mailboxes", () => {
       domains: [],
       mailHost: null,
     });
-    render(<Mailboxes />);
+    renderWithProviders(<Mailboxes />);
     expect(
-      await screen.findByText("Mailcow is not connected")
+      await screen.findByText("Your mail server isn't connected yet")
     ).toBeInTheDocument();
   });
 
@@ -138,19 +144,20 @@ describe("Mailboxes", () => {
       mailHost: "mail.acme.test",
       error: "connect timeout",
     });
-    render(<Mailboxes />);
+    renderWithProviders(<Mailboxes />);
     expect(
-      await screen.findByText(/configured but unreachable/i)
+      await screen.findByText(/couldn't reach it/i)
     ).toBeInTheDocument();
   });
 
   it("provisions a mailbox and shows the one-time password", async () => {
     const user = userEvent.setup();
-    render(<Mailboxes />);
+    renderWithProviders(<Mailboxes />);
 
+    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
     await user.type(await screen.findByLabelText("Address"), "new");
     await user.click(
-      screen.getByRole("button", { name: /Provision mailbox/i })
+      screen.getByRole("button", { name: /Create mailbox/i })
     );
 
     await waitFor(() =>
@@ -166,7 +173,7 @@ describe("Mailboxes", () => {
     expect(
       await screen.findByText("generated-password-123")
     ).toBeInTheDocument();
-    expect(screen.getByText(/shown only this once/i)).toBeInTheDocument();
+    expect(screen.getByText(/shown once and\s+never again/i)).toBeInTheDocument();
     // Verified provisioning shows no credential warning.
     expect(screen.queryByText(/haven't verified yet/i)).not.toBeInTheDocument();
   });
@@ -180,11 +187,12 @@ describe("Mailboxes", () => {
       mailboxPassword: "generated-password-123",
       verified: false,
     });
-    render(<Mailboxes />);
+    renderWithProviders(<Mailboxes />);
 
+    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
     await user.type(await screen.findByLabelText("Address"), "new");
     await user.click(
-      screen.getByRole("button", { name: /Provision mailbox/i })
+      screen.getByRole("button", { name: /Create mailbox/i })
     );
 
     // The password dialog still opens (provisioning succeeded)...
@@ -195,29 +203,40 @@ describe("Mailboxes", () => {
     expect(screen.getByText(/haven't verified yet/i)).toBeInTheDocument();
   });
 
-  it("lists grants per connection and removes one", async () => {
+  it("shows who can send as each mailbox and revokes access from the grid", async () => {
     const user = userEvent.setup();
-    render(<Mailboxes />);
+    renderWithProviders(<Mailboxes />);
 
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
-    expect(screen.getByText("Ama")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
 
-    await user.click(screen.getByLabelText("Remove send-as for ama@acme.test"));
+    // Ama is a MEMBER holding a grant, so her cell is ticked.
+    const cell = await screen.findByRole("checkbox", {
+      name: "Ama can send as support@acme.test",
+    });
+    expect(cell).toHaveAttribute("aria-checked", "true");
+
+    await user.click(cell);
     await waitFor(() =>
       expect(mockedApi.removeConnectionGrant).toHaveBeenCalledWith(
         "s1",
         "user_ama"
       )
     );
-    expect(screen.queryByText("Ama")).not.toBeInTheDocument();
   });
 
-  it("keeps the grant button disabled until a member is picked", async () => {
-    render(<Mailboxes />);
+  it("locks the row for people who can always send as any mailbox", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
+
+    // The owner needs no grant, so there is no checkbox to toggle for them.
     expect(
-      screen.getByRole("button", { name: /Grant send-as/i })
-    ).toBeDisabled();
+      screen.queryByRole("checkbox", {
+        name: "Owner can send as support@acme.test",
+      })
+    ).not.toBeInTheDocument();
   });
 
   // Domain access: owners manage which domains each admin may provision on.
@@ -248,17 +267,16 @@ describe("Mailboxes", () => {
         user: { id: "user_admin", email: "admin@acme.test", name: "Adjoa" },
       },
     ]);
-    render(<Mailboxes />);
-
-    expect(await screen.findByText("Domain access")).toBeInTheDocument();
-    // The admin row lists their granted domain as a removable chip.
-    expect(
-      screen.getByLabelText("Remove acme.test for admin@acme.test")
-    ).toBeInTheDocument();
+    renderWithProviders(<Mailboxes />);
 
     await user.click(
-      screen.getByLabelText("Remove acme.test for admin@acme.test")
+      await screen.findByRole("tab", { name: /Domain access/ })
     );
+    // The admin row lists their granted domain as a removable chip.
+    const remove = await screen.findByLabelText(
+      "Remove acme.test from Adjoa"
+    );
+    await user.click(remove);
     await waitFor(() =>
       expect(mockedApi.removeMailDomainGrant).toHaveBeenCalledWith(
         "dg_1",
@@ -267,10 +285,11 @@ describe("Mailboxes", () => {
     );
   });
 
-  it("hides the Domain access editor from admins", async () => {
-    render(<Mailboxes />); // default session role is ADMIN
+  it("hides the Domain access tab from admins", async () => { renderWithProviders(<Mailboxes />); // default session role is ADMIN
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
-    expect(screen.queryByText("Domain access")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: /Domain access/ })
+    ).not.toBeInTheDocument();
     expect(mockedApi.listMailDomainGrants).not.toHaveBeenCalled();
   });
 
@@ -280,9 +299,11 @@ describe("Mailboxes", () => {
       domains: [],
       restricted: true,
     });
-    render(<Mailboxes />);
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
     expect(
-      await screen.findByText(/granted you access to any domains/i)
+      await screen.findByText(/don't have access to any domains/i)
     ).toBeInTheDocument();
   });
 });

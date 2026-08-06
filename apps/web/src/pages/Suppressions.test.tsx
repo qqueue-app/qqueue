@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
@@ -54,19 +60,18 @@ describe("Suppressions", () => {
     mockedApi.deleteSuppression.mockResolvedValue(undefined);
   });
 
-  it("lists suppressed addresses with their reason", async () => {
-    render(<Suppressions />);
+  it("lists suppressed addresses with their reason", async () => { renderWithProviders(<Suppressions />);
     expect(await screen.findByText("blocked@example.com")).toBeInTheDocument();
-    expect(screen.getByText("BOUNCE")).toBeInTheDocument();
+    expect(screen.getByText("Bounced")).toBeInTheDocument();
   });
 
   it("manually suppresses a new address", async () => {
     const user = userEvent.setup();
-    render(<Suppressions />);
+    renderWithProviders(<Suppressions />);
     await screen.findByText("blocked@example.com");
 
-    await user.click(screen.getByRole("button", { name: /^block address$/i }));
-    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await user.click(screen.getByRole("button", { name: /^block an address$/i }));
+    await user.type(screen.getByLabelText("Email address"), "new@example.com");
     await user.click(screen.getByRole("button", { name: /^block$/i }));
 
     await waitFor(() =>
@@ -79,10 +84,9 @@ describe("Suppressions", () => {
     expect(toast.success).toHaveBeenCalledWith("Address blocked.");
   });
 
-  it("shows the unblock control to OWNER/ADMIN", async () => {
-    render(<Suppressions />);
+  it("shows the unblock control to OWNER/ADMIN", async () => { renderWithProviders(<Suppressions />);
     await screen.findByText("blocked@example.com");
-    expect(screen.getByLabelText("Unblock address")).toBeInTheDocument();
+    expect(screen.getByLabelText("Unblock this address")).toBeInTheDocument();
   });
 
   // Un-suppressing is OWNER/ADMIN on the API (Phase 3); members keep the
@@ -92,12 +96,12 @@ describe("Suppressions", () => {
       currentOrganizationId: "org_1",
       currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" }
     };
-    render(<Suppressions />);
+    renderWithProviders(<Suppressions />);
     await screen.findByText("blocked@example.com");
-    expect(screen.queryByLabelText("Unblock address")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Unblock this address")).not.toBeInTheDocument();
     expect(screen.queryByText("Actions")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /^block address$/i })
+      screen.getByRole("button", { name: /^block an address$/i })
     ).toBeInTheDocument();
   });
 });

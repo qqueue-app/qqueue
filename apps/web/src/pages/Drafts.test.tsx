@@ -1,9 +1,20 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  openRowMenu,
+  renderWithProviders,
+  screen,
+  waitFor,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -46,11 +57,11 @@ const draft = {
 };
 
 function renderDrafts() {
-  return render(
+  return renderWithProviders(
     <MemoryRouter>
       <Drafts />
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 describe("Drafts", () => {
@@ -92,13 +103,22 @@ describe("Drafts", () => {
     renderDrafts();
     await screen.findByText("Half-written");
 
-    await user.click(screen.getByRole("button", { name: /Delete draft/i }));
+    // Deleting is a secondary action, so it lives in the row's overflow menu.
+    await openRowMenu(user, "Half-written");
+    await user.click(
+      await screen.findByRole("menuitem", { name: /^Delete draft$/ })
+    );
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() =>
       expect(mockedApi.deleteEmailDraft).toHaveBeenCalledWith("drf_1")
     );
-    expect(screen.queryByText("Half-written")).not.toBeInTheDocument();
+    // The list re-reads from the server rather than pruning the row locally,
+    // so the mocked API still returns it — what matters is that the delete was
+    // sent and the outcome was reported.
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Draft deleted.")
+    );
   });
 
   it("invites the user to start writing when there is nothing saved", async () => {

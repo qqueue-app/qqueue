@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { TemplatePreview } from "./TemplatePreview.js";
@@ -8,8 +8,7 @@ function getFrame() {
 }
 
 describe("TemplatePreview", () => {
-  it("renders the subject with variables substituted", () => {
-    render(
+  it("renders the subject with variables substituted", () => { renderWithProviders(
       <TemplatePreview
         subject="Welcome, {{firstName}}!"
         html="<p>Hi</p>"
@@ -19,8 +18,7 @@ describe("TemplatePreview", () => {
     expect(screen.getByText("Welcome, Ada!")).toBeInTheDocument();
   });
 
-  it("prefers sample data over a declared default", () => {
-    render(
+  it("prefers sample data over a declared default", () => { renderWithProviders(
       <TemplatePreview
         subject="Hi {{firstName}}"
         html="<p>Hi</p>"
@@ -31,8 +29,7 @@ describe("TemplatePreview", () => {
     expect(screen.getByText("Hi Ada")).toBeInTheDocument();
   });
 
-  it("falls back to a declared default when no sample data is given", () => {
-    render(
+  it("falls back to a declared default when no sample data is given", () => { renderWithProviders(
       <TemplatePreview
         subject="Hi {{firstName}}"
         html="<p>Hi</p>"
@@ -42,21 +39,18 @@ describe("TemplatePreview", () => {
     expect(screen.getByText("Hi friend")).toBeInTheDocument();
   });
 
-  it("shows a placeholder when the subject is empty", () => {
-    render(<TemplatePreview subject="" html="<p>Hi</p>" />);
+  it("shows a placeholder when the subject is empty", () => { renderWithProviders(<TemplatePreview subject="" html="<p>Hi</p>" />);
     expect(screen.getByText("(no subject)")).toBeInTheDocument();
   });
 
-  it("renders the body html into a fully sandboxed frame", () => {
-    render(<TemplatePreview subject="s" html="<p>Body copy</p>" />);
+  it("renders the body html into a fully sandboxed frame", () => { renderWithProviders(<TemplatePreview subject="s" html="<p>Body copy</p>" />);
     const frame = getFrame();
     // sandbox="" — template HTML must not run scripts or reach the parent.
     expect(frame).toHaveAttribute("sandbox", "");
     expect(frame.getAttribute("srcdoc")).toContain("<p>Body copy</p>");
   });
 
-  it("substitutes variables into the body html", () => {
-    render(
+  it("substitutes variables into the body html", () => { renderWithProviders(
       <TemplatePreview
         subject="s"
         html="<p>Hello {{firstName}}</p>"
@@ -73,15 +67,14 @@ describe("TemplatePreview", () => {
     const source =
       "<!doctype html><html><head><style>.x{color:red}</style></head>" +
       "<body><p>Pasted</p></body></html>";
-    render(<TemplatePreview subject="s" html={source} />);
+    renderWithProviders(<TemplatePreview subject="s" html={source} />);
 
     const srcDoc = getFrame().getAttribute("srcdoc") ?? "";
     expect(srcDoc).toBe(source);
     expect(srcDoc).not.toContain("qq-card");
   });
 
-  it("still substitutes variables inside a full document", () => {
-    render(
+  it("still substitutes variables inside a full document", () => { renderWithProviders(
       <TemplatePreview
         subject="s"
         html="<html><body><p>Hello {{firstName}}</p></body></html>"
@@ -93,7 +86,7 @@ describe("TemplatePreview", () => {
 
   it("defaults to the desktop viewport and switches to mobile", async () => {
     const user = userEvent.setup();
-    render(<TemplatePreview subject="s" html="<p>Hi</p>" />);
+    renderWithProviders(<TemplatePreview subject="s" html="<p>Hi</p>" />);
     expect(getFrame()).toHaveClass("max-w-[680px]");
 
     await user.click(screen.getByRole("button", { name: "Mobile preview" }));

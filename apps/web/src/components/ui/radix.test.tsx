@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -29,7 +29,7 @@ import {
 describe("Dialog", () => {
   it("opens via the trigger and renders content", async () => {
     const user = userEvent.setup();
-    render(
+    renderWithProviders(
       <Dialog>
         <DialogTrigger>Open</DialogTrigger>
         <DialogContent>
@@ -53,7 +53,7 @@ describe("DropdownMenu", () => {
   it("opens and fires onSelect", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    render(
+    renderWithProviders(
       <DropdownMenu>
         <DropdownMenuTrigger>Menu</DropdownMenuTrigger>
         <DropdownMenuContent>
@@ -75,7 +75,7 @@ describe("Select", () => {
   it("opens and selects a value", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
-    render(
+    renderWithProviders(
       <Select onValueChange={onValueChange}>
         <SelectTrigger aria-label="fruit">
           <SelectValue placeholder="Pick one" />

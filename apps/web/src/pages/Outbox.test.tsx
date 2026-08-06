@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
@@ -49,8 +55,7 @@ describe("Outbox", () => {
     });
   });
 
-  it("shows what is queued and which account it sends from", async () => {
-    render(<Outbox />);
+  it("shows what is queued and which account it sends from", async () => { renderWithProviders(<Outbox />);
 
     expect(await screen.findByText("Friday update")).toBeInTheDocument();
     expect(screen.getByText("Acme <hi@acme.com>")).toBeInTheDocument();
@@ -68,7 +73,7 @@ describe("Outbox", () => {
         scheduledAt: null
       }
     ]);
-    render(<Outbox />);
+    renderWithProviders(<Outbox />);
 
     expect(await screen.findByText("Campaign")).toBeInTheDocument();
     expect(screen.getByText("July newsletter")).toBeInTheDocument();
@@ -77,10 +82,10 @@ describe("Outbox", () => {
 
   it("cancels a queued email after confirmation", async () => {
     const user = userEvent.setup();
-    render(<Outbox />);
+    renderWithProviders(<Outbox />);
     await screen.findByText("Friday update");
 
-    await user.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    await user.click(screen.getByRole("button", { name: /^Cancel this email$/ }));
     await user.click(screen.getByRole("button", { name: "Cancel email" }));
 
     await waitFor(() =>
@@ -89,19 +94,26 @@ describe("Outbox", () => {
         "org_1"
       )
     );
-    expect(screen.queryByText("Friday update")).not.toBeInTheDocument();
+    // The list re-reads from the server rather than dropping the row locally:
+    // the API is the authority on what is still queued, and guessing wrong
+    // would hide mail that is in fact still going out.
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Cancelled — that email won't be sent."
+      )
+    );
   });
 
   it("offers no cancel once the worker has picked the email up", async () => {
     mockedApi.listOutbox.mockResolvedValue([
       { ...scheduled, status: "PROCESSING" }
     ]);
-    render(<Outbox />);
+    renderWithProviders(<Outbox />);
 
     expect(await screen.findByText("Sending now")).toBeInTheDocument();
-    expect(screen.getByText("Too late to cancel")).toBeInTheDocument();
+    expect(screen.getByText("Too late")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /^Cancel$/ })
+      screen.queryByRole("button", { name: /^Cancel this email$/ })
     ).not.toBeInTheDocument();
   });
 
@@ -110,10 +122,10 @@ describe("Outbox", () => {
     mockedApi.cancelOutboxEmail.mockRejectedValue(
       new Error("This email has already been sent")
     );
-    render(<Outbox />);
+    renderWithProviders(<Outbox />);
     await screen.findByText("Friday update");
 
-    await user.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    await user.click(screen.getByRole("button", { name: /^Cancel this email$/ }));
     await user.click(screen.getByRole("button", { name: "Cancel email" }));
 
     await waitFor(() =>
@@ -127,7 +139,7 @@ describe("Outbox", () => {
 
   it("says so plainly when nothing is waiting", async () => {
     mockedApi.listOutbox.mockResolvedValue([]);
-    render(<Outbox />);
+    renderWithProviders(<Outbox />);
 
     expect(
       await screen.findByText("Nothing waiting to send")

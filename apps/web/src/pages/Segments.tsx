@@ -1,17 +1,17 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Filter, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import type { ColumnDef } from "@tanstack/react-table";
 import { api, type Segment } from "../lib/api.js";
+import { formatMailDate } from "../lib/format.js";
 import { useSession } from "../lib/session-context.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
 import { Spinner } from "../components/ui/spinner.js";
-import { Skeleton } from "../components/ui/skeleton.js";
-import { Card } from "../components/ui/card.js";
 import {
   Dialog,
   DialogContent,
@@ -20,14 +20,9 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/ui/dialog.js";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "../components/ui/table.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions } from "../components/ui/row-actions.js";
+import { Hint } from "../components/ui/tooltip.js";
 
 type ConditionField = "tags" | "status" | "emailDomain";
 
@@ -87,9 +82,89 @@ export function buildRules(
   return { op: combinator, rules };
 }
 
+/**
+ * A one-line summary of a smart list's rules. The rule tree is stored as opaque
+ * JSON, so this reads defensively and falls back to a count rather than
+ * asserting a shape the API might change.
+ */
+function describeRules(segment: Segment): string {
+  const rules = segment.rules as
+    | { combinator?: string; conditions?: unknown[] }
+    | null
+    | undefined;
+  const count = Array.isArray(rules?.conditions) ? rules.conditions.length : 0;
+  if (count === 0) return "Everyone";
+  const joiner = rules?.combinator === "OR" ? "any" : "all";
+  return `Matches ${joiner} of ${count} rule${count === 1 ? "" : "s"}`;
+}
+
 export function Segments() {
   const { currentOrganizationId: organizationId } = useSession();
   const [segments, setSegments] = useState<Segment[]>([]);
+
+  const segmentColumns = useMemo<ColumnDef<Segment, unknown>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Name",
+        meta: { title: "Name" },
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium">{row.original.name}</div>
+            {row.original.description ? (
+              <p className="truncate text-xs text-muted-foreground">
+                {row.original.description}
+              </p>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "rules",
+        accessorFn: describeRules,
+        header: "Who's in it",
+        meta: { title: "Who's in it", hideBelowMd: true },
+        cell: ({ getValue }) => (
+          <Hint label="Members are worked out fresh every time a campaign sends to this list">
+            <span className="cursor-help text-muted-foreground">
+              {String(getValue())}
+            </span>
+          </Hint>
+        ),
+      },
+      {
+        accessorKey: "createdAt",
+        header: "Created",
+        meta: { title: "Created", hideBelowLg: true },
+        cell: ({ getValue }) => (
+          <span className="text-muted-foreground">
+            {getValue() ? formatMailDate(String(getValue())) : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.name}
+            actions={[
+              {
+                label: "Delete this smart list",
+                icon: Trash2,
+                primary: true,
+                destructive: true,
+                onSelect: () => setDeleteTarget(row.original),
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    []
+  );
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState("");
@@ -209,52 +284,51 @@ export function Segments() {
         }
       />
 
-      <section className="p-6">
-        <Card className="overflow-hidden">
-          {loading ? (
-            <div className="space-y-3 p-5">
-              {[0, 1, 2].map((index) => (
-                <Skeleton key={index} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : segments.length === 0 ? (
+      <section className="p-4 sm:p-6">
+        <DataGrid
+          label="Smart lists"
+          data={segments}
+          columns={segmentColumns}
+          getRowId={(row) => row.id}
+          loading={loading}
+          searchPlaceholder="Search smart lists…"
+          empty={
             <EmptyState
               icon={Filter}
               title="No smart lists yet"
-              description="Create a smart list to target a campaign at contacts matching tags, status, or email domain."
+              description="A smart list fills itself: describe who belongs — by tag, status, or email domain — and QQueue works out the members every time you send."
             />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {segments.map((segment) => (
-                  <TableRow key={segment.id}>
-                    <TableCell className="font-medium">{segment.name}</TableCell>
-                    <TableCell>
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteTarget(segment)}
-                          aria-label="Delete smart list"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          }
+          noResults={
+            <EmptyState
+              icon={Filter}
+              title="No matching smart lists"
+              description="Try a different search."
+            />
+          }
+          renderMobileRow={(segment) => (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{segment.name}</div>
+                <p className="text-xs text-muted-foreground">
+                  {describeRules(segment)}
+                </p>
+              </div>
+              <RowActions
+                rowLabel={segment.name}
+                actions={[
+                  {
+                    label: "Delete this smart list",
+                    icon: Trash2,
+                    primary: true,
+                    destructive: true,
+                    onSelect: () => setDeleteTarget(segment),
+                  },
+                ]}
+              />
+            </div>
           )}
-        </Card>
+        />
       </section>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

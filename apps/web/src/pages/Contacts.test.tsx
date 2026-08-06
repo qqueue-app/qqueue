@@ -1,8 +1,20 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  openRowMenu,
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({ current: { currentOrganizationId: "org_1" } }));
@@ -50,13 +62,13 @@ describe("Contacts", () => {
 
   it("shows the empty state when there are no contacts", async () => {
     mockedApi.listContacts.mockResolvedValue([]);
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     expect(await screen.findByText("No contacts yet")).toBeInTheDocument();
   });
 
   it("renders contacts with status badges", async () => {
     mockedApi.listContacts.mockResolvedValue(makeContacts(3));
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     expect(await screen.findByText("user0@x.com")).toBeInTheDocument();
     expect(screen.getByText("ACTIVE")).toBeInTheDocument();
     expect(screen.getByText("BOUNCED")).toBeInTheDocument();
@@ -65,30 +77,33 @@ describe("Contacts", () => {
   it("filters by search and shows no-matches state", async () => {
     const user = userEvent.setup();
     mockedApi.listContacts.mockResolvedValue(makeContacts(3));
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
     await user.type(
-      screen.getByPlaceholderText("Search by name or email…"),
+      screen.getByPlaceholderText("Search by name, email, or tag…"),
       "zzz"
     );
-    expect(await screen.findByText("No matches")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No matching contacts")
+    ).toBeInTheDocument();
   });
 
   it("paginates when there are more than a page of contacts", async () => {
     const user = userEvent.setup();
-    mockedApi.listContacts.mockResolvedValue(makeContacts(15));
-    render(<Contacts />);
+    // The grid pages at 25 rows, so 30 contacts is two pages.
+    mockedApi.listContacts.mockResolvedValue(makeContacts(30));
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
-    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    expect(screen.getByText(/Page 1 of 2/)).toBeInTheDocument();
     await user.click(screen.getByLabelText("Next page"));
-    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByText(/Page 2 of 2/)).toBeInTheDocument();
   });
 
   it("creates a contact", async () => {
     const user = userEvent.setup();
     mockedApi.listContacts.mockResolvedValue([]);
     mockedApi.createContact.mockResolvedValue({ id: "c1" });
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("No contacts yet");
     await user.click(
       screen.getAllByRole("button", { name: /Add contact/i })[0]
@@ -106,9 +121,13 @@ describe("Contacts", () => {
     const user = userEvent.setup();
     mockedApi.listContacts.mockResolvedValue(makeContacts(1));
     mockedApi.updateContact.mockResolvedValue({ id: "c0" });
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
-    await user.click(screen.getByLabelText("Edit contact"));
+    // Editing is a secondary action, so it lives in the row's overflow menu.
+    await openRowMenu(user, "user0@x.com");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Edit this contact" })
+    );
     const dialog = await screen.findByRole("dialog");
     await user.click(
       within(dialog).getByRole("button", { name: "Save changes" })
@@ -125,9 +144,12 @@ describe("Contacts", () => {
     const user = userEvent.setup();
     mockedApi.listContacts.mockResolvedValue(makeContacts(1));
     mockedApi.deleteContact.mockResolvedValue(undefined);
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
-    await user.click(screen.getByLabelText("Delete contact"));
+    await openRowMenu(user, "user0@x.com");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Delete this contact" })
+    );
     await user.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() =>
       expect(mockedApi.deleteContact).toHaveBeenCalledWith("c0")
@@ -137,13 +159,13 @@ describe("Contacts", () => {
 
   it("toasts on load failure", async () => {
     mockedApi.listContacts.mockRejectedValue(new Error("load fail"));
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("load fail"));
   });
 
   it("disables actions and warns when no organization is selected", async () => {
     session.current = { currentOrganizationId: undefined } as never;
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await waitFor(() =>
       expect(
         screen.getAllByRole("button", { name: /Add contact/i })[0]
@@ -170,10 +192,10 @@ describe("Contacts", () => {
       ],
       nextCursor: null
     });
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
 
-    await user.click(screen.getByLabelText("View activity"));
+    await user.click(screen.getByLabelText("See what this person has done"));
 
     await waitFor(() =>
       expect(mockedApi.getContactActivity).toHaveBeenCalledWith("c0")
@@ -191,7 +213,7 @@ describe("Contacts", () => {
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     const user = userEvent.setup();
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
 
     await user.click(screen.getByRole("button", { name: /export/i }));
@@ -254,8 +276,7 @@ describe("Contacts import dialog", () => {
     };
   }
 
-  async function openImportDialog(user: ReturnType<typeof userEvent.setup>) {
-    render(<Contacts />);
+  async function openImportDialog(user: ReturnType<typeof userEvent.setup>) { renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
     const file = new File(["email\na@b.com\n"], "contacts.csv", {
       type: "text/csv"
@@ -480,8 +501,7 @@ describe("Contacts bulk delete", () => {
     mockedApi.bulkDeleteContacts.mockResolvedValue({ deleted: 2 });
   });
 
-  it("shows no bulk bar until something is selected", async () => {
-    render(<Contacts />);
+  it("shows no bulk bar until something is selected", async () => { renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
 
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
@@ -489,11 +509,14 @@ describe("Contacts bulk delete", () => {
 
   it("deletes the selected contacts", async () => {
     const user = userEvent.setup();
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
 
-    await user.click(screen.getByLabelText("Select user0@x.com"));
-    await user.click(screen.getByLabelText("Select user1@x.com"));
+    // Every row's checkbox carries the same accessible name; pick the first
+    // two by position, the way a person clicking down the list would.
+    const rowCheckboxes = screen.getAllByLabelText("Select row");
+    await user.click(rowCheckboxes[0]);
+    await user.click(rowCheckboxes[1]);
     expect(screen.getByText("2 selected")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /delete selected/i }));
@@ -511,21 +534,21 @@ describe("Contacts bulk delete", () => {
 
   it("select-all covers every filtered contact, not just the visible page", async () => {
     const user = userEvent.setup();
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
 
-    await user.click(screen.getByLabelText("Select all matching contacts"));
+    await user.click(screen.getByLabelText("Select all rows on this page"));
 
     expect(screen.getByText("3 selected")).toBeInTheDocument();
   });
 
   it("clears the selection", async () => {
     const user = userEvent.setup();
-    render(<Contacts />);
+    renderWithProviders(<Contacts />);
     await screen.findByText("user0@x.com");
 
-    await user.click(screen.getByLabelText("Select user0@x.com"));
-    await user.click(screen.getByRole("button", { name: /clear selection/i }));
+    await user.click(screen.getAllByLabelText("Select row")[0]);
+    await user.click(screen.getByRole("button", { name: /^clear$/i }));
 
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
   });

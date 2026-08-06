@@ -1,8 +1,20 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  openRowMenu,
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({ current: { currentOrganizationId: "org_1" } }));
@@ -45,27 +57,27 @@ describe("ContactLists", () => {
   it("shows the empty state", async () => {
     mockedApi.listContacts.mockResolvedValue([]);
     mockedApi.listContactLists.mockResolvedValue([]);
-    render(<ContactLists />);
-    expect(await screen.findByText("No contact lists yet")).toBeInTheDocument();
+    renderWithProviders(<ContactLists />);
+    expect(await screen.findByText("No lists yet")).toBeInTheDocument();
   });
 
   it("renders lists with member preview and campaign count", async () => {
     mockedApi.listContacts.mockResolvedValue(contacts);
     mockedApi.listContactLists.mockResolvedValue([list]);
-    render(<ContactLists />);
+    renderWithProviders(<ContactLists />);
     expect(await screen.findByText("VIPs")).toBeInTheDocument();
     expect(screen.getByText("2 campaigns")).toBeInTheDocument();
-    expect(screen.getByText("1 contact")).toBeInTheDocument();
+    expect(screen.getByText("1 person")).toBeInTheDocument();
   });
 
   it("filters lists by search", async () => {
     const user = userEvent.setup();
     mockedApi.listContacts.mockResolvedValue(contacts);
     mockedApi.listContactLists.mockResolvedValue([list]);
-    render(<ContactLists />);
+    renderWithProviders(<ContactLists />);
     await screen.findByText("VIPs");
     await user.type(screen.getByPlaceholderText("Search lists…"), "zzz");
-    expect(await screen.findByText("No matches")).toBeInTheDocument();
+    expect(await screen.findByText("No matching lists")).toBeInTheDocument();
   });
 
   it("creates a list with selected contacts", async () => {
@@ -73,12 +85,12 @@ describe("ContactLists", () => {
     mockedApi.listContacts.mockResolvedValue(contacts);
     mockedApi.listContactLists.mockResolvedValue([]);
     mockedApi.createContactList.mockResolvedValue({ id: "l2" });
-    render(<ContactLists />);
-    await screen.findByText("No contact lists yet");
+    renderWithProviders(<ContactLists />);
+    await screen.findByText("No lists yet");
     await user.click(screen.getAllByRole("button", { name: /New list/i })[0]);
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Name"), "New list");
-    await user.click(within(dialog).getByLabelText("Select a@x.com"));
+    await user.click(within(dialog).getByLabelText("Include a@x.com"));
     await user.click(
       within(dialog).getByRole("button", { name: "Create list" })
     );
@@ -94,9 +106,9 @@ describe("ContactLists", () => {
     mockedApi.listContacts.mockResolvedValue(contacts);
     mockedApi.listContactLists.mockResolvedValue([list]);
     mockedApi.updateContactList.mockResolvedValue({ id: "l1" });
-    render(<ContactLists />);
+    renderWithProviders(<ContactLists />);
     await screen.findByText("VIPs");
-    await user.click(screen.getByLabelText("Edit contact list"));
+    await user.click(screen.getByLabelText("Edit this list"));
     const dialog = await screen.findByRole("dialog");
     await user.click(
       within(dialog).getByRole("button", { name: "Save changes" })
@@ -114,9 +126,13 @@ describe("ContactLists", () => {
     mockedApi.listContacts.mockResolvedValue(contacts);
     mockedApi.listContactLists.mockResolvedValue([list]);
     mockedApi.deleteContactList.mockResolvedValue(undefined);
-    render(<ContactLists />);
+    renderWithProviders(<ContactLists />);
     await screen.findByText("VIPs");
-    await user.click(screen.getByLabelText("Delete contact list"));
+    // Deleting is a secondary action, so it lives in the row's overflow menu.
+    await openRowMenu(user, "VIPs");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Delete this list" })
+    );
     await user.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() =>
       expect(mockedApi.deleteContactList).toHaveBeenCalledWith("l1")
@@ -126,7 +142,7 @@ describe("ContactLists", () => {
   it("toasts on load failure", async () => {
     mockedApi.listContacts.mockRejectedValue(new Error("bad"));
     mockedApi.listContactLists.mockResolvedValue([]);
-    render(<ContactLists />);
+    renderWithProviders(<ContactLists />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("bad"));
   });
 });

@@ -1,9 +1,15 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor, within } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({
@@ -134,11 +140,11 @@ function setup({ withSmtp = true } = {}) {
 }
 
 async function renderStudio() {
-  const result = render(
+  const result = renderWithProviders(
     <MemoryRouter>
       <EmailStudio />
     </MemoryRouter>
-  );
+  , { withRouter: false });
   // Wait for the initial data load to resolve and the composer form to render.
   // The submit button only exists once `loading` flips to false, so this clears
   // the loading skeleton before the synchronous queries below run — otherwise

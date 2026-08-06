@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({ current: { currentOrganizationId: "org_1" } }));
@@ -64,11 +70,11 @@ const summary = {
 };
 
 function renderDashboard() {
-  return render(
+  return renderWithProviders(
     <MemoryRouter>
       <Dashboard />
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 describe("Dashboard", () => {

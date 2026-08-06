@@ -1,8 +1,14 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor, within } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
@@ -87,33 +93,34 @@ describe("Inbox read/unread emphasis", () => {
   // The reported bug: every row rendered bold, so "unread" carried no signal.
   it("bolds an unread conversation's sender and subject", async () => {
     setup([makeMessage({ readAt: null })]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     const row = await findRow();
     expect(
       within(row).getByText("Quarterly numbers").className
     ).toContain("font-semibold");
     expect(
-      within(row).getByText(/Sender </).className
+      within(row).getByText("Sender").className
     ).toContain("font-semibold");
   });
 
   it("does not bold a conversation that has been read", async () => {
     setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     const row = await findRow();
     const subject = within(row).getByText("Quarterly numbers");
+    // A read row drops the bold and dims rather than switching to an explicit
+    // font-normal class.
     expect(subject.className).not.toContain("font-semibold");
-    expect(subject.className).toContain("font-normal");
     expect(
-      within(row).getByText(/Sender </).className
+      within(row).getByText("Sender").className
     ).not.toContain("font-semibold");
   });
 
   it("shows the unread badge only while unread", async () => {
     setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     const row = await findRow();
     expect(within(row).queryByText(/unread/i)).not.toBeInTheDocument();
@@ -130,7 +137,7 @@ describe("Inbox message body rendering", () => {
         text: "Q1 42"
       })
     ]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     const frame = await screen.findByTitle(/^Message from/);
     expect(frame.tagName).toBe("IFRAME");
@@ -144,7 +151,7 @@ describe("Inbox message body rendering", () => {
 
   it("falls back to the text part when there is no HTML", async () => {
     setup([makeMessage({ html: null, text: "plain text fallback" })]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     await findRow();
     expect(screen.queryByTitle(/^Message from/)).not.toBeInTheDocument();
@@ -155,7 +162,7 @@ describe("Inbox message body rendering", () => {
   it("blocks remote images until the reader opts in", async () => {
     const user = userEvent.setup();
     setup([makeMessage({ html: '<img src="https://tracker.test/pixel.gif">' })]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     const frame = await screen.findByTitle(/^Message from/);
     // Blocked twice over: the pixel's src is stripped from the body, and
@@ -196,7 +203,7 @@ describe("Inbox message body rendering", () => {
     mockedApi.downloadInboundAttachment.mockResolvedValue(
       new Blob(["png"], { type: "image/png" })
     );
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     await waitFor(() =>
       expect(
@@ -233,7 +240,7 @@ describe("Inbox attachments", () => {
 
   it("lists a received attachment with its size", async () => {
     setup([withAttachment()]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     expect(await screen.findByText("Attachments")).toBeInTheDocument();
     expect(screen.getByText("report.pdf")).toBeInTheDocument();
@@ -254,7 +261,7 @@ describe("Inbox attachments", () => {
         ]
       })
     ]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     await findRow();
     expect(screen.queryByText("logo.png")).not.toBeInTheDocument();
@@ -272,7 +279,7 @@ describe("Inbox attachments", () => {
     const revokeObjectURL = vi.fn();
     Object.assign(URL, { createObjectURL, revokeObjectURL });
 
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
     await user.click(await screen.findByRole("button", { name: /report\.pdf/ }));
 
     await waitFor(() => {
@@ -291,11 +298,11 @@ describe("Inbox attachments", () => {
     setup([withAttachment()]);
     mockedApi.downloadInboundAttachment.mockRejectedValue(new Error("nope"));
 
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
     await user.click(await screen.findByRole("button", { name: /report\.pdf/ }));
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Unable to download attachment");
+      expect(toast.error).toHaveBeenCalledWith("Couldn't download that file.");
     });
   });
 });
@@ -308,7 +315,7 @@ describe("Inbox list preview", () => {
         html: "<style>p{color:red}</style><p>Real preview text</p>"
       })
     ]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     const row = await findRow();
     expect(within(row).getByText(/Real preview text/)).toBeInTheDocument();
@@ -322,7 +329,7 @@ describe("Inbox mark-as-read", () => {
   it("marks unread messages read when the conversation is opened", async () => {
     const user = userEvent.setup();
     setup([makeMessage({ readAt: null })]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     await user.click(await findRow());
 
@@ -337,7 +344,7 @@ describe("Inbox mark-as-read", () => {
   it("does not re-mark a conversation that is already read", async () => {
     const user = userEvent.setup();
     setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     await user.click(await findRow());
 
@@ -348,7 +355,7 @@ describe("Inbox mark-as-read", () => {
 describe("Inbox empty state", () => {
   it("renders without messages", async () => {
     setup([]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     await waitFor(() => {
       expect(mockedApi.listInboundMessages).toHaveBeenCalled();
@@ -365,11 +372,11 @@ describe("Inbox reply", () => {
       id: "job_1",
       status: "QUEUED"
     });
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
-    const box = await screen.findByPlaceholderText(/Reply to sender@example/);
+    const box = await screen.findByPlaceholderText(/Reply to Sender/);
     await user.type(box, "Thanks!");
-    await user.click(screen.getByRole("button", { name: /send reply/i }));
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
 
     await waitFor(() => {
       expect(mockedApi.replyToInboundMessage).toHaveBeenCalledWith(
@@ -386,11 +393,11 @@ describe("Inbox reply", () => {
     const user = userEvent.setup();
     setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);
     mockedApi.replyToInboundMessage.mockRejectedValue(new Error("smtp down"));
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
-    const box = await screen.findByPlaceholderText(/Reply to sender@example/);
+    const box = await screen.findByPlaceholderText(/Reply to Sender/);
     await user.type(box, "Hi");
-    await user.click(screen.getByRole("button", { name: /send reply/i }));
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("smtp down"));
   });
@@ -400,11 +407,11 @@ describe("Inbox filters", () => {
   it("re-queries with a search term", async () => {
     const user = userEvent.setup();
     setup([makeMessage()]);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
     await findRow();
 
-    await user.type(screen.getByPlaceholderText("Search inbox"), "invoice");
-    await user.click(screen.getByRole("button", { name: "Search inbox" }));
+    await user.type(screen.getByPlaceholderText("Search mail"), "invoice");
+    await user.tab();
 
     await waitFor(() => {
       expect(mockedApi.listInboundMessages).toHaveBeenLastCalledWith(
@@ -419,19 +426,19 @@ describe("Inbox accounts", () => {
     const user = userEvent.setup();
     setup([]);
     mockedApi.createInboxAccount.mockResolvedValue({ id: "acc_2" });
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
     await user.click(
-      await screen.findByRole("button", { name: /connect an inbox/i })
+      await screen.findByRole("button", { name: /connect a mailbox/i })
     );
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Name"), "Sales");
     await user.type(
-      within(dialog).getByLabelText("Email"),
+      within(dialog).getByLabelText("Email address"),
       "sales@acme.test"
     );
     await user.type(
-      within(dialog).getByLabelText("Mail server"),
+      within(dialog).getByLabelText("Incoming mail server"),
       "imap.acme.test"
     );
     await user.type(
@@ -440,7 +447,7 @@ describe("Inbox accounts", () => {
     );
     await user.type(within(dialog).getByLabelText("Password"), "secret");
     await user.click(
-      within(dialog).getByRole("button", { name: /^connect$/i })
+      within(dialog).getByRole("button", { name: /^connect mailbox$/i })
     );
 
     await waitFor(() => {
@@ -459,12 +466,11 @@ describe("Inbox accounts", () => {
     const user = userEvent.setup();
     setup([]);
     mockedApi.deleteInboxAccount.mockResolvedValue(undefined);
-    render(<Inbox />);
+    renderWithProviders(<Inbox />);
 
-    // The remove control is disabled while the filter is on "all accounts".
-    await user.click(await screen.findByRole("combobox"));
-    await user.click(await screen.findByRole("option", { name: /Support/ }));
-    await user.click(screen.getByLabelText("Remove this inbox"));
+    await user.click(
+      await screen.findByLabelText("Disconnect support@acme.test")
+    );
 
     await waitFor(() =>
       expect(mockedApi.deleteInboxAccount).toHaveBeenCalledWith(

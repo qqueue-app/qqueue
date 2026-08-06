@@ -1847,3 +1847,46 @@ export const smtpConnectionGrantCreateSchema = z.object({
 export type SmtpConnectionGrantCreateInput = z.infer<
   typeof smtpConnectionGrantCreateSchema
 >;
+
+/**
+ * A browser's Web Push registration, in the shape `PushSubscription.toJSON()`
+ * produces — so the dashboard can post the subscription through unchanged.
+ * `p256dh` and `auth` are the client's own public keys; they are not secrets of
+ * ours and are useless without the private key held on the device.
+ */
+export const pushSubscriptionSchema = z.object({
+  organizationId: z.string().min(1),
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+  /** Best-effort device label shown in settings; never trusted for anything. */
+  userAgent: z.string().max(512).optional(),
+});
+
+export type PushSubscriptionInput = z.infer<typeof pushSubscriptionSchema>;
+
+export const pushUnsubscribeSchema = z.object({
+  endpoint: z.string().url(),
+});
+
+export type PushUnsubscribeInput = z.infer<typeof pushUnsubscribeSchema>;
+
+/**
+ * The payload a service worker receives. Kept deliberately small: push
+ * services cap the encrypted body (~4 KB), and the body of an email must not
+ * travel through a third-party push service in the first place.
+ */
+export const pushNotificationPayloadSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+  /** In-app path the notification opens, e.g. `/inbox?message=abc`. */
+  url: z.string().optional(),
+  /** Collapses same-tag notifications so ten replies don't stack ten alerts. */
+  tag: z.string().optional(),
+});
+
+export type PushNotificationPayload = z.infer<
+  typeof pushNotificationPayloadSchema
+>;

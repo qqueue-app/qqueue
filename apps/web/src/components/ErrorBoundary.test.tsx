@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import { describe, expect, it, vi } from "vitest";
 import { ErrorBoundary } from "./ErrorBoundary.js";
 
@@ -7,8 +7,7 @@ function Bomb(): never {
 }
 
 describe("ErrorBoundary", () => {
-  it("renders its children when nothing throws", () => {
-    render(
+  it("renders its children when nothing throws", () => { renderWithProviders(
       <ErrorBoundary>
         <p>all good</p>
       </ErrorBoundary>
@@ -28,7 +27,7 @@ describe("ErrorBoundary", () => {
       value: { ...original, reload },
     });
 
-    render(
+    renderWithProviders(
       <ErrorBoundary>
         <Bomb />
       </ErrorBoundary>

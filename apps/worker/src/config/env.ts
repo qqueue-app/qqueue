@@ -74,6 +74,22 @@ const envSchema = z.object({
     .int()
     .min(1)
     .default(25 * 1024 * 1024),
+  // Web Push (VAPID). Both unset = the worker never pushes; the dashboard also
+  // hides the control, since the API reads the same pair. The public key must
+  // match the API's or every device's subscription will be rejected as signed
+  // by the wrong key.
+  VAPID_PUBLIC_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  VAPID_PRIVATE_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  VAPID_SUBJECT: z.string().default("mailto:admin@localhost"),
+  // Absolute base URL of the web dashboard, used as the target a notification
+  // opens. Must match the API's PUBLIC_APP_URL.
+  PUBLIC_APP_URL: z.string().url().default("https://qqueue.app"),
 });
 
 const parsed = envSchema.parse(process.env);

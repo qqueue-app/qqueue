@@ -1,70 +1,70 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { Pencil, Plus, Search, Trash2, Users } from "lucide-react";
-import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
-import { api, type Contact, type ContactList } from "../lib/api.js";
+import { api, type ContactList } from "../lib/api.js";
+import { formatCount } from "../lib/format.js";
+import { qk } from "../lib/query-client.js";
+import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
-import { Card } from "../components/ui/card.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions } from "../components/ui/row-actions.js";
+import { Hint } from "../components/ui/tooltip.js";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
-import { Skeleton } from "../components/ui/skeleton.js";
 import { Spinner } from "../components/ui/spinner.js";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "../components/ui/table.js";
 
 const MEMBER_PREVIEW = 3;
 
+function memberCount(list: ContactList) {
+  return list._count?.contacts ?? list.contacts?.length ?? 0;
+}
+
 export function ContactLists() {
   const { currentOrganizationId: organizationId } = useSession();
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [contactLists, setContactLists] = useState<ContactList[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [listDialogOpen, setListDialogOpen] = useState(false);
-  const [editingList, setEditingList] = useState<ContactList | null>(null);
-  const [deleteListTarget, setDeleteListTarget] = useState<ContactList | null>(
-    null
-  );
-  const [listName, setListName] = useState("");
-  const [listDescription, setListDescription] = useState("");
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<ContactList | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ContactList | null>(null);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState("");
   const [contactSearch, setContactSearch] = useState("");
 
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return contactLists;
-    }
-    return contactLists.filter((list) =>
-      list.name.toLowerCase().includes(query)
-    );
-  }, [contactLists, search]);
+  const listsQuery = useOrgQuery(
+    organizationId,
+    qk.contactLists(organizationId ?? ""),
+    (id) => api.listContactLists(id)
+  );
+  // Only needed while the dialog is open, but contacts are cached org-wide and
+  // the Contacts page will have warmed this already in most sessions.
+  const contactsQuery = useOrgQuery(
+    organizationId,
+    qk.contacts(organizationId ?? ""),
+    (id) => api.listContacts(id)
+  );
+
+  const contacts = useMemo(
+    () => contactsQuery.data ?? [],
+    [contactsQuery.data]
+  );
 
   const filteredContacts = useMemo(() => {
     const query = contactSearch.trim().toLowerCase();
-    if (!query) {
-      return contacts;
-    }
+    if (!query) return contacts;
     return contacts.filter((contact) =>
       [contact.email, contact.firstName, contact.lastName]
         .filter(Boolean)
@@ -74,171 +74,227 @@ export function ContactLists() {
 
   const allFilteredSelected =
     filteredContacts.length > 0 &&
-    filteredContacts.every((contact) => selectedContactIds.includes(contact.id));
+    filteredContacts.every((contact) =>
+      selectedContactIds.includes(contact.id)
+    );
+
+  const save = useApiMutation(
+    () =>
+      editing
+        ? api.updateContactList(editing.id, {
+            name,
+            description: description || undefined,
+            contactIds: selectedContactIds,
+          })
+        : api.createContactList({
+            organizationId,
+            name,
+            description: description || undefined,
+            contactIds: selectedContactIds,
+          }),
+    {
+      successMessage: () =>
+        editing ? "List updated." : "List created.",
+      errorMessage: "Couldn't save that list.",
+      invalidates: [qk.contactLists(organizationId ?? "")],
+      onSuccess: () => closeDialog(),
+    }
+  );
+
+  const remove = useApiMutation(
+    (list: ContactList) => api.deleteContactList(list.id),
+    {
+      successMessage: "List deleted.",
+      errorMessage: "Couldn't delete that list.",
+      invalidates: [qk.contactLists(organizationId ?? "")],
+      onSuccess: () => setDeleteTarget(null),
+    }
+  );
+
+  function closeDialog() {
+    setDialogOpen(false);
+    setEditing(null);
+    setName("");
+    setDescription("");
+    setSelectedContactIds([]);
+    setContactSearch("");
+  }
+
+  function openCreate() {
+    setEditing(null);
+    setName("");
+    setDescription("");
+    setSelectedContactIds([]);
+    setContactSearch("");
+    setDialogOpen(true);
+  }
+
+  function openEdit(list: ContactList) {
+    setEditing(list);
+    setName(list.name);
+    setDescription(list.description ?? "");
+    setSelectedContactIds(list.contacts?.map((contact) => contact.id) ?? []);
+    setContactSearch("");
+    setDialogOpen(true);
+  }
 
   function toggleSelectAll() {
     const filteredIds = filteredContacts.map((contact) => contact.id);
-    setSelectedContactIds((current) => {
-      if (allFilteredSelected) {
-        return current.filter((id) => !filteredIds.includes(id));
-      }
-      return Array.from(new Set([...current, ...filteredIds]));
-    });
-  }
-
-  async function load() {
-    if (!organizationId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const [nextContacts, nextLists] = await Promise.all([
-        api.listContacts(organizationId),
-        api.listContactLists(organizationId)
-      ]);
-      setContacts(nextContacts);
-      setContactLists(nextLists);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to load contact lists"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, [organizationId]);
-
-  function toggleContact(contactId: string) {
     setSelectedContactIds((current) =>
-      current.includes(contactId)
-        ? current.filter((id) => id !== contactId)
-        : [...current, contactId]
+      allFilteredSelected
+        ? current.filter((id) => !filteredIds.includes(id))
+        : Array.from(new Set([...current, ...filteredIds]))
     );
   }
 
-  function openCreateList() {
-    setEditingList(null);
-    setListName("");
-    setListDescription("");
-    setSelectedContactIds([]);
-    setContactSearch("");
-    setListDialogOpen(true);
-  }
-
-  function openEditList(list: ContactList) {
-    setEditingList(list);
-    setListName(list.name);
-    setListDescription(list.description ?? "");
-    setSelectedContactIds(list.contacts?.map((contact) => contact.id) ?? []);
-    setContactSearch("");
-    setListDialogOpen(true);
-  }
-
-  function closeListDialog(open: boolean) {
-    setListDialogOpen(open);
-    if (!open) {
-      setEditingList(null);
-      setListName("");
-      setListDescription("");
-      setSelectedContactIds([]);
-      setContactSearch("");
-    }
-  }
-
-  async function saveList(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId) return;
-
-    setSaving(true);
-    try {
-      if (editingList) {
-        await api.updateContactList(editingList.id, {
-          name: listName,
-          description: listDescription || undefined,
-          contactIds: selectedContactIds
-        });
-        toast.success("Contact list updated.");
-      } else {
-        await api.createContactList({
-          organizationId,
-          name: listName,
-          description: listDescription || undefined,
-          contactIds: selectedContactIds
-        });
-        toast.success("Contact list created.");
-      }
-      setListDialogOpen(false);
-      setEditingList(null);
-      setListName("");
-      setListDescription("");
-      setSelectedContactIds([]);
-      setContactSearch("");
-      await load();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to save contact list"
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function confirmDeleteList() {
-    if (!deleteListTarget) return;
-    setSaving(true);
-    try {
-      await api.deleteContactList(deleteListTarget.id);
-      toast.success("Contact list deleted.");
-      setDeleteListTarget(null);
-      await load();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to delete contact list"
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function memberCount(list: ContactList) {
-    return list._count?.contacts ?? list.contacts?.length ?? 0;
-  }
+  const columns = useMemo<ColumnDef<ContactList, unknown>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "List",
+        meta: { title: "List" },
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Users className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate font-medium">{row.original.name}</div>
+              {row.original.description ? (
+                <p className="truncate text-xs text-muted-foreground">
+                  {row.original.description}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "members",
+        accessorFn: memberCount,
+        header: "People",
+        meta: { title: "People" },
+        cell: ({ row }) => {
+          const count = memberCount(row.original);
+          const preview = (row.original.contacts ?? []).slice(
+            0,
+            MEMBER_PREVIEW
+          );
+          const remaining = count - preview.length;
+          return (
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">
+                {formatCount(count)} {count === 1 ? "person" : "people"}
+              </span>
+              {preview.length > 0 ? (
+                <div className="hidden flex-wrap gap-1 lg:flex">
+                  {preview.map((contact) => (
+                    <Badge
+                      key={contact.id}
+                      variant="secondary"
+                      className="font-normal"
+                    >
+                      {contact.email}
+                    </Badge>
+                  ))}
+                  {remaining > 0 ? (
+                    <Badge variant="outline" className="font-normal">
+                      +{remaining} more
+                    </Badge>
+                  ) : null}
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  Nobody in it yet
+                </span>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        id: "campaigns",
+        accessorFn: (row) => row._count?.campaigns ?? 0,
+        header: "Used by",
+        meta: { title: "Used by", hideBelowMd: true },
+        cell: ({ getValue }) => {
+          const count = Number(getValue());
+          return (
+            <Hint
+              label={
+                count === 0
+                  ? "No campaign sends to this list yet"
+                  : `${count} campaign${count === 1 ? "" : "s"} send to this list`
+              }
+            >
+              <span className="cursor-help text-muted-foreground">
+                {count} {count === 1 ? "campaign" : "campaigns"}
+              </span>
+            </Hint>
+          );
+        },
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.name}
+            actions={[
+              {
+                label: "Edit this list",
+                icon: Pencil,
+                primary: true,
+                onSelect: () => openEdit(row.original),
+              },
+              {
+                label: "Delete this list",
+                icon: Trash2,
+                destructive: true,
+                onSelect: () => setDeleteTarget(row.original),
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <>
       <PageHeader
         title="Lists"
-        description="Group contacts into audiences for your campaigns."
+        description="Groups of contacts you put together by hand. Use one as the audience for a campaign."
         actions={
-          <Button type="button" onClick={openCreateList} disabled={!organizationId}>
+          <Button type="button" onClick={openCreate} disabled={!organizationId}>
             <Plus className="h-4 w-4" />
             New list
           </Button>
         }
       />
 
-      <section className="p-6">
-        <Card className="overflow-hidden">
-          {loading ? (
-            <div className="space-y-3 p-5">
-              {[0, 1, 2].map((index) => (
-                <Skeleton key={index} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : contactLists.length === 0 ? (
+      <section className="p-4 sm:p-6">
+        <DataGrid
+          label="Contact lists"
+          data={listsQuery.data ?? []}
+          columns={columns}
+          getRowId={(row) => row.id}
+          loading={listsQuery.isPending}
+          onRowClick={openEdit}
+          searchPlaceholder="Search lists…"
+          empty={
             <EmptyState
               icon={Users}
-              title="No contact lists yet"
-              description="Create your first list to start grouping contacts into audiences."
+              title="No lists yet"
+              description="Make a list to group people you email together — a newsletter audience, your customers, a launch invite list."
               action={
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={openCreateList}
+                  onClick={openCreate}
                   disabled={!organizationId}
                 >
                   <Plus className="h-4 w-4" />
@@ -246,198 +302,134 @@ export function ContactLists() {
                 </Button>
               }
             />
-          ) : (
-            <>
-              <div className="flex items-center gap-3 border-b p-3">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search lists…"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-                <span className="shrink-0 text-sm text-muted-foreground">
-                  {filtered.length} of {contactLists.length}
-                </span>
+          }
+          noResults={
+            <EmptyState
+              icon={Search}
+              title="No matching lists"
+              description="Try a different search."
+            />
+          }
+          renderMobileRow={(list) => (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{list.name}</div>
+                {list.description ? (
+                  <p className="truncate text-sm text-muted-foreground">
+                    {list.description}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatCount(memberCount(list))}{" "}
+                  {memberCount(list) === 1 ? "person" : "people"}
+                </p>
               </div>
-
-              {filtered.length === 0 ? (
-                <EmptyState
-                  icon={Search}
-                  title="No matches"
-                  description={`No lists match "${search}".`}
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Members</TableHead>
-                      <TableHead>Used in</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((list) => {
-                      const members = list.contacts ?? [];
-                      const preview = members.slice(0, MEMBER_PREVIEW);
-                      const remaining = memberCount(list) - preview.length;
-                      const campaignCount = list._count?.campaigns ?? 0;
-
-                      return (
-                        <TableRow key={list.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-2.5">
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                                <Users className="h-4 w-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <span className="font-medium">{list.name}</span>
-                                {list.description ? (
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {list.description}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-col gap-1">
-                              <span className="text-sm font-medium">
-                                {memberCount(list)}{" "}
-                                {memberCount(list) === 1 ? "contact" : "contacts"}
-                              </span>
-                              {preview.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {preview.map((contact) => (
-                                    <Badge
-                                      key={contact.id}
-                                      variant="secondary"
-                                      className="font-normal"
-                                    >
-                                      {contact.email}
-                                    </Badge>
-                                  ))}
-                                  {remaining > 0 ? (
-                                    <Badge variant="outline" className="font-normal">
-                                      +{remaining} more
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              ) : (
-                                <span className="text-sm text-muted-foreground">
-                                  Empty list
-                                </span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {campaignCount}{" "}
-                            {campaignCount === 1 ? "campaign" : "campaigns"}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openEditList(list)}
-                                aria-label="Edit contact list"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="text-muted-foreground hover:text-destructive"
-                                onClick={() => setDeleteListTarget(list)}
-                                aria-label="Delete contact list"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </>
+              <RowActions
+                rowLabel={list.name}
+                actions={[
+                  {
+                    label: "Delete this list",
+                    icon: Trash2,
+                    primary: true,
+                    destructive: true,
+                    onSelect: () => setDeleteTarget(list),
+                  },
+                ]}
+              />
+            </div>
           )}
-        </Card>
+        />
       </section>
 
-      <Dialog open={listDialogOpen} onOpenChange={closeListDialog}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {editingList ? "Edit contact list" : "New contact list"}
-            </DialogTitle>
+            <DialogTitle>{editing ? "Edit list" : "New list"}</DialogTitle>
             <DialogDescription>
-              {editingList
-                ? "Rename the list or change which contacts belong to it."
-                : "Name the list and choose the contacts to include."}
+              {editing
+                ? "Rename the list or change who's in it."
+                : "Name the list and pick who belongs in it."}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={saveList} className="space-y-4">
+
+          <form
+            onSubmit={(event: FormEvent) => {
+              event.preventDefault();
+              save.mutate();
+            }}
+            className="space-y-4"
+          >
             <div className="space-y-2">
               <Label htmlFor="listName">Name</Label>
               <Input
                 id="listName"
-                value={listName}
-                onChange={(event) => setListName(event.target.value)}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Newsletter subscribers"
+                autoFocus
                 required
               />
             </div>
+
             <div className="space-y-2">
-              <Label htmlFor="listDescription">Description</Label>
+              <Label htmlFor="listDescription">What it's for</Label>
               <Input
                 id="listDescription"
-                placeholder="What is this list for? (optional)"
-                value={listDescription}
-                onChange={(event) => setListDescription(event.target.value)}
+                placeholder="Optional — a note for your teammates"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
               />
             </div>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Contacts</Label>
+                <Label>People</Label>
                 <span className="text-xs text-muted-foreground">
                   {selectedContactIds.length} selected
                 </span>
               </div>
+
               {contacts.length === 0 ? (
-                <div className="rounded-md border p-2">
-                  <p className="px-1 py-2 text-sm text-muted-foreground">
-                    No contacts available yet.
-                  </p>
-                </div>
+                <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+                  You don't have any contacts yet. Add some first, then come
+                  back and build a list.
+                </p>
               ) : (
-                <div className="rounded-md border">
+                <div className="rounded-lg border">
                   <div className="border-b p-2">
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
-                        placeholder="Search contacts by name or email…"
+                        placeholder="Search by name or email…"
+                        aria-label="Search contacts"
                         value={contactSearch}
-                        onChange={(event) => setContactSearch(event.target.value)}
+                        onChange={(event) =>
+                          setContactSearch(event.target.value)
+                        }
                         className="h-9 pl-8"
                       />
                     </div>
                   </div>
+
                   <div className="flex items-center justify-between border-b px-2 py-1.5">
                     <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium">
                       <Checkbox
-                        checked={allFilteredSelected}
+                        checked={
+                          allFilteredSelected
+                            ? true
+                            : filteredContacts.some((contact) =>
+                                  selectedContactIds.includes(contact.id)
+                                )
+                              ? "indeterminate"
+                              : false
+                        }
                         onCheckedChange={toggleSelectAll}
                         disabled={filteredContacts.length === 0}
                         aria-label={
-                          allFilteredSelected
-                            ? "Clear all contacts"
-                            : "Select all contacts"
+                          allFilteredSelected ? "Clear all" : "Select all"
                         }
                       />
                       {allFilteredSelected ? "Clear all" : "Select all"}
@@ -447,14 +439,15 @@ export function ContactLists() {
                       {filteredContacts.length} of {contacts.length}
                     </span>
                   </div>
+
                   <div className="max-h-56 space-y-1 overflow-auto p-2">
                     {filteredContacts.length === 0 ? (
                       <p className="px-1 py-2 text-sm text-muted-foreground">
-                        No contacts match “{contactSearch}”.
+                        Nobody matches “{contactSearch}”.
                       </p>
                     ) : (
                       filteredContacts.map((contact) => {
-                        const name = [contact.firstName, contact.lastName]
+                        const fullName = [contact.firstName, contact.lastName]
                           .filter(Boolean)
                           .join(" ");
                         return (
@@ -464,13 +457,19 @@ export function ContactLists() {
                           >
                             <Checkbox
                               checked={selectedContactIds.includes(contact.id)}
-                              onCheckedChange={() => toggleContact(contact.id)}
-                              aria-label={`Select ${contact.email}`}
+                              onCheckedChange={() =>
+                                setSelectedContactIds((current) =>
+                                  current.includes(contact.id)
+                                    ? current.filter((id) => id !== contact.id)
+                                    : [...current, contact.id]
+                                )
+                              }
+                              aria-label={`Include ${contact.email}`}
                             />
                             <span className="min-w-0 truncate">
-                              {name ? (
+                              {fullName ? (
                                 <>
-                                  {name}{" "}
+                                  {fullName}{" "}
                                   <span className="text-muted-foreground">
                                     {contact.email}
                                   </span>
@@ -487,22 +486,20 @@ export function ContactLists() {
                 </div>
               )}
             </div>
+
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => closeListDialog(false)}
-              >
+              <Button type="button" variant="outline" onClick={closeDialog}>
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={
-                  saving || (!editingList && selectedContactIds.length === 0)
+                  save.isPending ||
+                  (!editing && selectedContactIds.length === 0)
                 }
               >
-                {saving ? <Spinner /> : null}
-                {editingList ? "Save changes" : "Create list"}
+                {save.isPending ? <Spinner /> : null}
+                {editing ? "Save changes" : "Create list"}
               </Button>
             </DialogFooter>
           </form>
@@ -510,13 +507,13 @@ export function ContactLists() {
       </Dialog>
 
       <ConfirmDialog
-        open={deleteListTarget !== null}
-        onOpenChange={(open) => !open && setDeleteListTarget(null)}
-        title="Delete contact list?"
-        description={`"${deleteListTarget?.name}" will be removed from future campaign drafts.`}
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Delete this list?"
+        description={`"${deleteTarget?.name}" will be removed. The people in it stay in your contacts.`}
         confirmLabel="Delete"
-        loading={saving}
-        onConfirm={confirmDeleteList}
+        loading={remove.isPending}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget)}
       />
     </>
   );

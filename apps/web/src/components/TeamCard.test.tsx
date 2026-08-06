@@ -1,8 +1,14 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor, within } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 type SessionValue = {
@@ -82,13 +88,12 @@ describe("TeamCard", () => {
       ...sessionRef.current,
       currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" },
     };
-    const { container } = render(<TeamCard />);
+    const { container } = renderWithProviders(<TeamCard />);
     expect(container).toBeEmptyDOMElement();
     expect(mockedApi.listOrganizationMembers).not.toHaveBeenCalled();
   });
 
-  it("loads and lists members and pending invitations", async () => {
-    render(<TeamCard />);
+  it("loads and lists members and pending invitations", async () => { renderWithProviders(<TeamCard />);
     expect(await screen.findByText("teammate@x.com")).toBeInTheDocument();
     expect(screen.getByText("pending@x.com")).toBeInTheDocument();
     expect(screen.getByText("(you)")).toBeInTheDocument();
@@ -110,7 +115,7 @@ describe("TeamCard", () => {
       acceptUrl: "http://localhost:5173/accept-invite?token=xyz",
     });
 
-    render(<TeamCard />);
+    renderWithProviders(<TeamCard />);
     await screen.findByText("teammate@x.com");
     await userEvent.type(
       screen.getByLabelText("Invite by email"),
@@ -148,7 +153,7 @@ describe("TeamCard", () => {
       acceptUrl: "http://localhost:5173/accept-invite?token=abc",
     });
 
-    render(<TeamCard />);
+    renderWithProviders(<TeamCard />);
     await screen.findByText("teammate@x.com");
     await userEvent.type(
       screen.getByLabelText("Invite by email"),
@@ -166,7 +171,7 @@ describe("TeamCard", () => {
 
   it("revokes a pending invitation", async () => {
     mockedApi.revokeInvite.mockResolvedValue({});
-    render(<TeamCard />);
+    renderWithProviders(<TeamCard />);
     await screen.findByText("pending@x.com");
     await userEvent.click(
       screen.getByRole("button", {
@@ -180,7 +185,7 @@ describe("TeamCard", () => {
 
   it("removes a member after confirming", async () => {
     mockedApi.removeMember.mockResolvedValue(undefined);
-    render(<TeamCard />);
+    renderWithProviders(<TeamCard />);
     await screen.findByText("teammate@x.com");
     await userEvent.click(
       screen.getByRole("button", { name: /Remove teammate@x.com/ })
@@ -199,7 +204,7 @@ describe("TeamCard", () => {
       ...members[1],
       role: "ADMIN",
     });
-    render(<TeamCard />);
+    renderWithProviders(<TeamCard />);
     await screen.findByText("teammate@x.com");
 
     // Two comboboxes: the invite-role select and the editable member's role
@@ -220,7 +225,7 @@ describe("TeamCard", () => {
 
   it("surfaces a load error", async () => {
     mockedApi.listOrganizationMembers.mockRejectedValue(new Error("boom"));
-    render(<TeamCard />);
+    renderWithProviders(<TeamCard />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"));
   });
 });

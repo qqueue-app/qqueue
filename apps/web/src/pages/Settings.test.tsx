@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const sessionValue = vi.hoisted(() => ({
@@ -113,7 +119,7 @@ describe("Settings", () => {
         attachmentMaxBytes: 10485760
       }
     });
-    render(<Settings />);
+    renderWithProviders(<Settings />);
 
     expect(await screen.findByText("Instance")).toBeInTheDocument();
     expect(
@@ -122,8 +128,7 @@ describe("Settings", () => {
     expect(await screen.findByText("Configuration health")).toBeInTheDocument();
   });
 
-  it("hides the Instance card for non-instance-admins", async () => {
-    render(<Settings />);
+  it("hides the Instance card for non-instance-admins", async () => { renderWithProviders(<Settings />);
 
     await waitFor(() =>
       expect(mockedApi.getInstanceSettings).toHaveBeenCalled()
@@ -131,14 +136,12 @@ describe("Settings", () => {
     expect(screen.queryByText("Instance")).not.toBeInTheDocument();
   });
 
-  it("renders account details", () => {
-    render(<Settings />);
+  it("renders account details", () => { renderWithProviders(<Settings />);
     expect(screen.getByText("me@x.com")).toBeInTheDocument();
     expect(screen.getByText("Account")).toBeInTheDocument();
   });
 
-  it("disables the create button when the name is blank", () => {
-    render(<Settings />);
+  it("disables the create button when the name is blank", () => { renderWithProviders(<Settings />);
     expect(
       screen.getByRole("button", { name: "Create organization" })
     ).toBeDisabled();
@@ -151,7 +154,7 @@ describe("Settings", () => {
       name: "Gamma",
       createdAt: ""
     });
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await user.type(screen.getByLabelText("New organization"), "Gamma");
     await user.click(
       screen.getByRole("button", { name: "Create organization" })
@@ -168,7 +171,7 @@ describe("Settings", () => {
   it("toasts on create failure", async () => {
     const user = userEvent.setup();
     mockedApi.createOrganization.mockRejectedValue(new Error("nope"));
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await user.type(screen.getByLabelText("New organization"), "Gamma");
     await user.click(
       screen.getByRole("button", { name: "Create organization" })
@@ -188,7 +191,7 @@ describe("Settings", () => {
       }
     ]);
 
-    render(<Settings />);
+    renderWithProviders(<Settings />);
 
     expect(await screen.findByText("Production")).toBeInTheDocument();
     expect(mockedApi.listApiKeys).toHaveBeenCalledWith("o1");
@@ -208,7 +211,7 @@ describe("Settings", () => {
       key: "qq_live_secret"
     });
 
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await user.type(screen.getByLabelText("Key name"), "Local app");
     await user.click(screen.getByRole("button", { name: /Create key/i }));
 
@@ -240,7 +243,7 @@ describe("Settings", () => {
       revokedAt: "2026-01-02T00:00:00.000Z"
     });
 
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await screen.findByText("Production");
     await user.click(screen.getByLabelText("Revoke Production"));
     await user.click(screen.getByRole("button", { name: "Revoke key" }));
@@ -267,7 +270,7 @@ describe("Settings", () => {
       secret: "whsec_secret"
     });
 
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await user.type(
       screen.getByLabelText("Endpoint name"),
       "Production webhook"
@@ -304,7 +307,7 @@ describe("Settings", () => {
     ]);
     mockedApi.deleteWebhookEndpoint.mockResolvedValue(undefined);
 
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await screen.findByText("Production webhook");
     await user.click(screen.getByLabelText("Delete Production webhook"));
     await user.click(screen.getByRole("button", { name: "Delete endpoint" }));
@@ -359,7 +362,7 @@ describe("Settings", () => {
       createdAt: "2026-01-01T00:00:00.000Z"
     });
 
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await screen.findByText("Production webhook");
     await user.click(screen.getByLabelText("View deliveries for Production webhook"));
 
@@ -381,7 +384,7 @@ describe("Settings", () => {
       configurable: true,
       value: { set href(v: string) { hrefSetter(v); } }
     });
-    render(<Settings />);
+    renderWithProviders(<Settings />);
     await user.click(screen.getByRole("button", { name: /Sign out/i }));
     expect(sessionValue.current.signOut).toHaveBeenCalled();
     expect(hrefSetter).toHaveBeenCalledWith("/login");

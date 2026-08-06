@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { renderWithProviders, screen, within } from "../test/render.js";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LegalPage } from "./Legal.js";
@@ -6,11 +6,11 @@ import { LegalPage } from "./Legal.js";
 type Kind = "terms" | "privacy" | "licensing" | "trademark";
 
 function renderPage(kind: Kind) {
-  return render(
+  return renderWithProviders(
     <MemoryRouter>
       <LegalPage kind={kind} />
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 const pages: Array<{ kind: Kind; title: string; effectiveDate: string }> = [

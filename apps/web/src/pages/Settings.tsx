@@ -5,6 +5,8 @@ import { EmptyState } from "../components/EmptyState.js";
 import { InstanceSettingsCard } from "../components/InstanceSettingsCard.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { TeamCard } from "../components/TeamCard.js";
+import { InstallAppCard } from "../components/InstallAppCard.js";
+import { NotificationsCard } from "../components/NotificationsCard.js";
 import {
   api,
   apiBaseUrl,
@@ -438,9 +440,18 @@ export function Settings() {
     <>
       <PageHeader
         title="Settings"
-        description="Manage your organization, account access, API keys, and webhooks."
+        description="Your organization, your team, and the technical bits — API keys, webhooks, and notifications."
       />
-      <section className="grid gap-6 p-5 sm:p-6 lg:grid-cols-2">
+
+      {/* Device-level settings first: they're the ones a person acts on for
+          themselves, and the install prompt is what unlocks notifications on
+          iPhone and iPad. */}
+      <section className="space-y-3 px-4 pt-4 sm:px-6 sm:pt-6">
+        <InstallAppCard />
+        <NotificationsCard />
+      </section>
+
+      <section className="grid gap-6 p-4 sm:p-6 lg:grid-cols-2">
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>Organization</CardTitle>

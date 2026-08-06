@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor, within } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -90,8 +90,7 @@ describe("isInvisible", () => {
 });
 
 describe("raw blocks in the editor", () => {
-  it("frames markup the schema cannot hold and names it", async () => {
-    render(<Editor source="<style>.x{color:red}</style><p>Body</p>" />);
+  it("frames markup the schema cannot hold and names it", async () => { renderWithProviders(<Editor source="<style>.x{color:red}</style><p>Body</p>" />);
 
     await screen.findByLabelText("Bold");
     await waitFor(() => expect(rawBlock()).not.toBeNull());
@@ -100,8 +99,7 @@ describe("raw blocks in the editor", () => {
 
   // A conditional comment has tags inside it, so naming a block by the first
   // tag it can find would call this one a "<td> block".
-  it("names a conditional comment by what it is", async () => {
-    render(
+  it("names a conditional comment by what it is", async () => { renderWithProviders(
       <Editor source="<p>A</p><!--[if mso]><td>spacer</td><![endif]--><p>B</p>" />
     );
 
@@ -112,8 +110,7 @@ describe("raw blocks in the editor", () => {
 
   // The legacy tag is frozen where it stands, inside a cell of a table that
   // stays editable around it.
-  it("renders a visible block's markup in an isolated shadow root", async () => {
-    render(
+  it("renders a visible block's markup in an isolated shadow root", async () => { renderWithProviders(
       <Editor source='<table width="600"><tbody><tr><td><font color="#333">Legacy</font></td></tr></tbody></table>' />
     );
 
@@ -130,7 +127,7 @@ describe("raw blocks in the editor", () => {
   it("opens the source dialog on the block's own markup and saves it back", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(
+    renderWithProviders(
       <Editor source="<style>.x{color:red}</style><p>Body</p>" onChange={onChange} />
     );
 
@@ -158,7 +155,7 @@ describe("raw blocks in the editor", () => {
 
   it("removes a block on request", async () => {
     const user = userEvent.setup();
-    render(<Editor source="<style>.x{}</style><p>Body</p>" />);
+    renderWithProviders(<Editor source="<style>.x{}</style><p>Body</p>" />);
 
     await screen.findByLabelText("Bold");
     await waitFor(() => expect(rawBlock()).not.toBeNull());
@@ -173,7 +170,7 @@ describe("raw blocks in the editor", () => {
   it("inserts a new block from the toolbar", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<Editor source="<p>Body</p>" onChange={onChange} />);
+    renderWithProviders(<Editor source="<p>Body</p>" onChange={onChange} />);
 
     await screen.findByLabelText("Bold");
     expect(rawBlock()).toBeNull();
@@ -194,7 +191,7 @@ describe("raw blocks in the editor", () => {
 
   it("closes without inserting anything when the source is left blank", async () => {
     const user = userEvent.setup();
-    render(<Editor source="<p>Body</p>" />);
+    renderWithProviders(<Editor source="<p>Body</p>" />);
 
     await screen.findByLabelText("Bold");
     await user.click(screen.getByLabelText("HTML block"));
@@ -216,7 +213,7 @@ describe("raw blocks in the editor", () => {
   it("does not submit the page form when a block is saved", async () => {
     const user = userEvent.setup();
     const submit = vi.fn((event: React.FormEvent) => event.preventDefault());
-    render(
+    renderWithProviders(
       <form onSubmit={submit}>
         <Editor source="<p>Body</p>" />
       </form>

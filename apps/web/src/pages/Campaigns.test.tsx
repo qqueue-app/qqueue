@@ -1,9 +1,21 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  openRowMenu,
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({ current: { currentOrganizationId: "org_1" } }));
@@ -60,11 +72,11 @@ function setup(campaigns: Record<string, unknown>[]) {
 }
 
 function renderCampaigns() {
-  return render(
+  return renderWithProviders(
     <MemoryRouter>
       <Campaigns />
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 describe("Campaigns", () => {
@@ -104,7 +116,7 @@ describe("Campaigns", () => {
     renderCampaigns();
     await screen.findByText("Spring");
     await user.click(screen.getByRole("button", { name: /Paused/ }));
-    expect(screen.getByText("No paused campaigns.")).toBeInTheDocument();
+    expect(screen.getByText("No paused campaigns")).toBeInTheDocument();
   });
 
   it("creates a campaign", async () => {
@@ -135,7 +147,7 @@ describe("Campaigns", () => {
     mockedApi.sendCampaignNow.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Send campaign now"));
+    await user.click(screen.getByLabelText("Send this campaign now"));
     await waitFor(() =>
       expect(mockedApi.sendCampaignNow).toHaveBeenCalledWith("cmp1")
     );
@@ -147,7 +159,11 @@ describe("Campaigns", () => {
     mockedApi.scheduleCampaign.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Schedule campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Schedule this campaign" })
+    );
     const dialog = await screen.findByRole("dialog");
     await user.type(
       within(dialog).getByLabelText("Send at"),
@@ -168,7 +184,11 @@ describe("Campaigns", () => {
     mockedApi.setCampaignRecurrence.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Schedule campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Schedule this campaign" })
+    );
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByText("Repeat on a schedule"));
     await user.click(
@@ -188,7 +208,11 @@ describe("Campaigns", () => {
     mockedApi.duplicateCampaign.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Duplicate campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Make a copy" })
+    );
     await user.click(await screen.findByRole("button", { name: "Duplicate" }));
     await waitFor(() =>
       expect(mockedApi.duplicateCampaign).toHaveBeenCalledWith("cmp1")
@@ -201,7 +225,11 @@ describe("Campaigns", () => {
     mockedApi.deleteCampaign.mockResolvedValue(undefined);
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Delete campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Delete this campaign" })
+    );
     await user.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() =>
       expect(mockedApi.deleteCampaign).toHaveBeenCalledWith("cmp1")
@@ -214,7 +242,11 @@ describe("Campaigns", () => {
     mockedApi.resumeCampaign.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Resume campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Resume this campaign" })
+    );
     await waitFor(() =>
       expect(mockedApi.resumeCampaign).toHaveBeenCalledWith("cmp1")
     );
@@ -240,7 +272,11 @@ describe("Campaigns", () => {
     mockedApi.updateCampaign.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Edit campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Edit this campaign" })
+    );
     const dialog = await screen.findByRole("dialog");
     const name = within(dialog).getByLabelText("Name");
     await user.clear(name);
@@ -262,7 +298,11 @@ describe("Campaigns", () => {
     mockedApi.pauseCampaign.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Pause campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Pause this campaign" })
+    );
     await waitFor(() =>
       expect(mockedApi.pauseCampaign).toHaveBeenCalledWith("cmp1")
     );
@@ -273,7 +313,11 @@ describe("Campaigns", () => {
     setup([campaign()]);
     renderCampaigns();
     await screen.findByText("Spring");
-    await user.click(screen.getByLabelText("Schedule campaign"));
+    // Secondary campaign actions live in the row's overflow menu.
+    await openRowMenu(user, "Spring");
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Schedule this campaign" })
+    );
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByText("Repeat on a schedule"));
     // switch frequency to advanced (first combobox is the Frequency select)

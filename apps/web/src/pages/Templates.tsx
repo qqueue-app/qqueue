@@ -1,41 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, FileText, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import type { ColumnDef } from "@tanstack/react-table";
+import {
+  Copy,
+  FileText,
+  LayoutGrid,
+  List as ListIcon,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { STARTER_TEMPLATES } from "../components/editor/starters.js";
 import {
   applyVariables,
-  resolveVariableData
+  resolveVariableData,
 } from "../components/editor/variables.js";
 import { api, type Template } from "../lib/api.js";
+import { formatFullDate, formatMailDate } from "../lib/format.js";
+import { qk } from "../lib/query-client.js";
+import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
-import { Button } from "../components/ui/button.js";
-import { Input } from "../components/ui/input.js";
 import { Badge } from "../components/ui/badge.js";
-import { Skeleton } from "../components/ui/skeleton.js";
+import { Button } from "../components/ui/button.js";
 import { Card, CardContent } from "../components/ui/card.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { IconButton } from "../components/ui/icon-button.js";
+import { Input } from "../components/ui/input.js";
+import { RowActions } from "../components/ui/row-actions.js";
+import { Skeleton } from "../components/ui/skeleton.js";
+import { Hint } from "../components/ui/tooltip.js";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "../components/ui/dialog.js";
 
-function formatDate(value?: string) {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? null
-    : date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric"
-      });
-}
+const VIEW_STORAGE_KEY = "qqueue.templates-view";
+
+type View = "gallery" | "list";
 
 // Lightweight, non-interactive thumbnail of the rendered template.
 function TemplateThumbnail({ template }: { template: Template }) {
@@ -66,7 +74,7 @@ function TemplateThumbnail({ template }: { template: Template }) {
 function StarterGallery({
   open,
   onOpenChange,
-  onPick
+  onPick,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -104,38 +112,69 @@ function StarterGallery({
   );
 }
 
+/**
+ * Templates.
+ *
+ * Two views, because there are two jobs. Choosing a design is visual, so the
+ * gallery of thumbnails stays the default. Finding the one you edited last
+ * Tuesday among ninety of them is a scanning job, and that's what the list view
+ * is for. The choice is remembered per browser.
+ */
 export function Templates() {
   const navigate = useNavigate();
   const { currentOrganizationId: organizationId } = useSession();
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  const [view, setView] = useState<View>(() => {
+    try {
+      return window.localStorage.getItem(VIEW_STORAGE_KEY) === "list"
+        ? "list"
+        : "gallery";
+    } catch {
+      return "gallery";
+    }
+  });
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [cloningId, setCloningId] = useState<string | null>(null);
 
-  async function load() {
-    if (!organizationId) {
-      setLoading(false);
-      return;
+  const templatesQuery = useOrgQuery(
+    organizationId,
+    qk.templates(organizationId ?? ""),
+    (id) => api.listTemplates(id)
+  );
+  const templates = useMemo(
+    () => templatesQuery.data ?? [],
+    [templatesQuery.data]
+  );
+
+  const duplicate = useApiMutation(
+    (template: Template) => api.cloneTemplate(template.id),
+    {
+      successMessage: "Template duplicated.",
+      errorMessage: "Couldn't duplicate that template.",
+      invalidates: [qk.templates(organizationId ?? "")],
     }
-    setLoading(true);
+  );
+
+  const remove = useApiMutation(
+    (template: Template) => api.deleteTemplate(template.id),
+    {
+      successMessage: "Template deleted.",
+      errorMessage: "Couldn't delete that template.",
+      invalidates: [qk.templates(organizationId ?? "")],
+      onSuccess: () => setDeleteTarget(null),
+    }
+  );
+
+  function chooseView(next: View) {
+    setView(next);
     try {
-      setTemplates(await api.listTemplates(organizationId));
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to load templates"
-      );
-    } finally {
-      setLoading(false);
+      window.localStorage.setItem(VIEW_STORAGE_KEY, next);
+    } catch {
+      // Private browsing blocks localStorage; the view just resets next visit.
     }
   }
-
-  useEffect(() => {
-    void load();
-  }, [organizationId]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -145,7 +184,9 @@ export function Templates() {
     return [...set].sort();
   }, [templates]);
 
-  const filtered = useMemo(() => {
+  // The gallery filters here; the list view hands filtering to the DataGrid's
+  // own search, so only the category chips apply to it.
+  const galleryFiltered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return templates.filter((template) => {
       if (activeCategory && template.category !== activeCategory) return false;
@@ -155,7 +196,7 @@ export function Templates() {
         template.subject,
         template.description ?? "",
         template.category ?? "",
-        ...(template.tags ?? [])
+        ...(template.tags ?? []),
       ]
         .join(" ")
         .toLowerCase()
@@ -163,72 +204,139 @@ export function Templates() {
     });
   }, [templates, search, activeCategory]);
 
-  async function duplicate(template: Template) {
-    setCloningId(template.id);
-    try {
-      await api.cloneTemplate(template.id);
-      toast.success("Template duplicated.");
-      await load();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to duplicate."
-      );
-    } finally {
-      setCloningId(null);
-    }
-  }
+  const listFiltered = useMemo(
+    () =>
+      activeCategory
+        ? templates.filter((template) => template.category === activeCategory)
+        : templates,
+    [templates, activeCategory]
+  );
 
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await api.deleteTemplate(deleteTarget.id);
-      toast.success("Template deleted.");
-      setDeleteTarget(null);
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to delete.");
-    } finally {
-      setDeleting(false);
-    }
-  }
+  const columns = useMemo<ColumnDef<Template, unknown>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Name",
+        meta: { title: "Name" },
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium">{row.original.name}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {row.original.description || row.original.subject}
+            </div>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "subject",
+        header: "Subject line",
+        meta: { title: "Subject line", hideBelowLg: true },
+        cell: ({ getValue }) => (
+          <span className="block max-w-xs truncate text-muted-foreground">
+            {String(getValue())}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "category",
+        header: "Category",
+        meta: { title: "Category", hideBelowMd: true },
+        cell: ({ getValue }) => {
+          const value = getValue() as string | null;
+          return value ? (
+            <Badge variant="secondary">{value}</Badge>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          );
+        },
+      },
+      {
+        accessorKey: "updatedAt",
+        header: "Updated",
+        meta: { title: "Updated", hideBelowMd: true },
+        cell: ({ getValue }) => (
+          <Hint label={formatFullDate(String(getValue()))}>
+            <span className="cursor-help text-muted-foreground">
+              {formatMailDate(String(getValue()))}
+            </span>
+          </Hint>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.name}
+            actions={[
+              {
+                label: "Edit this template",
+                icon: Pencil,
+                primary: true,
+                onSelect: () => navigate(`/templates/${row.original.id}/edit`),
+              },
+              {
+                label: "Make a copy",
+                icon: Copy,
+                disabled: duplicate.isPending,
+                onSelect: () => duplicate.mutate(row.original),
+              },
+              {
+                label: "Delete template",
+                icon: Trash2,
+                destructive: true,
+                onSelect: () => setDeleteTarget(row.original),
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    [navigate, duplicate]
+  );
 
-  function startNew(starterKey: string) {
-    setGalleryOpen(false);
-    navigate(`/templates/new?starter=${encodeURIComponent(starterKey)}`);
-  }
+  const loading = templatesQuery.isPending;
 
   return (
     <>
       <PageHeader
         title="Templates"
-        description="Design reusable emails with variables like {{firstName}}, a live preview, and starter layouts."
+        description="Reusable email designs with placeholders like {{firstName}}, a live preview, and starter layouts."
         actions={
-          <Button onClick={() => setGalleryOpen(true)} disabled={!organizationId}>
+          <Button
+            onClick={() => setGalleryOpen(true)}
+            disabled={!organizationId}
+          >
             <Plus className="h-4 w-4" />
             New template
           </Button>
         }
       />
 
-      <section className="space-y-4 p-6">
+      <section className="space-y-4 p-4 sm:p-6">
         {!loading && templates.length > 0 ? (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search templates…"
-                className="pl-8"
-              />
-            </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            {view === "gallery" ? (
+              <div className="relative w-full lg:max-w-xs">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search templates…"
+                  aria-label="Search templates"
+                  className="pl-8"
+                />
+              </div>
+            ) : null}
+
             {categories.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
                   onClick={() => setActiveCategory(null)}
-                  className="focus:outline-none"
+                  className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <Badge variant={activeCategory ? "outline" : "default"}>
                     All
@@ -239,7 +347,7 @@ export function Templates() {
                     key={category}
                     type="button"
                     onClick={() => setActiveCategory(category)}
-                    className="focus:outline-none"
+                    className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Badge
                       variant={
@@ -252,6 +360,25 @@ export function Templates() {
                 ))}
               </div>
             ) : null}
+
+            <div className="flex items-center gap-0.5 rounded-lg border p-0.5 lg:ml-auto">
+              <IconButton
+                label="Show thumbnails"
+                size="sm"
+                variant={view === "gallery" ? "solid" : "ghost"}
+                onClick={() => chooseView("gallery")}
+              >
+                <LayoutGrid />
+              </IconButton>
+              <IconButton
+                label="Show as a list"
+                size="sm"
+                variant={view === "list" ? "solid" : "ghost"}
+                onClick={() => chooseView("list")}
+              >
+                <ListIcon />
+              </IconButton>
+            </div>
           </div>
         ) : null}
 
@@ -272,7 +399,7 @@ export function Templates() {
             <EmptyState
               icon={FileText}
               title="No templates yet"
-              description="Create a reusable template to speed up sending."
+              description="Design one once, then send it as often as you like."
               action={
                 <Button
                   onClick={() => setGalleryOpen(true)}
@@ -285,7 +412,41 @@ export function Templates() {
               }
             />
           </Card>
-        ) : filtered.length === 0 ? (
+        ) : view === "list" ? (
+          <DataGrid
+            label="Templates"
+            data={listFiltered}
+            columns={columns}
+            getRowId={(row) => row.id}
+            onRowClick={(template) =>
+              navigate(`/templates/${template.id}/edit`)
+            }
+            searchPlaceholder="Search templates…"
+            empty={
+              <EmptyState
+                icon={FileText}
+                title="Nothing in this category"
+                description="Pick a different category, or choose All."
+              />
+            }
+            renderMobileRow={(template) => (
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{template.name}</div>
+                  <div className="truncate text-sm text-muted-foreground">
+                    {template.description || template.subject}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Updated {formatMailDate(template.updatedAt)}
+                  </div>
+                </div>
+                {template.category ? (
+                  <Badge variant="secondary">{template.category}</Badge>
+                ) : null}
+              </div>
+            )}
+          />
+        ) : galleryFiltered.length === 0 ? (
           <Card>
             <EmptyState
               icon={Search}
@@ -295,7 +456,7 @@ export function Templates() {
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((template) => (
+            {galleryFiltered.map((template) => (
               <Card
                 key={template.id}
                 className="group overflow-hidden transition-shadow hover:shadow-md"
@@ -311,7 +472,9 @@ export function Templates() {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h2 className="truncate font-semibold">{template.name}</h2>
+                      <h2 className="truncate font-semibold">
+                        {template.name}
+                      </h2>
                       <p className="mt-0.5 truncate text-sm text-muted-foreground">
                         {template.description || template.subject}
                       </p>
@@ -334,43 +497,37 @@ export function Templates() {
                   ) : null}
 
                   <div className="mt-3 flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(template.updatedAt)
-                        ? `Updated ${formatDate(template.updatedAt)}`
-                        : ""}
-                    </span>
+                    <Hint label={formatFullDate(template.updatedAt)}>
+                      <span className="cursor-help text-xs text-muted-foreground">
+                        Updated {formatMailDate(template.updatedAt)}
+                      </span>
+                    </Hint>
                     <div className="flex gap-0.5">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
+                      <IconButton
+                        label={`Edit ${template.name}`}
+                        size="sm"
                         onClick={() =>
                           navigate(`/templates/${template.id}/edit`)
                         }
-                        aria-label="Edit template"
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => duplicate(template)}
-                        disabled={cloningId === template.id}
-                        aria-label="Duplicate template"
+                        <Pencil />
+                      </IconButton>
+                      <IconButton
+                        label={`Make a copy of ${template.name}`}
+                        size="sm"
+                        disabled={duplicate.isPending}
+                        onClick={() => duplicate.mutate(template)}
                       >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="text-muted-foreground hover:text-destructive"
+                        <Copy />
+                      </IconButton>
+                      <IconButton
+                        label={`Delete ${template.name}`}
+                        size="sm"
+                        variant="destructive"
                         onClick={() => setDeleteTarget(template)}
-                        aria-label="Delete template"
                       >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                        <Trash2 />
+                      </IconButton>
                     </div>
                   </div>
                 </CardContent>
@@ -383,17 +540,20 @@ export function Templates() {
       <StarterGallery
         open={galleryOpen}
         onOpenChange={setGalleryOpen}
-        onPick={startNew}
+        onPick={(starterKey) => {
+          setGalleryOpen(false);
+          navigate(`/templates/new?starter=${encodeURIComponent(starterKey)}`);
+        }}
       />
 
       <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete template?"
-        description={`"${deleteTarget?.name}" will be permanently removed.`}
+        title="Delete this template?"
+        description={`"${deleteTarget?.name}" will be removed permanently. Emails already sent with it are unaffected.`}
         confirmLabel="Delete"
-        loading={deleting}
-        onConfirm={confirmDelete}
+        loading={remove.isPending}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget)}
       />
     </>
   );

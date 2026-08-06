@@ -1,134 +1,186 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { Plus, ShieldBan, Trash2 } from "lucide-react";
-import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { api, type Suppression } from "../lib/api.js";
+import { formatFullDate, formatMailDate } from "../lib/format.js";
+import { qk } from "../lib/query-client.js";
+import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
+import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions } from "../components/ui/row-actions.js";
+import { Hint } from "../components/ui/tooltip.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
-import { Badge } from "../components/ui/badge.js";
 import { Spinner } from "../components/ui/spinner.js";
-import { Skeleton } from "../components/ui/skeleton.js";
-import { Card } from "../components/ui/card.js";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "../components/ui/dialog.js";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "../components/ui/table.js";
 
-function formatDate(value?: string) {
-  if (!value) {
-    return "—";
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric"
-      });
-}
+/**
+ * Why an address ended up blocked, in words rather than the enum name. People
+ * reading this page are deciding whether it is safe to unblock someone, and
+ * "BOUNCE" alone doesn't tell them that.
+ */
+const REASONS: Record<
+  string,
+  { label: string; hint: string; variant: "destructive" | "secondary" | "outline" }
+> = {
+  BOUNCE: {
+    label: "Bounced",
+    hint: "Mail to this address kept failing, so QQueue stopped trying.",
+    variant: "destructive",
+  },
+  COMPLAINT: {
+    label: "Marked as spam",
+    hint: "This person reported one of your emails as spam.",
+    variant: "destructive",
+  },
+  UNSUBSCRIBE: {
+    label: "Unsubscribed",
+    hint: "This person asked to stop receiving your email.",
+    variant: "secondary",
+  },
+  MANUAL: {
+    label: "Added by you",
+    hint: "Someone on your team blocked this address by hand.",
+    variant: "outline",
+  },
+};
 
-function reasonVariant(reason: string) {
-  if (reason === "COMPLAINT" || reason === "BOUNCE") return "destructive" as const;
-  if (reason === "UNSUBSCRIBE") return "secondary" as const;
-  return "outline" as const;
+function reasonOf(reason: string) {
+  return (
+    REASONS[reason] ?? {
+      label: reason,
+      hint: "Blocked by QQueue.",
+      variant: "outline" as const,
+    }
+  );
 }
 
 export function Suppressions() {
   const { currentOrganizationId: organizationId, currentOrganization } =
     useSession();
-  // Un-suppressing is OWNER/ADMIN on the API (Phase 3); hide the control from
-  // members. Blocking an address stays open to every member.
+  // Un-suppressing is OWNER/ADMIN on the API; hide the control from members.
+  // Blocking an address stays open to every member.
   const canUnblock =
     currentOrganization?.role === "OWNER" ||
     currentOrganization?.role === "ADMIN";
-  const [suppressions, setSuppressions] = useState<Suppression[]>([]);
-  const [loading, setLoading] = useState(true);
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Suppression | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
-  async function load() {
-    if (!organizationId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      setSuppressions(await api.listSuppressions(organizationId));
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to load suppressions"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+  const suppressionsQuery = useOrgQuery(
+    organizationId,
+    qk.suppressions(organizationId ?? ""),
+    (id) => api.listSuppressions(id)
+  );
 
-  useEffect(() => {
-    void load();
-  }, [organizationId]);
+  const block = useApiMutation(
+    () =>
+      api.addSuppression({
+        organizationId: organizationId as string,
+        email,
+        reason: "MANUAL",
+      }),
+    {
+      successMessage: "Address blocked.",
+      errorMessage: "Couldn't block that address.",
+      invalidates: [qk.suppressions(organizationId ?? "")],
+      onSuccess: () => {
+        setDialogOpen(false);
+        setEmail("");
+      },
+    }
+  );
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!organizationId) {
-      toast.error("Select an organization in Settings first.");
-      return;
+  const unblock = useApiMutation(
+    (suppression: Suppression) => api.deleteSuppression(suppression.id),
+    {
+      successMessage: "Address unblocked — it can be emailed again.",
+      errorMessage: "Couldn't unblock that address.",
+      invalidates: [qk.suppressions(organizationId ?? "")],
+      onSuccess: () => setDeleteTarget(null),
     }
-    setSaving(true);
-    try {
-      await api.addSuppression({ organizationId, email, reason: "MANUAL" });
-      toast.success("Address blocked.");
-      setDialogOpen(false);
-      setEmail("");
-      await load();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to block address"
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
+  );
 
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await api.deleteSuppression(deleteTarget.id);
-      toast.success("Address unblocked. It can be emailed again.");
-      setDeleteTarget(null);
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to remove.");
-    } finally {
-      setDeleting(false);
-    }
-  }
+  const columns = useMemo<ColumnDef<Suppression, unknown>[]>(
+    () => [
+      {
+        accessorKey: "email",
+        header: "Address",
+        meta: { title: "Address" },
+        cell: ({ getValue }) => (
+          <span className="font-medium">{String(getValue())}</span>
+        ),
+      },
+      {
+        accessorKey: "reason",
+        header: "Why",
+        meta: { title: "Why" },
+        cell: ({ getValue }) => {
+          const reason = reasonOf(String(getValue()));
+          return (
+            <Hint label={reason.hint}>
+              <Badge variant={reason.variant} className="cursor-help">
+                {reason.label}
+              </Badge>
+            </Hint>
+          );
+        },
+      },
+      {
+        accessorKey: "createdAt",
+        header: "Blocked",
+        meta: { title: "Blocked", hideBelowMd: true },
+        cell: ({ getValue }) => (
+          <Hint label={formatFullDate(String(getValue()))}>
+            <span className="cursor-help text-muted-foreground">
+              {formatMailDate(String(getValue()))}
+            </span>
+          </Hint>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.email}
+            actions={[
+              {
+                label: "Unblock this address",
+                icon: Trash2,
+                primary: true,
+                destructive: true,
+                hidden: !canUnblock,
+                onSelect: () => setDeleteTarget(row.original),
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    [canUnblock]
+  );
 
   return (
     <>
       <PageHeader
         title="Blocked addresses"
-        description="Addresses QQueue will never email, across every send. Bounces, complaints, and unsubscribes land here automatically."
+        description="Addresses QQueue will never email, across every send. Bounces, spam reports, and unsubscribes land here on their own."
         actions={
           <Button
             onClick={() => {
@@ -138,73 +190,66 @@ export function Suppressions() {
             disabled={!organizationId}
           >
             <Plus className="h-4 w-4" />
-            Block address
+            Block an address
           </Button>
         }
       />
 
-      <section className="p-6">
-        <Card className="overflow-hidden">
-          {loading ? (
-            <div className="space-y-3 p-5">
-              {[0, 1, 2].map((index) => (
-                <Skeleton key={index} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : suppressions.length === 0 ? (
+      <section className="p-4 sm:p-6">
+        <DataGrid
+          label="Blocked addresses"
+          data={suppressionsQuery.data ?? []}
+          columns={columns}
+          getRowId={(row) => row.id}
+          loading={suppressionsQuery.isPending}
+          searchPlaceholder="Search blocked addresses…"
+          empty={
             <EmptyState
               icon={ShieldBan}
               title="Nothing blocked"
-              description="Bounces, complaints, and unsubscribes land here automatically. You can also add an address manually."
+              description="Bounces, spam reports, and unsubscribes land here on their own. You can also block an address by hand."
             />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead>Added</TableHead>
-                  {canUnblock ? (
-                    <TableHead className="text-right">Actions</TableHead>
-                  ) : null}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {suppressions.map((suppression) => (
-                  <TableRow key={suppression.id}>
-                    <TableCell className="font-medium">
-                      {suppression.email}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={reasonVariant(suppression.reason)}>
-                        {suppression.reason}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(suppression.createdAt)}
-                    </TableCell>
-                    {canUnblock ? (
-                      <TableCell>
-                        <div className="flex justify-end">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="text-muted-foreground hover:text-destructive"
-                            onClick={() => setDeleteTarget(suppression)}
-                            aria-label="Unblock address"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    ) : null}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </Card>
+          }
+          noResults={
+            <EmptyState
+              icon={ShieldBan}
+              title="No matching addresses"
+              description="Try a different search."
+            />
+          }
+          renderMobileRow={(suppression) => {
+            const reason = reasonOf(suppression.reason);
+            return (
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">
+                    {suppression.email}
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Badge variant={reason.variant}>{reason.label}</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {formatMailDate(suppression.createdAt)}
+                    </span>
+                  </div>
+                </div>
+                {canUnblock ? (
+                  <RowActions
+                    rowLabel={suppression.email}
+                    actions={[
+                      {
+                        label: "Unblock this address",
+                        icon: Trash2,
+                        primary: true,
+                        destructive: true,
+                        onSelect: () => setDeleteTarget(suppression),
+                      },
+                    ]}
+                  />
+                ) : null}
+              </div>
+            );
+          }}
+        />
       </section>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -212,18 +257,26 @@ export function Suppressions() {
           <DialogHeader>
             <DialogTitle>Block an address</DialogTitle>
             <DialogDescription>
-              The address will be skipped on every campaign, transactional, and
-              manual send until you remove it.
+              QQueue will skip this address on every campaign, automated, and
+              manual send until you unblock it.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submit} className="space-y-4">
+          <form
+            onSubmit={(event: FormEvent) => {
+              event.preventDefault();
+              block.mutate();
+            }}
+            className="space-y-4"
+          >
             <div className="space-y-2">
-              <Label htmlFor="suppress-email">Email</Label>
+              <Label htmlFor="suppress-email">Email address</Label>
               <Input
                 id="suppress-email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="someone@example.com"
+                autoFocus
                 required
               />
             </div>
@@ -235,8 +288,8 @@ export function Suppressions() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? <Spinner /> : null}
+              <Button type="submit" disabled={block.isPending}>
+                {block.isPending ? <Spinner /> : null}
                 Block
               </Button>
             </DialogFooter>
@@ -248,10 +301,10 @@ export function Suppressions() {
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Unblock this address?"
-        description={`${deleteTarget?.email} will be eligible to receive email again.`}
+        description={`${deleteTarget?.email} will start receiving your email again.`}
         confirmLabel="Unblock"
-        loading={deleting}
-        onConfirm={confirmDelete}
+        loading={unblock.isPending}
+        onConfirm={() => deleteTarget && unblock.mutate(deleteTarget)}
       />
     </>
   );

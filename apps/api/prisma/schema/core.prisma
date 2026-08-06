@@ -145,8 +145,40 @@ model User {
   invitesSent         OrganizationInvite[] @relation("InvitesSent")
   smtpGrants          SmtpConnectionGrant[]
   mailDomainGrants    MailDomainGrant[]
+  pushSubscriptions   PushSubscription[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+}
+
+/// A Web Push endpoint registered by one installed client (browser profile or
+/// home-screen PWA) for one user. A person legitimately has several — phone,
+/// laptop, tablet — so this is keyed by endpoint, not by user.
+///
+/// `p256dh` and `auth` are the subscription's own public encryption keys, not
+/// secrets of ours: they let the push service encrypt a payload only that
+/// client can read. They are stored plain because they are useless without the
+/// client's private key, which never leaves the device.
+///
+/// Rows are disposable. A push service returning 404/410 means the client
+/// unsubscribed or was uninstalled, and the sender deletes the row — never
+/// treat delivery failure here as an error worth retrying.
+model PushSubscription {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  endpoint       String       @unique
+  p256dh         String
+  auth           String
+  /// Best-effort label for the device list in settings ("Chrome on macOS").
+  userAgent      String?
+  lastUsedAt     DateTime?
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([organizationId])
 }
 
 // Instance-wide runtime settings (install scope, not per-org). Sparse
@@ -216,6 +248,7 @@ model Organization {
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
+  pushSubscriptions PushSubscription[]
   // Cloud (Phase 7) back-references — defined in cloud.prisma. Relation metadata
   // only; no AGPL obligation attaches to these fields.
   subscription      Subscription?

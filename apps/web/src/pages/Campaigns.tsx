@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
   CalendarClock,
@@ -14,6 +14,8 @@ import {
   Trash2
 } from "lucide-react";
 import { toast } from "sonner";
+import type { ColumnDef } from "@tanstack/react-table";
+import { formatCount } from "../lib/format.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -34,7 +36,6 @@ import {
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
-import { Card } from "../components/ui/card.js";
 import {
   Dialog,
   DialogContent,
@@ -52,22 +53,36 @@ import {
   SelectTrigger,
   SelectValue
 } from "../components/ui/select.js";
-import { Skeleton } from "../components/ui/skeleton.js";
 import { Spinner } from "../components/ui/spinner.js";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "../components/ui/table.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions, type RowAction } from "../components/ui/row-actions.js";
+import { Hint } from "../components/ui/tooltip.js";
 
 const emptyCampaignForm = {
   name: "",
   templateId: "",
   contactListId: ""
 };
+
+/** What each status means, for the badge tooltip. */
+function statusHint(status: string) {
+  switch (status) {
+    case "DRAFT":
+      return "Not sent to anyone yet. Edit it freely.";
+    case "SCHEDULED":
+      return "Waiting for its send time.";
+    case "SENDING":
+      return "Going out right now.";
+    case "PAUSED":
+      return "Stopped part-way. Resume it to carry on.";
+    case "SENT":
+      return "Finished — every email has been handed to the mail server.";
+    case "CANCELLED":
+      return "Stopped for good. It won't send.";
+    default:
+      return status;
+  }
+}
 
 function statusVariant(status: string) {
   if (status === "SENT") return "success" as const;
@@ -108,6 +123,7 @@ function toDatetimeLocal(value: string) {
 }
 
 export function Campaigns() {
+  const navigate = useNavigate();
   const { currentOrganizationId: organizationId } = useSession();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -130,6 +146,153 @@ export function Campaigns() {
     STATUS_FILTERS[0];
   const filteredCampaigns = campaigns.filter((campaign) =>
     activeFilter.match(campaign.status)
+  );
+
+  /**
+   * What you can do to a campaign depends on where it is in its life: a draft
+   * can be edited and sent, a sending one can only be paused, and a sent one is
+   * history. Rather than render seven icon buttons and grey most of them out,
+   * the row shows the two that matter and folds the rest into a menu.
+   */
+  function campaignActions(campaign: Campaign): RowAction[] {
+    const isPausable = ["SCHEDULED", "SENDING", "PAUSED"].includes(
+      campaign.status
+    );
+    return [
+      {
+        label: "See how this campaign performed",
+        icon: BarChart3,
+        primary: true,
+        onSelect: () => navigate(`/campaigns/${campaign.id}/analytics`),
+      },
+      {
+        label: "Send this campaign now",
+        icon: Send,
+        primary: ["DRAFT", "SCHEDULED"].includes(campaign.status),
+        disabled: saving || !["DRAFT", "SCHEDULED"].includes(campaign.status),
+        hidden: ["SENT", "CANCELLED"].includes(campaign.status),
+        onSelect: () => sendNow(campaign),
+      },
+      {
+        label:
+          campaign.status === "PAUSED"
+            ? "Resume this campaign"
+            : "Pause this campaign",
+        icon: campaign.status === "PAUSED" ? Play : Pause,
+        disabled: saving,
+        hidden: !isPausable,
+        onSelect: () => togglePause(campaign),
+      },
+      {
+        label: "Schedule this campaign",
+        icon: CalendarClock,
+        disabled:
+          saving || !["DRAFT", "SCHEDULED", "PAUSED"].includes(campaign.status),
+        onSelect: () => openSchedule(campaign),
+      },
+      {
+        label: "Edit this campaign",
+        icon: Pencil,
+        disabled: saving || campaign.status !== "DRAFT",
+        onSelect: () => openEditCampaign(campaign),
+      },
+      {
+        label: "Make a copy",
+        icon: Copy,
+        disabled: saving,
+        onSelect: () => setDuplicateTarget(campaign),
+      },
+      {
+        label: "Delete this campaign",
+        icon: Trash2,
+        destructive: true,
+        disabled: saving || !["DRAFT", "CANCELLED"].includes(campaign.status),
+        onSelect: () => setDeleteTarget(campaign),
+      },
+    ];
+  }
+
+  const campaignColumns = useMemo<ColumnDef<Campaign, unknown>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Campaign",
+        meta: { title: "Campaign" },
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium">{row.original.name}</div>
+            <div className="truncate text-sm text-muted-foreground">
+              {row.original.template?.subject ?? "No template"}
+            </div>
+            {row.original.cronExpression ? (
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Repeat className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {describeCron(row.original.cronExpression) ??
+                    row.original.cronExpression}
+                  {row.original.nextRunAt && row.original.status !== "PAUSED"
+                    ? ` · next ${new Date(row.original.nextRunAt).toLocaleString()}`
+                    : ""}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "audience",
+        accessorFn: (row) => row.contactList?.name ?? "",
+        header: "Audience",
+        meta: { title: "Audience", hideBelowMd: true },
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.original.contactList?.name ?? "No list"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        meta: { title: "Status" },
+        cell: ({ row }) => (
+          <Hint label={statusHint(row.original.status)}>
+            <Badge
+              variant={statusVariant(row.original.status)}
+              className="cursor-help"
+            >
+              {row.original.status}
+            </Badge>
+          </Hint>
+        ),
+      },
+      {
+        id: "queued",
+        accessorFn: (row) => row._count?.emailJobs ?? 0,
+        header: "Emails",
+        meta: { title: "Emails", align: "right", hideBelowLg: true },
+        cell: ({ getValue }) => (
+          <Hint label="How many individual emails this campaign has created">
+            <span className="cursor-help tabular-nums">
+              {formatCount(Number(getValue()))}
+            </span>
+          </Hint>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.name}
+            actions={campaignActions(row.original)}
+          />
+        ),
+      },
+    ],
+    // campaignActions reads the latest `saving` on every render of the cell.
+    [saving]
   );
 
   async function load() {
@@ -370,191 +533,84 @@ export function Campaigns() {
         }
       />
 
-      <section className="p-5 sm:p-6">
-        <Card className="overflow-hidden">
-          {loading ? (
-            <div className="space-y-3 p-5">
-              {[0, 1, 2].map((index) => (
-                <Skeleton key={index} className="h-10 w-full" />
-              ))}
+      <section className="p-4 sm:p-6">
+        <DataGrid
+          label="Campaigns"
+          data={filteredCampaigns}
+          columns={campaignColumns}
+          getRowId={(row) => row.id}
+          loading={loading}
+          searchPlaceholder="Search campaigns…"
+          toolbar={
+            <div className="flex flex-wrap items-center gap-1">
+              {STATUS_FILTERS.map((filter) => {
+                const count = campaigns.filter((campaign) =>
+                  filter.match(campaign.status)
+                ).length;
+                return (
+                  <Button
+                    key={filter.value}
+                    type="button"
+                    size="sm"
+                    variant={
+                      statusFilter === filter.value ? "secondary" : "ghost"
+                    }
+                    onClick={() => setStatusFilter(filter.value)}
+                  >
+                    {filter.label}
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      {count}
+                    </span>
+                  </Button>
+                );
+              })}
             </div>
-          ) : campaigns.length === 0 ? (
+          }
+          empty={
             <EmptyState
               icon={Megaphone}
-              title="No campaigns yet"
-              description="Create a contact list and template, then draft your first campaign."
+              title={
+                campaigns.length === 0
+                  ? "No campaigns yet"
+                  : `No ${activeFilter.label.toLowerCase()} campaigns`
+              }
+              description={
+                campaigns.length === 0
+                  ? "A campaign sends one email to a whole list. Make a list and a template first, then draft one here."
+                  : "Pick a different status above to see the rest."
+              }
             />
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-1.5 border-b p-3">
-                {STATUS_FILTERS.map((filter) => {
-                  const count = campaigns.filter((campaign) =>
-                    filter.match(campaign.status)
-                  ).length;
-                  return (
-                    <Button
-                      key={filter.value}
-                      type="button"
-                      size="sm"
-                      variant={
-                        statusFilter === filter.value ? "secondary" : "ghost"
-                      }
-                      onClick={() => setStatusFilter(filter.value)}
-                    >
-                      {filter.label}
-                      <span className="ml-1.5 text-xs text-muted-foreground">
-                        {count}
-                      </span>
-                    </Button>
-                  );
-                })}
+          }
+          noResults={
+            <EmptyState
+              icon={Megaphone}
+              title="No matching campaigns"
+              description="Try a different search."
+            />
+          }
+          renderMobileRow={(campaign) => (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{campaign.name}</div>
+                <div className="truncate text-sm text-muted-foreground">
+                  {campaign.template?.subject ?? "No template"}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Badge variant={statusVariant(campaign.status)}>
+                    {campaign.status}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {campaign.contactList?.name ?? "No list"}
+                  </span>
+                </div>
               </div>
-              <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Campaign</TableHead>
-                  <TableHead>Audience</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Queued</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCampaigns.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="py-8 text-center text-sm text-muted-foreground"
-                    >
-                      No {activeFilter.label.toLowerCase()} campaigns.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredCampaigns.map((campaign) => (
-                  <TableRow key={campaign.id}>
-                    <TableCell>
-                      <div className="font-medium">{campaign.name}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {campaign.template?.subject ?? "No template"}
-                      </div>
-                      {campaign.cronExpression ? (
-                        <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Repeat className="h-3 w-3" />
-                          <span>
-                            {describeCron(campaign.cronExpression) ??
-                              campaign.cronExpression}
-                            {campaign.nextRunAt &&
-                            campaign.status !== "PAUSED"
-                              ? ` · next ${new Date(campaign.nextRunAt).toLocaleString()}`
-                              : ""}
-                          </span>
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {campaign.contactList?.name ?? "No list"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(campaign.status)}>
-                        {campaign.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{campaign._count?.emailJobs ?? 0}</TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          asChild
-                          variant="ghost"
-                          size="icon"
-                          aria-label="View analytics"
-                        >
-                          <Link to={`/campaigns/${campaign.id}/analytics`}>
-                            <BarChart3 className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          disabled={saving || campaign.status !== "DRAFT"}
-                          onClick={() => openEditCampaign(campaign)}
-                          aria-label="Edit campaign"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          disabled={saving}
-                          onClick={() => setDuplicateTarget(campaign)}
-                          aria-label="Duplicate campaign"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          disabled={saving || !["DRAFT", "SCHEDULED"].includes(campaign.status)}
-                          onClick={() => sendNow(campaign)}
-                          aria-label="Send campaign now"
-                        >
-                          <Send className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          disabled={saving || !["DRAFT", "SCHEDULED", "PAUSED"].includes(campaign.status)}
-                          onClick={() => openSchedule(campaign)}
-                          aria-label="Schedule campaign"
-                        >
-                          <CalendarClock className="h-4 w-4" />
-                        </Button>
-                        {["SCHEDULED", "SENDING", "PAUSED"].includes(
-                          campaign.status
-                        ) ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            disabled={saving}
-                            onClick={() => togglePause(campaign)}
-                            aria-label={
-                              campaign.status === "PAUSED"
-                                ? "Resume campaign"
-                                : "Pause campaign"
-                            }
-                          >
-                            {campaign.status === "PAUSED" ? (
-                              <Play className="h-4 w-4" />
-                            ) : (
-                              <Pause className="h-4 w-4" />
-                            )}
-                          </Button>
-                        ) : null}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="text-muted-foreground hover:text-destructive"
-                          disabled={saving || !["DRAFT", "CANCELLED"].includes(campaign.status)}
-                          onClick={() => setDeleteTarget(campaign)}
-                          aria-label="Delete campaign"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-            </>
+              <RowActions
+                rowLabel={campaign.name}
+                actions={campaignActions(campaign)}
+              />
+            </div>
           )}
-        </Card>
+        />
       </section>
 
       <Dialog open={campaignDialogOpen} onOpenChange={closeCampaignDialog}>

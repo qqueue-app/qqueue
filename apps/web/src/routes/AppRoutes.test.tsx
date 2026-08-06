@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -46,50 +46,46 @@ vi.mock("../pages/QueueOperations.js", () => ({
 import { AppRoutes } from "./AppRoutes.js";
 
 describe("AppRoutes", () => {
-  it("renders the dashboard within the layout at the index route", async () => {
-    render(
+  // Signing in lands on the inbox now; the stats page moved to /insights.
+  it("renders the inbox within the layout at the index route", async () => { renderWithProviders(
       <MemoryRouter initialEntries={["/"]}>
         <AppRoutes />
       </MemoryRouter>
-    );
+    , { withRouter: false });
     expect(await screen.findByTestId("layout")).toBeInTheDocument();
-    expect(await screen.findByText("Dashboard page")).toBeInTheDocument();
+    expect(await screen.findByText("Inbox page")).toBeInTheDocument();
   });
 
-  it("renders the login route outside the layout", async () => {
-    render(
+  it("renders the login route outside the layout", async () => { renderWithProviders(
       <MemoryRouter initialEntries={["/login"]}>
         <AppRoutes />
       </MemoryRouter>
-    );
+    , { withRouter: false });
     expect(await screen.findByText("Login login")).toBeInTheDocument();
   });
 
-  it("renders the register route", async () => {
-    render(
+  it("renders the register route", async () => { renderWithProviders(
       <MemoryRouter initialEntries={["/register"]}>
         <AppRoutes />
       </MemoryRouter>
-    );
+    , { withRouter: false });
     expect(await screen.findByText("Login register")).toBeInTheDocument();
   });
 
-  it("renders password reset routes outside the layout", async () => {
-    render(
+  it("renders password reset routes outside the layout", async () => { renderWithProviders(
       <MemoryRouter initialEntries={["/forgot-password"]}>
         <AppRoutes />
       </MemoryRouter>
-    );
+    , { withRouter: false });
     expect(await screen.findByText("Login forgot")).toBeInTheDocument();
     expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
   });
 
-  it("renders public legal routes outside the dashboard layout", async () => {
-    render(
+  it("renders public legal routes outside the dashboard layout", async () => { renderWithProviders(
       <MemoryRouter initialEntries={["/terms"]}>
         <AppRoutes />
       </MemoryRouter>
-    );
+    , { withRouter: false });
     expect(await screen.findByText("Legal terms")).toBeInTheDocument();
     expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
   });

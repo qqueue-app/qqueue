@@ -48,6 +48,45 @@ The remaining open items are primarily commercial/cloud features, multi-user
 organization management, and qualified legal review — none of which block an
 early self-hosted beta.
 
+## Dashboard rebuild (2026-08-07)
+
+The dashboard was rebuilt to read as an **email client** rather than an admin
+console, for a team who use Gmail, Outlook, or Zoho Mail and have no interest in
+learning a new vocabulary. What changed:
+
+- **The app opens on the Inbox.** The stats page still exists at `/insights`
+  (`/dashboard` redirects there) but you go to it deliberately.
+- **It installs as an app.** A web manifest and a Workbox service worker
+  (`apps/web/src/sw.ts`, `injectManifest`) give an installable, offline-opening
+  PWA with a home-screen icon and shortcuts.
+- **Web Push for new mail.** `PushSubscription` + `modules/push` on the API,
+  `lib/push.ts` in the worker, fired from inbox sync on a genuinely new,
+  non-DSN, unseen message. Off unless VAPID keys are configured. Deep-links
+  through `/inbox?message=<id>`.
+- **Mobile-first shell.** Desktop keeps a sidebar; phones get a bottom tab bar,
+  a More sheet, and safe-area insets. `DashboardLayout` and the mobile bar read
+  one nav config (`layouts/nav-config.ts`) so they can't drift.
+- **Every icon action has a tooltip, structurally.** `IconButton` requires a
+  `label` prop and renders it as both the tooltip and the `aria-label`, so an
+  unlabelled icon-only control cannot be written.
+- **One data grid everywhere.** `components/ui/data-grid.tsx` (TanStack Table)
+  gives sorting, search, column visibility, selection with bulk actions, and
+  pagination — plus a card layout on phones, rendered as a real branch rather
+  than a CSS-hidden duplicate. Adopted by Contacts, Lists, Smart lists,
+  Templates (list view), Campaigns, Drafts, Outbox, Blocked addresses, Sending
+  accounts, Background jobs, and Mailboxes.
+- **Mailboxes rebuilt** around three questions — what mailboxes exist, who can
+  send as them, which domains each admin may use — with the access question
+  answered by a people × mailboxes permission grid (`PermissionMatrix`) instead
+  of a per-mailbox grant form.
+- **Server state moved to TanStack Query** (`lib/query-client.ts`,
+  `lib/use-api.ts`). Query keys carry the organization id, so switching orgs
+  swaps caches; a first load that fails toasts once, and background refetch
+  failures stay quiet.
+
+Compose and Campaigns were deliberately **not** merged — see
+`docs/DECISIONS.md`.
+
 ## Product Direction
 
 QQueue is positioned as an **email operations platform** (not a Gmail/Outlook/
@@ -590,7 +629,37 @@ a claim about the suite as it stands today. For the current state, run the gates
 yourself (`pnpm typecheck`, `lint`, `build`, `test`, plus `test:smoke:docker`
 for send-pipeline or migration changes).
 
-### Current suite (2026-08-06)
+### Dashboard rebuild (2026-08-07)
+
+- `pnpm test` — **156 test files, 1,828 tests**, all passing: api 76/889,
+  web 52/574, worker 13/133, shared 1/118, email-engine 6/62, cloud 5/26,
+  crypto 1/11, storage 1/8, sdk 1/7.
+  New coverage: the API `pushService` (half-configured VAPID pairs, endpoint
+  upsert and ownership reassignment, user-scoped unsubscribe) and the worker's
+  push sender (disabled without keys, per-org and per-user delivery, 410 →
+  delete the dead subscription, 5xx → keep it).
+- `pnpm typecheck`, `pnpm lint`, `pnpm build` — green across every task. The
+  web build emits the service worker and precaches 82 entries.
+- `pnpm test:smoke:docker` — passing with the new migration applied
+  (register → SMTP → transactional send → worker reached `SENT`).
+- `pnpm cloud:boundary` and `pnpm license:audit` — passing. The audit is clean
+  with the added dependencies (TanStack Query/Table, Radix tooltip/popover/tabs,
+  `vite-plugin-pwa` + Workbox, `web-push`).
+- Migration `20260807000000_add_push_subscriptions` verified against a throwaway
+  PostgreSQL 16: all migrations apply in order (additive `PushSubscription`
+  table only) and `prisma migrate diff` reports no drift.
+
+Three bugs were found and fixed while rebuilding, each of which would have
+shipped:
+
+- `useQueries` returns a new array each render, so the Mailboxes memo chain
+  never stabilised and the grid re-rendered in a loop. Fixed with `combine`.
+- The new-mailbox dialog mounts before the domain list loads, so its domain
+  never initialised and the submit button stayed disabled.
+- With exactly one mailbox there was no filter to select it with, which made
+  its status and Disconnect control unreachable.
+
+### Previous suite (2026-08-06)
 
 - `pnpm test` — **154 test files, 1,815 tests**, all passing:
   api 75/881, web 52/575, worker 12/127, shared 1/118, email-engine 6/62,

@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../test/render.js";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
@@ -43,7 +49,7 @@ const analytics = {
 };
 
 function renderAnalytics() {
-  return render(
+  return renderWithProviders(
     <MemoryRouter initialEntries={["/campaigns/cmp1/analytics"]}>
       <Routes>
         <Route
@@ -52,7 +58,7 @@ function renderAnalytics() {
         />
       </Routes>
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 describe("CampaignAnalytics", () => {

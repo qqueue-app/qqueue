@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -25,8 +25,7 @@ function ControlledBodyEditor({
 }
 
 describe("BodyEditor", () => {
-  it("starts in rich text with the editor toolbar available", async () => {
-    render(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
+  it("starts in rich text with the editor toolbar available", async () => { renderWithProviders(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
 
     expect(await screen.findByLabelText("Bold")).toBeInTheDocument();
     expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument();
@@ -34,7 +33,7 @@ describe("BodyEditor", () => {
 
   it("swaps the editor for a source textarea in HTML mode", async () => {
     const user = userEvent.setup();
-    render(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
+    renderWithProviders(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
     await screen.findByLabelText("Bold");
 
     await user.click(screen.getByRole("button", { name: "HTML" }));
@@ -49,7 +48,7 @@ describe("BodyEditor", () => {
   it("passes hand-written HTML through untouched", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<ControlledBodyEditor onChange={onChange} />);
+    renderWithProviders(<ControlledBodyEditor onChange={onChange} />);
     await screen.findByLabelText("Bold");
     await user.click(screen.getByRole("button", { name: "HTML" }));
 
@@ -64,8 +63,7 @@ describe("BodyEditor", () => {
   // document locked rich text off entirely; a hand-written fragment defaulted
   // to source and warned before letting you leave. Neither is destructive any
   // more, so neither is refused.
-  it("opens a complete HTML document in rich text", async () => {
-    render(
+  it("opens a complete HTML document in rich text", async () => { renderWithProviders(
       <BodyEditor
         value="<!doctype html><html><head><style>.x{}</style></head><body><p>Pasted</p></body></html>"
         onChange={() => {}}
@@ -79,8 +77,7 @@ describe("BodyEditor", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens a hand-written HTML fragment in rich text", async () => {
-    render(
+  it("opens a hand-written HTML fragment in rich text", async () => { renderWithProviders(
       <BodyEditor
         value={'<div style="padding:24px"><p>Hi</p></div>'}
         onChange={() => {}}
@@ -93,7 +90,7 @@ describe("BodyEditor", () => {
 
   it("switches to rich text without warning about what it would lose", async () => {
     const user = userEvent.setup();
-    render(
+    renderWithProviders(
       <BodyEditor value="<style>.x{}</style><p>Hi</p>" onChange={() => {}} />
     );
     await screen.findByLabelText("Bold");
@@ -113,7 +110,7 @@ describe("BodyEditor", () => {
   // read as the save having silently failed.
   it("keeps markup the editor cannot format, and says so", async () => {
     const user = userEvent.setup();
-    render(
+    renderWithProviders(
       <ControlledBodyEditor initial="<style>.x{color:red}</style><p>Hi</p>" />
     );
 
@@ -128,8 +125,7 @@ describe("BodyEditor", () => {
     );
   });
 
-  it("reports nothing kept as HTML when everything is editable", async () => {
-    render(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
+  it("reports nothing kept as HTML when everything is editable", async () => { renderWithProviders(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
     await screen.findByLabelText("Bold");
 
     expect(screen.queryByText(/kept as HTML/)).not.toBeInTheDocument();
@@ -161,7 +157,7 @@ describe("BodyEditor", () => {
     for (const [description, html] of documents) {
       it(`reports no change for ${description}`, async () => {
         const onChange = vi.fn();
-        render(<BodyEditor value={html} onChange={onChange} />);
+        renderWithProviders(<BodyEditor value={html} onChange={onChange} />);
         await screen.findByLabelText("Bold");
 
         expect(onChange).not.toHaveBeenCalled();
@@ -172,7 +168,7 @@ describe("BodyEditor", () => {
     it("reports the author's first real edit", async () => {
       const user = userEvent.setup();
       const onChange = vi.fn();
-      render(
+      renderWithProviders(
         <ControlledBodyEditor
           initial='<div style="padding:24px"><table cellpadding="0" cellspacing="0" width="100%"><tbody><tr><td align="center"><p>Hello</p></td></tr></tbody></table></div>'
           onChange={onChange}
@@ -198,7 +194,7 @@ describe("BodyEditor", () => {
   // Drafts and templates arrive after mount, so the document has to be split
   // again when one lands rather than only once at mount.
   it("takes up content that arrives after mount", async () => {
-    const { rerender } = render(
+    const { rerender } = renderWithProviders(
       <BodyEditor value="<p>Hi</p>" onChange={() => {}} />
     );
     await screen.findByLabelText("Bold");

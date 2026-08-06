@@ -53,9 +53,25 @@ enforces this; see `docs/CLOUD_BOUNDARY.md`.
   `core.prisma` (AGPL, all product models) and `cloud.prisma` (proprietary).
   - **Naming:** the UI says "**sending accounts**", the code says
     `smtp-connections` / `SMTPConnection`. Don't rename the backend to match.
-- `apps/web` — Vite + React + Tailwind dashboard. Routes `src/routes/AppRoutes.tsx`;
-  pages `src/pages/*`; Tiptap editor primitives in `src/components/editor/*`
-  (which has its own CLAUDE.md — read it before touching the editor).
+- `apps/web` — Vite + React + Tailwind dashboard, built to read as an **email
+  client** for people who use Gmail/Outlook/Zoho, not as an admin console.
+  Routes `src/routes/AppRoutes.tsx` (the index route is the **Inbox**; stats
+  live at `/insights`); pages `src/pages/*`; Tiptap editor primitives in
+  `src/components/editor/*` (which has its own CLAUDE.md — read it before
+  touching the editor). Installs as a PWA: manifest in `vite.config.ts`,
+  service worker `src/sw.ts`.
+  - **Server state is TanStack Query.** Use `useOrgQuery` / `useApiMutation`
+    (`src/lib/use-api.ts`) and the key factory `qk` (`src/lib/query-client.ts`) —
+    don't hand-roll `useState` + `useEffect` fetching. Keys carry the org id.
+  - **Lists use `<DataGrid>`** (`components/ui/data-grid.tsx`), not a bare
+    `<Table>`. Supply `renderMobileRow` so phones get cards.
+  - **Icon-only actions use `<IconButton>`**, whose `label` is required and
+    becomes both the tooltip and the `aria-label`. Wrap any other control that
+    needs a tooltip in `<Hint>`. Never a bare icon `<Button size="icon">`.
+  - Row actions go through `<RowActions>`: one or two `primary` inline, the
+    rest in the overflow menu.
+  - Nav lives in `layouts/nav-config.ts` — the desktop sidebar and the mobile
+    bottom bar both read it, so add destinations there only.
 - `apps/worker` — BullMQ workers (`src/workers/*`); startup recovery re-enqueues
   queued/scheduled work.
 - `apps/cloud` — **proprietary** managed-cloud scaffold; no production behavior yet.
@@ -119,6 +135,13 @@ worker) plus these non-obvious ones:
   removes access someone already had.
 - Provider-specific sending goes behind the `EmailProvider` interface;
   Mailcow-compatible SMTP uses the generic SMTP path.
+- **Push notifications are optional and best-effort.** No VAPID pair configured
+  = push is off and the dashboard hides the control; never let a push failure
+  fail a sync or a send. Pushes fire from inbox sync only for a genuinely new,
+  non-DSN, unseen message, and carry sender + subject + link only — an email
+  body must not travel through a third-party push service. A 404/410 from a
+  push service means delete that subscription, not retry it. The API and worker
+  must read the same key pair.
 
 ## Verification
 

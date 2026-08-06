@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, renderWithProviders, screen, waitFor } from "../test/render.js";
 import { describe, expect, it } from "vitest";
 import { EmailPreviewFrame } from "./EmailPreviewFrame.js";
 
@@ -15,16 +15,14 @@ function stubDocumentHeight(frame: HTMLIFrameElement, height: number) {
 }
 
 describe("EmailPreviewFrame", () => {
-  it("sandboxes the frame without allowing scripts", () => {
-    render(<EmailPreviewFrame html="<p>Hi</p>" />);
+  it("sandboxes the frame without allowing scripts", () => { renderWithProviders(<EmailPreviewFrame html="<p>Hi</p>" />);
     const frame = screen.getByTitle("Email preview");
     // allow-same-origin lets us measure height; allow-scripts must never appear.
     expect(frame).toHaveAttribute("sandbox", "allow-same-origin");
     expect(frame.getAttribute("sandbox")).not.toContain("allow-scripts");
   });
 
-  it("passes the html through srcdoc and applies overrides", () => {
-    render(
+  it("passes the html through srcdoc and applies overrides", () => { renderWithProviders(
       <EmailPreviewFrame
         html="<p>Hello</p>"
         title="Custom title"
@@ -38,13 +36,11 @@ describe("EmailPreviewFrame", () => {
     expect(frame).toHaveClass("my-frame");
   });
 
-  it("starts at the default height", () => {
-    render(<EmailPreviewFrame html="<p>Hi</p>" />);
+  it("starts at the default height", () => { renderWithProviders(<EmailPreviewFrame html="<p>Hi</p>" />);
     expect(screen.getByTitle("Email preview")).toHaveStyle({ height: "320px" });
   });
 
-  it("resizes to the document height on load", async () => {
-    render(<EmailPreviewFrame html="<p>Hi</p>" />);
+  it("resizes to the document height on load", async () => { renderWithProviders(<EmailPreviewFrame html="<p>Hi</p>" />);
     const frame = screen.getByTitle("Email preview") as HTMLIFrameElement;
     stubDocumentHeight(frame, 540);
     fireEvent.load(frame);
@@ -52,7 +48,7 @@ describe("EmailPreviewFrame", () => {
   });
 
   it("re-measures after the html changes without a load event", async () => {
-    const { rerender } = render(<EmailPreviewFrame html="<p>Short</p>" />);
+    const { rerender } = renderWithProviders(<EmailPreviewFrame html="<p>Short</p>" />);
     const frame = screen.getByTitle("Email preview") as HTMLIFrameElement;
     stubDocumentHeight(frame, 900);
     rerender(<EmailPreviewFrame html="<p>Much longer</p>" />);
@@ -61,8 +57,7 @@ describe("EmailPreviewFrame", () => {
     await waitFor(() => expect(frame).toHaveStyle({ height: "900px" }));
   });
 
-  it("keeps the current height when the document measures zero", async () => {
-    render(<EmailPreviewFrame html="" />);
+  it("keeps the current height when the document measures zero", async () => { renderWithProviders(<EmailPreviewFrame html="" />);
     const frame = screen.getByTitle("Email preview") as HTMLIFrameElement;
     stubDocumentHeight(frame, 0);
     fireEvent.load(frame);

@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -10,7 +10,7 @@ import {
 function renderForm(
   props: Partial<ComponentProps<typeof SMTPConnectionForm>> = {}
 ) {
-  return render(
+  return renderWithProviders(
     <SMTPConnectionForm
       footer={<button type="submit">Save</button>}
       onSubmit={vi.fn()}

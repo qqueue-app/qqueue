@@ -141,11 +141,16 @@ export function AppRoutes() {
         <Route path="/licensing" element={<LegalPage kind="licensing" />} />
         <Route path="/trademark" element={<LegalPage kind="trademark" />} />
         <Route element={<DashboardLayout />}>
-          <Route index element={<Dashboard />} />
+          {/* Signing in lands on mail, the way every email client does. The
+              stats page still exists, but you go to it deliberately. */}
+          <Route index element={<Inbox />} />
+          <Route path="/inbox" element={<Inbox />} />
+          <Route path="/insights" element={<Dashboard />} />
+          {/* Bookmarks and old links to the stats-first home. */}
+          <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="/email-studio" element={<EmailStudio />} />
           <Route path="/drafts" element={<Drafts />} />
           <Route path="/outbox" element={<Outbox />} />
-          <Route path="/inbox" element={<Inbox />} />
           {/* The standalone Send Email page was merged into Email Studio. */}
           <Route
             path="/send-email"

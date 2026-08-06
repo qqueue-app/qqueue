@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { Pencil, Plus, PlugZap, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
@@ -7,70 +8,120 @@ import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
   SMTPConnectionForm,
   emptySMTPConnectionForm,
-  type SMTPConnectionFormValues
+  type SMTPConnectionFormValues,
 } from "../components/SMTPConnectionForm.js";
 import { api, type SMTPConnection } from "../lib/api.js";
+import { qk } from "../lib/query-client.js";
+import { errorMessage, useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
-import { Button } from "../components/ui/button.js";
 import { Badge } from "../components/ui/badge.js";
+import { Button } from "../components/ui/button.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions } from "../components/ui/row-actions.js";
 import { Spinner } from "../components/ui/spinner.js";
-import { Skeleton } from "../components/ui/skeleton.js";
-import { Card, CardContent } from "../components/ui/card.js";
+import { Hint } from "../components/ui/tooltip.js";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "../components/ui/dialog.js";
 
 export function SMTPConnections() {
   const { currentOrganizationId: organizationId, currentOrganization } =
     useSession();
-  // Writes are OWNER/ADMIN on the API (Phase 3); hide the controls members
-  // can't use. The server remains the enforcement point.
+  // Writes are OWNER/ADMIN on the API; hide the controls members can't use.
+  // The server remains the enforcement point.
   const canManage =
     currentOrganization?.role === "OWNER" ||
     currentOrganization?.role === "ADMIN";
-  const [connections, setConnections] = useState<SMTPConnection[]>([]);
-  const [loading, setLoading] = useState(true);
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SMTPConnection | null>(null);
-  const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SMTPConnection | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
 
-  async function load() {
-    if (!organizationId) {
-      setLoading(false);
-      return;
+  const connectionsQuery = useOrgQuery(
+    organizationId,
+    qk.smtpConnections(organizationId ?? ""),
+    (id) => api.listSMTPConnections(id)
+  );
+  const connections = useMemo(
+    () => connectionsQuery.data ?? [],
+    [connectionsQuery.data]
+  );
+
+  const save = useApiMutation(
+    (form: SMTPConnectionFormValues) => {
+      if (editing) {
+        // Partial update — only send credentials if they were re-entered, so
+        // saving a name change doesn't wipe the stored password.
+        const payload: Record<string, unknown> = {
+          organizationId,
+          name: form.name,
+          host: form.host,
+          port: Number(form.port),
+          secure: form.secure,
+          fromEmail: form.fromEmail,
+          fromName: form.fromName || undefined,
+          isDefault: form.isDefault,
+        };
+        if (form.username) payload.username = form.username;
+        if (form.password) payload.password = form.password;
+        return api.updateSMTPConnection(editing.id, payload);
+      }
+      return api.createSMTPConnection({
+        organizationId,
+        name: form.name,
+        host: form.host,
+        port: Number(form.port),
+        secure: form.secure,
+        username: form.username,
+        password: form.password,
+        fromEmail: form.fromEmail,
+        fromName: form.fromName || undefined,
+        isDefault: form.isDefault,
+      });
+    },
+    {
+      successMessage: "Checked the credentials and saved the account.",
+      errorMessage: "Couldn't save that sending account.",
+      invalidates: [qk.smtpConnections(organizationId ?? "")],
+      onSuccess: () => setDialogOpen(false),
     }
-    setLoading(true);
+  );
+
+  const remove = useApiMutation(
+    (connection: SMTPConnection) => api.deleteSMTPConnection(connection.id),
+    {
+      successMessage: "Sending account deleted.",
+      errorMessage: "Couldn't delete that account.",
+      invalidates: [qk.smtpConnections(organizationId ?? "")],
+      onSuccess: () => setDeleteTarget(null),
+    }
+  );
+
+  async function testConnection(connection: SMTPConnection) {
+    setTestingId(connection.id);
+    const toastId = toast.loading(`Testing ${connection.name}…`);
     try {
-      setConnections(await api.listSMTPConnections(organizationId));
+      const result = await api.verifySMTPConnection(connection.id);
+      if (result.verified) {
+        toast.success(`${connection.name} works.`, { id: toastId });
+      } else {
+        toast.error(result.message ?? "Couldn't verify that connection.", {
+          id: toastId,
+        });
+      }
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to load SMTP connections"
-      );
+      toast.error(errorMessage(error, "Couldn't test that connection."), {
+        id: toastId,
+      });
     } finally {
-      setLoading(false);
+      setTestingId(null);
     }
-  }
-
-  useEffect(() => {
-    void load();
-  }, [organizationId]);
-
-  function openCreate() {
-    setEditing(null);
-    setDialogOpen(true);
-  }
-
-  function openEdit(connection: SMTPConnection) {
-    setEditing(connection);
-    setDialogOpen(true);
   }
 
   const initialForm: SMTPConnectionFormValues = editing
@@ -83,204 +134,226 @@ export function SMTPConnections() {
         password: "",
         fromEmail: editing.fromEmail,
         fromName: editing.fromName ?? "",
-        isDefault: editing.isDefault
+        isDefault: editing.isDefault,
       }
     : {
         ...emptySMTPConnectionForm,
         name: "Default SMTP",
-        isDefault: connections.length === 0
+        isDefault: connections.length === 0,
       };
 
-  async function submit(form: SMTPConnectionFormValues) {
-    if (!organizationId) {
-      toast.error("Select an organization in Settings first.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      if (editing) {
-        // Partial update — only send credentials if the user re-entered them.
-        const payload: Record<string, unknown> = {
-          organizationId,
-          name: form.name,
-          host: form.host,
-          port: Number(form.port),
-          secure: form.secure,
-          fromEmail: form.fromEmail,
-          fromName: form.fromName || undefined,
-          isDefault: form.isDefault
-        };
-        if (form.username) payload.username = form.username;
-        if (form.password) payload.password = form.password;
-        await api.updateSMTPConnection(editing.id, payload);
-        toast.success("Sending account verified and updated.");
-      } else {
-        await api.createSMTPConnection({
-          organizationId,
-          name: form.name,
-          host: form.host,
-          port: Number(form.port),
-          secure: form.secure,
-          username: form.username,
-          password: form.password,
-          fromEmail: form.fromEmail,
-          fromName: form.fromName || undefined,
-          isDefault: form.isDefault
-        });
-        toast.success("Sending account verified and saved.");
-      }
-      setDialogOpen(false);
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to save SMTP.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await api.deleteSMTPConnection(deleteTarget.id);
-      toast.success("Sending account deleted.");
-      setDeleteTarget(null);
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to delete.");
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  async function testConnection(connection: SMTPConnection) {
-    setTestingId(connection.id);
-    try {
-      const result = await api.verifySMTPConnection(connection.id);
-      if (result.verified) {
-        toast.success(`${connection.name} verified — credentials work.`);
-      } else {
-        toast.error(result.message ?? "The connection could not be verified.");
-      }
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to test the connection."
-      );
-    } finally {
-      setTestingId(null);
-    }
-  }
+  const columns = useMemo<ColumnDef<SMTPConnection, unknown>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Account",
+        meta: { title: "Account" },
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate font-medium">{row.original.name}</span>
+              {row.original.isDefault ? (
+                <Hint label="Mail sends from this account unless another is chosen">
+                  <Badge className="cursor-help">Default</Badge>
+                </Hint>
+              ) : null}
+            </div>
+            <div className="truncate text-xs text-muted-foreground">
+              {row.original.fromEmail}
+            </div>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "fromEmail",
+        header: "Sends as",
+        meta: { title: "Sends as", hideBelowLg: true },
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.original.fromName
+              ? `${row.original.fromName} <${row.original.fromEmail}>`
+              : row.original.fromEmail}
+          </span>
+        ),
+      },
+      {
+        id: "server",
+        accessorFn: (row) => `${row.host}:${row.port}`,
+        header: "Server",
+        meta: { title: "Server", hideBelowMd: true },
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs text-muted-foreground">
+            {String(getValue())}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "secure",
+        header: "Encryption",
+        meta: { title: "Encryption", hideBelowLg: true },
+        cell: ({ getValue }) => (
+          <Hint
+            label={
+              getValue()
+                ? "Encrypted from the moment it connects (implicit TLS, usually port 465)"
+                : "Starts unencrypted, then upgrades (STARTTLS, usually port 587)"
+            }
+          >
+            <Badge variant="secondary" className="cursor-help">
+              {getValue() ? "TLS" : "STARTTLS"}
+            </Badge>
+          </Hint>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.name}
+            actions={[
+              {
+                label: "Check this account still works",
+                icon: PlugZap,
+                primary: true,
+                disabled: testingId !== null,
+                onSelect: () => void testConnection(row.original),
+              },
+              {
+                label: "Edit this account",
+                icon: Pencil,
+                hidden: !canManage,
+                onSelect: () => {
+                  setEditing(row.original);
+                  setDialogOpen(true);
+                },
+              },
+              {
+                label: "Delete this account",
+                icon: Trash2,
+                destructive: true,
+                hidden: !canManage,
+                onSelect: () => setDeleteTarget(row.original),
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    [canManage, testingId]
+  );
 
   return (
     <>
       <PageHeader
         title="Sending accounts"
-        description="The mailboxes QQueue sends from. Connect one to start sending email (works with Mailcow and any standard SMTP server)."
+        description="The mailboxes QQueue sends from. Connect one to start sending — it works with Mailcow and any standard SMTP server."
         actions={
           canManage ? (
-            <Button onClick={openCreate} disabled={!organizationId}>
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+              disabled={!organizationId}
+            >
               <Plus className="h-4 w-4" />
-              New connection
+              New account
             </Button>
           ) : undefined
         }
       />
 
-      <section className="space-y-3 p-6">
-        {loading ? (
-          [0, 1].map((index) => (
-            <Card key={index}>
-              <CardContent className="p-5">
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="mt-2 h-4 w-64" />
-              </CardContent>
-            </Card>
-          ))
-        ) : connections.length === 0 ? (
-          <Card>
+      <section className="p-4 sm:p-6">
+        <DataGrid
+          label="Sending accounts"
+          data={connections}
+          columns={columns}
+          getRowId={(row) => row.id}
+          loading={connectionsQuery.isPending}
+          searchPlaceholder="Search sending accounts…"
+          empty={
             <EmptyState
               icon={Server}
               title="No sending accounts yet"
               description={
                 canManage
-                  ? "Add your first account to start sending email."
+                  ? "Add your first account and QQueue can start sending email."
                   : "An owner or admin needs to add one before this organization can send email."
               }
               action={
                 canManage ? (
                   <Button
-                    onClick={openCreate}
+                    onClick={() => {
+                      setEditing(null);
+                      setDialogOpen(true);
+                    }}
                     disabled={!organizationId}
                     variant="outline"
                   >
                     <Plus className="h-4 w-4" />
-                    New connection
+                    New account
                   </Button>
                 ) : undefined
               }
             />
-          </Card>
-        ) : (
-          connections.map((connection) => (
-            <Card key={connection.id}>
-              <CardContent className="flex flex-wrap items-start justify-between gap-3 p-5">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-semibold">{connection.name}</h2>
-                    {connection.isDefault ? <Badge>Default</Badge> : null}
-                    <Badge variant="secondary">
-                      {connection.secure ? "TLS" : "STARTTLS"}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {connection.host}:{connection.port} · from{" "}
-                    {connection.fromEmail}
-                  </p>
+          }
+          noResults={
+            <EmptyState
+              icon={Server}
+              title="No matching accounts"
+              description="Try a different search."
+            />
+          }
+          renderMobileRow={(connection) => (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="truncate font-medium">
+                    {connection.name}
+                  </span>
+                  {connection.isDefault ? <Badge>Default</Badge> : null}
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => testConnection(connection)}
-                    disabled={testingId !== null}
-                    aria-label="Test connection"
-                  >
-                    {testingId === connection.id ? (
-                      <Spinner />
-                    ) : (
-                      <PlugZap className="h-4 w-4" />
-                    )}
-                  </Button>
-                  {canManage ? (
-                    <>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => openEdit(connection)}
-                        aria-label="Edit connection"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeleteTarget(connection)}
-                        aria-label="Delete connection"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </>
-                  ) : null}
+                <div className="truncate text-sm text-muted-foreground">
+                  {connection.fromEmail}
                 </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
+                <div className="mt-1 font-mono text-xs text-muted-foreground">
+                  {connection.host}:{connection.port}
+                </div>
+              </div>
+              <RowActions
+                rowLabel={connection.name}
+                actions={[
+                  {
+                    label: "Check this account still works",
+                    icon: PlugZap,
+                    primary: true,
+                    disabled: testingId !== null,
+                    onSelect: () => void testConnection(connection),
+                  },
+                  {
+                    label: "Edit this account",
+                    icon: Pencil,
+                    hidden: !canManage,
+                    onSelect: () => {
+                      setEditing(connection);
+                      setDialogOpen(true);
+                    },
+                  },
+                  {
+                    label: "Delete this account",
+                    icon: Trash2,
+                    destructive: true,
+                    hidden: !canManage,
+                    onSelect: () => setDeleteTarget(connection),
+                  },
+                ]}
+              />
+            </div>
+          )}
+        />
       </section>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -291,15 +364,15 @@ export function SMTPConnections() {
             </DialogTitle>
             <DialogDescription>
               {editing
-                ? "Update the connection. Leave username/password blank to keep the saved credentials."
-                : "Add SMTP credentials so QQueue can send email on your behalf."}
+                ? "Leave the username and password blank to keep the ones already saved."
+                : "QQueue checks these details before saving, so you'll know straight away if something is wrong."}
             </DialogDescription>
           </DialogHeader>
           <SMTPConnectionForm
             key={editing?.id ?? "new"}
             initial={initialForm}
             editing={Boolean(editing)}
-            onSubmit={submit}
+            onSubmit={(form) => save.mutate(form)}
             footer={
               <DialogFooter>
                 <Button
@@ -309,9 +382,9 @@ export function SMTPConnections() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={saving}>
-                  {saving ? <Spinner /> : null}
-                  {editing ? "Test and save" : "Test and create"}
+                <Button type="submit" disabled={save.isPending}>
+                  {save.isPending ? <Spinner /> : null}
+                  {editing ? "Check and save" : "Check and create"}
                 </Button>
               </DialogFooter>
             }
@@ -322,11 +395,11 @@ export function SMTPConnections() {
       <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete sending account?"
-        description={`"${deleteTarget?.name}" will be permanently removed. Emails using it as default will need another account.`}
+        title="Delete this sending account?"
+        description={`"${deleteTarget?.name}" will be removed permanently. Anything set to send from it will need another account.`}
         confirmLabel="Delete"
-        loading={deleting}
-        onConfirm={confirmDelete}
+        loading={remove.isPending}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget)}
       />
     </>
   );

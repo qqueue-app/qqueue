@@ -591,3 +591,93 @@ Two related choices made at the same time:
   GET links, silently unsubscribing recipients. GET renders a confirmation page
   whose button POSTs; the POST (also the RFC 8058 one-click target) performs
   the unsubscribe. Both are rate limited.
+
+## Dashboard rebuilt as an email client (2026-08-07)
+
+The people using QQueue are not developers. They are used to Gmail, Outlook, or
+Zoho Mail. The dashboard read like an admin console for a delivery pipeline,
+which is what it is underneath and precisely what a non-technical user should
+never have to know. Rebuilding it around mail-client conventions cost nothing
+architecturally — the one delivery pipeline is untouched — and everything it
+changes is presentation.
+
+### Compose and Campaigns stay separate
+
+The obvious move is to merge them into one composer whose audience scales from
+one person to a list. It was considered and **deliberately deferred**: it is a
+product decision about how sending is modelled, not a UI cleanup, and doing it
+badly would make the safe, everyday act of writing one email feel as heavyweight
+as launching a campaign. Both surfaces were rebuilt on the new primitives so the
+merge stays open, and the pipeline already treats them as two entry points into
+one path. Don't do it without a fresh decision.
+
+### The Inbox is the home screen
+
+Signing in lands on `/inbox`. The old stats-first home moved to `/insights`
+(`/dashboard` redirects). Opening on mail is the single change that most makes
+the app feel like a mail client rather than a reporting tool — a dashboard is
+something you consult, an inbox is something you live in.
+
+### Tooltips are enforced by the type system, not by discipline
+
+`IconButton` takes a **required** `label` and renders it as both the tooltip and
+the `aria-label`. There is no way to write an icon-only control without one, and
+no way for the visible hint and the accessible name to drift apart. A convention
+in a style guide decays; a required prop does not.
+
+### One grid, and it renders one layout at a time
+
+Every list surface uses `components/ui/data-grid.tsx`, so sorting, search,
+column visibility, selection, and pagination behave identically wherever they
+appear. On phones it renders cards instead of a table — as a real branch driven
+by `useMediaQuery`, not two trees with one hidden by CSS. Hiding one with
+`md:hidden` leaves both in the DOM, which makes a screen reader announce every
+row twice and doubles the node count on exactly the devices least able to afford
+it.
+
+Row actions follow from the same reasoning: one or two primary actions inline,
+the rest behind an overflow menu. Campaigns previously rendered seven icon
+buttons per row with most of them greyed out, which is a way of showing someone
+what they cannot do.
+
+### Push notifications are optional and best-effort
+
+Web Push needs a VAPID key pair. Both halves unset means push is off: the API
+reports no public key and the dashboard hides the control rather than asking for
+a permission it could never honour. `pnpm setup` generates a pair with Node
+builtins (a VAPID key is just a P-256 keypair), so the common path needs no
+decision from the operator.
+
+Notifications fire from **inbox sync**, only for a message that is genuinely new
+(first sighting), not a DSN, and not already flagged `\Seen` in another client.
+Alerting on bounce plumbing or on mail somebody already read is how people learn
+to ignore alerts. A failure to push never fails a sync — notifications are a
+convenience layered on the inbox, never a step in delivery.
+
+A push service answering 404 or 410 means that client unsubscribed or was
+uninstalled, so the row is deleted rather than retried; anything else is left
+alone and tried again next time.
+
+Two constraints worth stating because they surprise people:
+
+- **On iPhone and iPad, notifications require installing to the Home Screen.**
+  Safari exposes push only to installed PWAs. The app says so in place of the
+  toggle instead of failing quietly.
+- **Push is per device, not per account.** Turning it on at a desk does nothing
+  for the phone in someone's pocket, and the copy says "this device" for
+  exactly that reason.
+
+The payload carries only a sender, a subject, and a link. The body of an email
+must not travel through a third-party push service, and the ~4 KB encrypted
+payload limit would not hold one anyway.
+
+### Errors surface once, where they matter
+
+A first load that fails toasts (an empty page is otherwise indistinguishable
+from "you have no contacts"); a background refetch that fails while good data is
+on screen stays quiet. Queries that are decoration rather than content — the
+unread badge, the members-only queue view — opt out with `meta: { silent: true }`.
+
+Error identity is checked **by shape** (`typeof error.status === "number"`)
+rather than `instanceof ApiError`, because an error can cross a module boundary
+and lose its prototype while still carrying everything we read off it.

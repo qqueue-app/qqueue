@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Alert, AlertDescription, AlertTitle } from "./alert.js";
@@ -32,13 +32,12 @@ describe("Button", () => {
   it("renders with default variant and handles clicks", async () => {
     const user = userEvent.setup();
     const onClick = vi.fn();
-    render(<Button onClick={onClick}>Click</Button>);
+    renderWithProviders(<Button onClick={onClick}>Click</Button>);
     await user.click(screen.getByRole("button", { name: "Click" }));
     expect(onClick).toHaveBeenCalled();
   });
 
-  it("renders as a child element when asChild is set", () => {
-    render(
+  it("renders as a child element when asChild is set", () => { renderWithProviders(
       <Button asChild variant="outline" size="sm">
         <a href="/x">Link</a>
       </Button>
@@ -52,7 +51,7 @@ describe("Button", () => {
 
 describe("Badge", () => {
   it("renders each variant", () => {
-    const { rerender } = render(<Badge>Default</Badge>);
+    const { rerender } = renderWithProviders(<Badge>Default</Badge>);
     expect(screen.getByText("Default")).toBeInTheDocument();
     for (const variant of [
       "secondary",
@@ -68,8 +67,7 @@ describe("Badge", () => {
 });
 
 describe("Alert", () => {
-  it("renders title and description", () => {
-    render(
+  it("renders title and description", () => { renderWithProviders(
       <Alert variant="info">
         <AlertTitle>Heads up</AlertTitle>
         <AlertDescription>Some detail</AlertDescription>
@@ -82,8 +80,7 @@ describe("Alert", () => {
 });
 
 describe("Card", () => {
-  it("renders the full composition", () => {
-    render(
+  it("renders the full composition", () => { renderWithProviders(
       <Card>
         <CardHeader>
           <CardTitle>Title</CardTitle>
@@ -104,7 +101,7 @@ describe("Checkbox", () => {
   it("toggles on click", async () => {
     const user = userEvent.setup();
     const onCheckedChange = vi.fn();
-    render(
+    renderWithProviders(
       <Checkbox
         checked={false}
         onCheckedChange={onCheckedChange}
@@ -117,8 +114,7 @@ describe("Checkbox", () => {
     expect(onCheckedChange).toHaveBeenCalledWith(true);
   });
 
-  it("shows the check icon when checked", () => {
-    render(
+  it("shows the check icon when checked", () => { renderWithProviders(
       <Checkbox checked onCheckedChange={() => {}} aria-label="checked" />
     );
     expect(screen.getByRole("checkbox", { name: "checked" })).toHaveAttribute(
@@ -129,8 +125,7 @@ describe("Checkbox", () => {
 });
 
 describe("form primitives", () => {
-  it("renders Input, Textarea and Label", () => {
-    render(
+  it("renders Input, Textarea and Label", () => { renderWithProviders(
       <div>
         <Label htmlFor="f">Field</Label>
         <Input id="f" placeholder="type" />
@@ -145,7 +140,7 @@ describe("form primitives", () => {
 
 describe("misc primitives", () => {
   it("renders Separator, Skeleton and Spinner", () => {
-    const { container } = render(
+    const { container } = renderWithProviders(
       <div>
         <Separator orientation="vertical" />
         <Skeleton className="h-4" />
@@ -158,8 +153,7 @@ describe("misc primitives", () => {
 });
 
 describe("Table", () => {
-  it("renders a complete table", () => {
-    render(
+  it("renders a complete table", () => { renderWithProviders(
       <Table>
         <TableHeader>
           <TableRow>

@@ -687,6 +687,24 @@ export interface QueueOperationsSummary {
   failedJobs: QueueJob[];
 }
 
+/**
+ * `publicKey` is null when the instance has no VAPID pair configured, which is
+ * how the dashboard knows to hide the enable-notifications control rather than
+ * asking for a permission it could never act on.
+ */
+export interface PushPublicKey {
+  publicKey: string | null;
+  enabled: boolean;
+}
+
+export interface PushDevice {
+  id: string;
+  endpoint: string;
+  userAgent: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
 export interface Campaign {
   id: string;
   organizationId: string;
@@ -1770,6 +1788,12 @@ export const api = {
     );
   },
 
+  inboxUnreadCount(organizationId: string) {
+    return request<{ count: number; hasMore: boolean }>(
+      `/api/v1/inbox/messages/unread-count?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
   markInboundMessageRead(
     id: string,
     input: { organizationId: string; read: boolean }
@@ -1928,5 +1952,32 @@ export const api = {
         body: JSON.stringify({ organizationId }),
       }
     );
+  },
+
+  pushPublicKey() {
+    return request<PushPublicKey>("/api/v1/push/public-key");
+  },
+
+  listPushSubscriptions() {
+    return request<PushDevice[]>("/api/v1/push/subscriptions");
+  },
+
+  subscribeToPush(input: {
+    organizationId: string;
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    userAgent?: string;
+  }) {
+    return request<{ id: string; endpoint: string; createdAt: string }>(
+      "/api/v1/push/subscriptions",
+      { method: "POST", body: JSON.stringify(input) }
+    );
+  },
+
+  unsubscribeFromPush(endpoint: string) {
+    return request<void>("/api/v1/push/subscriptions", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    });
   },
 };

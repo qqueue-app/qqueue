@@ -1,242 +1,347 @@
-import { useEffect, useState } from "react";
-import { Inbox, RotateCcw, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
+import { CheckCircle2, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
 import {
   api,
-  ApiError,
   type QueueJob,
-  type QueueOperationsSummary
+  type QueueOperationsSummary,
 } from "../lib/api.js";
+import { formatFullDate } from "../lib/format.js";
+import { qk } from "../lib/query-client.js";
+import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
+import { Card, CardContent } from "../components/ui/card.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions } from "../components/ui/row-actions.js";
+import { Hint } from "../components/ui/tooltip.js";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from "../components/ui/card.js";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "../components/ui/table.js";
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
-import { Spinner } from "../components/ui/spinner.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString() : "Not started";
+/** Plain-language names for the queues, so the page isn't a wall of slugs. */
+const QUEUE_LABELS: Record<string, string> = {
+  "email-sending": "Sending email",
+  "campaign-processing": "Building campaigns",
+  "webhook-delivery": "Webhooks",
+  "inbox-sync": "Checking mailboxes",
+  "recurring-send": "Recurring sends",
+};
+
+function queueLabel(name: string) {
+  return QUEUE_LABELS[name] ?? name;
 }
 
-function JobTable({
-  title,
-  jobs,
-  retrying,
-  onRetry
-}: {
-  title: string;
-  jobs: QueueJob[];
-  retrying: string | null;
-  onRetry?: (job: QueueJob) => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="text-sm font-medium">{title}</div>
-      {jobs.length === 0 ? (
-        <EmptyState icon={Inbox} title={`No ${title.toLowerCase()}`} />
-      ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Job</TableHead>
-                <TableHead>Payload</TableHead>
-                <TableHead>Attempts</TableHead>
-                <TableHead>Updated</TableHead>
-                {onRetry ? <TableHead className="w-24" /> : null}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {jobs.map((job) => (
-                <TableRow key={`${job.queueName}-${job.id}`}>
-                  <TableCell>
-                    <div className="font-medium">{job.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {job.id}
-                    </div>
-                    {job.failedReason ? (
-                      <div className="mt-1 max-w-xs truncate text-xs text-destructive">
-                        {job.failedReason}
-                      </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>
-                    <code className="block max-w-sm truncate rounded bg-muted px-2 py-1 text-xs">
-                      {JSON.stringify(job.data)}
-                    </code>
-                  </TableCell>
-                  <TableCell>
-                    {job.attemptsMade}/{job.attempts || "-"}
-                  </TableCell>
-                  <TableCell>
-                    {formatDate(job.finishedOn ?? job.processedOn ?? job.timestamp)}
-                  </TableCell>
-                  {onRetry ? (
-                    <TableCell>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={retrying === `${job.queueName}:${job.id}`}
-                        onClick={() => onRetry(job)}
-                      >
-                        {retrying === `${job.queueName}:${job.id}` ? (
-                          <Spinner />
-                        ) : (
-                          <RotateCcw className="h-4 w-4" />
-                        )}
-                        Retry
-                      </Button>
-                    </TableCell>
-                  ) : null}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </div>
-  );
-}
+type JobKind = "queued" | "processing" | "failed";
 
+/**
+ * Background jobs — the admin view of the BullMQ queues, for when something
+ * looks stuck. The product-level view of pending mail lives in the Outbox;
+ * this is deliberately the raw one.
+ */
 export function QueueOperations() {
-  const { currentOrganizationId } = useSession();
-  const [queues, setQueues] = useState<QueueOperationsSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [forbidden, setForbidden] = useState(false);
-  const [retrying, setRetrying] = useState<string | null>(null);
+  const { currentOrganizationId: organizationId } = useSession();
+  const [retryingKey, setRetryingKey] = useState<string | null>(null);
 
-  async function load() {
-    if (!currentOrganizationId) {
-      return;
+  const queuesQuery = useOrgQuery(
+    organizationId,
+    qk.queueOperations(organizationId ?? ""),
+    (id) => api.queueOperations(id),
+    {
+      refetchInterval: 15_000,
+      retry: false,
+      // A 403 here is expected for members and is explained inline below, so
+      // the global "couldn't load" toast would just be noise on top of it.
+      meta: { silent: true },
     }
-    setQueues(await api.queueOperations(currentOrganizationId));
-  }
+  );
 
-  useEffect(() => {
-    setForbidden(false);
-    setLoading(true);
-    load()
-      .catch((error) => {
-        if (error instanceof ApiError && error.status === 403) {
-          setForbidden(true);
-          return;
+  const retry = useApiMutation(
+    (job: QueueJob) =>
+      api.retryQueueJob(job.queueName, job.id, organizationId as string),
+    {
+      successMessage: "Job queued to run again.",
+      errorMessage: "Couldn't retry that job.",
+      invalidates: [qk.queueOperations(organizationId ?? "")],
+      onSuccess: () => setRetryingKey(null),
+      onError: () => setRetryingKey(null),
+    }
+  );
+
+  // Read the status by shape rather than `instanceof ApiError` so the check
+  // survives an error crossing a module boundary.
+  const forbidden =
+    (queuesQuery.error as { status?: number } | null)?.status === 403;
+
+  const columns = useMemo<ColumnDef<QueueJob, unknown>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Job",
+        meta: { title: "Job" },
+        cell: ({ row }) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium">{row.original.name}</div>
+            <div className="truncate font-mono text-[0.7rem] text-muted-foreground">
+              {row.original.id}
+            </div>
+            {row.original.failedReason ? (
+              <Hint label={row.original.failedReason}>
+                <div className="mt-1 max-w-xs cursor-help truncate text-xs text-destructive">
+                  {row.original.failedReason}
+                </div>
+              </Hint>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "data",
+        accessorFn: (row) => JSON.stringify(row.data),
+        header: "Details",
+        meta: { title: "Details", hideBelowLg: true },
+        enableSorting: false,
+        cell: ({ getValue }) => (
+          <Hint label={String(getValue())}>
+            <code className="block max-w-sm cursor-help truncate rounded bg-muted px-2 py-1 text-xs">
+              {String(getValue())}
+            </code>
+          </Hint>
+        ),
+      },
+      {
+        id: "attempts",
+        accessorFn: (row) => row.attemptsMade,
+        header: "Tries",
+        meta: { title: "Tries", align: "center", hideBelowMd: true },
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.original.attemptsMade}/{row.original.attempts || "—"}
+          </span>
+        ),
+      },
+      {
+        id: "updated",
+        accessorFn: (row) => row.finishedOn ?? row.processedOn ?? row.timestamp,
+        header: "Last activity",
+        meta: { title: "Last activity", hideBelowMd: true },
+        cell: ({ getValue }) => (
+          <span className="text-muted-foreground">
+            {formatFullDate(getValue() as string | null, "Not started")}
+          </span>
+        ),
+      },
+    ],
+    []
+  );
+
+  const failedColumns = useMemo<ColumnDef<QueueJob, unknown>[]>(
+    () => [
+      ...columns,
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.name}
+            actions={[
+              {
+                label: "Run this job again",
+                icon: RotateCcw,
+                primary: true,
+                disabled:
+                  retryingKey ===
+                  `${row.original.queueName}:${row.original.id}`,
+                onSelect: () => {
+                  setRetryingKey(
+                    `${row.original.queueName}:${row.original.id}`
+                  );
+                  retry.mutate(row.original);
+                },
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    [columns, retry, retryingKey]
+  );
+
+  function JobGrid({
+    queue,
+    kind,
+  }: {
+    queue: QueueOperationsSummary;
+    kind: JobKind;
+  }) {
+    const jobs =
+      kind === "queued"
+        ? queue.queuedJobs
+        : kind === "processing"
+          ? queue.processingJobs
+          : queue.failedJobs;
+
+    return (
+      <DataGrid
+        label={`${queueLabel(queue.name)} — ${kind} jobs`}
+        data={jobs}
+        columns={kind === "failed" ? failedColumns : columns}
+        getRowId={(row) => `${row.queueName}:${row.id}`}
+        pageSize={10}
+        searchPlaceholder="Search jobs…"
+        empty={
+          <EmptyState
+            icon={CheckCircle2}
+            title={
+              kind === "failed"
+                ? "Nothing has failed"
+                : kind === "processing"
+                  ? "Nothing running right now"
+                  : "Nothing waiting"
+            }
+            description={
+              kind === "failed"
+                ? "Jobs that give up after their retries land here."
+                : undefined
+            }
+          />
         }
-        toast.error(
-          error instanceof Error ? error.message : "Failed to load queues"
-        );
-      })
-      .finally(() => setLoading(false));
-  }, [currentOrganizationId]);
-
-  async function retry(job: QueueJob) {
-    if (!currentOrganizationId) {
-      return;
-    }
-    const key = `${job.queueName}:${job.id}`;
-    setRetrying(key);
-    try {
-      await api.retryQueueJob(job.queueName, job.id, currentOrganizationId);
-      toast.success("Job queued for retry.");
-      await load();
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 403) {
-        setForbidden(true);
-        return;
-      }
-      toast.error(error instanceof Error ? error.message : "Retry failed");
-    } finally {
-      setRetrying(null);
-    }
+        renderMobileRow={(job) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium">{job.name}</div>
+            <div className="truncate font-mono text-[0.7rem] text-muted-foreground">
+              {job.id}
+            </div>
+            {job.failedReason ? (
+              <p className="mt-1 line-clamp-2 text-xs text-destructive">
+                {job.failedReason}
+              </p>
+            ) : null}
+            {kind === "failed" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={() => retry.mutate(job)}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Run again
+              </Button>
+            ) : null}
+          </div>
+        )}
+      />
+    );
   }
 
   return (
-    <div className="space-y-6">
+    <>
       <PageHeader
         title="Background jobs"
-        description="Inspect queued, processing, and failed background jobs."
+        description="What QQueue is working through behind the scenes. Come here when something looks stuck."
         actions={
-          <Button type="button" variant="outline" onClick={load}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void queuesQuery.refetch()}
+            disabled={queuesQuery.isFetching}
+          >
+            <RefreshCw
+              className={queuesQuery.isFetching ? "animate-spin" : undefined}
+            />
             Refresh
           </Button>
         }
       />
 
-      {loading ? (
-        <Card>
-          <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-            <Spinner />
-            Loading queues...
-          </CardContent>
-        </Card>
-      ) : forbidden ? (
-        <Card>
-          <CardContent className="py-8">
+      <section className="space-y-6 p-4 sm:p-6">
+        {queuesQuery.isPending ? (
+          <div className="space-y-3">
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : forbidden ? (
+          <Card>
             <EmptyState
               icon={ShieldAlert}
-              title="Access restricted"
-              description="Background jobs are available to organization owners and admins only. Ask an owner or admin if you need access."
+              title="Owners and admins only"
+              description="Background jobs are visible to organization owners and admins. Ask one of them if you need access."
             />
-          </CardContent>
-        </Card>
-      ) : (
-        queues.map((queue) => (
-          <Card key={queue.name}>
-            <CardHeader>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <CardTitle>{queue.name}</CardTitle>
-                  <CardDescription>
-                    Current BullMQ state for this queue.
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary">Queued {queue.counts.queued}</Badge>
-                  <Badge variant="secondary">
-                    Processing {queue.counts.processing}
-                  </Badge>
-                  <Badge variant={queue.counts.failed ? "destructive" : "secondary"}>
-                    Failed {queue.counts.failed}
-                  </Badge>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <JobTable
-                title="Queued jobs"
-                jobs={queue.queuedJobs}
-                retrying={retrying}
-              />
-              <JobTable
-                title="Processing jobs"
-                jobs={queue.processingJobs}
-                retrying={retrying}
-              />
-              <JobTable
-                title="Failed jobs"
-                jobs={queue.failedJobs}
-                retrying={retrying}
-                onRetry={retry}
-              />
-            </CardContent>
           </Card>
-        ))
-      )}
-    </div>
+        ) : (
+          (queuesQuery.data ?? []).map((queue) => (
+            <Card key={queue.name}>
+              <CardContent className="p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold">{queueLabel(queue.name)}</h2>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {queue.name}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Hint label="Jobs waiting their turn">
+                      <Badge variant="secondary" className="cursor-help">
+                        {queue.counts.queued} waiting
+                      </Badge>
+                    </Hint>
+                    <Hint label="Jobs running right now">
+                      <Badge variant="secondary" className="cursor-help">
+                        {queue.counts.processing} running
+                      </Badge>
+                    </Hint>
+                    <Hint label="Jobs that gave up after their retries">
+                      <Badge
+                        variant={
+                          queue.counts.failed ? "destructive" : "secondary"
+                        }
+                        className="cursor-help"
+                      >
+                        {queue.counts.failed} failed
+                      </Badge>
+                    </Hint>
+                  </div>
+                </div>
+
+                <Tabs
+                  defaultValue={queue.counts.failed > 0 ? "failed" : "queued"}
+                  className="mt-4"
+                >
+                  <TabsList>
+                    <TabsTrigger value="queued">
+                      Waiting ({queue.counts.queued})
+                    </TabsTrigger>
+                    <TabsTrigger value="processing">
+                      Running ({queue.counts.processing})
+                    </TabsTrigger>
+                    <TabsTrigger value="failed">
+                      Failed ({queue.counts.failed})
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="queued">
+                    <JobGrid queue={queue} kind="queued" />
+                  </TabsContent>
+                  <TabsContent value="processing">
+                    <JobGrid queue={queue} kind="processing" />
+                  </TabsContent>
+                  <TabsContent value="failed">
+                    <JobGrid queue={queue} kind="failed" />
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </section>
+    </>
   );
 }

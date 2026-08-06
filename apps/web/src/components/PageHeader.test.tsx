@@ -1,18 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithProviders, screen } from "../test/render.js";
 import { describe, expect, it } from "vitest";
 import { PageHeader } from "./PageHeader.js";
 
 describe("PageHeader", () => {
-  it("renders the title and description", () => {
-    render(<PageHeader title="Contacts" description="Manage contacts" />);
+  it("renders the title and description", () => { renderWithProviders(<PageHeader title="Contacts" description="Manage contacts" />);
     expect(
       screen.getByRole("heading", { name: "Contacts" })
     ).toBeInTheDocument();
     expect(screen.getByText("Manage contacts")).toBeInTheDocument();
   });
 
-  it("renders actions when provided", () => {
-    render(
+  it("renders actions when provided", () => { renderWithProviders(
       <PageHeader
         title="Contacts"
         description="x"
@@ -23,7 +21,7 @@ describe("PageHeader", () => {
   });
 
   it("omits the actions container when no actions provided", () => {
-    const { container } = render(<PageHeader title="T" description="d" />);
+    const { container } = renderWithProviders(<PageHeader title="T" description="d" />);
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 });

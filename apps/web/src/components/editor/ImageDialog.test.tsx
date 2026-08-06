@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, renderWithProviders, screen, waitFor } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ImageDialog } from "./ImageDialog.js";
@@ -10,7 +10,7 @@ function pngFile(name = "banner.png") {
 function renderDialog(props: Partial<Parameters<typeof ImageDialog>[0]> = {}) {
   const onInsert = vi.fn();
   const onClose = vi.fn();
-  render(
+  renderWithProviders(
     <ImageDialog
       open
       onClose={onClose}

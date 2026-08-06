@@ -261,6 +261,23 @@ export const inboxService = {
     });
   },
 
+  /**
+   * Unread human mail, for the navigation badge. Bounce reports are excluded:
+   * they are plumbing the deliverability pages account for, and counting them
+   * here would show an inbox badge nobody can clear by reading mail.
+   *
+   * Capped so a neglected mailbox reports "99+" instead of making the database
+   * count a hundred thousand rows every time the badge refreshes.
+   */
+  async unreadCount(organizationId: string) {
+    const CAP = 99;
+    const count = await prisma.inboundMessage.count({
+      where: { organizationId, readAt: null, isDsn: false },
+      take: CAP + 1,
+    });
+    return { count: Math.min(count, CAP), hasMore: count > CAP };
+  },
+
   async listMessages(query: InboundMessageQueryInput) {
     const where: Prisma.InboundMessageWhereInput = {
       organizationId: query.organizationId,

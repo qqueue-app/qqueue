@@ -1,8 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import {
   Activity,
-  ChevronLeft,
-  ChevronRight,
   Download,
   ListPlus,
   Pencil,
@@ -43,20 +42,16 @@ import {
   DialogTitle
 } from "../components/ui/dialog.js";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "../components/ui/table.js";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue
 } from "../components/ui/select.js";
+import { Avatar } from "../components/ui/avatar.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions } from "../components/ui/row-actions.js";
+import { Hint } from "../components/ui/tooltip.js";
 
 function parseFilterTags(value: string) {
   return [...new Set(value.split(",").map((tag) => tag.trim()).filter(Boolean))];
@@ -75,8 +70,6 @@ const emptyForm: ContactForm = {
   lastName: "",
   tags: ""
 };
-
-const PAGE_SIZE = 10;
 
 function parseTags(value: string) {
   return [...new Set(value.split(",").map((tag) => tag.trim()).filter(Boolean))];
@@ -102,6 +95,16 @@ function statusVariant(status: string) {
   return "secondary" as const;
 }
 
+/** What each status actually means for whether this person receives mail. */
+function statusHint(status: string) {
+  if (status === "ACTIVE") return "Receiving your email normally.";
+  if (status === "BOUNCED")
+    return "Mail to this address kept failing, so QQueue stopped sending to it.";
+  if (status === "UNSUBSCRIBED")
+    return "This person asked to stop receiving your email.";
+  return "Not currently receiving your email.";
+}
+
 export function Contacts() {
   const { currentOrganizationId: organizationId } = useSession();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -112,8 +115,6 @@ export function Contacts() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
 
   // CSV import/export.
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -150,6 +151,9 @@ export function Contacts() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [clearGridSelection, setClearGridSelection] = useState<
+    (() => void) | null
+  >(null);
 
   // Tag-driven segment filter.
   const [filterTags, setFilterTags] = useState("");
@@ -165,29 +169,119 @@ export function Contacts() {
   const [activity, setActivity] = useState<ContactActivityEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
 
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return contacts;
-    }
-    return contacts.filter((contact) =>
-      [contact.email, contact.firstName, contact.lastName, ...(contact.tags ?? [])]
-        .filter(Boolean)
-        .some((field) => field!.toLowerCase().includes(query))
-    );
-  }, [contacts, search]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount);
-  const paginated = filtered.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
+  // Searching, sorting, selection, and paging all live in the DataGrid now, so
+  // this page only owns the things the grid can't know about: the tag segment
+  // builder, CSV import, and the activity drawer.
+  const contactColumns = useMemo<ColumnDef<Contact, unknown>[]>(
+    () => [
+      {
+        accessorKey: "email",
+        header: "Email",
+        meta: { title: "Email" },
+        cell: ({ row }) => (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Avatar
+              name={
+                [row.original.firstName, row.original.lastName]
+                  .filter(Boolean)
+                  .join(" ") || row.original.email
+              }
+              size="sm"
+            />
+            <span className="truncate font-medium">{row.original.email}</span>
+          </div>
+        ),
+      },
+      {
+        id: "name",
+        accessorFn: (row) =>
+          [row.firstName, row.lastName].filter(Boolean).join(" "),
+        header: "Name",
+        meta: { title: "Name", hideBelowMd: true },
+        cell: ({ getValue }) => (
+          <span className="text-muted-foreground">
+            {String(getValue()) || "—"}
+          </span>
+        ),
+      },
+      {
+        id: "tags",
+        accessorFn: (row) => (row.tags ?? []).join(" "),
+        header: "Tags",
+        meta: { title: "Tags", hideBelowLg: true },
+        enableSorting: false,
+        cell: ({ row }) =>
+          row.original.tags && row.original.tags.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {row.original.tags.map((tag) => (
+                <Badge key={tag} variant="outline" className="font-normal">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        meta: { title: "Status" },
+        cell: ({ row }) => (
+          <Hint label={statusHint(row.original.status)}>
+            <Badge
+              variant={statusVariant(row.original.status)}
+              className="cursor-help"
+            >
+              {row.original.status}
+            </Badge>
+          </Hint>
+        ),
+      },
+      {
+        accessorKey: "createdAt",
+        header: "Added",
+        meta: { title: "Added", hideBelowLg: true },
+        cell: ({ getValue }) => (
+          <span className="text-muted-foreground">
+            {formatDate(getValue() as string)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        meta: { pinned: true, align: "right" },
+        enableSorting: false,
+        cell: ({ row }) => (
+          <RowActions
+            rowLabel={row.original.email}
+            actions={[
+              {
+                label: "See what this person has done",
+                icon: Activity,
+                primary: true,
+                onSelect: () => void openActivity(row.original),
+              },
+              {
+                label: "Edit this contact",
+                icon: Pencil,
+                onSelect: () => openEdit(row.original),
+              },
+              {
+                label: "Delete this contact",
+                icon: Trash2,
+                destructive: true,
+                onSelect: () => setDeleteTarget(row.original),
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    // The handlers referenced above are stable for the life of the page.
+    []
   );
-
-  // Reset to the first page whenever the search query changes.
-  useEffect(() => {
-    setPage(1);
-  }, [search]);
 
   async function load() {
     if (!organizationId) {
@@ -410,28 +504,12 @@ export function Contacts() {
     }
   }
 
-  function toggleSelected(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }
-
-  function toggleSelectAllFiltered() {
-    setSelectedIds((current) => {
-      const allSelected = filtered.every((contact) => current.has(contact.id));
-      if (allSelected) {
-        return new Set();
-      }
-      return new Set(filtered.map((contact) => contact.id));
-    });
-  }
-
+  /**
+   * The grid owns which rows are ticked; this page only holds the set long
+   * enough to confirm the delete. `clearGridSelection` is the grid's own reset,
+   * captured when the bulk action fires so the tick marks clear once the rows
+   * they referred to are gone.
+   */
   async function confirmBulkDelete() {
     if (!organizationId || selectedIds.size === 0) return;
     setBulkDeleting(true);
@@ -441,6 +519,7 @@ export function Contacts() {
         Array.from(selectedIds)
       );
       toast.success(`${deleted} contact${deleted === 1 ? "" : "s"} removed.`);
+      clearGridSelection?.();
       setSelectedIds(new Set());
       setBulkDeleteOpen(false);
       await load();
@@ -640,219 +719,98 @@ export function Contacts() {
           </div>
         </Card>
 
-        <Card className="overflow-hidden">
-          {loading ? (
-            <div className="space-y-3 p-5">
-              {[0, 1, 2].map((index) => (
-                <Skeleton key={index} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : contacts.length === 0 ? (
+        <DataGrid
+          label="Contacts"
+          data={contacts}
+          columns={contactColumns}
+          getRowId={(row) => row.id}
+          loading={loading}
+          enableSelection
+          searchPlaceholder="Search by name, email, or tag…"
+          bulkActions={(rows, clear) => (
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={() => {
+                setSelectedIds(new Set(rows.map((row) => row.id)));
+                setClearGridSelection(() => clear);
+                setBulkDeleteOpen(true);
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete selected
+            </Button>
+          )}
+          empty={
             <EmptyState
               icon={Users}
               title="No contacts yet"
-              description="Add a contact to start building your audience."
+              description="Add someone, or import a CSV, to start building your audience."
               action={
-                <Button onClick={openCreate} disabled={!organizationId} variant="outline">
+                <Button
+                  onClick={openCreate}
+                  disabled={!organizationId}
+                  variant="outline"
+                >
                   <Plus className="h-4 w-4" />
                   Add contact
                 </Button>
               }
             />
-          ) : (
-            <>
-              <div className="flex items-center gap-3 border-b p-3">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by name or email…"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    className="pl-9"
-                  />
+          }
+          noResults={
+            <EmptyState
+              icon={Search}
+              title="No matching contacts"
+              description="Try a different search."
+            />
+          }
+          renderMobileRow={(contact) => (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{contact.email}</div>
+                <div className="truncate text-sm text-muted-foreground">
+                  {[contact.firstName, contact.lastName]
+                    .filter(Boolean)
+                    .join(" ") || "No name"}
                 </div>
-                <span className="shrink-0 text-sm text-muted-foreground">
-                  {filtered.length} of {contacts.length}
-                </span>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  <Badge variant={statusVariant(contact.status)}>
+                    {contact.status}
+                  </Badge>
+                  {(contact.tags ?? []).slice(0, 2).map((tag) => (
+                    <Badge key={tag} variant="outline" className="font-normal">
+                      {tag}
+                    </Badge>
+                  ))}
+                </div>
               </div>
-
-              {selectedIds.size > 0 ? (
-                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2">
-                  <span className="text-sm font-medium">
-                    {selectedIds.size} selected
-                  </span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setSelectedIds(new Set())}
-                  >
-                    Clear selection
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => setBulkDeleteOpen(true)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Delete selected
-                  </Button>
-                </div>
-              ) : null}
-
-              {filtered.length === 0 ? (
-                <EmptyState
-                  icon={Search}
-                  title="No matches"
-                  description={`No contacts match "${search}".`}
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10">
-                        {/*
-                          Selects everything matching the current search, not
-                          just the visible page — otherwise "select all" on a
-                          filtered set of 400 would silently mean 10.
-                        */}
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 cursor-pointer accent-primary"
-                          aria-label="Select all matching contacts"
-                          checked={
-                            filtered.length > 0 &&
-                            filtered.every((contact) =>
-                              selectedIds.has(contact.id)
-                            )
-                          }
-                          onChange={toggleSelectAllFiltered}
-                        />
-                      </TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Tags</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginated.map((contact) => (
-                      <TableRow key={contact.id}>
-                        <TableCell>
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 cursor-pointer accent-primary"
-                            aria-label={`Select ${contact.email}`}
-                            checked={selectedIds.has(contact.id)}
-                            onChange={() => toggleSelected(contact.id)}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">{contact.email}</TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {[contact.firstName, contact.lastName]
-                            .filter(Boolean)
-                            .join(" ") || "—"}
-                        </TableCell>
-                        <TableCell>
-                          {contact.tags && contact.tags.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {contact.tags.map((tag) => (
-                                <Badge
-                                  key={tag}
-                                  variant="outline"
-                                  className="font-normal"
-                                >
-                                  {tag}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={statusVariant(contact.status)}>
-                            {contact.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDate(contact.createdAt)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openActivity(contact)}
-                              aria-label="View activity"
-                            >
-                              <Activity className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEdit(contact)}
-                              aria-label="Edit contact"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="text-muted-foreground hover:text-destructive"
-                              onClick={() => setDeleteTarget(contact)}
-                              aria-label="Delete contact"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-
-              {pageCount > 1 ? (
-                <div className="flex items-center justify-between border-t p-3 text-sm">
-                  <span className="text-muted-foreground">
-                    Page {currentPage} of {pageCount}
-                  </span>
-                  <div className="flex gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setPage((value) => Math.max(1, value - 1))}
-                      disabled={currentPage === 1}
-                      aria-label="Previous page"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() =>
-                        setPage((value) => Math.min(pageCount, value + 1))
-                      }
-                      disabled={currentPage === pageCount}
-                      aria-label="Next page"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </>
+              <RowActions
+                rowLabel={contact.email}
+                actions={[
+                  {
+                    label: "See what this person has done",
+                    icon: Activity,
+                    onSelect: () => void openActivity(contact),
+                  },
+                  {
+                    label: "Edit this contact",
+                    icon: Pencil,
+                    onSelect: () => openEdit(contact),
+                  },
+                  {
+                    label: "Delete this contact",
+                    icon: Trash2,
+                    destructive: true,
+                    onSelect: () => setDeleteTarget(contact),
+                  },
+                ]}
+              />
+            </div>
           )}
-        </Card>
+        />
+
       </section>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -1,9 +1,15 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, screen, waitFor, within } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  // Used by actions that report progress before their result.
+  loading: vi.fn(),
+  message: vi.fn()
+}));
 vi.mock("sonner", () => ({ toast }));
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -44,11 +50,11 @@ const template = {
 };
 
 function renderPage() {
-  return render(
+  return renderWithProviders(
     <MemoryRouter>
       <Templates />
     </MemoryRouter>
-  );
+  , { withRouter: false });
 }
 
 describe("Templates", () => {
@@ -105,7 +111,7 @@ describe("Templates", () => {
     mockedApi.cloneTemplate.mockResolvedValue({ id: "t2" });
     renderPage();
     await screen.findByText("Welcome");
-    await user.click(screen.getByLabelText("Duplicate template"));
+    await user.click(screen.getByLabelText("Make a copy of Welcome"));
     await waitFor(() =>
       expect(mockedApi.cloneTemplate).toHaveBeenCalledWith("t1")
     );
@@ -117,7 +123,7 @@ describe("Templates", () => {
     mockedApi.deleteTemplate.mockResolvedValue(undefined);
     renderPage();
     await screen.findByText("Welcome");
-    await user.click(screen.getByLabelText("Delete template"));
+    await user.click(screen.getByLabelText("Delete Welcome"));
     await user.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() =>
       expect(mockedApi.deleteTemplate).toHaveBeenCalledWith("t1")
