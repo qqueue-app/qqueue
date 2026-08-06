@@ -101,6 +101,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 - **`OrganizationMember`** (200) — `organizationId` + `userId` (`@@unique` pair), `role UserRole @default(MEMBER)`.
 - **`OrganizationInvite`** (216) — `email`, `role`, `tokenHash @unique`, `status InviteStatus`, `invitedByUserId`, `expiresAt`, `acceptedAt?`. Indexes: org, email, expiresAt.
 - **`SMTPConnection`** (236) — `name`, `host`, `port`, `secure` (default true), `usernameEncrypted`, `passwordEncrypted`, `fromEmail`, `fromName?`, `isDefault` (default false). **No `@@index([organizationId])`.**
+- **`SmtpConnectionGrant`** (Phase 4) — send-as permission: `smtpConnectionId` + `userId` (`@@unique` pair, both FK Cascade, plus denormalized `organizationId`). MEMBERs may only send from granted connections; OWNER/ADMIN need no row. Enforced at the service layer on every send surface (`apps/api/src/lib/send-as.ts`); the worker does not re-verify.
 - **`RecurringSend`** (269) — `name`, `subject`, `html?`, `text?`, `to[]`/`cc[]`/`bcc[]`, `contactIds[]`/`listIds[]` (resolved fresh per occurrence), `replyTo?`, `smtpConnectionId` (**plain string, no FK relation**), `templateId?` (same), `variables Json?`, `cronExpression`, `timezone` (default "UTC"), `status`, `nextRunAt?`, `lastRunAt?`, `createdByUserId?`. Index `[status, nextRunAt]`.
 - **`RecurringSendRun`** (309) — `@@unique([recurringSendId, occurrenceKey])` (idempotency), `emailJobId?` (no FK).
 - **`Contact`** (321) — `email`, `firstName?`, `lastName?`, `status ContactStatus`, `tags[]`, `metadata Json?`. `@@unique([organizationId, email])`.
@@ -134,7 +135,7 @@ All ids are `cuid()` strings unless noted; `?` = nullable; nearly everything cas
 
 ### 2.5 Migrations
 
-- **35 migrations** in `apps/api/prisma/schema/migrations/` (32 at audit time; phases 1, 2, and 2b added `add_system_email_origin`, `per_recipient_sends_and_bulk_flag`, `add_inbound_message_is_dsn`) (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
+- **36 migrations** in `apps/api/prisma/schema/migrations/` (32 at audit time; phases 1, 2, 2b, and 4 added `add_system_email_origin`, `per_recipient_sends_and_bulk_flag`, `add_inbound_message_is_dsn`, `add_smtp_connection_grants`) (`migration_lock.toml` → postgresql), named `<timestamp>_<phase_label>` (mostly hand-rounded timestamps). Notable churn: `phase_f_sending_domains` + `phase_f_sender_identity_links` were **reverted** by `20260701000000_drop_sending_domains_and_identities`; inbox ticketing was added then removed (`remove_inbox_ticketing`, `simplify_inbox`).
 - Run paths: dev `pnpm db:migrate` (`migrate dev`); production via a one-shot `migrate` compose service running `prisma migrate deploy`; smoke test and `pnpm setup` also run deploy/dev respectively.
 - **No drift check in CI** — no `migrate diff`/`migrate status` anywhere automated; drift verification is a documented manual practice (`docs/TROUBLESHOOTING.md:126-133`, `docs/BETA_CHECKLIST.md:30`). No seed script.
 
@@ -180,7 +181,7 @@ The only overlap: password-reset and invitation emails are *delivered through* t
 
 ### 3.4 Password reset
 
-`PasswordResetToken` model (`core.prisma:153`): 32-byte base64url token, stored sha256-hashed, 1-hour TTL, single-use (`usedAt`). Delivery finds *any* SMTP connection across the user's orgs (default-first) and is `.catch()`-swallowed so SMTP failure can't leak account existence. Reset URL uses `PUBLIC_APP_URL`. **Caveat: outside `NODE_ENV === "production"` the raw reset token is echoed in the API response** (`auth/service.ts:216`) — correct for dev, dangerous if prod is misconfigured. Reset does not invalidate outstanding refresh tokens.
+`PasswordResetToken` model (`core.prisma:153`): 32-byte base64url token, stored sha256-hashed, 1-hour TTL, single-use (`usedAt`). Delivery finds *any* SMTP connection across the user's orgs (default-first) and is `.catch()`-swallowed so SMTP failure can't leak account existence. Reset URL uses `PUBLIC_APP_URL`. Echoing the raw reset token in the API response is an explicit opt-in as of Phase 3 (`DEV_ECHO_RESET_TOKEN=true`, additionally blocked under `NODE_ENV === "production"`); a prod instance that forgets `NODE_ENV` no longer leaks it. Reset does not invalidate outstanding refresh tokens.
 
 ### 3.5 API keys
 
@@ -195,7 +196,7 @@ The only overlap: password-reset and invitation emails are *delivered through* t
 - Key derivation is a **plain SHA-256 of `ENCRYPTION_KEY`** — no KDF, no salt, no key versioning; rotating the key permanently bricks stored credentials (documented in `docs/DEPLOY.md`, `docs/SMTP_PROVIDER_GUIDE.md`). `ENCRYPTION_KEY` and JWT secrets are validated only as `min(1)` — no entropy floor.
 - Credentials never leave the API: `smtpConnectionSelect` omits the encrypted columns on every read path. SMTP verification (`transporter.verify()`, 15s timeout) is **mandatory on create and update**.
 - Same scheme reused for `InboxAccount` (IMAP) credentials and `WebhookEndpoint.secretEncrypted`.
-- **Gap**: SMTP connection create/update/delete require only org *membership*, not OWNER/ADMIN — any MEMBER can add, alter, or delete sending credentials.
+- Writes are OWNER/ADMIN as of Phase 3: create via `requireOrgRole` on the route, update/delete via `assertOrgRole` in the service (no org id in the request until the row loads). Reads stay membership.
 
 ### 3.7 Roles, permissions & multi-tenancy
 
@@ -206,7 +207,7 @@ The only overlap: password-reset and invitation emails are *delivered through* t
 
 ### 3.8 Confirmed absent
 
-Email verification, MFA/TOTP/WebAuthn, OAuth/SSO/SAML, server-side logout/session revocation, account lockout (beyond flat IP limits — which are fully disabled when `NODE_ENV === "test"` and IP-keyed with **no `trust proxy` set**, so behind Caddy/nginx `req.ip` may collapse to the proxy address), password history, audit logging. The cloud app (`apps/cloud/src/routes/v1.ts`) explicitly has **no auth at all** — skeleton routes returning 501. **Present despite CLAUDE.md saying otherwise: org invitations are fully implemented** (`apps/api/src/modules/invitations/`, `OrganizationInvite` model, 7-day sha256 tokens, accept flow that bypasses closed registration as "the sanctioned exception", UI at `/accept-invite`).
+Email verification, MFA/TOTP/WebAuthn, OAuth/SSO/SAML, server-side logout/session revocation, account lockout (beyond flat IP limits — which are fully disabled when `NODE_ENV === "test"` and IP-keyed — `trust proxy` is set from `TRUST_PROXY` (default 1 hop for the bundled Caddy) as of Phase 3, so `req.ip` is the real client behind the bundled proxy), password history, audit logging. The cloud app (`apps/cloud/src/routes/v1.ts`) explicitly has **no auth at all** — skeleton routes returning 501. **Present despite CLAUDE.md saying otherwise: org invitations are fully implemented** (`apps/api/src/modules/invitations/`, `OrganizationInvite` model, 7-day sha256 tokens, accept flow that bypasses closed registration as "the sanctioned exception", UI at `/accept-invite`).
 
 ## 4. Sending Pipeline
 
@@ -349,7 +350,7 @@ Caveat: because manual/recurring sends store `toEmail` as a **comma-joined multi
 ### 6.4 Suppression system
 
 - **Model** (`core.prisma:378`): `Suppression { id, organizationId, email, reason (BOUNCE | COMPLAINT | UNSUBSCRIBE | MANUAL), source?, createdAt }`, unique on `(organizationId, email)`. Org-wide by design (covers non-contact recipients); no instance-global list, no row expiry.
-- **API** (`apps/api/src/modules/suppressions/`): `GET /`, `POST /` (manual add, idempotent upsert), `GET /policy`, `PUT /policy` (OWNER/ADMIN via `requireOrgRole`), `DELETE /:id`. Asymmetry: **`DELETE /:id` requires only org membership** while editing the policy requires OWNER/ADMIN — any member can un-suppress an address.
+- **API** (`apps/api/src/modules/suppressions/`): `GET /`, `POST /` (manual add, idempotent upsert), `GET /policy`, `PUT /policy` (OWNER/ADMIN via `requireOrgRole`), `DELETE /:id` (OWNER/ADMIN as of Phase 3 — un-suppressing a bounced/complained address is a deliverability decision; enforced in the service after the membership-scoped lookup, so non-members still 404).
 - **Enforcement points**:
   | Point | Location | Mechanism |
   |---|---|---|
@@ -386,7 +387,7 @@ Specific findings:
 ### 6.8 Inbound ESP webhooks
 
 - Endpoint: `POST /api/v1/webhooks/email-events` (public; in `modules/tracking`, whereas `modules/webhooks` is the *outbound* system).
-- Auth: plaintext `x-webhook-secret` header compared with `!==` against the instance-wide `WEBHOOK_SECRET` — **not per-provider signature verification, not per-org, not constant-time**. The `messageId` correlation lookup is **not org-scoped**, so one shared secret can record bounce/complaint events (and force suppressions) for any organization on the instance.
+- **Disabled by default as of Phase 3** (`INBOUND_ESP_WEBHOOK_ENABLED`, default false → the route answers 404): there is no caller on a Mailcow-relay instance and Phase 2b's DSN parsing covers async bounce ingestion. When enabled, auth is the `x-webhook-secret` header against the instance-wide `WEBHOOK_SECRET` (constant-time compare as of Phase 3) — still not per-provider signature verification and not per-org: the `messageId` correlation lookup is **not org-scoped**, so one shared secret can record bounce/complaint events (and force suppressions) for any organization on the instance. Enable it only on an instance that deliberately relays through an ESP.
 - Payload is QQueue's own normalized shape (`{ type: DELIVERED|BOUNCED|COMPLAINED, messageId?, emailJobId?, email?, reason?, bounceType? }`). **There is no provider-specific adapter layer** — no SES/Postmark/Mailgun/SendGrid/Resend/Brevo parser exists; normalization is the caller's responsibility. The provider classes in `packages/email-engine/src/providers/future-providers.ts` (Mailcow/SES/Resend/Brevo/Postmark) are stubs that throw "not implemented".
 - On BOUNCED with neither `bounceType` nor `reason` supplied, classification falls to the unknown branch → HARD → immediate permanent suppression. Complaints set the contact's status to `BOUNCED` (no distinct complaint status) and always suppress.
 
@@ -408,7 +409,7 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 | GET `/api/v1/setup/status` | First-run probe | public, 60/60s |
 | POST `/api/v1/setup/complete` | Finish wizard | JWT + inst-admin (in service) |
 | GET `/api/v1/track/open/:token`, `/track/click/:token` | Open pixel / click redirect | public (signed token), **no rate limit** |
-| POST `/api/v1/webhooks/email-events` | Inbound ESP events | `x-webhook-secret` header |
+| POST `/api/v1/webhooks/email-events` | Inbound ESP events | disabled by default (404); when `INBOUND_ESP_WEBHOOK_ENABLED`: `x-webhook-secret` header |
 | GET/POST `/api/v1/unsubscribe` | Unsubscribe landing / RFC 8058 one-click | public (signed token), **no rate limit** |
 | GET `/api/v1/invitations/lookup`, POST `/api/v1/invitations/accept` | Invite preview/accept | public, 30/15min |
 | GET `/api/v1/images/:publicId` | Email-embedded image for mail clients | public (unguessable id), **no rate limit** |
@@ -419,11 +420,12 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 | `/api/v1/invitations` (GET, POST, DELETE `/:id`) | Invite management | JWT +O/A |
 | `/api/v1/instance-settings` (GET, PATCH, GET `/env-status`) | Registration policy + env health | inst-admin |
 | `/api/v1/queue-operations` (GET, POST `/:queueName/jobs/:jobId/retry`) | BullMQ inspector/retry | JWT +O/A |
-| `/api/v1/smtp-connections` (full CRUD) | Sending accounts | JWT +org / svc (**no O/A gate — see §3.6**) |
+| `/api/v1/smtp-connections` (full CRUD + GET `/sendable`, POST `/:id/verify`, grants CRUD under `/:id/grants`) | Sending accounts + on-demand credential test + send-as grants | reads and `/:id/verify` JWT +org / svc; writes and grant management +O/A (Phases 3–4); `/sendable` returns only what the caller may send as |
+| `/api/v1/mailcow` (GET `/status`, POST `/provision`) | Mailcow mailbox provisioning | JWT +O/A; 404 unless `MAILCOW_API_URL`/`MAILCOW_API_KEY` configured |
 | `/api/v1/contacts` (CRUD + `/import`, `/import/preview`, `/export`, `/bulk-delete`, `/segment/preview`, `/:id/activity`) | Contacts | JWT +org / svc |
 | `/api/v1/contact-lists` (CRUD + `/from-segment`) | Lists | JWT +org / svc |
 | `/api/v1/segments` (CRUD + `/preview`) | Rule-tree segments | JWT +org / svc |
-| `/api/v1/suppressions` (GET, POST, DELETE `/:id`, GET/PUT `/policy`) | Never-send registry + policy | JWT +org; policy PUT +O/A; **DELETE membership-only** |
+| `/api/v1/suppressions` (GET, POST, DELETE `/:id`, GET/PUT `/policy`) | Never-send registry + policy | JWT +org; policy PUT and DELETE +O/A (Phase 3) |
 | `/api/v1/domain-throttles` (GET, PUT, DELETE `/:id`) | Per-domain caps | reads +org, writes +O/A |
 | `/api/v1/deliverability` (`/overview`, `/domains`, `/alerts`) | Deliverability dashboards | JWT +O/A |
 | `/api/v1/templates` (CRUD + `/preview`, `/:id/clone`, `/:id/test`) | Templates | JWT +org / svc |
@@ -439,7 +441,7 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 
 ### 7.3 Middleware stack (`app.ts`)
 
-`cors` → `express.json()` (**default 100 kb limit — never raised**) → `requestLogger` (console one-liner) → routes → `errorHandler`. CORS: `env.WEB_ORIGIN ?? false` in production (CORS off if unset); enumerated `localhost:5173-5179` in dev; no credentials, no wildcard. Rate limiting is per-route Redis fixed-window (see §2.6), **bypassed under `NODE_ENV === "test"`**. Error handler maps `HttpError`/`ZodError`/Prisma P2025/P2002 → structured `{error: {code, message, issues?}}`; everything else `console.error` + 500. **No helmet, no compression, no `trust proxy`** (so IP-keyed rate limits behind Caddy/nginx may key on the proxy address).
+`cors` → `express.json()` (**default 100 kb limit — never raised**) → `requestLogger` (console one-liner) → routes → `errorHandler`. CORS: `env.WEB_ORIGIN ?? false` in production (CORS off if unset); enumerated `localhost:5173-5179` in dev; no credentials, no wildcard. Rate limiting is per-route Redis fixed-window (see §2.6), **bypassed under `NODE_ENV === "test"`**. Error handler maps `HttpError`/`ZodError`/Prisma P2025/P2002 → structured `{error: {code, message, issues?}}`; everything else `console.error` + 500. **No helmet, no compression.** `trust proxy` is set from `TRUST_PROXY` (default 1, matching the bundled Caddy) as of Phase 3, so IP-keyed rate limits see the real client address behind the proxy.
 
 ### 7.4 Frontend (`apps/web`)
 
@@ -466,7 +468,7 @@ Auth legend: **public** · **JWT** (`requireAuth`) · **+org** (`requireOrgMembe
 - **Vitest only** (v2.1.8), `@vitest/coverage-v8`. **144 test files, ~1,513 test cases**: api 70, web 50, worker 10, cloud 5, email-engine 6, sdk/shared/storage 1 each. Committed badges (`badges/coverage-summary.json`, updated 2026-08-05): **backend 94.36%, web 90.14%**; thresholds enforced at 85% everywhere (web slightly lower with a written justification).
 - **Unit-dominant**: Prisma is mocked everywhere (`apps/api/src/test/prisma-mock.ts`); only 3 files use supertest, still against mocked Prisma; BullMQ queues are globally stubbed (`apps/api/src/test/setup.ts`) — **no test exercises real queue semantics** (jobIds, delays, schedulers). No test touches a real database.
 - **Docker smoke test** (`scripts/docker-smoke.ts`, standalone tsx): real Postgres/Redis + fake in-process SMTP server; drives register → registration-locked assertion → setup → SMTP connection → scheduled transactional send → poll to SENT. Does **not** cover campaigns, attachments, tracking, unsubscribe, webhooks, inbox, or bounces.
-- Untested security-relevant files (no sibling test): `middleware/require-transactional-auth.ts` (API-key auth for the public send endpoint), `middleware/require-org-role.ts`, `apps/worker/src/lib/suppression.ts`.
+- Formerly-untested security-relevant files gained sibling tests in Phase 3: `middleware/require-transactional-auth.ts` (API-key auth for the public send endpoint) and `middleware/require-org-role.ts`. `apps/worker/src/lib/suppression.ts` is exercised via the shared decision logic's tests and the worker suites.
 - **CI gap**: no workflow runs lint, typecheck, build, or the smoke test — coverage + two guardrail scripts + SDK publish only.
 
 ### 8.2 Error handling

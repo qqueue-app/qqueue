@@ -24,6 +24,7 @@ import { outboxRouter } from "../modules/outbox/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { segmentRouter } from "../modules/segments/routes.js";
 import { setupRouter } from "../modules/setup/routes.js";
+import { mailcowRouter } from "../modules/mailcow/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
 import { suppressionRouter } from "../modules/suppressions/routes.js";
 import { templateRouter } from "../modules/templates/routes.js";
@@ -74,6 +75,7 @@ v1Router.use("/invitations", invitationRouter);
 v1Router.use("/instance-settings", instanceSettingsRouter);
 v1Router.use("/queue-operations", queueOperationsRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
+v1Router.use("/mailcow", mailcowRouter);
 v1Router.use("/contacts", contactRouter);
 v1Router.use("/contact-lists", contactListRouter);
 // Dynamic, rule-tree segments resolved to contacts at send time.

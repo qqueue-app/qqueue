@@ -34,9 +34,32 @@ const envSchema = z.object({
   PUBLIC_APP_URL: z.string().url().default("https://qqueue.app"),
   // HMAC secret for signing/verifying tracking tokens. Must match in the worker.
   TRACKING_SECRET: z.string().min(1),
-  // Shared secret authenticating inbound ESP bounce/complaint webhooks. When
-  // unset the webhook endpoint rejects every request.
+  // The inbound ESP webhook (POST /api/v1/webhooks/email-events) is disabled
+  // by default: it authenticates with one instance-wide shared secret and its
+  // messageId lookup is not org-scoped, so it only belongs on instances that
+  // actually relay through an ESP that posts normalized events. QQueue detects
+  // bounces on its own (SMTP rejections + DSN parsing in inbox sync).
+  INBOUND_ESP_WEBHOOK_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  // Shared secret authenticating inbound ESP bounce/complaint webhooks. Only
+  // read when INBOUND_ESP_WEBHOOK_ENABLED=true; when unset the endpoint
+  // rejects every request.
   WEBHOOK_SECRET: z.string().min(1).optional(),
+  // How many reverse-proxy hops to trust for client IPs (Express
+  // `trust proxy`). The bundled deployment fronts the API with Caddy, so the
+  // default is 1; set 0 when the API is exposed directly, or higher when
+  // additional proxies (nginx, a CDN) sit in front. IP-keyed rate limits key
+  // on the wrong address when this is wrong.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(1),
+  // Echo the raw password-reset token in the API response. Explicit opt-in for
+  // local development without SMTP; never enable on a real instance — anyone
+  // who can request a reset for an email could take over that account.
+  DEV_ECHO_RESET_TOKEN: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   // Object storage (S3-compatible) for email attachments. Defaults target the
   // bundled MinIO container for self-host; point them at any S3 provider for
   // managed deployments. `S3_FORCE_PATH_STYLE` must stay true for MinIO.
@@ -70,6 +93,25 @@ const envSchema = z.object({
   // Default per-recipient-domain send cap (messages/minute) used when an org has
   // no DomainThrottle row for the domain or a default. Must match the worker.
   DEFAULT_DOMAIN_MAX_PER_MINUTE: z.coerce.number().int().min(1).default(60),
+  // Mailcow provisioning (Phase 4). Both unset = the feature is off and the
+  // Mailboxes provisioning endpoints answer 404. The API key needs mailbox
+  // read/write access in Mailcow (Admin -> API).
+  MAILCOW_API_URL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().url().optional()
+  ),
+  MAILCOW_API_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  // Where provisioned mailboxes speak SMTP/IMAP. Defaults to the Mailcow
+  // hostname (from MAILCOW_API_URL) on the implicit-TLS ports.
+  MAILCOW_MAIL_HOST: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().optional()
+  ),
+  MAILCOW_SMTP_PORT: z.coerce.number().int().positive().default(465),
+  MAILCOW_IMAP_PORT: z.coerce.number().int().positive().default(993),
 });
 
 export const env = envSchema.parse(process.env);

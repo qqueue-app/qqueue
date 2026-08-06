@@ -27,6 +27,7 @@ vi.mock("./queues/webhook-delivery.queue.js", () => ({
 }));
 
 const { createApp } = await import("./app.js");
+const { env } = await import("./config/env.js");
 
 const app = createApp();
 const { accessToken } = createAuthTokens({ id: "user_1", email: "a@b.com" });
@@ -366,6 +367,28 @@ describe("tracking routes (public)", () => {
     );
     const res = await request(app).get(`/api/v1/track/click/${token}`);
     expect(res.status).toBe(400);
+  });
+
+});
+
+// Phase 3: the inbound ESP webhook ships disabled; these tests flip the flag
+// on the (test-mutable) env object per test and always restore the default.
+describe("inbound ESP webhook", () => {
+  beforeEach(() => {
+    env.INBOUND_ESP_WEBHOOK_ENABLED = true;
+  });
+  afterEach(() => {
+    env.INBOUND_ESP_WEBHOOK_ENABLED = false;
+  });
+
+  it("returns 404 by default, even with the correct secret", async () => {
+    env.INBOUND_ESP_WEBHOOK_ENABLED = false;
+    const res = await request(app)
+      .post("/api/v1/webhooks/email-events")
+      .set("x-webhook-secret", "test-webhook-secret")
+      .send({ type: "DELIVERED", emailJobId: "job_1" });
+    expect(res.status).toBe(404);
+    expect(prismaMock.emailEvent.create).not.toHaveBeenCalled();
   });
 
   it("rejects a webhook with the wrong secret (401)", async () => {
@@ -723,13 +746,76 @@ describe("smtp-connections mutations", () => {
     expect(res.status).toBe(200);
   });
 
-  it("deletes a connection (204)", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue({ id: "s1" } as never);
+  it("deletes a connection (204) as OWNER", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "s1",
+      organizationId: "org_1"
+    } as never);
     prismaMock.sMTPConnection.delete.mockResolvedValue({ id: "s1" } as never);
     const res = await request(app)
       .delete("/api/v1/smtp-connections/s1")
       .set("Authorization", auth);
     expect(res.status).toBe(204);
+  });
+
+  // Phase 3 acceptance: sending-account writes are OWNER/ADMIN only.
+  it("returns 403 when a MEMBER tries to create a connection", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    const res = await request(app)
+      .post("/api/v1/smtp-connections")
+      .set("Authorization", auth)
+      .send({ organizationId: "org_1" });
+    expect(res.status).toBe(403);
+    expect(prismaMock.sMTPConnection.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when a MEMBER tries to delete a connection", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "s1",
+      organizationId: "org_1"
+    } as never);
+    const res = await request(app)
+      .delete("/api/v1/smtp-connections/s1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(403);
+    expect(prismaMock.sMTPConnection.delete).not.toHaveBeenCalled();
+  });
+});
+
+// Phase 3 acceptance: un-suppressing an address is OWNER/ADMIN only.
+describe("suppressions delete authorization", () => {
+  it("deletes as ADMIN (204)", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN"
+    } as never);
+    prismaMock.suppression.findFirst.mockResolvedValue({
+      id: "sup_1",
+      organizationId: "org_1"
+    } as never);
+    const res = await request(app)
+      .delete("/api/v1/suppressions/sup_1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(204);
+  });
+
+  it("returns 403 for a MEMBER", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.suppression.findFirst.mockResolvedValue({
+      id: "sup_1",
+      organizationId: "org_1"
+    } as never);
+    const res = await request(app)
+      .delete("/api/v1/suppressions/sup_1")
+      .set("Authorization", auth);
+    expect(res.status).toBe(403);
+    expect(prismaMock.suppression.delete).not.toHaveBeenCalled();
   });
 });
 

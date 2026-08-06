@@ -25,6 +25,10 @@ const baseInput = {
 beforeEach(() => {
   h.queue.upsertJobScheduler.mockReset();
   h.queue.removeJobScheduler.mockReset();
+  // Send-as enforcement (Phase 4): the default actor is an OWNER.
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER"
+  } as never);
 });
 
 describe("recurringSendService.create", () => {
@@ -65,6 +69,24 @@ describe("recurringSendService.create", () => {
       { pattern: "0 9 * * 1", tz: "UTC" },
       expect.objectContaining({ name: "process-recurring-send" })
     );
+  });
+
+  // Phase 4: the schedule fires as this identity forever, so the grant is
+  // checked at creation (the worker does not re-verify).
+  it("blocks a MEMBER without a grant from scheduling as the connection", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
+
+    await expect(
+      recurringSendService.create(baseInput as never, "user-1")
+    ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
+    expect(prismaMock.recurringSend.create).not.toHaveBeenCalled();
+    expect(h.queue.upsertJobScheduler).not.toHaveBeenCalled();
   });
 
   it("rejects when no sending account can be resolved", async () => {

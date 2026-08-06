@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
 import {
   verifyTrackingToken,
@@ -9,6 +10,15 @@ import {
   trackingService,
   webhookEventSchema
 } from "./service.js";
+
+// Constant-time secret comparison; hashing first sidesteps timingSafeEqual's
+// equal-length requirement without leaking length via an early return.
+function secretsEqual(provided: string, expected: string) {
+  return timingSafeEqual(
+    createHash("sha256").update(provided).digest(),
+    createHash("sha256").update(expected).digest()
+  );
+}
 
 function sendPixel(res: Response) {
   res.set({
@@ -53,9 +63,19 @@ export const trackingController = {
   },
 
   async webhook(req: Request, res: Response) {
+    // Off unless the operator opted in: the endpoint authenticates with one
+    // instance-wide shared secret and correlates messageIds across every org,
+    // which is only acceptable on an instance that deliberately relays through
+    // an ESP posting normalized events. 404 (not 401) so a disabled instance
+    // doesn't advertise the endpoint's existence.
+    if (!env.INBOUND_ESP_WEBHOOK_ENABLED) {
+      res.status(404).json({ error: { message: "Not found" } });
+      return;
+    }
+
     const secret = env.WEBHOOK_SECRET;
     const provided = req.get("x-webhook-secret");
-    if (!secret || provided !== secret) {
+    if (!secret || !provided || !secretsEqual(provided, secret)) {
       res.status(401).json({ error: { message: "Invalid webhook secret" } });
       return;
     }

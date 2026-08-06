@@ -5,6 +5,7 @@ import {
 } from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
+import { assertOrgRole } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 
 interface AddSuppressionInput {
@@ -75,13 +76,22 @@ export const suppressionService = {
     return new Set(rows.map((row) => row.email.toLowerCase()));
   },
 
+  /**
+   * OWNER/ADMIN only: un-suppressing a bounced or complained address makes the
+   * instance mail it again, which is a deliverability decision, not a routine
+   * member action. Non-members get the same 404 as before; members without the
+   * role get 403.
+   */
   async remove(id: string, userId: string) {
-    const { count } = await prisma.suppression.deleteMany({
-      where: { id, organization: { members: { some: { userId } } } }
+    const suppression = await prisma.suppression.findFirst({
+      where: { id, organization: { members: { some: { userId } } } },
+      select: { id: true, organizationId: true }
     });
-    if (count === 0) {
+    if (!suppression) {
       throw new HttpError(404, "Suppression not found");
     }
+    await assertOrgRole(userId, suppression.organizationId, ["OWNER", "ADMIN"]);
+    await prisma.suppression.delete({ where: { id: suppression.id } });
   },
 
   /**

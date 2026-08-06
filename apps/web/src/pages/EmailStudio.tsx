@@ -475,7 +475,9 @@ export function EmailStudio() {
         recentData
       ] = await Promise.all([
         api.listTemplates(organizationId),
-        api.listSMTPConnections(organizationId),
+        // Only identities this user may send as (Phase 4): members see their
+        // granted accounts, owners/admins see everything.
+        api.listSendableSMTPConnections(organizationId),
         api.listContacts(organizationId),
         api.listContactLists(organizationId),
         api.listEmailDrafts(organizationId),

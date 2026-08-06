@@ -5,7 +5,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
-const session = vi.hoisted(() => ({ current: { currentOrganizationId: "org_1" } }));
+// Mutable so individual tests can view the page as a MEMBER; the default is
+// an OWNER, who sees every control.
+const session = vi.hoisted(() => ({
+  current: {
+    currentOrganizationId: "org_1",
+    currentOrganization: { id: "org_1", name: "Acme", role: "OWNER" }
+  } as {
+    currentOrganizationId: string;
+    currentOrganization?: { id: string; name: string; role?: string };
+  }
+}));
 vi.mock("../lib/session-context.js", () => ({ useSession: () => session.current }));
 
 vi.mock("../lib/api.js", () => ({
@@ -13,7 +23,8 @@ vi.mock("../lib/api.js", () => ({
     listSMTPConnections: vi.fn(),
     createSMTPConnection: vi.fn(),
     updateSMTPConnection: vi.fn(),
-    deleteSMTPConnection: vi.fn()
+    deleteSMTPConnection: vi.fn(),
+    verifySMTPConnection: vi.fn()
   }
 }));
 
@@ -37,7 +48,10 @@ const connection = {
 describe("SMTPConnections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    session.current = { currentOrganizationId: "org_1" };
+    session.current = {
+      currentOrganizationId: "org_1",
+      currentOrganization: { id: "org_1", name: "Acme", role: "OWNER" }
+    };
   });
 
   it("shows the empty state", async () => {
@@ -134,5 +148,89 @@ describe("SMTPConnections", () => {
     mockedApi.listSMTPConnections.mockRejectedValue(new Error("oops"));
     render(<SMTPConnections />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("oops"));
+  });
+
+  describe("Test connection", () => {
+    it("toasts success when the credentials verify", async () => {
+      const user = userEvent.setup();
+      mockedApi.listSMTPConnections.mockResolvedValue([connection]);
+      mockedApi.verifySMTPConnection.mockResolvedValue({ verified: true });
+      render(<SMTPConnections />);
+      await screen.findByText("Primary");
+
+      await user.click(screen.getByLabelText("Test connection"));
+
+      await waitFor(() =>
+        expect(mockedApi.verifySMTPConnection).toHaveBeenCalledWith("s1")
+      );
+      expect(toast.success).toHaveBeenCalledWith(
+        "Primary verified — credentials work."
+      );
+    });
+
+    it("surfaces the provider message when verification fails", async () => {
+      const user = userEvent.setup();
+      mockedApi.listSMTPConnections.mockResolvedValue([connection]);
+      mockedApi.verifySMTPConnection.mockResolvedValue({
+        verified: false,
+        message: "The mail server rejected the username or password."
+      });
+      render(<SMTPConnections />);
+      await screen.findByText("Primary");
+
+      await user.click(screen.getByLabelText("Test connection"));
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "The mail server rejected the username or password."
+        )
+      );
+    });
+
+    it("stays available to MEMBERs (testing changes nothing)", async () => {
+      session.current = {
+        currentOrganizationId: "org_1",
+        currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" }
+      };
+      mockedApi.listSMTPConnections.mockResolvedValue([connection]);
+      render(<SMTPConnections />);
+      await screen.findByText("Primary");
+      expect(screen.getByLabelText("Test connection")).toBeInTheDocument();
+    });
+  });
+
+  // Writes are OWNER/ADMIN on the API (Phase 3); members shouldn't see
+  // controls that can only end in a 403 toast.
+  describe("as a MEMBER", () => {
+    beforeEach(() => {
+      session.current = {
+        currentOrganizationId: "org_1",
+        currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" }
+      };
+    });
+
+    it("hides the create, edit, and delete controls", async () => {
+      mockedApi.listSMTPConnections.mockResolvedValue([connection]);
+      render(<SMTPConnections />);
+      await screen.findByText("Primary");
+      expect(
+        screen.queryByRole("button", { name: /New connection/i })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Edit connection")).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Delete connection")
+      ).not.toBeInTheDocument();
+    });
+
+    it("points at an owner or admin when there are no accounts", async () => {
+      mockedApi.listSMTPConnections.mockResolvedValue([]);
+      render(<SMTPConnections />);
+      expect(
+        await screen.findByText(/owner or admin needs to add one/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /New connection/i })
+      ).not.toBeInTheDocument();
+    });
   });
 });

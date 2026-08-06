@@ -216,7 +216,13 @@ export const authService = {
         "If an account exists for that email, a password reset link has been prepared.",
       // Outside production we echo the token so local/dev flows work without a
       // configured mailbox. Production relies solely on the emailed link.
-      ...(env.NODE_ENV === "production" ? {} : { resetToken: token })
+      // Echoing the token is an explicit dev-only opt-in (double-guarded:
+      // never in production). The old `NODE_ENV !== "production"` condition
+      // meant a prod instance that forgot to set NODE_ENV handed account
+      // takeover to anyone who could type an email address.
+      ...(env.DEV_ECHO_RESET_TOKEN && env.NODE_ENV !== "production"
+        ? { resetToken: token }
+        : {})
     };
   },
 

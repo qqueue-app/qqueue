@@ -33,7 +33,24 @@ building.
 | `JWT_REFRESH_SECRET` | Signs the longer-lived "keep me signed in" tokens. |
 | `ENCRYPTION_KEY` | See above — encrypts saved SMTP passwords at rest. |
 | `TRACKING_SECRET` | See above — signs open/click tracking links. |
-| `WEBHOOK_SECRET` | Optional. A shared password that lets an email provider (like SES or Postmark) report bounces to QQueue at a webhook URL. Leave blank to keep that endpoint disabled — QQueue detects bounces on its own for normal SMTP sending. |
+| `INBOUND_ESP_WEBHOOK_ENABLED` | Optional, default `false`. Turns on the inbound ESP webhook endpoint (`POST /api/v1/webhooks/email-events`). Leave it off unless you relay through an email provider that posts bounce reports to QQueue — QQueue detects bounces on its own for normal SMTP sending (rejected sends and bounce emails read from a synced inbox). |
+| `WEBHOOK_SECRET` | Optional. The shared password an email provider must send with each report when `INBOUND_ESP_WEBHOOK_ENABLED=true`. With the endpoint enabled but no secret set, every request is rejected. |
+| `TRUST_PROXY` | Optional, default `1`. How many reverse proxies sit in front of the API. The standard deployment (Caddy) is 1. Set `0` if the API faces the internet directly, or `2` if you added your own proxy (like Nginx) in front of Caddy. If this is wrong, rate limiting counts all visitors as one. |
+| `DEV_ECHO_RESET_TOKEN` | Optional, default `false`. For local development only: shows the password-reset token in the API response so you can reset a password without a working sending account. Never turn this on for a real instance — it would let anyone reset anyone's password. |
+
+## Mailcow provisioning (optional)
+
+Lets owners and admins create team mailboxes from QQueue's **Mailboxes** page
+instead of Mailcow's admin UI. QQueue creates the mailbox, keeps an app
+password for sending, and connects the inbox so bounces are tracked
+automatically. Leave these unset if you manage mailboxes yourself.
+
+| Variable | What it is |
+| --- | --- |
+| `MAILCOW_API_URL` | The address of your Mailcow server (e.g. `https://mail.example.com`). |
+| `MAILCOW_API_KEY` | An API key from Mailcow's Admin → API page. It needs read/write access. |
+| `MAILCOW_MAIL_HOST` | Optional. Where provisioned mailboxes send and receive (SMTP/IMAP). Defaults to the `MAILCOW_API_URL` hostname. |
+| `MAILCOW_SMTP_PORT` / `MAILCOW_IMAP_PORT` | Optional, default `465` / `993` (both TLS). |
 
 All of these are random strings — no human ever needs to read or remember
 them. Generate any of them by hand with `openssl rand -hex 32` if you're not

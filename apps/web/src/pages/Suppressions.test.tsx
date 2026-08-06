@@ -13,8 +13,16 @@ vi.mock("../lib/api.js", () => ({
   }
 }));
 
+// Mutable so individual tests can view the page as a MEMBER; the default is
+// an ADMIN, who sees every control.
+const session = vi.hoisted(() => ({
+  current: {
+    currentOrganizationId: "org_1",
+    currentOrganization: { id: "org_1", name: "Acme", role: "ADMIN" }
+  }
+}));
 vi.mock("../lib/session-context.js", () => ({
-  useSession: () => ({ currentOrganizationId: "org_1" })
+  useSession: () => session.current
 }));
 
 import { api } from "../lib/api.js";
@@ -29,6 +37,10 @@ const mockedApi = api as unknown as {
 describe("Suppressions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    session.current = {
+      currentOrganizationId: "org_1",
+      currentOrganization: { id: "org_1", name: "Acme", role: "ADMIN" }
+    };
     mockedApi.listSuppressions.mockResolvedValue([
       {
         id: "s1",
@@ -65,5 +77,27 @@ describe("Suppressions", () => {
       })
     );
     expect(toast.success).toHaveBeenCalledWith("Address blocked.");
+  });
+
+  it("shows the unblock control to OWNER/ADMIN", async () => {
+    render(<Suppressions />);
+    await screen.findByText("blocked@example.com");
+    expect(screen.getByLabelText("Unblock address")).toBeInTheDocument();
+  });
+
+  // Un-suppressing is OWNER/ADMIN on the API (Phase 3); members keep the
+  // ability to block, but the unblock control (and its column) disappears.
+  it("hides the unblock control from MEMBERs", async () => {
+    session.current = {
+      currentOrganizationId: "org_1",
+      currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" }
+    };
+    render(<Suppressions />);
+    await screen.findByText("blocked@example.com");
+    expect(screen.queryByLabelText("Unblock address")).not.toBeInTheDocument();
+    expect(screen.queryByText("Actions")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^block address$/i })
+    ).toBeInTheDocument();
   });
 });

@@ -8,10 +8,21 @@ import type {
 import { nextCronRun } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { assertMayUseConnection } from "../../lib/send-as.js";
 import { campaignProcessingQueue } from "../../queues/campaign-processing.queue.js";
 
 function recurringSchedulerId(campaignId: string) {
   return `campaign-recurring-${campaignId}`;
+}
+
+/**
+ * Campaign fan-out sends as the org's default connection (resolved in the
+ * worker). Send-as enforcement (Phase 4) therefore happens when the campaign
+ * is started: the actor must be allowed to use the default connection. The
+ * worker does not re-verify at fire time.
+ */
+async function assertMayStartCampaign(userId: string, organizationId: string) {
+  await assertMayUseConnection({ userId, organizationId });
 }
 
 const campaignInclude = {
@@ -249,6 +260,8 @@ export const campaignService = {
       throw new HttpError(400, "Campaign requires a template and contact list");
     }
 
+    await assertMayStartCampaign(userId, campaign.organizationId);
+
     const updated = await prisma.campaign.update({
       where: { id },
       data: { status: "SENDING", scheduledAt: null },
@@ -269,6 +282,8 @@ export const campaignService = {
     if (!campaign.templateId || !campaign.contactListId) {
       throw new HttpError(400, "Campaign requires a template and contact list");
     }
+
+    await assertMayStartCampaign(userId, campaign.organizationId);
 
     const scheduledAt = new Date(input.scheduledAt);
     if (scheduledAt.getTime() <= Date.now()) {
@@ -312,6 +327,8 @@ export const campaignService = {
     if (!campaign.templateId || !campaign.contactListId) {
       throw new HttpError(400, "Campaign requires a template and contact list");
     }
+
+    await assertMayStartCampaign(userId, campaign.organizationId);
 
     const nextRunAt = nextCronRun(input.cronExpression, input.timezone);
     if (!nextRunAt) {

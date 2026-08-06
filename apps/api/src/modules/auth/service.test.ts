@@ -264,7 +264,7 @@ describe("authService.requestPasswordReset", () => {
     expect(pipelineSend).not.toHaveBeenCalled();
   });
 
-  it("creates a reset token for an existing user in non-production", async () => {
+  it("creates a reset token but does not echo it by default (Phase 3)", async () => {
     prismaMock.user.findUnique.mockResolvedValue({
       id: "user_1",
       email: "a@b.com",
@@ -275,7 +275,7 @@ describe("authService.requestPasswordReset", () => {
 
     const result = await authService.requestPasswordReset("a@b.com");
 
-    expect(result.resetToken).toEqual(expect.any(String));
+    expect(result).not.toHaveProperty("resetToken");
     expect(prismaMock.passwordResetToken.create).toHaveBeenCalledWith({
       data: {
         userId: "user_1",
@@ -285,9 +285,29 @@ describe("authService.requestPasswordReset", () => {
     });
   });
 
-  it("does not return the reset token in production", async () => {
+  it("echoes the reset token only with the explicit DEV_ECHO_RESET_TOKEN opt-in", async () => {
+    env.DEV_ECHO_RESET_TOKEN = true;
+    try {
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: "user_1",
+        email: "a@b.com",
+        name: "A"
+      } as never);
+      prismaMock.passwordResetToken.create.mockResolvedValue({ id: "prt_1" } as never);
+      prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+
+      const result = await authService.requestPasswordReset("a@b.com");
+
+      expect(result.resetToken).toEqual(expect.any(String));
+    } finally {
+      env.DEV_ECHO_RESET_TOKEN = false;
+    }
+  });
+
+  it("never returns the reset token in production, even when opted in", async () => {
     const originalEnv = env.NODE_ENV;
     env.NODE_ENV = "production";
+    env.DEV_ECHO_RESET_TOKEN = true;
     try {
       prismaMock.user.findUnique.mockResolvedValue({
         id: "user_1",
@@ -303,6 +323,7 @@ describe("authService.requestPasswordReset", () => {
       expect(result.message).toContain("If an account exists");
     } finally {
       env.NODE_ENV = originalEnv;
+      env.DEV_ECHO_RESET_TOKEN = false;
     }
   });
 

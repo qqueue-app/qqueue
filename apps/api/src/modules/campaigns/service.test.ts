@@ -17,6 +17,11 @@ beforeEach(() => {
   removeJobScheduler.mockReset().mockResolvedValue(undefined);
   // Most campaigns have no A/B variants; analytics defaults to an empty set.
   prismaMock.campaignVariant.findMany.mockResolvedValue([] as never);
+  // Send-as enforcement (Phase 4) checks the actor's role when a campaign is
+  // started; the default actor here is an OWNER.
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER"
+  } as never);
 });
 
 afterEach(() => {
@@ -205,6 +210,24 @@ describe("campaignService.sendNow", () => {
     prismaMock.campaign.update.mockResolvedValue(draft as never);
     await campaignService.sendNow("c1", "user_1");
     expect(add).toHaveBeenCalledOnce();
+  });
+
+  // Phase 4: campaigns send as the org default connection, so starting one
+  // requires the actor to be allowed to use it.
+  it("blocks a MEMBER without a grant on the default connection", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
+
+    await expect(campaignService.sendNow("c1", "user_1")).rejects.toMatchObject(
+      { statusCode: 403, code: "send_as_denied" }
+    );
+    expect(add).not.toHaveBeenCalled();
   });
 
   it("throws 400 from a non-sendable status", async () => {

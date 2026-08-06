@@ -4,6 +4,82 @@ Notable changes to QQueue. Phases refer to the evolution plan; each entry lands
 with green `typecheck`/`lint`/`test` and, where the send pipeline or migrations
 are touched, a passing Docker smoke test.
 
+## Phase 4 — Mailcow provisioning + send-as permissions (2026-08-06)
+
+- **Mailboxes page (OWNER/ADMIN)**: with `MAILCOW_API_URL`/`MAILCOW_API_KEY`
+  set, admins provision a team mailbox in one flow — QQueue creates the
+  Mailcow mailbox, generates an app password it alone keeps (encrypted with
+  the existing AES-GCM scheme), auto-creates the `SMTPConnection` and a
+  **sync-enabled `InboxAccount`** (mandatory, so Phase 2b's DSN parser has
+  bounce visibility for the identity from day one), and optionally grants
+  send-as to a member. The human's mailbox password is returned exactly once
+  for their own mail client; QQueue never stores it. On partial failure the
+  Mailcow mailbox is deleted again — provisioning leaves no orphans.
+- **Send-as grants**: new `SmtpConnectionGrant` model (migration
+  `20260806000000_add_smtp_connection_grants`). OWNER/ADMIN may send as any
+  org connection; a MEMBER only as connections they hold a grant for.
+  Enforced once, at creation time, on every send surface — transactional API
+  (JWT callers), manual sends, drafts naming a connection, recurring-send
+  creation, and campaign start (campaigns send as the org default, so the
+  actor must be allowed to use it). API-key sends and SYSTEM mail carry no
+  acting user and bypass by design; the worker does not re-verify (jobs are
+  created post-check).
+- **The composer picker is grant-aware**: Email Studio now loads
+  `GET /smtp-connections/sendable`, so members see exactly the identities
+  they may use. Grant management (list/add/remove per connection) lives on
+  the Mailboxes page.
+- New Mailcow API client (`apps/api/src/modules/mailcow/client.ts`) covering
+  list domains, create/delete mailbox, password reset, and app passwords,
+  with Mailcow's 200-with-danger-body responses mapped to real errors.
+- Env: `MAILCOW_API_URL`, `MAILCOW_API_KEY`, `MAILCOW_MAIL_HOST`,
+  `MAILCOW_SMTP_PORT`, `MAILCOW_IMAP_PORT` (documented in
+  `docs/ENVIRONMENT_VARIABLES.md`); the feature is off and its routes 404
+  when unset.
+- **Provisioning verifies without false failures**: after the mailbox is
+  created and recorded, a short non-fatal probe (3 attempts over ~7s, 6s
+  timeout each) tests the SMTP credentials. Mailcow can take a moment to
+  activate a fresh mailbox, so a failed probe reports `verified: false` as a
+  warning in the result and the UI — rollback stays reserved for "we couldn't
+  record what we created", never "the handshake didn't work yet". A new
+  `POST /smtp-connections/:id/verify` endpoint plus a "Test connection"
+  button on every sending-account card (membership-level — it changes
+  nothing) lets anyone re-check on demand.
+
+## Phase 3 — Close the security gaps (2026-08-06)
+
+- **Sending-account writes are OWNER/ADMIN only.** Any member could previously
+  add, alter, or delete the org's SMTP credentials. Create is gated at the
+  route (`requireOrgRole`); update/delete are gated in the service next to the
+  ownership lookup (the `/:id` requests carry no org id until the row loads).
+  Reads stay membership; members still send from the accounts.
+- **Un-suppressing an address is OWNER/ADMIN only.** `DELETE /suppressions/:id`
+  needed only membership — any member could put a bounced or complained
+  address back into circulation. Non-members still get the same 404.
+- **The inbound ESP webhook ships disabled.** `POST /webhooks/email-events`
+  authenticated with one instance-wide plaintext secret (non-constant-time)
+  and correlated messageIds across every org. There is no caller on a
+  Mailcow-relay instance, and Phase 2b's DSN parsing covers async bounces. The
+  endpoint now answers 404 unless `INBOUND_ESP_WEBHOOK_ENABLED=true`; when
+  enabled, the secret compare is constant-time. The outbound webhook system is
+  untouched.
+- **`trust proxy` is set** (`TRUST_PROXY`, default 1 for the bundled Caddy),
+  so IP-keyed rate limits key on the real client address instead of the
+  proxy's.
+- **The raw password-reset token is no longer echoed by default.** The old
+  condition (`NODE_ENV !== "production"`) leaked account takeover on any prod
+  instance that forgot to set `NODE_ENV`. Echoing now requires the explicit
+  `DEV_ECHO_RESET_TOKEN=true` opt-in and is refused under production
+  regardless.
+- The previously-untested `require-org-role` and `require-transactional-auth`
+  middlewares gained dedicated test suites, alongside route-level acceptance
+  tests (MEMBER → 403 on sending-account create/delete and suppression
+  delete; webhook 404 by default).
+- **The dashboard hides what members can't do**: the sending-accounts page
+  shows no create/edit/delete controls to MEMBERs (its empty state points at
+  an owner or admin instead), and the blocked-addresses page hides the
+  unblock control while keeping blocking open to everyone. Cosmetic only —
+  the API remains the enforcement point.
+
 ## Phase 2b — Async bounce processing: DSN parsing in inbox sync (2026-08-05)
 
 - **Inbox sync now recognizes delivery status notifications** (bounces that

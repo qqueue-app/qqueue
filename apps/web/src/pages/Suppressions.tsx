@@ -51,7 +51,13 @@ function reasonVariant(reason: string) {
 }
 
 export function Suppressions() {
-  const { currentOrganizationId: organizationId } = useSession();
+  const { currentOrganizationId: organizationId, currentOrganization } =
+    useSession();
+  // Un-suppressing is OWNER/ADMIN on the API (Phase 3); hide the control from
+  // members. Blocking an address stays open to every member.
+  const canUnblock =
+    currentOrganization?.role === "OWNER" ||
+    currentOrganization?.role === "ADMIN";
   const [suppressions, setSuppressions] = useState<Suppression[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -158,7 +164,9 @@ export function Suppressions() {
                   <TableHead>Email</TableHead>
                   <TableHead>Reason</TableHead>
                   <TableHead>Added</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  {canUnblock ? (
+                    <TableHead className="text-right">Actions</TableHead>
+                  ) : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -175,20 +183,22 @@ export function Suppressions() {
                     <TableCell className="text-muted-foreground">
                       {formatDate(suppression.createdAt)}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteTarget(suppression)}
-                          aria-label="Unblock address"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+                    {canUnblock ? (
+                      <TableCell>
+                        <div className="flex justify-end">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => setDeleteTarget(suppression)}
+                            aria-label="Unblock address"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))}
               </TableBody>

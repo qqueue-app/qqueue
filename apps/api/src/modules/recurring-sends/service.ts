@@ -6,6 +6,7 @@ import {
 } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { assertMayUseConnection } from "../../lib/send-as.js";
 import {
   recurringSendQueue,
   recurringSendSchedulerId
@@ -81,6 +82,15 @@ export const recurringSendService = {
         "missing_smtp_connection"
       );
     }
+
+    // Send-as enforcement (Phase 4): the schedule keeps firing as this
+    // identity long after creation, so the grant check happens here — the
+    // worker does not re-verify at fire time.
+    await assertMayUseConnection({
+      userId,
+      organizationId: input.organizationId,
+      smtpConnectionId: smtpConnection.id
+    });
 
     const nextRunAt = nextCronRun(input.cronExpression, input.timezone);
     if (!nextRunAt) {

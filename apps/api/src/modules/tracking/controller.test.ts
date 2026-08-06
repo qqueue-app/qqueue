@@ -36,7 +36,10 @@ vi.mock("../../config/env.js", async () => {
 const { trackingController } = await import("./controller.js");
 const { trackingService, TRACKING_PIXEL } = await import("./service.js");
 const { env } = await import("../../config/env.js");
-const mutableEnv = env as { WEBHOOK_SECRET?: string };
+const mutableEnv = env as {
+  WEBHOOK_SECRET?: string;
+  INBOUND_ESP_WEBHOOK_ENABLED?: boolean;
+};
 
 function mockRes() {
   const res = {} as Response;
@@ -62,6 +65,9 @@ function mockReq(overrides: Partial<Request> & { headers?: Record<string, string
 beforeEach(() => {
   vi.clearAllMocks();
   mutableEnv.WEBHOOK_SECRET = "test-webhook-secret";
+  // The endpoint ships disabled (Phase 3); most webhook tests exercise the
+  // enabled behavior, and the default-off test flips this back.
+  mutableEnv.INBOUND_ESP_WEBHOOK_ENABLED = true;
 });
 
 describe("trackingController.open", () => {
@@ -192,6 +198,21 @@ describe("trackingController.click", () => {
 
 describe("trackingController.webhook", () => {
   const body = { type: "DELIVERED", messageId: "<msg-1@example.com>" };
+
+  // Phase 3: the endpoint ships disabled and answers 404 — not 401 — so a
+  // default instance doesn't even advertise that it exists.
+  it("responds 404 when INBOUND_ESP_WEBHOOK_ENABLED is off (the default)", async () => {
+    mutableEnv.INBOUND_ESP_WEBHOOK_ENABLED = false;
+    const res = mockRes();
+
+    await trackingController.webhook(
+      mockReq({ body, headers: { "x-webhook-secret": "test-webhook-secret" } }),
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(trackingService.recordWebhookEvent).not.toHaveBeenCalled();
+  });
 
   it("records a normalized event and responds 202", async () => {
     vi.mocked(trackingService.recordWebhookEvent).mockResolvedValue(true);

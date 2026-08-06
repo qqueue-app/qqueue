@@ -494,6 +494,33 @@ export interface SMTPConnection {
   isDefault: boolean;
 }
 
+export interface SmtpConnectionGrant {
+  id: string;
+  organizationId: string;
+  smtpConnectionId: string;
+  userId: string;
+  createdAt: string;
+  user?: { id: string; email: string; name?: string | null };
+}
+
+export interface MailcowStatus {
+  configured: boolean;
+  reachable: boolean;
+  domains: string[];
+  mailHost: string | null;
+  error?: string;
+}
+
+export interface MailboxProvisionResult {
+  smtpConnection: SMTPConnection;
+  inboxAccountId: string;
+  email: string;
+  /** The human's mailbox login password — shown exactly once. */
+  mailboxPassword: string;
+  /** False = created fine but the SMTP handshake hasn't verified yet. */
+  verified: boolean;
+}
+
 export interface ApiKey {
   id: string;
   organizationId: string;
@@ -931,6 +958,46 @@ export const api = {
     );
   },
 
+  /** Connections the current user may send as (all for OWNER/ADMIN, granted for members). */
+  listSendableSMTPConnections(organizationId: string) {
+    return request<SMTPConnection[]>(
+      `/api/v1/smtp-connections/sendable?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  listConnectionGrants(connectionId: string) {
+    return request<SmtpConnectionGrant[]>(
+      `/api/v1/smtp-connections/${encodeURIComponent(connectionId)}/grants`
+    );
+  },
+
+  addConnectionGrant(connectionId: string, userId: string) {
+    return request<SmtpConnectionGrant>(
+      `/api/v1/smtp-connections/${encodeURIComponent(connectionId)}/grants`,
+      { method: "POST", body: JSON.stringify({ userId }) }
+    );
+  },
+
+  removeConnectionGrant(connectionId: string, userId: string) {
+    return request<void>(
+      `/api/v1/smtp-connections/${encodeURIComponent(connectionId)}/grants/${encodeURIComponent(userId)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  getMailcowStatus(organizationId: string) {
+    return request<MailcowStatus>(
+      `/api/v1/mailcow/status?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  provisionMailbox(input: Record<string, unknown>) {
+    return request<MailboxProvisionResult>("/api/v1/mailcow/provision", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
   createSMTPConnection(input: Record<string, unknown>) {
     return request<SMTPConnection>("/api/v1/smtp-connections", {
       method: "POST",
@@ -949,6 +1016,14 @@ export const api = {
     return request<void>(`/api/v1/smtp-connections/${id}`, {
       method: "DELETE",
     });
+  },
+
+  /** On-demand credential test; a `verified: false` result carries the reason. */
+  verifySMTPConnection(id: string) {
+    return request<{ verified: boolean; message?: string }>(
+      `/api/v1/smtp-connections/${encodeURIComponent(id)}/verify`,
+      { method: "POST" }
+    );
   },
 
   listContacts(organizationId: string) {

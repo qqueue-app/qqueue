@@ -53,6 +53,8 @@ describe("transactionalEmailController.send", () => {
       ...validBody,
       // organizationId comes from the API key / session, never the body.
       organizationId: "org_1",
+      // API-key requests carry no acting user (the key is the org credential).
+      createdByUserId: null,
       idempotencyKey: undefined
     });
     expect(res.status).toHaveBeenCalledWith(202);

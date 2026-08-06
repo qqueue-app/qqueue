@@ -16,7 +16,7 @@ vi.mock("../lib/session-context.js", () => ({
 vi.mock("../lib/api.js", () => ({
   api: {
     listTemplates: vi.fn(),
-    listSMTPConnections: vi.fn(),
+    listSendableSMTPConnections: vi.fn(),
     listContacts: vi.fn(),
     listContactLists: vi.fn(),
     listEmailDrafts: vi.fn(),
@@ -98,7 +98,7 @@ const lists = [
 
 function setup({ withSmtp = true } = {}) {
   mockedApi.listTemplates.mockResolvedValue(templates);
-  mockedApi.listSMTPConnections.mockResolvedValue(withSmtp ? smtp : []);
+  mockedApi.listSendableSMTPConnections.mockResolvedValue(withSmtp ? smtp : []);
   mockedApi.listContacts.mockResolvedValue(contacts);
   mockedApi.listContactLists.mockResolvedValue(lists);
   mockedApi.listEmailDrafts.mockResolvedValue([]);

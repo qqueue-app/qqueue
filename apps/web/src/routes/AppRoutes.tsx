@@ -84,6 +84,11 @@ const SMTPConnections = lazy(() =>
     default: module.SMTPConnections,
   }))
 );
+const Mailboxes = lazy(() =>
+  import("../pages/Mailboxes.js").then((module) => ({
+    default: module.Mailboxes,
+  }))
+);
 const Templates = lazy(() =>
   import("../pages/Templates.js").then((module) => ({
     default: module.Templates,
@@ -147,6 +152,7 @@ export function AppRoutes() {
             element={<Navigate to="/email-studio" replace />}
           />
           <Route path="/smtp-connections" element={<SMTPConnections />} />
+          <Route path="/mailboxes" element={<Mailboxes />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/suppressions" element={<Suppressions />} />
           <Route path="/templates" element={<Templates />} />

@@ -1,0 +1,285 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { prismaMock } from "../../test/prisma-mock.js";
+
+// The Mailcow client is stubbed: these tests pin the provisioning
+// orchestration (ordering, transaction contents, cleanup), not HTTP shapes —
+// client.test.ts covers those.
+const h = vi.hoisted(() => ({
+  client: {
+    listDomains: vi.fn(),
+    createMailbox: vi.fn(),
+    createAppPassword: vi.fn(),
+    deleteMailbox: vi.fn(),
+    setMailboxPassword: vi.fn(),
+    verify: vi.fn(),
+  } as Record<string, ReturnType<typeof vi.fn>>,
+  getMailcowClient: vi.fn(),
+  mailcowMailHost: vi.fn(),
+  verifyConnection: vi.fn(),
+}));
+
+vi.mock("./client.js", () => ({
+  getMailcowClient: h.getMailcowClient,
+  mailcowMailHost: h.mailcowMailHost,
+}));
+
+// Keep normalizeDefault/smtpConnectionSelect real; stub only the SMTP probe so
+// no test ever opens a socket.
+vi.mock("../smtp-connections/service.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../smtp-connections/service.js")
+  >("../smtp-connections/service.js");
+  return { ...actual, verifyConnection: h.verifyConnection };
+});
+
+const { mailcowService } = await import("./service.js");
+const { decryptSecret } = await import("../../lib/crypto.js");
+
+const provisionInput = {
+  organizationId: "org_1",
+  localPart: "Ama",
+  domain: "Acme.Test",
+  name: "Ama Mensah",
+  assignToUserId: "user_ama",
+};
+
+beforeEach(() => {
+  for (const fn of Object.values(h.client)) {
+    fn.mockReset().mockResolvedValue(undefined);
+  }
+  h.verifyConnection.mockReset().mockResolvedValue(undefined);
+  h.getMailcowClient.mockReturnValue(h.client);
+  h.mailcowMailHost.mockReturnValue("mail.acme.test");
+  h.client.listDomains.mockResolvedValue([
+    { domain_name: "acme.test", active: true },
+    { domain_name: "inactive.test", active: false },
+  ]);
+  // Org membership for the assignee; no pre-existing inbox; no default yet.
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "MEMBER",
+  } as never);
+  prismaMock.inboxAccount.findUnique.mockResolvedValue(null);
+  prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
+  prismaMock.sMTPConnection.create.mockResolvedValue({
+    id: "s_new",
+    organizationId: "org_1",
+    name: "Ama Mensah",
+    host: "mail.acme.test",
+    port: 465,
+    secure: true,
+    fromEmail: "ama@acme.test",
+    fromName: "Ama Mensah",
+    isDefault: true,
+    createdAt: new Date("2026-08-06T00:00:00Z"),
+    updatedAt: new Date("2026-08-06T00:00:00Z"),
+  } as never);
+  prismaMock.inboxAccount.create.mockResolvedValue({ id: "inbox_1" } as never);
+});
+
+describe("mailcowService.status", () => {
+  it("reports unconfigured when the instance has no Mailcow env", async () => {
+    h.getMailcowClient.mockReturnValue(null);
+    h.mailcowMailHost.mockReturnValue(null);
+    await expect(mailcowService.status()).resolves.toEqual({
+      configured: false,
+      reachable: false,
+      domains: [],
+      mailHost: null,
+    });
+  });
+
+  it("lists only active domains when reachable", async () => {
+    await expect(mailcowService.status()).resolves.toMatchObject({
+      configured: true,
+      reachable: true,
+      domains: ["acme.test"],
+      mailHost: "mail.acme.test",
+    });
+  });
+
+  it("reports unreachable with the error message", async () => {
+    h.client.listDomains.mockRejectedValue(new Error("connect timeout"));
+    await expect(mailcowService.status()).resolves.toMatchObject({
+      configured: true,
+      reachable: false,
+      error: "connect timeout",
+    });
+  });
+});
+
+describe("mailcowService.provision", () => {
+  it("provisions mailbox + app password + connection + inbox + grant in one flow", async () => {
+    const result = await mailcowService.provision(provisionInput);
+
+    // Address is normalized to lowercase everywhere.
+    expect(h.client.createMailbox).toHaveBeenCalledWith({
+      localPart: "ama",
+      domain: "acme.test",
+      name: "Ama Mensah",
+      password: expect.any(String),
+    });
+    expect(h.client.createAppPassword).toHaveBeenCalledWith({
+      email: "ama@acme.test",
+      name: "QQueue",
+      password: expect.any(String),
+    });
+
+    // QQueue stores the app password, never the mailbox password.
+    const appPassword = h.client.createAppPassword.mock.calls[0][0].password;
+    const connectionData =
+      prismaMock.sMTPConnection.create.mock.calls[0][0].data;
+    expect(connectionData).toMatchObject({
+      organizationId: "org_1",
+      host: "mail.acme.test",
+      port: 465,
+      secure: true,
+      fromEmail: "ama@acme.test",
+      isDefault: true,
+    });
+    expect(decryptSecret(connectionData.passwordEncrypted)).toBe(appPassword);
+    expect(decryptSecret(connectionData.usernameEncrypted)).toBe(
+      "ama@acme.test"
+    );
+
+    // The sync-enabled InboxAccount is mandatory: it gives DSN parsing bounce
+    // visibility for this identity.
+    const inboxData = prismaMock.inboxAccount.create.mock.calls[0][0].data;
+    expect(inboxData).toMatchObject({
+      email: "ama@acme.test",
+      host: "mail.acme.test",
+      port: 993,
+      secure: true,
+      status: "ACTIVE",
+    });
+    expect(decryptSecret(inboxData.passwordEncrypted)).toBe(appPassword);
+
+    expect(prismaMock.smtpConnectionGrant.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: "org_1",
+        smtpConnectionId: "s_new",
+        userId: "user_ama",
+      },
+    });
+
+    expect(result.email).toBe("ama@acme.test");
+    expect(result.mailboxPassword).toEqual(expect.any(String));
+    expect(result.mailboxPassword).not.toBe(appPassword);
+    expect(result.smtpConnection.id).toBe("s_new");
+    expect(result.inboxAccountId).toBe("inbox_1");
+    expect(result.verified).toBe(true);
+  });
+
+  it("reports verified: false without rolling back when the probe never passes", async () => {
+    vi.useFakeTimers();
+    try {
+      // Mailbox not active yet: every probe attempt fails.
+      h.verifyConnection.mockRejectedValue(new Error("535 auth failed"));
+
+      const promise = mailcowService.provision(provisionInput);
+      await vi.runAllTimersAsync(); // skip the probe's backoff sleeps
+      const result = await promise;
+
+      expect(result.verified).toBe(false);
+      // Everything was still created and nothing was cleaned up — false is a
+      // warning, not a failure.
+      expect(prismaMock.sMTPConnection.create).toHaveBeenCalled();
+      expect(prismaMock.inboxAccount.create).toHaveBeenCalled();
+      expect(h.client.deleteMailbox).not.toHaveBeenCalled();
+      // It retried before giving up.
+      expect(h.verifyConnection).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recovers to verified: true when a later probe attempt succeeds", async () => {
+    vi.useFakeTimers();
+    try {
+      h.verifyConnection
+        .mockRejectedValueOnce(new Error("535 auth failed"))
+        .mockResolvedValueOnce(undefined);
+
+      const promise = mailcowService.provision(provisionInput);
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.verified).toBe(true);
+      expect(h.verifyConnection).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips the grant when no assignee is named", async () => {
+    await mailcowService.provision({
+      ...provisionInput,
+      assignToUserId: undefined,
+    });
+    expect(prismaMock.smtpConnectionGrant.create).not.toHaveBeenCalled();
+  });
+
+  it("404s when the instance has no Mailcow configured", async () => {
+    h.getMailcowClient.mockReturnValue(null);
+    await expect(
+      mailcowService.provision(provisionInput)
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      code: "mailcow_not_configured",
+    });
+  });
+
+  it("rejects a domain Mailcow does not serve, before any mutation", async () => {
+    await expect(
+      mailcowService.provision({ ...provisionInput, domain: "other.test" })
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(h.client.createMailbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inactive domain", async () => {
+    await expect(
+      mailcowService.provision({ ...provisionInput, domain: "inactive.test" })
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(h.client.createMailbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects an assignee who is not an org member, before any mutation", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue(null);
+    await expect(
+      mailcowService.provision(provisionInput)
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(h.client.createMailbox).not.toHaveBeenCalled();
+  });
+
+  it("409s when the address is already connected to the org", async () => {
+    prismaMock.inboxAccount.findUnique.mockResolvedValue({
+      id: "existing",
+    } as never);
+    await expect(
+      mailcowService.provision(provisionInput)
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(h.client.createMailbox).not.toHaveBeenCalled();
+  });
+
+  it("deletes the Mailcow mailbox when the QQueue side fails (no orphans)", async () => {
+    prismaMock.sMTPConnection.create.mockRejectedValue(new Error("db down"));
+
+    await expect(mailcowService.provision(provisionInput)).rejects.toThrow(
+      "db down"
+    );
+    expect(h.client.deleteMailbox).toHaveBeenCalledWith("ama@acme.test");
+  });
+
+  it("surfaces the original error even when cleanup also fails", async () => {
+    prismaMock.sMTPConnection.create.mockRejectedValue(new Error("db down"));
+    h.client.deleteMailbox.mockRejectedValue(new Error("mailcow gone"));
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await expect(mailcowService.provision(provisionInput)).rejects.toThrow(
+      "db down"
+    );
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+});

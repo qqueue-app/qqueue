@@ -59,6 +59,41 @@ describe("emailDraftService", () => {
     });
   });
 
+  // Phase 4: a draft naming an ungranted sending account is rejected at save.
+  it("blocks a MEMBER from saving a draft with an ungranted connection", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
+
+    await expect(
+      emailDraftService.create(
+        { organizationId: "org_1", smtpConnectionId: "s1" },
+        "user_1"
+      )
+    ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
+    expect(prismaMock.emailDraft.create).not.toHaveBeenCalled();
+  });
+
+  it("lets a MEMBER with a grant pick the connection on update", async () => {
+    prismaMock.emailDraft.findFirst.mockResolvedValue({
+      id: "d1",
+      organizationId: "org_1"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
+      id: "g1"
+    } as never);
+    prismaMock.emailDraft.update.mockResolvedValue({ id: "d1" } as never);
+
+    await emailDraftService.update("d1", "user_1", {
+      smtpConnectionId: "s1"
+    });
+    expect(prismaMock.emailDraft.update).toHaveBeenCalled();
+  });
+
   it("throws 404 when updating a draft the user does not own", async () => {
     prismaMock.emailDraft.findFirst.mockResolvedValue(null);
     await expect(

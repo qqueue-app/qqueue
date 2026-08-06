@@ -21,6 +21,11 @@ const DEV_ALLOWED_ORIGINS = Array.from(
 export function createApp() {
   const app = express();
 
+  // Behind the bundled Caddy (or any reverse proxy), the client IP arrives in
+  // X-Forwarded-For; without this the IP-keyed rate limits all key on the
+  // proxy's address. Configurable hop count; 0 disables (direct exposure).
+  app.set("trust proxy", env.TRUST_PROXY);
+
   app.use(
     cors({
       origin:

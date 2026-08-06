@@ -7,6 +7,7 @@ import type {
 import { HttpError } from "../../lib/http-error.js";
 import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { assertMayUseConnection } from "../../lib/send-as.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 import { attachmentService } from "../attachments/service.js";
 import { suppressionService } from "../suppressions/service.js";
@@ -154,6 +155,18 @@ export const transactionalEmailService = {
         "SMTP connection not found",
         "missing_smtp_connection"
       );
+    }
+
+    // Send-as enforcement (Phase 4): a MEMBER needs a grant for this
+    // connection. Covers manual sends too (they delegate here with the
+    // composer's user). API-key sends have no acting user and SYSTEM mail is
+    // instance mail — both bypass inside assertMayUseConnection/here.
+    if (input.origin !== "SYSTEM") {
+      await assertMayUseConnection({
+        userId: input.createdByUserId,
+        organizationId: input.organizationId,
+        smtpConnectionId: smtpConnection.id
+      });
     }
 
     const template = input.templateId

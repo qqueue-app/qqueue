@@ -23,6 +23,9 @@ export const transactionalEmailController = {
     const input = {
       ...payload,
       organizationId: req.organizationId!,
+      // JWT callers carry the acting user (send-as enforcement + attribution);
+      // API-key callers have none — the key itself is the org credential.
+      createdByUserId: req.userId ?? null,
       idempotencyKey
     };
     const result = await transactionalEmailService.send(input);

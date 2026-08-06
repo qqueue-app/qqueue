@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pencil, Plus, Server, Trash2 } from "lucide-react";
+import { Pencil, Plus, PlugZap, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -26,7 +26,13 @@ import {
 } from "../components/ui/dialog.js";
 
 export function SMTPConnections() {
-  const { currentOrganizationId: organizationId } = useSession();
+  const { currentOrganizationId: organizationId, currentOrganization } =
+    useSession();
+  // Writes are OWNER/ADMIN on the API (Phase 3); hide the controls members
+  // can't use. The server remains the enforcement point.
+  const canManage =
+    currentOrganization?.role === "OWNER" ||
+    currentOrganization?.role === "ADMIN";
   const [connections, setConnections] = useState<SMTPConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -34,6 +40,7 @@ export function SMTPConnections() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SMTPConnection | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   async function load() {
     if (!organizationId) {
@@ -147,16 +154,36 @@ export function SMTPConnections() {
     }
   }
 
+  async function testConnection(connection: SMTPConnection) {
+    setTestingId(connection.id);
+    try {
+      const result = await api.verifySMTPConnection(connection.id);
+      if (result.verified) {
+        toast.success(`${connection.name} verified — credentials work.`);
+      } else {
+        toast.error(result.message ?? "The connection could not be verified.");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Unable to test the connection."
+      );
+    } finally {
+      setTestingId(null);
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Sending accounts"
         description="The mailboxes QQueue sends from. Connect one to start sending email (works with Mailcow and any standard SMTP server)."
         actions={
-          <Button onClick={openCreate} disabled={!organizationId}>
-            <Plus className="h-4 w-4" />
-            New connection
-          </Button>
+          canManage ? (
+            <Button onClick={openCreate} disabled={!organizationId}>
+              <Plus className="h-4 w-4" />
+              New connection
+            </Button>
+          ) : undefined
         }
       />
 
@@ -175,12 +202,22 @@ export function SMTPConnections() {
             <EmptyState
               icon={Server}
               title="No sending accounts yet"
-              description="Add your first account to start sending email."
+              description={
+                canManage
+                  ? "Add your first account to start sending email."
+                  : "An owner or admin needs to add one before this organization can send email."
+              }
               action={
-                <Button onClick={openCreate} disabled={!organizationId} variant="outline">
-                  <Plus className="h-4 w-4" />
-                  New connection
-                </Button>
+                canManage ? (
+                  <Button
+                    onClick={openCreate}
+                    disabled={!organizationId}
+                    variant="outline"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New connection
+                  </Button>
+                ) : undefined
               }
             />
           </Card>
@@ -206,21 +243,39 @@ export function SMTPConnections() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    onClick={() => openEdit(connection)}
-                    aria-label="Edit connection"
+                    onClick={() => testConnection(connection)}
+                    disabled={testingId !== null}
+                    aria-label="Test connection"
                   >
-                    <Pencil className="h-4 w-4" />
+                    {testingId === connection.id ? (
+                      <Spinner />
+                    ) : (
+                      <PlugZap className="h-4 w-4" />
+                    )}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-destructive"
-                    onClick={() => setDeleteTarget(connection)}
-                    aria-label="Delete connection"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {canManage ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openEdit(connection)}
+                        aria-label="Edit connection"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeleteTarget(connection)}
+                        aria-label="Delete connection"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>

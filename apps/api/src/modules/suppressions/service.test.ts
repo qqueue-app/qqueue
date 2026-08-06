@@ -41,16 +41,43 @@ describe("suppressionService", () => {
     );
   });
 
-  it("removes a suppression scoped by membership", async () => {
-    prismaMock.suppression.deleteMany.mockResolvedValue({ count: 1 } as never);
+  it("removes a suppression when the caller is OWNER/ADMIN", async () => {
+    prismaMock.suppression.findFirst.mockResolvedValue({
+      id: "s1",
+      organizationId: "org_1"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN"
+    } as never);
     await suppressionService.remove("s1", "user_1");
-    expect(prismaMock.suppression.deleteMany).toHaveBeenCalledWith({
-      where: { id: "s1", organization: { members: { some: { userId: "user_1" } } } }
+    expect(prismaMock.suppression.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "s1",
+        organization: { members: { some: { userId: "user_1" } } }
+      },
+      select: { id: true, organizationId: true }
+    });
+    expect(prismaMock.suppression.delete).toHaveBeenCalledWith({
+      where: { id: "s1" }
     });
   });
 
+  it("throws 403 when a MEMBER tries to un-suppress (Phase 3)", async () => {
+    prismaMock.suppression.findFirst.mockResolvedValue({
+      id: "s1",
+      organizationId: "org_1"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    await expect(suppressionService.remove("s1", "user_1")).rejects.toMatchObject(
+      { statusCode: 403 }
+    );
+    expect(prismaMock.suppression.delete).not.toHaveBeenCalled();
+  });
+
   it("throws 404 removing a suppression the user does not own", async () => {
-    prismaMock.suppression.deleteMany.mockResolvedValue({ count: 0 } as never);
+    prismaMock.suppression.findFirst.mockResolvedValue(null);
     await expect(suppressionService.remove("s1", "user_1")).rejects.toThrow(
       "Suppression not found"
     );

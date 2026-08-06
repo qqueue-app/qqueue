@@ -2,6 +2,7 @@ import type { InputJsonValue } from "@prisma/client/runtime/library";
 import type { EmailDraftInput, EmailDraftUpdateInput } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { assertMayUseConnection } from "../../lib/send-as.js";
 
 // Drafts are personal: a user only ever sees and edits their own. Scoping every
 // query by createdByUserId enforces that even between members of the same org.
@@ -26,7 +27,16 @@ export const emailDraftService = {
     });
   },
 
-  create(input: EmailDraftInput, userId: string) {
+  async create(input: EmailDraftInput, userId: string) {
+    // A draft naming an ungranted sending account would only fail later, at
+    // send time — reject it here where the picker can react (Phase 4).
+    if (input.smtpConnectionId) {
+      await assertMayUseConnection({
+        userId,
+        organizationId: input.organizationId,
+        smtpConnectionId: input.smtpConnectionId
+      });
+    }
     return prisma.emailDraft.create({
       data: {
         organizationId: input.organizationId,
@@ -50,10 +60,18 @@ export const emailDraftService = {
   async update(id: string, userId: string, input: EmailDraftUpdateInput) {
     const existing = await prisma.emailDraft.findFirst({
       where: { id, createdByUserId: userId },
-      select: { id: true }
+      select: { id: true, organizationId: true }
     });
     if (!existing) {
       throw new HttpError(404, "Draft not found", "not_found");
+    }
+
+    if (input.smtpConnectionId) {
+      await assertMayUseConnection({
+        userId,
+        organizationId: existing.organizationId,
+        smtpConnectionId: input.smtpConnectionId
+      });
     }
 
     return prisma.emailDraft.update({

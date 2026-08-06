@@ -87,7 +87,12 @@ export type ApiErrorCode =
   | "image_too_large"
   | "unsupported_image_type"
   | "not_found"
-  | "conflict";
+  | "conflict"
+  | "send_as_denied"
+  | "mailcow_not_configured"
+  | "mailcow_unreachable"
+  | "mailcow_auth_failed"
+  | "mailcow_error";
 
 export interface User {
   id: string;
@@ -305,6 +310,45 @@ export interface SMTPConnection {
   fromEmail: string;
   fromName?: string | null;
   isDefault: boolean;
+}
+
+/** Send-as permission: lets a MEMBER send from a specific connection. */
+export interface SmtpConnectionGrant {
+  id: string;
+  organizationId: string;
+  smtpConnectionId: string;
+  userId: string;
+  createdAt: string;
+  user?: { id: string; email: string; name?: string | null };
+}
+
+/** Instance Mailcow provisioning status, as shown on the Mailboxes page. */
+export interface MailcowStatus {
+  configured: boolean;
+  reachable: boolean;
+  /** Active Mailcow domains a mailbox can be provisioned under. */
+  domains: string[];
+  /** Host provisioned mailboxes use for SMTP/IMAP (for mail-client setup). */
+  mailHost: string | null;
+  error?: string;
+}
+
+/** Result of provisioning a mailbox; the password is shown exactly once. */
+export interface MailboxProvisionResult {
+  smtpConnection: SMTPConnection;
+  inboxAccountId: string;
+  email: string;
+  /**
+   * The human's mailbox login password (mail clients, SOGo). QQueue itself
+   * keeps only an app password, encrypted — this is never retrievable again.
+   */
+  mailboxPassword: string;
+  /**
+   * Whether the SMTP credentials already verified end to end. False is a
+   * warning, not a failure — Mailcow can take a moment to activate a fresh
+   * mailbox; re-check with "Test connection" on the sending account.
+   */
+  verified: boolean;
 }
 
 export interface EmailJob {
@@ -1607,4 +1651,32 @@ export const smtpConnectionUpdateSchema = smtpConnectionSchema.partial();
 
 export type SMTPConnectionUpdateInput = z.infer<
   typeof smtpConnectionUpdateSchema
+>;
+
+// The local part is validated conservatively (dot-atom without quoting);
+// Mailcow enforces its own rules on top.
+export const mailboxProvisionSchema = z.object({
+  organizationId: z.string().min(1),
+  localPart: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(
+      /^[a-z0-9](?:[a-z0-9._+-]*[a-z0-9])?$/i,
+      "Use letters, numbers, dots, dashes, plus or underscores"
+    ),
+  domain: z.string().min(1),
+  name: z.string().max(120).optional(),
+  /** Member to grant send-as on the new mailbox immediately. */
+  assignToUserId: z.string().min(1).optional(),
+});
+
+export type MailboxProvisionInput = z.infer<typeof mailboxProvisionSchema>;
+
+export const smtpConnectionGrantCreateSchema = z.object({
+  userId: z.string().min(1),
+});
+
+export type SmtpConnectionGrantCreateInput = z.infer<
+  typeof smtpConnectionGrantCreateSchema
 >;

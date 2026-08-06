@@ -142,6 +142,7 @@ model User {
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
   invitesSent         OrganizationInvite[] @relation("InvitesSent")
+  smtpGrants          SmtpConnectionGrant[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 }
@@ -174,6 +175,7 @@ model Organization {
   members           OrganizationMember[]
   invites           OrganizationInvite[]
   smtpConnections   SMTPConnection[]
+  smtpConnectionGrants SmtpConnectionGrant[]
   contacts          Contact[]
   contactLists      ContactList[]
   suppressions      Suppression[]
@@ -239,21 +241,40 @@ model OrganizationInvite {
 }
 
 model SMTPConnection {
-  id                String       @id @default(cuid())
+  id                String                @id @default(cuid())
   organizationId    String
   name              String
   host              String
   port              Int
-  secure            Boolean      @default(true)
+  secure            Boolean               @default(true)
   usernameEncrypted String
   passwordEncrypted String
   fromEmail         String
   fromName          String?
-  isDefault         Boolean      @default(false)
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  isDefault         Boolean               @default(false)
+  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   emailJobs         EmailJob[]
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  grants            SmtpConnectionGrant[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+}
+
+/// Send-as permission (Phase 4): MEMBERs may only send from connections they
+/// hold a grant for; OWNER/ADMIN may use any org connection and need no row.
+/// Enforced at the service layer when a send/draft/schedule is created —
+/// EmailJobs are created post-check, so the worker does not re-verify.
+model SmtpConnectionGrant {
+  id               String         @id @default(cuid())
+  organizationId   String
+  smtpConnectionId String
+  userId           String
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  smtpConnection   SMTPConnection @relation(fields: [smtpConnectionId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@unique([smtpConnectionId, userId])
+  @@index([organizationId, userId])
 }
 
 /// A composed message that re-sends on a cron schedule ("recurring" in Email

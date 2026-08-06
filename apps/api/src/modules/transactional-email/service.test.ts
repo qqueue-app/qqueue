@@ -30,6 +30,11 @@ beforeEach(() => {
   prismaMock.emailAttachment.findMany.mockResolvedValue([] as never);
   prismaMock.emailAttachment.updateMany.mockResolvedValue({ count: 0 } as never);
   storageGetObject.mockReset();
+  // Send-as enforcement (Phase 4) runs when a send carries an acting user;
+  // the default actor here is an OWNER.
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER"
+  } as never);
 });
 
 afterEach(() => {
@@ -301,6 +306,54 @@ describe("transactionalEmailService.send", () => {
     const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
     expect(createData.origin).toBe("MANUAL");
     expect(createData.createdByUserId).toBe("user_1");
+  });
+
+  // Phase 4 acceptance: a MEMBER without a grant cannot send as the account,
+  // on any surface that funnels through this service (API JWT sends, manual).
+  it("blocks a MEMBER without a grant from sending as the connection", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
+
+    await expect(
+      transactionalEmailService.send({
+        organizationId: "org_1",
+        to: "x@y.com",
+        subject: "Hi",
+        html: "<p>Hi</p>",
+        origin: "MANUAL",
+        createdByUserId: "user_1"
+      })
+    ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
+    expect(prismaMock.emailJob.create).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it("lets a MEMBER with a grant send as the connection", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
+      id: "g1"
+    } as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+
+    await expect(
+      transactionalEmailService.send({
+        organizationId: "org_1",
+        to: "x@y.com",
+        subject: "Hi",
+        html: "<p>Hi</p>",
+        origin: "MANUAL",
+        createdByUserId: "user_1"
+      })
+    ).resolves.toMatchObject({ status: "QUEUED" });
   });
 
   it("links attachments to the queued job without loading their blobs", async () => {

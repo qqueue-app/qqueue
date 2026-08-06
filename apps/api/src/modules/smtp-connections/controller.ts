@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  smtpConnectionGrantCreateSchema,
   smtpConnectionSchema,
   smtpConnectionUpdateSchema
 } from "@qqueue/shared";
@@ -9,6 +10,41 @@ export const smtpConnectionController = {
   async list(req: Request, res: Response) {
     const connections = await smtpConnectionService.list(req.organizationId!);
     res.json({ data: connections });
+  },
+
+  async listSendable(req: Request, res: Response) {
+    const connections = await smtpConnectionService.listSendable(
+      req.organizationId!,
+      req.userId!
+    );
+    res.json({ data: connections });
+  },
+
+  async listGrants(req: Request, res: Response) {
+    const grants = await smtpConnectionService.listGrants(
+      String(req.params.id),
+      req.userId!
+    );
+    res.json({ data: grants });
+  },
+
+  async addGrant(req: Request, res: Response) {
+    const input = smtpConnectionGrantCreateSchema.parse(req.body);
+    const grant = await smtpConnectionService.addGrant(
+      String(req.params.id),
+      req.userId!,
+      input.userId
+    );
+    res.status(201).json({ data: grant });
+  },
+
+  async removeGrant(req: Request, res: Response) {
+    await smtpConnectionService.removeGrant(
+      String(req.params.id),
+      req.userId!,
+      String(req.params.userId)
+    );
+    res.status(204).send();
   },
 
   async get(req: Request, res: Response) {
@@ -44,5 +80,13 @@ export const smtpConnectionController = {
   async delete(req: Request, res: Response) {
     await smtpConnectionService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
+  },
+
+  async verify(req: Request, res: Response) {
+    const result = await smtpConnectionService.verify(
+      String(req.params.id),
+      req.userId!
+    );
+    res.json({ data: result });
   }
 };
