@@ -50,6 +50,18 @@ services:
       SOFT_BOUNCE_THRESHOLD: ${SOFT_BOUNCE_THRESHOLD:-3}
       SOFT_BOUNCE_WINDOW_DAYS: ${SOFT_BOUNCE_WINDOW_DAYS:-30}
       DEFAULT_DOMAIN_MAX_PER_MINUTE: ${DEFAULT_DOMAIN_MAX_PER_MINUTE:-60}
+      # Phase 3-5 additions. Empty values are treated as unset by the app.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      INBOUND_ESP_WEBHOOK_ENABLED: ${INBOUND_ESP_WEBHOOK_ENABLED:-false}
+      # Keyring for encryption-key rotation; overrides ENCRYPTION_KEY when set.
+      ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Mailcow provisioning (Mailboxes page). Unset = feature off.
+      MAILCOW_API_URL: ${MAILCOW_API_URL:-}
+      MAILCOW_API_KEY: ${MAILCOW_API_KEY:-}
+      MAILCOW_MAIL_HOST: ${MAILCOW_MAIL_HOST:-}
+      MAILCOW_SMTP_PORT: ${MAILCOW_SMTP_PORT:-465}
+      MAILCOW_IMAP_PORT: ${MAILCOW_IMAP_PORT:-993}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -83,6 +95,9 @@ services:
       DEFAULT_DOMAIN_MAX_PER_MINUTE: ${DEFAULT_DOMAIN_MAX_PER_MINUTE:-60}
       INBOX_SYNC_INTERVAL_SECONDS: ${INBOX_SYNC_INTERVAL_SECONDS:-120}
       INBOX_SYNC_MAX_MESSAGES: ${INBOX_SYNC_MAX_MESSAGES:-50}
+      # Phase 5 additions; must match the API's values.
+      ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       migrate:
         condition: service_completed_successfully
