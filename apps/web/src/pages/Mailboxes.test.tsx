@@ -59,6 +59,17 @@ const connection = {
   isDefault: true,
 };
 
+const otherConnection = {
+  id: "s2",
+  organizationId: "org_1",
+  name: "Billing",
+  host: "mail.other.test",
+  port: 465,
+  secure: true,
+  fromEmail: "billing@other.test",
+  isDefault: false,
+};
+
 const members = [
   {
     id: "m1",
@@ -291,6 +302,73 @@ describe("Mailboxes", () => {
       screen.queryByRole("tab", { name: /Domain access/ })
     ).not.toBeInTheDocument();
     expect(mockedApi.listMailDomainGrants).not.toHaveBeenCalled();
+  });
+
+  // Domain-scoped management: pick a domain, see only its mailboxes, and add
+  // the next one straight onto it.
+  it("narrows the list to the chosen domain", async () => {
+    const user = userEvent.setup();
+    mockedApi.listSMTPConnections.mockResolvedValue([
+      connection,
+      otherConnection,
+    ]);
+    renderWithProviders(<Mailboxes />);
+
+    expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    expect(screen.getByText("billing@other.test")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Filter by domain" }));
+    await user.click(
+      await screen.findByRole("option", { name: "other.test (1)" })
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText("support@acme.test")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("billing@other.test")).toBeInTheDocument();
+  });
+
+  it("creates the new mailbox on the domain being viewed", async () => {
+    const user = userEvent.setup();
+    mockedApi.listSMTPConnections.mockResolvedValue([
+      connection,
+      otherConnection,
+    ]);
+    renderWithProviders(<Mailboxes />);
+
+    await user.click(
+      await screen.findByRole("combobox", { name: "Filter by domain" })
+    );
+    await user.click(
+      await screen.findByRole("option", { name: "other.test (1)" })
+    );
+
+    await user.click(screen.getByRole("button", { name: "New mailbox" }));
+    await user.type(await screen.findByLabelText("Address"), "new");
+    await user.click(screen.getByRole("button", { name: /Create mailbox/i }));
+
+    await waitFor(() =>
+      expect(mockedApi.provisionMailbox).toHaveBeenCalledWith(
+        // The filtered domain wins over the first one in the list.
+        expect.objectContaining({ localPart: "new", domain: "other.test" })
+      )
+    );
+  });
+
+  it("says which domain is empty rather than showing the blank-slate copy", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+
+    expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Filter by domain" }));
+    await user.click(
+      await screen.findByRole("option", { name: "other.test (0)" })
+    );
+
+    expect(
+      await screen.findByText("No mailboxes on other.test")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No mailboxes yet")).not.toBeInTheDocument();
   });
 
   it("tells an admin with no granted domains to ask the owner", async () => {

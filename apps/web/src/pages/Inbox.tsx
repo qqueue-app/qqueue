@@ -18,7 +18,16 @@ import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
 import { InboundHtmlFrame } from "../components/InboundHtmlFrame.js";
 import { ConnectInboxDialog } from "../components/inbox/ConnectInboxDialog.js";
-import { api, type InboundMessage } from "../lib/api.js";
+import {
+  AttachmentPreviewDialog,
+  attachmentPreviewKind,
+  downloadBlob,
+} from "../components/inbox/AttachmentPreviewDialog.js";
+import {
+  api,
+  type InboundAttachment,
+  type InboundMessage,
+} from "../lib/api.js";
 import { formatFullDate, formatMailDate, formatBytes } from "../lib/format.js";
 import { useInboundInlineImages } from "../lib/inbound-inline-images.js";
 import { qk } from "../lib/query-client.js";
@@ -180,7 +189,11 @@ export function Inbox() {
   const [remoteContentAllowed, setRemoteContentAllowed] = useState<Set<string>>(
     () => new Set()
   );
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{
+    attachment: InboundAttachment;
+    blob: Blob;
+  } | null>(null);
 
   const accountsQuery = useOrgQuery(
     organizationId,
@@ -342,30 +355,32 @@ export function Inbox() {
       .forEach((message) => markRead.mutate({ id: message.id, read: true }));
   }
 
-  async function downloadAttachment(
-    messageId: string,
-    file: { id: string; filename: string }
-  ) {
+  /**
+   * Open an attachment the way a mail client does: show it in place when it is
+   * something the browser can render safely, and only fall back to saving it to
+   * disk for formats it can't (documents, archives, anything scriptable).
+   *
+   * Either way the bytes come over the authenticated download route — inbound
+   * files are never exposed publicly, so the file can't just be linked to.
+   */
+  async function openAttachment(messageId: string, file: InboundAttachment) {
     if (!organizationId) return;
-    setDownloadingId(file.id);
+    setOpeningId(file.id);
     try {
       const blob = await api.downloadInboundAttachment({
         messageId,
         attachmentId: file.id,
         organizationId,
       });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = file.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      if (attachmentPreviewKind(file.contentType)) {
+        setPreview({ attachment: file, blob });
+      } else {
+        downloadBlob(blob, file.filename);
+      }
     } catch {
-      toast.error("Couldn't download that file.");
+      toast.error("Couldn't open that file.");
     } finally {
-      setDownloadingId(null);
+      setOpeningId(null);
     }
   }
 
@@ -718,9 +733,9 @@ export function Inbox() {
                   )}
 
                   {/*
-                    Downloadable parts. Inline parts (cid: images the sender
-                    meant to render in the body) are filtered out so a signature
-                    logo doesn't look like an attachment.
+                    Attached parts. Inline parts (cid: images the sender meant
+                    to render in the body) are filtered out so a signature logo
+                    doesn't look like an attachment.
                   */}
                   {(message.attachments ?? []).filter((file) => !file.isInline)
                     .length > 0 ? (
@@ -734,19 +749,23 @@ export function Inbox() {
                           .map((file) => (
                             <Hint
                               key={file.id}
-                              label={`Download ${file.filename} (${formatBytes(file.size)})`}
+                              label={`${
+                                attachmentPreviewKind(file.contentType)
+                                  ? "Open"
+                                  : "Download"
+                              } ${file.filename} (${formatBytes(file.size)})`}
                             >
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                disabled={downloadingId === file.id}
+                                disabled={openingId === file.id}
                                 onClick={() =>
-                                  void downloadAttachment(message.id, file)
+                                  void openAttachment(message.id, file)
                                 }
                                 className="h-auto gap-2 py-1.5"
                               >
-                                {downloadingId === file.id ? (
+                                {openingId === file.id ? (
                                   <Spinner className="h-3.5 w-3.5" />
                                 ) : (
                                   <Paperclip className="h-3.5 w-3.5" />
@@ -832,6 +851,11 @@ export function Inbox() {
         open={connectOpen}
         onOpenChange={setConnectOpen}
         organizationId={organizationId ?? ""}
+      />
+
+      <AttachmentPreviewDialog
+        preview={preview}
+        onClose={() => setPreview(null)}
       />
     </div>
   );

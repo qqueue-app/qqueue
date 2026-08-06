@@ -60,6 +60,7 @@ import {
 import { Hint } from "../components/ui/tooltip.js";
 
 const NO_ASSIGNEE = "__none__";
+const ALL_DOMAINS = "__all__";
 
 function memberName(member: OrganizationMember) {
   return member.user.name ?? member.user.email;
@@ -88,6 +89,7 @@ export function Mailboxes() {
   const isOwner = currentOrganization?.role === "OWNER";
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [domainFilter, setDomainFilter] = useState(ALL_DOMAINS);
   const [provisioned, setProvisioned] = useState<MailboxProvisionResult | null>(
     null
   );
@@ -153,6 +155,47 @@ export function Mailboxes() {
     });
     return set;
   }, [grantsByConnection]);
+
+  const mailboxCountByDomain = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const connection of connections) {
+      const domain = domainOf(connection.fromEmail);
+      if (domain) counts.set(domain, (counts.get(domain) ?? 0) + 1);
+    }
+    return counts;
+  }, [connections]);
+
+  // Mail server domains are the ones a *new* mailbox can be created on, but a
+  // sending account added by hand may live on a domain the mail server never
+  // reported. List both, so picking a domain never hides an existing mailbox.
+  const domains = useMemo(() => {
+    const all = new Set<string>(status?.domains ?? []);
+    for (const domain of mailboxCountByDomain.keys()) all.add(domain);
+    return [...all].sort((a, b) => a.localeCompare(b));
+  }, [mailboxCountByDomain, status?.domains]);
+
+  const visibleConnections = useMemo(
+    () =>
+      domainFilter === ALL_DOMAINS
+        ? connections
+        : connections.filter(
+            (connection) => domainOf(connection.fromEmail) === domainFilter
+          ),
+    [connections, domainFilter]
+  );
+
+  // A domain can go away under the filter — an owner revokes an admin's domain
+  // grant, or the last hand-added account on it is deleted. Fall back to all
+  // domains rather than leaving the page stuck on an empty, unexplained list.
+  useEffect(() => {
+    if (
+      domainFilter !== ALL_DOMAINS &&
+      domains.length > 0 &&
+      !domains.includes(domainFilter)
+    ) {
+      setDomainFilter(ALL_DOMAINS);
+    }
+  }, [domainFilter, domains]);
 
   const loading =
     statusQuery.isPending ||
@@ -419,17 +462,47 @@ export function Mailboxes() {
           <TabsContent value="mailboxes">
             <DataGrid
               label="Mailboxes"
-              data={connections}
+              data={visibleConnections}
               columns={mailboxColumns}
               getRowId={(row) => row.id}
               loading={loading}
               searchPlaceholder="Search mailboxes…"
+              toolbar={
+                domains.length > 0 ? (
+                  <Select value={domainFilter} onValueChange={setDomainFilter}>
+                    <SelectTrigger
+                      aria-label="Filter by domain"
+                      className="w-full sm:w-56"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_DOMAINS}>
+                        All domains ({connections.length})
+                      </SelectItem>
+                      {domains.map((candidate) => (
+                        <SelectItem key={candidate} value={candidate}>
+                          {candidate} ({mailboxCountByDomain.get(candidate) ?? 0})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null
+              }
               empty={
-                <EmptyState
-                  icon={Mail}
-                  title="No mailboxes yet"
-                  description="Create one to give your team an address they can send and receive from."
-                />
+                domainFilter === ALL_DOMAINS ? (
+                  <EmptyState
+                    icon={Mail}
+                    title="No mailboxes yet"
+                    description="Create one to give your team an address they can send and receive from."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={Globe}
+                    title={`No mailboxes on ${domainFilter}`}
+                    description={`Nothing here yet — create the first address on ${domainFilter}, or switch to another domain.`}
+                  />
+                )
               }
               noResults={
                 <EmptyState
@@ -519,6 +592,7 @@ export function Mailboxes() {
         onOpenChange={setCreateOpen}
         organizationId={organizationId ?? ""}
         domains={status?.domains ?? []}
+        preferredDomain={domainFilter === ALL_DOMAINS ? null : domainFilter}
         restricted={Boolean(status?.restricted)}
         members={members}
         onProvisioned={(result) => {
@@ -544,6 +618,7 @@ function NewMailboxDialog({
   onOpenChange,
   organizationId,
   domains,
+  preferredDomain,
   restricted,
   members,
   onProvisioned,
@@ -552,6 +627,8 @@ function NewMailboxDialog({
   onOpenChange: (open: boolean) => void;
   organizationId: string;
   domains: string[];
+  /** The domain the page is filtered to, or null when showing all of them. */
+  preferredDomain: string | null;
   restricted: boolean;
   members: OrganizationMember[];
   onProvisioned: (result: MailboxProvisionResult) => void;
@@ -560,6 +637,16 @@ function NewMailboxDialog({
   const [domain, setDomain] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [assignTo, setAssignTo] = useState(NO_ASSIGNEE);
+
+  // Open on whichever domain the page is filtered to, so "New mailbox" carries
+  // on from what the user was already looking at. Deliberately keyed on `open`
+  // rather than on `domains`, which a background refetch would replace — that
+  // would yank the picker out from under someone mid-form.
+  useEffect(() => {
+    if (open && preferredDomain) {
+      setDomain(preferredDomain);
+    }
+  }, [open, preferredDomain]);
 
   // This dialog mounts with the page, before the domain list has loaded, so
   // the initial state can't come from `domains`. Adopt the first one as soon
@@ -632,7 +719,7 @@ function NewMailboxDialog({
                   id="mailbox-local-part"
                   value={localPart}
                   onChange={(event) => setLocalPart(event.target.value)}
-                  placeholder="ama"
+                  placeholder="support"
                   autoFocus
                   required
                 />
@@ -663,7 +750,7 @@ function NewMailboxDialog({
                 id="mailbox-name"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Ama Mensah"
+                placeholder="Support Team"
               />
               <p className="text-xs text-muted-foreground">
                 What recipients see in the From line. Optional.

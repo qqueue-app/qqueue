@@ -1051,7 +1051,7 @@ export function EmailStudio() {
                 </Card>
               ) : null}
 
-              <Card className="space-y-5 p-5">
+              <Card className="space-y-4 p-5">
                 <div>
                   <h2 className="text-base font-semibold">Message details</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -1279,60 +1279,10 @@ export function EmailStudio() {
             </div>
 
             <div className="space-y-5 xl:sticky xl:top-6 xl:self-start">
-              <Card className="space-y-3 p-5">
-                <h2 className="text-sm font-semibold">Recipients</h2>
-                {totalRecipients === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No recipients yet — add people in the To field above.
-                  </p>
-                ) : (
-                  <>
-                    <div className="text-2xl font-semibold tracking-tight">
-                      {listMemberEstimate > 0 ? "~" : ""}
-                      {totalRecipients}
-                      <span className="ml-1.5 text-sm font-normal text-muted-foreground">
-                        {totalRecipients === 1 ? "recipient" : "recipients"}
-                      </span>
-                    </div>
-                    <dl className="space-y-1.5 text-sm">
-                      {toEmails.length > 0 ? (
-                        <div className="flex justify-between">
-                          <dt className="text-muted-foreground">To</dt>
-                          <dd>{toEmails.length}</dd>
-                        </div>
-                      ) : null}
-                      {listMemberEstimate > 0 ? (
-                        <div className="flex justify-between">
-                          <dt className="text-muted-foreground">
-                            From lists (approx.)
-                          </dt>
-                          <dd>{listMemberEstimate}</dd>
-                        </div>
-                      ) : null}
-                      {ccEmails.length > 0 ? (
-                        <div className="flex justify-between">
-                          <dt className="text-muted-foreground">Cc</dt>
-                          <dd>{ccEmails.length}</dd>
-                        </div>
-                      ) : null}
-                      {bccEmails.length > 0 ? (
-                        <div className="flex justify-between">
-                          <dt className="text-muted-foreground">Bcc</dt>
-                          <dd>{bccEmails.length}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                    <p className="text-xs text-muted-foreground">
-                      Duplicates are removed automatically when you send.
-                    </p>
-                  </>
-                )}
-              </Card>
-
               <Card className="space-y-4 p-5">
                 <div>
-                  <h2 className="text-sm font-semibold">Send options</h2>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  <h2 className="text-base font-semibold">Send options</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     Send now, schedule it for later, or repeat it on a schedule.
                   </p>
                 </div>
@@ -1352,6 +1302,18 @@ export function EmailStudio() {
                     occurrence would need its own copy.
                   </p>
                 ) : null}
+
+                {/*
+                  The running tally lives with the button that acts on it —
+                  a list contributes an estimate, so it is marked approximate.
+                */}
+                <p className="text-sm text-muted-foreground">
+                  {totalRecipients === 0
+                    ? "No recipients yet — add people in the To field."
+                    : `Sending to ${listMemberEstimate > 0 ? "~" : ""}${totalRecipients} ${
+                        totalRecipients === 1 ? "recipient" : "recipients"
+                      }. Duplicates are removed.`}
+                </p>
 
                 <Button
                   type="submit"
@@ -1373,15 +1335,20 @@ export function EmailStudio() {
               </Card>
 
               {recurringSends.length > 0 ? (
-                <Card className="space-y-3 p-5">
+                <Card className="space-y-4 p-5">
                   <div>
-                    <h2 className="text-sm font-semibold">Recurring sends</h2>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    <h2 className="text-base font-semibold">Recurring sends</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
                       Recipients are re-resolved each time, so growing lists are
                       picked up automatically.
                     </p>
                   </div>
-                  <div className="space-y-2">
+                  {/*
+                    Capped rather than open-ended: a long schedule list would
+                    otherwise push the sidebar well past the composer and undo
+                    the sticky column.
+                  */}
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                     {recurringSends.map((send) => (
                       <div
                         key={send.id}
@@ -1608,7 +1575,7 @@ function DeliveryStatusCard({
   return (
     <Card className="space-y-4 p-5" data-testid="delivery-status">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Delivery status</h2>
+        <h2 className="text-base font-semibold">Delivery status</h2>
         <button
           type="button"
           aria-label="Dismiss delivery status"

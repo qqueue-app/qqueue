@@ -268,16 +268,13 @@ describe("Inbox attachments", () => {
     expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
   });
 
-  it("downloads an attachment through the authenticated endpoint", async () => {
+  it("opens a previewable attachment in place instead of downloading it", async () => {
     const user = userEvent.setup();
     setup([withAttachment()]);
     mockedApi.downloadInboundAttachment.mockResolvedValue(
       new Blob(["pdf"], { type: "application/pdf" })
     );
-    // jsdom provides no object-URL plumbing.
-    const createObjectURL = vi.fn(() => "blob:fake");
-    const revokeObjectURL = vi.fn();
-    Object.assign(URL, { createObjectURL, revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click");
 
     renderWithProviders(<Inbox />);
     await user.click(await screen.findByRole("button", { name: /report\.pdf/ }));
@@ -289,11 +286,49 @@ describe("Inbox attachments", () => {
         organizationId: "org_1"
       });
     });
-    expect(createObjectURL).toHaveBeenCalled();
-    expect(revokeObjectURL).toHaveBeenCalled();
+    // The viewer opens and nothing is saved to disk until the reader asks.
+    expect(
+      await screen.findByRole("dialog", { name: /report\.pdf/ })
+    ).toBeInTheDocument();
+    expect(click).not.toHaveBeenCalled();
+    click.mockRestore();
   });
 
-  it("surfaces a download failure instead of failing silently", async () => {
+  it("falls back to downloading a type the browser can't render", async () => {
+    const user = userEvent.setup();
+    setup([
+      makeMessage({
+        attachments: [
+          {
+            id: "att_2",
+            filename: "books.xlsx",
+            contentType:
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            size: 4096,
+            isInline: false
+          }
+        ]
+      })
+    ]);
+    mockedApi.downloadInboundAttachment.mockResolvedValue(
+      new Blob(["xlsx"], { type: "application/octet-stream" })
+    );
+    // Stubbed: jsdom treats a real anchor click as a navigation it can't do.
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    renderWithProviders(<Inbox />);
+    await user.click(
+      await screen.findByRole("button", { name: /books\.xlsx/ })
+    );
+
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    click.mockRestore();
+  });
+
+  it("surfaces a failure instead of failing silently", async () => {
     const user = userEvent.setup();
     setup([withAttachment()]);
     mockedApi.downloadInboundAttachment.mockRejectedValue(new Error("nope"));
@@ -302,7 +337,7 @@ describe("Inbox attachments", () => {
     await user.click(await screen.findByRole("button", { name: /report\.pdf/ }));
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Couldn't download that file.");
+      expect(toast.error).toHaveBeenCalledWith("Couldn't open that file.");
     });
   });
 });
