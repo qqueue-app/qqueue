@@ -120,34 +120,34 @@ export function ImageDialog({
                 }
               }}
               className={cn(
-                "flex flex-col items-center gap-3 rounded-lg border border-dashed p-6 text-center transition-colors",
+                "flex flex-col items-center gap-3 rounded-card border border-dashed p-6 text-center transition-colors",
                 dragging ? "border-primary bg-primary/5" : "border-input"
               )}
             >
               {uploading ? (
                 <>
                   <Spinner />
-                  <p className="text-sm text-muted-foreground">Uploading…</p>
+                  <p className="text-body text-muted-foreground">Uploading…</p>
                 </>
               ) : (
                 <>
                   <ImagePlus className="h-6 w-6 text-muted-foreground" />
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-body text-muted-foreground">
                       Drag an image here, or
                     </p>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="gap-1.5"
+                      className="gap-field"
                       onClick={() => fileInput.current?.click()}
                     >
                       <Upload className="h-4 w-4" />
                       Choose file
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-meta text-muted-foreground">
                     PNG, JPEG, GIF, or WebP
                   </p>
                 </>
@@ -171,7 +171,7 @@ export function ImageDialog({
 
             <div className="flex items-center gap-3">
               <span className="h-px flex-1 bg-border" />
-              <span className="text-xs uppercase text-muted-foreground">or</span>
+              <span className="text-meta uppercase text-muted-foreground">or</span>
               <span className="h-px flex-1 bg-border" />
             </div>
           </>
@@ -196,14 +196,14 @@ export function ImageDialog({
                 setUrl(event.target.value);
               }}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               Linked images must stay reachable — recipients load them when they
               open the email.
             </p>
           </div>
 
           {error ? (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body text-destructive">
               {error}
             </p>
           ) : null}

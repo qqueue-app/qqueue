@@ -78,13 +78,13 @@ export function InstallAppCard() {
       <div className="min-w-0 flex-1 pr-8">
         <p className="text-body font-medium text-text">Install QQueue</p>
         {ios ? (
-          <p className="mt-0.5 text-ui leading-5 text-text-secondary">
+          <p className="mt-1 text-ui leading-5 text-text-secondary">
             Tap <Share className="inline h-3.5 w-3.5 align-text-bottom" /> Share,
             then <strong className="font-medium">Add to Home Screen</strong>. On
             iPhone and iPad this is also what unlocks notifications for new mail.
           </p>
         ) : (
-          <p className="mt-0.5 text-ui leading-5 text-text-secondary">
+          <p className="mt-1 text-ui leading-5 text-text-secondary">
             Get a full-screen app with notifications for new mail.
           </p>
         )}

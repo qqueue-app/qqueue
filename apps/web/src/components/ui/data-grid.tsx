@@ -247,7 +247,7 @@ export function DataGrid<TData>({
                 onChange={(event) => setGlobalFilter(event.target.value)}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
-                className="pl-9 pr-9"
+                className="pl-control pr-control"
               />
               {globalFilter ? (
                 <IconButton
@@ -283,7 +283,7 @@ export function DataGrid<TData>({
                   {hideableColumns.map((column) => (
                     <label
                       key={column.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-control px-1 py-1.5 text-body hover:bg-accent"
+                      className="flex cursor-pointer items-center gap-2 rounded-control px-1 py-field text-body hover:bg-accent"
                     >
                       <Checkbox
                         checked={column.getIsVisible()}

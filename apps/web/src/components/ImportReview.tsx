@@ -84,9 +84,9 @@ function displayName(contact: ProjectedContact) {
 
 function Stat({ value, label }: { value: number; label: string }) {
   return (
-    <div className="rounded-md border bg-muted/30 px-3 py-2">
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className="rounded-control border bg-muted/30 px-3 py-2">
+      <div className="text-title font-semibold tabular-nums">{value}</div>
+      <div className="text-meta text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -129,7 +129,7 @@ export function ImportReview({
       </div>
 
       {preview.contactList ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           Everyone imported joins{" "}
           <span className="font-medium text-foreground">
             {preview.contactList.name}
@@ -139,7 +139,7 @@ export function ImportReview({
       ) : null}
 
       {preview.collapsedInFile > 0 ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           {preview.collapsedInFile} row
           {preview.collapsedInFile === 1 ? "" : "s"} repeated an address already
           in the file — those were combined into one contact each.
@@ -147,7 +147,7 @@ export function ImportReview({
       ) : null}
 
       {preview.suppressedCount > 0 ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           Suppressed addresses are still imported, but they stay suppressed and
           won&apos;t be emailed.
         </p>
@@ -160,7 +160,7 @@ export function ImportReview({
               <Label htmlFor="defaultResolution">
                 What to do with contacts you already have
               </Label>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 {RESOLUTION_HELP[defaultResolution]}
               </p>
             </div>
@@ -170,7 +170,7 @@ export function ImportReview({
                 onDefaultResolutionChange(value as ContactImportResolution)
               }
             >
-              <SelectTrigger id="defaultResolution" className="w-[190px]">
+              <SelectTrigger id="defaultResolution" className="w-field-choice">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -185,7 +185,7 @@ export function ImportReview({
             </Select>
           </div>
 
-          <ul className="divide-y rounded-md border">
+          <ul className="divide-y rounded-control border">
             {preview.duplicates.map((duplicate) => {
               const key = duplicate.email.toLowerCase();
               const override = overrides[key];
@@ -205,8 +205,8 @@ export function ImportReview({
                 <li key={key} className="space-y-2 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="truncate text-sm font-medium">
+                      <div className="flex flex-wrap items-center gap-field">
+                        <span className="truncate text-body font-medium">
                           {duplicate.email}
                         </span>
                         {duplicate.suppressed ? (
@@ -219,7 +219,7 @@ export function ImportReview({
                         ) : null}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="flex shrink-0 items-center gap-field">
                       <Select
                         value={resolution}
                         onValueChange={(value) =>
@@ -229,7 +229,7 @@ export function ImportReview({
                         }
                       >
                         <SelectTrigger
-                          className="h-8 w-[150px]"
+                          className="h-8 w-field-choice"
                           aria-label={`What to do with ${duplicate.email}`}
                         >
                           <SelectValue />
@@ -260,8 +260,8 @@ export function ImportReview({
                     </div>
                   </div>
 
-                  <div className="grid gap-2 text-xs sm:grid-cols-2">
-                    <div className="rounded border bg-muted/30 px-2 py-1.5">
+                  <div className="grid gap-2 text-meta sm:grid-cols-2">
+                    <div className="rounded border bg-muted/30 px-2 py-field">
                       <div className="text-muted-foreground">Now</div>
                       <div className="font-medium">{displayName(before)}</div>
                       <div className="text-muted-foreground">
@@ -271,8 +271,8 @@ export function ImportReview({
                     <div
                       className={
                         noChange
-                          ? "rounded border bg-muted/30 px-2 py-1.5"
-                          : "rounded border border-primary/40 bg-primary/5 px-2 py-1.5"
+                          ? "rounded border bg-muted/30 px-2 py-field"
+                          : "rounded border border-primary/40 bg-primary/5 px-2 py-field"
                       }
                     >
                       <div className="text-muted-foreground">
@@ -289,7 +289,7 @@ export function ImportReview({
                     <div className="grid gap-2 rounded border bg-muted/20 p-2 sm:grid-cols-3">
                       <div className="space-y-1">
                         <Label
-                          className="text-xs"
+                          className="text-meta"
                           htmlFor={`first-${key}`}
                         >
                           First name
@@ -310,7 +310,7 @@ export function ImportReview({
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs" htmlFor={`last-${key}`}>
+                        <Label className="text-meta" htmlFor={`last-${key}`}>
                           Last name
                         </Label>
                         <Input
@@ -329,7 +329,7 @@ export function ImportReview({
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs" htmlFor={`tags-${key}`}>
+                        <Label className="text-meta" htmlFor={`tags-${key}`}>
                           Tags
                         </Label>
                         <Input
@@ -357,7 +357,7 @@ export function ImportReview({
           </ul>
 
           {preview.duplicatesTruncated ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               Showing the first {preview.duplicates.length} of{" "}
               {preview.duplicateCount} existing contacts. The remaining{" "}
               {preview.duplicateCount - preview.duplicates.length} are imported
@@ -366,17 +366,17 @@ export function ImportReview({
           ) : null}
         </div>
       ) : (
-        <p className="border-t pt-4 text-sm text-muted-foreground">
+        <p className="border-t pt-4 text-body text-muted-foreground">
           None of these contacts exist yet — nothing will be overwritten.
         </p>
       )}
 
       {preview.newSample.length > 0 ? (
-        <details className="border-t pt-4 text-sm">
+        <details className="border-t pt-4 text-body">
           <summary className="cursor-pointer text-muted-foreground">
             Preview the new contacts
           </summary>
-          <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+          <ul className="mt-2 space-y-1 text-meta text-muted-foreground">
             {preview.newSample.map((row) => (
               <li key={row.email}>
                 <span className="text-foreground">{row.email}</span>

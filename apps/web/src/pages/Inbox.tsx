@@ -397,7 +397,7 @@ export function Inbox() {
       {/* ---------------------------------------------------------------- list */}
       <div
         className={cn(
-          "flex min-h-0 min-w-0 flex-col md:flex md:w-[22rem] md:shrink-0 md:border-r md:border-border lg:w-[24rem]",
+          "flex min-h-0 min-w-0 flex-col md:flex md:w-list-pane md:shrink-0 md:border-r md:border-border lg:w-list-pane-lg",
           /*
             `md:flex-none` matters: on a phone the list is the only pane, so it
             takes `flex-1` to fill the screen — but `flex: 1 1 0%` sets a
@@ -418,7 +418,7 @@ export function Inbox() {
                   : `${filteredMessages.length} message${filteredMessages.length === 1 ? "" : "s"}`}
               </p>
             </div>
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-1">
               <IconButton
                 label="Check for new mail"
                 onClick={() => {
@@ -466,7 +466,7 @@ export function Inbox() {
             picker put both below the 44px touch minimum (§5).
           */}
           <div className="mt-3 flex flex-col gap-2">
-            <div className="flex rounded-control border border-border bg-surface-sunken p-0.5">
+            <div className="flex rounded-control border border-border bg-surface-sunken p-1">
               {(["all", "unread", "read"] as const).map((value) => (
                 <button
                   key={value}
@@ -474,7 +474,7 @@ export function Inbox() {
                   onClick={() => setReadFilter(value)}
                   aria-pressed={readFilter === value}
                   className={cn(
-                    "min-h-touch flex-1 rounded-control px-2 text-ui font-medium capitalize transition-colors duration-fast ease-out sm:min-h-0 sm:py-1.5",
+                    "min-h-touch flex-1 rounded-control px-2 text-ui font-medium capitalize transition-colors duration-fast ease-out sm:min-h-0 sm:py-field",
                     readFilter === value
                       ? "bg-surface text-text shadow-card"
                       : "text-text-secondary hover:text-text"
@@ -599,16 +599,16 @@ export function Inbox() {
                         </div>
                         <div
                           className={cn(
-                            "mt-0.5 truncate text-ui",
+                            "mt-1 truncate text-ui",
                             unread ? "font-semibold text-text" : "text-text"
                           )}
                         >
                           {thread.subject}
                         </div>
-                        <p className="mt-0.5 line-clamp-1 text-meta text-text-tertiary">
+                        <p className="mt-1 line-clamp-1 text-meta text-text-tertiary">
                           {snippet(thread.latestMessage)}
                         </p>
-                        <div className="mt-1.5 flex items-center gap-1.5">
+                        <div className="mt-field flex items-center gap-field">
                           {unread ? (
                             <span
                               className="h-1.5 w-1.5 rounded-pill bg-primary"
@@ -649,7 +649,7 @@ export function Inbox() {
               <button
                 type="button"
                 onClick={() => setMobileShowDetail(false)}
-                className="mb-2 -ml-1 inline-flex min-h-touch items-center gap-1.5 rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text md:hidden"
+                className="mb-2 -ml-1 inline-flex min-h-touch items-center gap-field rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text md:hidden"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Inbox
@@ -660,11 +660,11 @@ export function Inbox() {
                   <h2 className="truncate text-section font-semibold text-text">
                     {selectedThread.subject}
                   </h2>
-                  <p className="mt-0.5 truncate text-ui text-text-secondary">
+                  <p className="mt-1 truncate text-ui text-text-secondary">
                     {selectedThread.senderName} · {selectedThread.senderEmail}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5">
+                <div className="flex shrink-0 items-center gap-1">
                   <IconButton
                     label="Mark as unread"
                     onClick={() =>
@@ -698,7 +698,7 @@ export function Inbox() {
                   className="rounded-card border border-border bg-surface p-4 shadow-card"
                 >
                   <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="flex min-w-0 items-center gap-2">
                       <Avatar name={senderName(message)} size="sm" />
                       <div className="min-w-0">
                         <div className="truncate text-ui font-semibold text-text">
@@ -777,14 +777,14 @@ export function Inbox() {
                                 onClick={() =>
                                   void openAttachment(message.id, file)
                                 }
-                                className="h-auto gap-2 py-1.5"
+                                className="h-auto gap-2 py-field"
                               >
                                 {openingId === file.id ? (
                                   <Spinner className="h-3.5 w-3.5" />
                                 ) : (
                                   <Paperclip className="h-3.5 w-3.5" />
                                 )}
-                                <span className="max-w-[220px] truncate">
+                                <span className="max-w-cell truncate">
                                   {file.filename}
                                 </span>
                                 <span className="text-meta text-text-tertiary" data-numeric>

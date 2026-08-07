@@ -178,7 +178,7 @@ export function Contacts() {
         header: "Email",
         meta: { title: "Email" },
         cell: ({ row }) => (
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2">
             <Avatar
               name={
                 [row.original.firstName, row.original.lastName]
@@ -629,37 +629,46 @@ export function Contacts() {
       <PageHeader
         title="Contacts"
         description="Store contacts and list memberships."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleImportFileSelected}
-            />
-            <Button
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!organizationId || importing}
-            >
-              {importing ? <Spinner /> : <Upload className="h-4 w-4" />}
-              Import
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleExport}
-              disabled={!organizationId || exporting}
-            >
-              {exporting ? <Spinner /> : <Download className="h-4 w-4" />}
-              Export
-            </Button>
-            <Button onClick={openCreate} disabled={!organizationId}>
-              <Plus className="h-4 w-4" />
-              Add contact
-            </Button>
-          </div>
-        }
+        /*
+          Declarative actions, not an `actions` node — that is what lets them
+          collapse into the trailing ⋯ menu on a phone (§5). As three rendered
+          buttons they wrapped onto two extra rows above the contacts, which is
+          precisely the header §5 rules out. Desktop is unchanged: three
+          buttons, "Add contact" the one primary.
+
+          The file input lives outside this, below, because it has to stay
+          mounted whether the header renders buttons or a menu — unmounting it
+          mid-pick would drop the file.
+        */
+        menuActions={[
+          {
+            label: "Import",
+            icon: Upload,
+            onSelect: () => fileInputRef.current?.click(),
+            disabled: !organizationId || importing,
+          },
+          {
+            label: "Export",
+            icon: Download,
+            onSelect: handleExport,
+            disabled: !organizationId || exporting,
+          },
+          {
+            label: "Add contact",
+            icon: Plus,
+            onSelect: openCreate,
+            disabled: !organizationId,
+            primary: true,
+          },
+        ]}
+      />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={handleImportFileSelected}
       />
 
       <section className="max-w-table space-y-4 p-4 sm:p-6">
@@ -671,7 +680,15 @@ export function Contacts() {
           padded column is the content width.
         */}
         <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1.5">
+          {/*
+            `w-full xs:w-auto` on the wrappers, not just on the fields inside
+            them. In a flex row a nested `w-full` resolves against the flex
+            item, which is sized by its own content — so the field stayed
+            360px-ish and the pair stayed side by side on a 375px screen, with
+            the tag placeholder clipped mid-word. §2's mobile inversion asks for
+            the opposite: pairs stack and each field fills the padded column.
+          */}
+          <div className="w-full space-y-field xs:w-auto">
             <Label htmlFor="filter-tags">Filter by tags</Label>
             <Input
               id="filter-tags"
@@ -681,7 +698,7 @@ export function Contacts() {
               onChange={(event) => setFilterTags(event.target.value)}
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="w-full space-y-field xs:w-auto">
             <Label htmlFor="filter-match">Match</Label>
             <Select
               value={filterMatch}
@@ -1032,12 +1049,12 @@ export function Contacts() {
               ) : null}
 
               {importErrors.length > 0 ? (
-                <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+                <div className="space-y-1 rounded-control border border-destructive/40 bg-destructive/5 p-3">
                   <div className="text-ui font-medium text-err">
                     {importErrors.length} row
                     {importErrors.length === 1 ? "" : "s"} couldn&apos;t be read
                   </div>
-                  <ul className="max-h-40 space-y-0.5 overflow-y-auto text-meta text-text-tertiary">
+                  <ul className="max-h-40 space-y-1 overflow-y-auto text-meta text-text-tertiary">
                     {importErrors.slice(0, 50).map((error, index) => (
                       <li key={`${error.row}-${index}`}>
                         Row {error.row}: {error.message}
@@ -1154,7 +1171,7 @@ export function Contacts() {
             <ul className="max-h-80 space-y-3 overflow-y-auto">
               {activity.map((event) => (
                 <li key={event.id} className="flex items-start gap-3 text-ui">
-                  <Badge variant="outline" className="mt-0.5 font-normal">
+                  <Badge variant="outline" className="mt-1 font-normal">
                     {event.type}
                   </Badge>
                   <div className="min-w-0 flex-1">

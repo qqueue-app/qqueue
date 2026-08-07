@@ -159,7 +159,7 @@ export function SMTPConnections() {
                 </Hint>
               ) : null}
             </div>
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="truncate text-meta text-muted-foreground">
               {row.original.fromEmail}
             </div>
           </div>
@@ -183,7 +183,7 @@ export function SMTPConnections() {
         header: "Server",
         meta: { title: "Server", hideBelowMd: true },
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-meta text-muted-foreground">
             {String(getValue())}
           </span>
         ),
@@ -318,10 +318,10 @@ export function SMTPConnections() {
                   </span>
                   {connection.isDefault ? <Badge>Default</Badge> : null}
                 </div>
-                <div className="truncate text-sm text-muted-foreground">
+                <div className="truncate text-body text-muted-foreground">
                   {connection.fromEmail}
                 </div>
-                <div className="mt-1 font-mono text-xs text-muted-foreground">
+                <div className="mt-1 font-mono text-meta text-muted-foreground">
                   {connection.host}:{connection.port}
                 </div>
               </div>

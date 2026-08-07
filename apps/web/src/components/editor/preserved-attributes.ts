@@ -1,4 +1,5 @@
 import { Extension } from "@tiptap/core";
+import { EMAIL_NEUTRALS } from "../../lib/email-palette.js";
 
 /**
  * Presentational attributes carried through the editor untouched.
@@ -73,15 +74,14 @@ const TARGET_TYPES = [
  * - pasted carrying none     → `parseHTML` yields "", which beats the default
  */
 const STYLE_DEFAULTS: Record<string, string> = {
-  table: "border-collapse:collapse;width:100%;border:1px solid #d4d4d8",
-  tableCell: "border:1px solid #d4d4d8;padding:6px 10px;vertical-align:top",
+  table: `border-collapse:collapse;width:100%;border:1px solid ${EMAIL_NEUTRALS.border}`,
+  tableCell: `border:1px solid ${EMAIL_NEUTRALS.border};padding:6px 10px;vertical-align:top`,
   // No `font-weight` here, deliberately. Bold parses a font-weight *style* back
   // into a mark, whatever element carries it, so a header cell declaring one
   // made everything inside it bold again on every reopen — the same trap the
   // CTA button hit, which is why its weight lives on the inner label span. A
   // `<th>` is bold in every renderer's default stylesheet anyway.
-  tableHeader:
-    "border:1px solid #d4d4d8;padding:6px 10px;vertical-align:top;background-color:#f4f4f5;text-align:left",
+  tableHeader: `border:1px solid ${EMAIL_NEUTRALS.border};padding:6px 10px;vertical-align:top;background-color:${EMAIL_NEUTRALS.sunken};text-align:left`,
   image: "max-width:100%;height:auto"
 };
 

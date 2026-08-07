@@ -74,7 +74,7 @@ export function Drafts() {
         header: "To",
         meta: { title: "To", hideBelowMd: true },
         cell: ({ row }) => (
-          <span className="block max-w-sm truncate text-text-secondary">
+          <span className="block max-w-cell-lg truncate text-text-secondary">
             {describeRecipients(row.original)}
           </span>
         ),

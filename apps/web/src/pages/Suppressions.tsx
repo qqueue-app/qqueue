@@ -228,7 +228,7 @@ export function Suppressions() {
                   </div>
                   <div className="mt-1 flex items-center gap-2">
                     <Badge variant={reason.variant}>{reason.label}</Badge>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-meta text-muted-foreground">
                       {formatMailDate(suppression.createdAt)}
                     </span>
                   </div>

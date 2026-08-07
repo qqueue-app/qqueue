@@ -65,7 +65,7 @@ export function MoreSheet({
           {visibleSections.map((section, index) => (
             <div key={section.heading ?? `section-${index}`} className="pb-2">
               {section.heading ? (
-                <div className="px-4 pb-1 pt-3 text-[0.6875rem] font-medium uppercase tracking-eyebrow text-text-tertiary">
+                <div className="px-4 pb-1 pt-3 text-eyebrow font-medium uppercase tracking-eyebrow text-text-tertiary">
                   {section.heading}
                 </div>
               ) : null}
@@ -86,12 +86,12 @@ export function MoreSheet({
                           active ? "text-primary" : "text-text"
                         )}
                       >
-                        <Icon className="h-[1.125rem] w-[1.125rem] shrink-0 text-text-tertiary" />
+                        <Icon className="h-icon-row w-icon-row shrink-0 text-text-tertiary" />
                         <span className="flex-1 truncate">{item.label}</span>
                         {item.badge === "unread" && unread > 0 ? (
                           <span
                             data-numeric
-                            className="min-w-[1.25rem] rounded-pill bg-primary px-1.5 py-0.5 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
+                            className="min-w-badge rounded-pill bg-primary px-field py-1 text-center text-eyebrow font-semibold leading-none text-primary-foreground"
                           >
                             {unread > 99 ? "99+" : unread}
                           </span>

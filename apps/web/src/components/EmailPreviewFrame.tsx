@@ -55,7 +55,7 @@ export function EmailPreviewFrame({
       onLoad={resize}
       srcDoc={html}
       sandbox="allow-same-origin"
-      className={cn("w-full rounded-md border bg-white", className)}
+      className={cn("w-full rounded-control border bg-email-paper", className)}
       style={{ height }}
     />
   );

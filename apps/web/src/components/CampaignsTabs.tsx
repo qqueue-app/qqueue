@@ -38,7 +38,7 @@ export function CampaignsTabs() {
               to={tab.to}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "inline-flex min-h-touch items-center rounded-control px-3 text-ui font-medium transition-colors duration-fast ease-out sm:min-h-0 sm:py-1.5",
+                "inline-flex min-h-touch items-center rounded-control px-3 text-ui font-medium transition-colors duration-fast ease-out sm:min-h-0 sm:py-field",
                 active
                   ? "bg-surface text-text shadow-card"
                   : "text-text-secondary hover:text-text"

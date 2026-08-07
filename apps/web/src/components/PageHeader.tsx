@@ -123,7 +123,7 @@ export function PageHeader({
       <div className="min-w-0">
         {breadcrumb ? (
           <nav aria-label="Breadcrumb" className="mb-1">
-            <ol className="flex items-center gap-1.5 text-ui text-text-tertiary">
+            <ol className="flex items-center gap-field text-ui text-text-tertiary">
               <li>
                 <Link
                   to={breadcrumb.to}
@@ -146,7 +146,7 @@ export function PageHeader({
           </Link>
         ) : null}
         <h1 className="text-title font-semibold text-text">{title}</h1>
-        <p className="mt-1 max-w-[45rem] text-ui leading-6 text-text-secondary">
+        <p className="mt-1 max-w-read text-ui leading-6 text-text-secondary">
           {description}
         </p>
       </div>

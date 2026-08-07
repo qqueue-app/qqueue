@@ -210,8 +210,8 @@ function RecipientField({
             }
           }}
           className={cn(
-            "flex min-h-touch w-full cursor-text flex-wrap items-center gap-1.5 sm:min-h-control",
-            "rounded-control border border-border-strong bg-surface px-2 py-1.5",
+            "flex min-h-touch w-full cursor-text flex-wrap items-center gap-field sm:min-h-control",
+            "rounded-control border border-border-strong bg-surface px-2 py-field",
             "transition-colors duration-fast ease-out hover:border-text-tertiary",
             "focus-within:outline focus-within:outline-2 focus-within:outline-offset-2",
             "focus-within:outline-ring"
@@ -283,7 +283,7 @@ function RecipientField({
             placeholder={emails.length === 0 ? "name@example.com" : ""}
             // 16px on a phone: anything smaller and iOS zooms the viewport the
             // moment this is focused, and the app is installed to home screens.
-            className="min-w-[12ch] flex-1 bg-transparent px-1 py-0.5 text-base outline-none placeholder:text-text-tertiary sm:text-body"
+            className="min-w-[12ch] flex-1 bg-transparent px-1 py-1 text-base outline-none placeholder:text-text-tertiary sm:text-body"
           />
         </div>
         {matches.length > 0 ? (
@@ -309,7 +309,7 @@ function RecipientField({
                   }}
                   onMouseEnter={() => setHighlight(index)}
                   className={cn(
-                    "flex min-h-touch w-full items-center gap-2 rounded-control px-2 py-1.5",
+                    "flex min-h-touch w-full items-center gap-2 rounded-control px-2 py-field",
                     "text-left text-body sm:min-h-0",
                     index === highlight && "bg-accent"
                   )}
@@ -1085,7 +1085,7 @@ export function EmailStudio() {
           */
           <form
             onSubmit={send}
-            className="grid gap-8 xl:grid-cols-[minmax(0,40rem)_19rem]"
+            className="grid gap-8 xl:grid-cols-[minmax(0,var(--content-form))_var(--content-rail)]"
           >
             <div className="min-w-0 max-w-form space-y-6">
               {noSmtp ? (
@@ -1154,7 +1154,7 @@ export function EmailStudio() {
                   />
 
                   {selectedLists.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-field">
                       {selectedLists.map((list) => (
                         <Badge key={list.id} variant="outline" className="gap-1 pr-1">
                           {list.name} ({list._count?.contacts ?? 0})
@@ -1329,7 +1329,7 @@ export function EmailStudio() {
                         </Button>
                       </div>
                       {attachments.length > 0 ? (
-                        <ul className="space-y-1.5">
+                        <ul className="space-y-field">
                           {attachments.map((attachment) => (
                             <li
                               key={attachment.id}
@@ -1397,7 +1397,7 @@ export function EmailStudio() {
               own at any width.
             */}
             <div className="min-w-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
-              <Card className="space-y-4 p-5">
+              <Card className="space-y-4 p-card">
                 <div>
                   <h2 className="text-section font-semibold text-text">
                     Send options
@@ -1516,7 +1516,7 @@ export function EmailStudio() {
             // scroll-exception: a dialog, which §2 names alongside dropdowns.
             // Radix freezes the document while it is open, so this is still the
             // only scrollbar on screen.
-            <div className="max-h-80 space-y-1.5 overflow-auto">
+            <div className="max-h-80 space-y-field overflow-auto">
               {drafts.map((draft) => (
                 <div
                   key={draft.id}
@@ -1584,7 +1584,7 @@ export function EmailStudio() {
             </DialogDescription>
           </DialogHeader>
           {previewing ? (
-            <div className="flex items-center gap-2 py-10 text-ui text-text-secondary">
+            <div className="flex items-center gap-2 py-12 text-ui text-text-secondary">
               <Spinner />
               Rendering…
             </div>
@@ -1647,7 +1647,7 @@ function DeliveryStatusCard({
   onDismiss: () => void;
 }) {
   return (
-    <Card className="space-y-4 p-5" data-testid="delivery-status">
+    <Card className="space-y-4 p-card" data-testid="delivery-status">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-section font-semibold text-text">Delivery status</h2>
         <IconButton
@@ -1659,14 +1659,14 @@ function DeliveryStatusCard({
         </IconButton>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-field">
         {status.recipients.map((recipient) => (
           <div
             key={`${recipient.field}-${recipient.email}`}
             className="flex items-center justify-between gap-2 text-ui"
           >
             <span className="min-w-0 flex-1 truncate text-text">
-              <span className="mr-1.5 text-meta uppercase tracking-eyebrow text-text-tertiary">
+              <span className="mr-field text-meta uppercase tracking-eyebrow text-text-tertiary">
                 {recipient.field}
               </span>
               {recipient.email}
@@ -1779,7 +1779,7 @@ function ContactPickerDialog({
             placeholder="Search contacts…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="pl-9"
+            className="pl-control"
           />
         </div>
         {/* scroll-exception: inside a dialog (§2). */}
@@ -1794,7 +1794,7 @@ function ContactPickerDialog({
                 key={contact.id}
                 // The whole row is the tap target, and it is 44px tall on a
                 // phone — a 16px checkbox is not something a thumb can hit.
-                className="flex min-h-touch cursor-pointer items-center gap-2.5 rounded-control px-2 py-1.5 text-body transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
+                className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control px-2 py-field text-body transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
               >
                 <Checkbox
                   checked={selected.includes(contact.id)}
@@ -1871,7 +1871,7 @@ function ListPickerDialog({
             lists.map((list) => (
               <label
                 key={list.id}
-                className="flex min-h-touch cursor-pointer items-center gap-2.5 rounded-control px-2 py-1.5 text-body transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
+                className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control px-2 py-field text-body transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
               >
                 <Checkbox
                   checked={draft.includes(list.id)}

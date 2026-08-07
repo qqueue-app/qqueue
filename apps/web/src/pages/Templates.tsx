@@ -40,6 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog.js";
+import { EMAIL_ACCENT, EMAIL_NEUTRALS } from "../lib/email-palette.js";
 
 const VIEW_STORAGE_KEY = "qqueue.templates-view";
 
@@ -53,12 +54,12 @@ function TemplateThumbnail({ template }: { template: Template }) {
   );
   const body = applyVariables(template.html, data);
   const srcDoc = `<!doctype html><html><head><meta charset="utf-8" /><style>
-    body{margin:0;padding:16px;font-family:Inter,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#1f2933;font-size:13px;line-height:1.55;background:#fff}
-    img{max-width:100%;height:auto}a{color:#2e7d63}h1{font-size:18px;margin:0 0 8px}h2{font-size:15px;margin:14px 0 6px}p{margin:0 0 10px}
-    hr{border:none;border-top:1px solid #e4e7eb;margin:14px 0}
+    body{margin:0;padding:16px;font-family:Inter,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:${EMAIL_NEUTRALS.text};font-size:13px;line-height:1.55;background:${EMAIL_NEUTRALS.paper}}
+    img{max-width:100%;height:auto}a{color:${EMAIL_ACCENT}}h1{font-size:18px;margin:0 0 8px}h2{font-size:15px;margin:14px 0 6px}p{margin:0 0 10px}
+    hr{border:none;border-top:1px solid ${EMAIL_NEUTRALS.border};margin:14px 0}
   </style></head><body>${body}</body></html>`;
   return (
-    <div className="pointer-events-none h-40 overflow-hidden rounded-t-card border-b border-border bg-white">
+    <div className="pointer-events-none h-40 overflow-hidden rounded-t-card border-b border-border bg-email-paper">
       <iframe
         title={`${template.name} preview`}
         sandbox=""
@@ -232,7 +233,7 @@ export function Templates() {
         header: "Subject line",
         meta: { title: "Subject line", hideBelowLg: true },
         cell: ({ getValue }) => (
-          <span className="block max-w-xs truncate text-text-secondary">
+          <span className="block max-w-cell-lg truncate text-text-secondary">
             {String(getValue())}
           </span>
         ),
@@ -326,13 +327,13 @@ export function Templates() {
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search templates…"
                   aria-label="Search templates"
-                  className="pl-9"
+                  className="pl-control"
                 />
               </div>
             ) : null}
 
             {categories.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-field">
                 <button
                   type="button"
                   aria-pressed={activeCategory === null}
@@ -363,7 +364,7 @@ export function Templates() {
               </div>
             ) : null}
 
-            <div className="flex items-center gap-0.5 rounded-control border border-border p-0.5 lg:ml-auto">
+            <div className="flex items-center gap-1 rounded-control border border-border p-1 lg:ml-auto">
               <IconButton
                 label="Show thumbnails"
                 size="sm"
@@ -518,7 +519,7 @@ export function Templates() {
                       <h2 className="truncate text-body font-semibold text-text">
                         {template.name}
                       </h2>
-                      <p className="mt-0.5 truncate text-ui text-text-secondary">
+                      <p className="mt-1 truncate text-ui text-text-secondary">
                         {template.description || template.subject}
                       </p>
                     </div>
@@ -545,7 +546,7 @@ export function Templates() {
                         Updated {formatMailDate(template.updatedAt)}
                       </span>
                     </Hint>
-                    <div className="flex gap-0.5">
+                    <div className="flex gap-1">
                       <IconButton
                         label={`Edit ${template.name}`}
                         size="sm"

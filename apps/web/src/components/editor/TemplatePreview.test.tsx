@@ -87,12 +87,12 @@ describe("TemplatePreview", () => {
   it("defaults to the desktop viewport and switches to mobile", async () => {
     const user = userEvent.setup();
     renderWithProviders(<TemplatePreview subject="s" html="<p>Hi</p>" />);
-    expect(getFrame()).toHaveClass("max-w-[680px]");
+    expect(getFrame()).toHaveClass("max-w-email");
 
     await user.click(screen.getByRole("button", { name: "Mobile preview" }));
-    expect(getFrame()).toHaveClass("w-[375px]");
+    expect(getFrame()).toHaveClass("w-phone");
 
     await user.click(screen.getByRole("button", { name: "Desktop preview" }));
-    expect(getFrame()).toHaveClass("max-w-[680px]");
+    expect(getFrame()).toHaveClass("max-w-email");
   });
 });

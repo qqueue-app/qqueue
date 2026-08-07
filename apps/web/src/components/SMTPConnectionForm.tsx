@@ -169,11 +169,11 @@ export function SMTPConnectionForm({
           />
         </div>
       </div>
-      <div className="flex flex-wrap gap-5">
-        <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-6">
+        <div className="space-y-field">
           <label
             htmlFor="smtp-secure"
-            className="flex items-center gap-2.5 text-sm font-medium"
+            className="flex items-center gap-2 text-body font-medium"
           >
             <Checkbox
               id="smtp-secure"
@@ -182,14 +182,14 @@ export function SMTPConnectionForm({
             />
             Secure TLS
           </label>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-muted-foreground">
             Turn on for port 465 (implicit TLS). Leave off for 587 or 25 —
             those upgrade automatically with STARTTLS.
           </p>
         </div>
         <label
           htmlFor="smtp-default"
-          className="flex items-center gap-2.5 text-sm font-medium"
+          className="flex items-center gap-2 text-body font-medium"
         >
           <Checkbox
             id="smtp-default"

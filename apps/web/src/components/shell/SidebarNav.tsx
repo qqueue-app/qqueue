@@ -45,14 +45,14 @@ export function SidebarNav({
           <div
             key={section.heading ?? `section-${index}`}
             className={cn(
-              "flex flex-col gap-0.5",
+              "flex flex-col gap-1",
               // A section with no heading is a break in rhythm rather than a
               // new category, so it gets a hairline instead of a label.
               index > 0 && !section.heading && "border-t border-border pt-3"
             )}
           >
             {section.heading ? (
-              <div className="px-2 pb-1 text-[0.6875rem] font-medium uppercase tracking-eyebrow text-text-tertiary">
+              <div className="px-2 pb-1 text-eyebrow font-medium uppercase tracking-eyebrow text-text-tertiary">
                 {section.heading}
               </div>
             ) : null}
@@ -67,7 +67,7 @@ export function SidebarNav({
                   to={item.to}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex h-9 items-center gap-2.5 rounded-control px-2 text-ui font-medium transition-colors duration-fast ease-out",
+                    "flex h-9 items-center gap-2 rounded-control px-2 text-ui font-medium transition-colors duration-fast ease-out",
                     active
                       ? "bg-accent text-accent-foreground"
                       : "text-text-secondary hover:bg-surface-sunken hover:text-text"
@@ -78,7 +78,7 @@ export function SidebarNav({
                   {item.badge === "unread" && unread > 0 ? (
                     <span
                       data-numeric
-                      className="min-w-[1.25rem] rounded-pill bg-primary px-1.5 py-0.5 text-center text-[0.6875rem] font-semibold leading-none text-primary-foreground"
+                      className="min-w-badge rounded-pill bg-primary px-field py-1 text-center text-eyebrow font-semibold leading-none text-primary-foreground"
                     >
                       {unread > 99 ? "99+" : unread}
                     </span>

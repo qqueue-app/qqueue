@@ -93,5 +93,5 @@ export function Field({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cn("space-y-1.5", className)}>{children}</div>;
+  return <div className={cn("space-y-field", className)}>{children}</div>;
 }

@@ -272,7 +272,7 @@ export function Mailboxes() {
                 </Hint>
               ) : null}
             </div>
-            <div className="truncate text-xs text-muted-foreground md:hidden">
+            <div className="truncate text-meta text-muted-foreground md:hidden">
               {row.original.name}
             </div>
           </div>
@@ -303,7 +303,7 @@ export function Mailboxes() {
         header: "Server",
         meta: { title: "Server", hideBelowLg: true },
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-meta text-muted-foreground">
             {String(getValue())}
           </span>
         ),
@@ -328,7 +328,7 @@ export function Mailboxes() {
                   : `Owners and admins, plus ${names}`
               }
             >
-              <span className="inline-flex cursor-help items-center gap-1.5 text-sm text-muted-foreground">
+              <span className="inline-flex cursor-help items-center gap-field text-body text-muted-foreground">
                 <Users className="h-3.5 w-3.5" />
                 {count === 0 ? "Admins only" : `+${count}`}
               </span>
@@ -429,11 +429,11 @@ export function Mailboxes() {
           </Card>
         ) : !loading && !status?.reachable ? (
           <Card className="border-destructive/40">
-            <CardContent className="flex items-start gap-3 p-5">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <CardContent className="flex items-start gap-3 p-card">
+              <AlertTriangle className="mt-1 h-5 w-5 shrink-0 text-destructive" />
               <div>
                 <p className="font-medium">Your mail server isn't answering</p>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 text-body text-muted-foreground">
                   QQueue is configured to talk to Mailcow but couldn't reach it
                   {status?.error ? `: ${status.error}` : "."} Existing mailboxes
                   still send; you just can't create new ones until it responds.
@@ -515,7 +515,7 @@ export function Mailboxes() {
               }
               renderMobileRow={(connection) => (
                 <div className="flex items-start gap-3">
-                  <Mail className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <Mail className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium">
@@ -523,10 +523,10 @@ export function Mailboxes() {
                       </span>
                       {connection.isDefault ? <Badge>Default</Badge> : null}
                     </div>
-                    <p className="truncate text-sm text-muted-foreground">
+                    <p className="truncate text-body text-muted-foreground">
                       {connection.fromName || connection.name}
                     </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1 text-meta text-muted-foreground">
                       {(grantsByConnection.get(connection.id) ?? []).length ===
                       0
                         ? "Admins only"
@@ -540,7 +540,7 @@ export function Mailboxes() {
 
           <TabsContent value="access">
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-body text-muted-foreground">
                 Tick a box to let someone send as that mailbox. Owners and
                 admins can always send as any of them, so their rows are locked.
               </p>
@@ -708,7 +708,7 @@ function NewMailboxDialog({
           }}
         >
           {restricted && domains.length === 0 ? (
-            <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
+            <p className="rounded-card bg-muted p-3 text-body text-muted-foreground">
               You don't have access to any domains yet. Ask an owner to add you
               under Domain access.
             </p>
@@ -740,7 +740,7 @@ function NewMailboxDialog({
                 </Select>
               </div>
               {address ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-meta text-muted-foreground">
                   Mail will arrive at <strong>{address}</strong>.
                 </p>
               ) : null}
@@ -754,7 +754,7 @@ function NewMailboxDialog({
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder="Support Team"
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 What recipients see in the From line. Optional.
               </p>
             </div>
@@ -774,7 +774,7 @@ function NewMailboxDialog({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 You can change this any time on the "Who can send" tab.
               </p>
             </div>
@@ -824,7 +824,7 @@ function MailboxPasswordDialog({
         </DialogHeader>
 
         <div className="flex items-center gap-2">
-          <code className="flex-1 select-all rounded-lg bg-muted px-3 py-2.5 font-mono text-sm">
+          <code className="flex-1 select-all rounded-card bg-muted px-3 py-2 font-mono text-body">
             {result?.mailboxPassword}
           </code>
           <IconButton
@@ -845,7 +845,7 @@ function MailboxPasswordDialog({
         </div>
 
         {result && !result.verified ? (
-          <p className="rounded-lg bg-warning/10 p-3 text-sm text-warning-foreground">
+          <p className="rounded-card bg-warning/10 p-3 text-body text-warning-foreground">
             The sending credentials haven't verified yet — your mail server may
             still be activating the mailbox. Everything is saved; use "Test
             connection" on this page in a minute to re-check.
@@ -878,7 +878,7 @@ function DomainAccessPanel({
   const [picks, setPicks] = useState<Record<string, string>>({});
 
   if (loading) {
-    return <p className="p-6 text-sm text-muted-foreground">Loading…</p>;
+    return <p className="p-6 text-body text-muted-foreground">Loading…</p>;
   }
 
   if (admins.length === 0) {
@@ -895,30 +895,30 @@ function DomainAccessPanel({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-body text-muted-foreground">
         You can create mailboxes on every domain. Admins can only use the
         domains you list here.
       </p>
 
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-dialog border">
+        <table className="w-full text-body">
           <thead className="border-b bg-muted/60">
             <tr>
               <th
                 scope="col"
-                className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                className="px-3 py-2 text-left text-meta font-semibold uppercase tracking-wide text-muted-foreground"
               >
                 Admin
               </th>
               <th
                 scope="col"
-                className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                className="px-3 py-2 text-left text-meta font-semibold uppercase tracking-wide text-muted-foreground"
               >
                 Domains they can use
               </th>
               <th
                 scope="col"
-                className="w-72 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                className="w-72 px-3 py-2 text-left text-meta font-semibold uppercase tracking-wide text-muted-foreground"
               >
                 Add a domain
               </th>
@@ -939,7 +939,7 @@ function DomainAccessPanel({
                 <tr key={admin.userId} className="border-b last:border-0">
                   <td className="px-3 py-3 align-top">
                     <div className="font-medium">{memberName(admin)}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-meta text-muted-foreground">
                       {admin.user.email}
                     </div>
                   </td>
@@ -949,7 +949,7 @@ function DomainAccessPanel({
                         None — they can't create mailboxes yet.
                       </span>
                     ) : (
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-field">
                         {theirs.map((grant) => (
                           <Badge
                             key={grant.id}

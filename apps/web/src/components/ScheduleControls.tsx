@@ -187,7 +187,7 @@ function ToggleRow({
         onCheckedChange={onCheckedChange}
         disabled={disabled}
         aria-label={title}
-        className="mt-0.5 shrink-0"
+        className="mt-1 shrink-0"
       />
     </div>
   );
@@ -247,7 +247,7 @@ export function ScheduleControls({
         already a surface.
       */}
       {scheduleVisible && !recurring ? (
-        <div className="space-y-1.5 pb-4 pt-3">
+        <div className="space-y-field pb-4 pt-3">
           <Label htmlFor="scheduledAt">Send at</Label>
           <Input
             id="scheduledAt"
@@ -275,7 +275,7 @@ export function ScheduleControls({
 
       {showRecurring && recurring ? (
         <div className="space-y-4 pb-1 pt-4">
-          <div className="space-y-1.5">
+          <div className="space-y-field">
             <Label>Frequency</Label>
             <Select
               value={recurrence.preset}
@@ -299,7 +299,7 @@ export function ScheduleControls({
           </div>
 
           {recurrence.preset === "advanced" ? (
-            <div className="space-y-1.5">
+            <div className="space-y-field">
               <Label htmlFor="cronExpression">Cron expression</Label>
               <Input
                 id="cronExpression"
@@ -316,7 +316,7 @@ export function ScheduleControls({
           ) : (
             <div className="space-y-4">
               {recurrence.preset === "weekly" ? (
-                <div className="space-y-1.5">
+                <div className="space-y-field">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Label>Repeat on</Label>
                     <div className="flex flex-wrap gap-1">
@@ -348,7 +348,7 @@ export function ScheduleControls({
                       ))}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-field">
                     {WEEKDAYS.map((day) => {
                       const selected = recurrence.weekdays.includes(day.value);
                       return (
@@ -385,7 +385,7 @@ export function ScheduleControls({
                   sized to what it holds rather than to the container. */}
               <div className="flex flex-col gap-4 xs:flex-row xs:gap-4">
                 {recurrence.preset === "monthly" ? (
-                  <div className="space-y-1.5">
+                  <div className="space-y-field">
                     <Label htmlFor="dayOfMonth">Day of month</Label>
                     <Input
                       id="dayOfMonth"
@@ -404,7 +404,7 @@ export function ScheduleControls({
                     />
                   </div>
                 ) : null}
-                <div className="space-y-1.5">
+                <div className="space-y-field">
                   <Label htmlFor="scheduleTime">Time</Label>
                   <Input
                     id="scheduleTime"
@@ -423,7 +423,7 @@ export function ScheduleControls({
             </div>
           )}
 
-          <div className="space-y-1.5">
+          <div className="space-y-field">
             <Label htmlFor="timezone">Timezone</Label>
             {/*
               A native <select>, not the Radix one: there are ~400 timezones,

@@ -34,8 +34,8 @@ const sheetVariants = cva(
         // Bottom sheets are the native-feeling pattern on a phone; capped so a
         // long body scrolls inside rather than pushing the handle off-screen.
         bottom:
-          "inset-x-0 bottom-0 max-h-[85vh] rounded-t-dialog border-t border-border pb-[env(safe-area-inset-bottom)] data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-        top: "inset-x-0 top-0 max-h-[85vh] rounded-b-2xl border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+          "inset-x-0 bottom-0 max-h-[85vh] rounded-t-dialog border-t border-border pb-safe-b data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+        top: "inset-x-0 top-0 max-h-[85vh] rounded-b-dialog border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
         /*
           Edge to edge, for a sheet that is a destination rather than a detour —
           the mobile "More" nav. No radius and no handle: it isn't a peek at the
@@ -91,7 +91,7 @@ function SheetHeader({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex flex-col gap-1 border-b px-5 py-4 pr-12", className)}
+      className={cn("flex flex-col gap-1 border-b px-card py-4 pr-12", className)}
       {...props}
     />
   );
@@ -105,7 +105,7 @@ function SheetBody({
     <div
       // scroll-exception: a sheet is a dialog, and Radix freezes the document
       // behind it — so this is still the only scrollbar on screen.
-      className={cn("flex-1 overflow-y-auto px-5 py-4", className)}
+      className={cn("flex-1 overflow-y-auto px-card py-4", className)}
       {...props}
     />
   );
@@ -118,7 +118,7 @@ function SheetFooter({
   return (
     <div
       className={cn(
-        "flex flex-col-reverse gap-2 border-t px-5 py-4 sm:flex-row sm:justify-end",
+        "flex flex-col-reverse gap-2 border-t px-card py-4 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -144,7 +144,7 @@ const SheetDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
+    className={cn("text-body text-muted-foreground", className)}
     {...props}
   />
 ));

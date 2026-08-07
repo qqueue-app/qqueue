@@ -48,17 +48,17 @@ export function VariablesPanel({
 
   if (names.length === 0) {
     return (
-      <p className="px-1 text-sm text-muted-foreground">
+      <p className="px-1 text-body text-muted-foreground">
         No variables yet. Insert one with the{" "}
         <span className="font-medium">Variable</span> button in the toolbar, e.g.{" "}
-        <code className="text-xs">{"{{firstName}}"}</code>.
+        <code className="text-meta">{"{{firstName}}"}</code>.
       </p>
     );
   }
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-body text-muted-foreground">
         Set a default for each variable so sends have a fallback, and a sample
         value to drive the live preview.
       </p>
@@ -70,15 +70,15 @@ export function VariablesPanel({
           return (
             <div
               key={name}
-              className="rounded-lg border bg-card p-3 shadow-sm"
+              className="rounded-card border bg-card p-3 shadow-sm"
             >
               <div className="flex items-center justify-between gap-2">
-                <code className="text-sm font-medium">{`{{${name}}}`}</code>
-                <div className="flex items-center gap-1.5">
+                <code className="text-body font-medium">{`{{${name}}}`}</code>
+                <div className="flex items-center gap-field">
                   {!isUsed ? (
                     <Badge
                       variant="outline"
-                      className="gap-1 text-amber-600 dark:text-amber-500"
+                      className="gap-1 text-warn"
                     >
                       <AlertTriangle className="h-3 w-3" />
                       Unused
@@ -101,7 +101,7 @@ export function VariablesPanel({
               </div>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-meta text-muted-foreground">
                     Default (sent)
                   </span>
                   <Input
@@ -113,7 +113,7 @@ export function VariablesPanel({
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-meta text-muted-foreground">
                     Sample (preview)
                   </span>
                   <Input

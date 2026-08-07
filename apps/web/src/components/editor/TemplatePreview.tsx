@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { TemplateVariable } from "@/lib/api";
 import { isFullHtmlDocument } from "./html-source";
 import { applyVariables, resolveVariableData } from "./variables";
+import { EMAIL_ACCENT, EMAIL_NEUTRALS } from "../../lib/email-palette.js";
 
 interface TemplatePreviewProps {
   subject: string;
@@ -18,19 +19,19 @@ function buildDocument(bodyHtml: string) {
   return `<!doctype html><html><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  body { margin: 0; padding: 24px; background: #f4f5f7;
+  body { margin: 0; padding: 24px; background: ${EMAIL_NEUTRALS.backdrop};
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    color: #1f2933; line-height: 1.6; }
-  .qq-card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px;
-    padding: 32px; box-shadow: 0 1px 3px rgba(16,42,67,.08); }
+    color: ${EMAIL_NEUTRALS.text}; line-height: 1.6; }
+  .qq-card { max-width: 600px; margin: 0 auto; background: ${EMAIL_NEUTRALS.paper};
+    border-radius: 12px; padding: 32px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.04); }
   .qq-card img { max-width: 100%; height: auto; }
-  .qq-card a { color: #2e7d63; }
+  .qq-card a { color: ${EMAIL_ACCENT}; }
   .qq-card h1 { font-size: 24px; line-height: 1.3; margin: 0 0 12px; }
   .qq-card h2 { font-size: 20px; line-height: 1.35; margin: 20px 0 10px; }
   .qq-card p { margin: 0 0 14px; }
-  .qq-card hr { border: none; border-top: 1px solid #e4e7eb; margin: 20px 0; }
+  .qq-card hr { border: none; border-top: 1px solid ${EMAIL_NEUTRALS.border}; margin: 20px 0; }
   .qq-card blockquote { margin: 0 0 14px; padding: 4px 0 4px 16px;
-    border-left: 3px solid #2e7d63; color: #486581; }
+    border-left: 3px solid ${EMAIL_ACCENT}; color: ${EMAIL_NEUTRALS.textMuted}; }
 </style></head>
 <body><div class="qq-card">${bodyHtml}</div></body></html>`;
 }
@@ -62,16 +63,16 @@ export function TemplatePreview({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-2.5">
+      <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-meta font-medium uppercase tracking-wide text-muted-foreground">
             Subject
           </p>
-          <p className="truncate text-sm font-medium" title={renderedSubject}>
+          <p className="truncate text-body font-medium" title={renderedSubject}>
             {renderedSubject}
           </p>
         </div>
-        <div className="ml-3 flex shrink-0 items-center gap-1 rounded-md border bg-muted/40 p-0.5">
+        <div className="ml-3 flex shrink-0 items-center gap-1 rounded-control border bg-muted/40 p-1">
           <button
             type="button"
             aria-label="Desktop preview"
@@ -107,8 +108,8 @@ export function TemplatePreview({
           sandbox=""
           srcDoc={srcDoc}
           className={cn(
-            "h-full rounded-lg border bg-white shadow-sm transition-all",
-            device === "mobile" ? "w-[375px]" : "w-full max-w-[680px]"
+            "h-full rounded-card border bg-email-paper shadow-sm transition-all",
+            device === "mobile" ? "w-phone" : "w-full max-w-email"
           )}
         />
       </div>

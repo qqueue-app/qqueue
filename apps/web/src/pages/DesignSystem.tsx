@@ -61,7 +61,7 @@ function Section({
     <section className="border-t border-border pt-8 first:border-0 first:pt-0">
       <h2 className="text-section font-semibold text-text">{title}</h2>
       {note ? (
-        <p className="mt-1 max-w-[45rem] text-ui leading-6 text-text-secondary">
+        <p className="mt-1 max-w-read text-ui leading-6 text-text-secondary">
           {note}
         </p>
       ) : null}
@@ -88,7 +88,7 @@ export function DesignSystem() {
 
   return (
     <div className="min-h-screen bg-bg">
-      <div className="mx-auto max-w-[52rem] px-6 py-12">
+      <div className="mx-auto max-w-read px-6 py-12">
         <header className="mb-12">
           <Eyebrow>Foundation</Eyebrow>
           <h1 className="mt-2 text-title font-semibold text-text">
@@ -225,17 +225,17 @@ export function DesignSystem() {
             title="Inputs"
             note="Width comes from the content type, never the container. Whitespace to the right of a field is correct. On a phone every one of these goes full width, and their text is 16px so iOS does not zoom."
           >
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-6">
               <div>
                 <Label htmlFor="demo-email">Email address</Label>
                 <Input
                   id="demo-email"
                   type="email"
                   width="name"
-                  className="mt-1.5"
+                  className="mt-field"
                   placeholder="person@example.com"
                 />
-                <FieldHint className="mt-1.5">
+                <FieldHint className="mt-field">
                   360px — sized for an address, not for the page.
                 </FieldHint>
               </div>
@@ -245,10 +245,10 @@ export function DesignSystem() {
                 <Input
                   id="demo-subject"
                   width="long"
-                  className="mt-1.5"
+                  className="mt-field"
                   placeholder="Your receipt from Acme"
                 />
-                <FieldHint className="mt-1.5">480px</FieldHint>
+                <FieldHint className="mt-field">480px</FieldHint>
               </div>
 
               <div>
@@ -257,10 +257,10 @@ export function DesignSystem() {
                   id="demo-port"
                   width="code"
                   inputMode="numeric"
-                  className="mt-1.5"
+                  className="mt-field"
                   defaultValue="587"
                 />
-                <FieldHint className="mt-1.5">
+                <FieldHint className="mt-field">
                   120px — the audit&apos;s worst case, previously ~1100px.
                 </FieldHint>
               </div>
@@ -270,12 +270,12 @@ export function DesignSystem() {
                 <Input
                   id="demo-invalid"
                   width="name"
-                  className="mt-1.5"
+                  className="mt-field"
                   aria-invalid
                   aria-describedby="demo-invalid-error"
                   defaultValue="not-an-address"
                 />
-                <FieldError id="demo-invalid-error" className="mt-1.5">
+                <FieldError id="demo-invalid-error" className="mt-field">
                   Enter a valid email address.
                 </FieldError>
               </div>
@@ -286,7 +286,7 @@ export function DesignSystem() {
                   <SelectTrigger
                     id="demo-select"
                     width="name"
-                    className="mt-1.5"
+                    className="mt-field"
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -301,7 +301,7 @@ export function DesignSystem() {
                 <Label htmlFor="demo-body">Message</Label>
                 <Textarea
                   id="demo-body"
-                  className="mt-1.5"
+                  className="mt-field"
                   rows={4}
                   placeholder="A textarea is the one control that does fill the column — prose has no natural width."
                 />

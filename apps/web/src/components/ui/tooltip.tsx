@@ -60,7 +60,7 @@ export function Hint({
           <span className="flex items-center gap-2">
             <span>{label}</span>
             {shortcut ? (
-              <kbd className="rounded-[4px] border border-bg/25 px-1 font-sans text-meta uppercase text-bg/70">
+              <kbd className="rounded-control border border-bg/25 px-1 font-sans text-meta uppercase text-bg/70">
                 {shortcut}
               </kbd>
             ) : null}

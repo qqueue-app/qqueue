@@ -47,6 +47,17 @@
     --accent-soft: 160 24% 93%; /* #E8F1EE — selected rows, subtle badges */
     --accent-contrast: 0 0% 100%; /* text on --accent */
 
+    /*
+      The paper an email is previewed on.
+
+      Deliberately its own token rather than `--surface`, even though both are
+      white today. This one is not ours to theme: it stands for what a mail
+      client will actually paint behind the message, so it must not follow the
+      app's surface if the app ever gets a dark palette — a preview that goes
+      dark is lying about the email.
+    */
+    --email-paper: 0 0% 100%;
+
     /* ---- Status -------------------------------------------------------- */
     /* Paired tinted-bg + dark-text. Both halves are tokens so a badge never has
        to guess an opacity to stay legible. */
@@ -99,9 +110,11 @@
        eye-line no matter how wide the window gets, while a data table is
        allowed to go wide. Forms never do. */
     --content-form: 40rem; /* 640px — forms and settings pages */
-    --content-read: 45rem; /* 720px — reading content, empty states */
+    --content-read: 45rem; /* 720px — reading content */
     --content-grid: 70rem; /* 1120px — dashboard card grid */
     --content-table: 75rem; /* 1200px — data tables */
+    --content-empty: 25rem; /* 400px — empty states (§3) */
+    --content-rail: 19rem; /* 304px — the composer's send-options rail */
 
     /* ---- Shell --------------------------------------------------------- */
     /* The three fixed measurements of the app frame. They are tokens because

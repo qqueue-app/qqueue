@@ -45,7 +45,7 @@ export function RowActions({ actions, rowLabel, className }: RowActionsProps) {
 
   return (
     <div
-      className={cn("flex items-center justify-end gap-0.5", className)}
+      className={cn("flex items-center justify-end gap-1", className)}
       // Rows are often clickable; actions must not also trigger the row.
       onClick={(event) => event.stopPropagation()}
     >

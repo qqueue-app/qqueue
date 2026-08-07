@@ -45,6 +45,8 @@ export default {
         },
         border: "hsl(var(--border))",
         "border-strong": "hsl(var(--border-strong))",
+        // What a mail client paints behind the message — see styles.css.
+        "email-paper": "hsl(var(--email-paper))",
         text: {
           DEFAULT: "hsl(var(--text))",
           secondary: "hsl(var(--text-secondary))",
@@ -143,8 +145,16 @@ export default {
         overlay: "var(--shadow-overlay)"
       },
       fontSize: {
-        // The whole type scale — six sizes, named by role.
-        meta: ["0.75rem", { lineHeight: "1rem" }], // 12 — meta, eyebrow labels
+        // The whole type scale — seven sizes, named by role.
+        /*
+          11px, the size §1 gives ALL-CAPS eyebrow labels ("AUDIENCE" in the
+          sidebar) and §5 gives the mobile tab bar's labels. It is a real step in
+          the system, but it was missing from this scale — so every eyebrow in
+          the shell had been reaching for `text-[0.6875rem]`, and the badge
+          counters had drifted to three *different* literals between them.
+        */
+        eyebrow: ["0.6875rem", { lineHeight: "1rem" }], // 11 — caps labels, tab bar
+        meta: ["0.75rem", { lineHeight: "1rem" }], // 12 — meta, small labels
         ui: ["0.8125rem", { lineHeight: "1.125rem" }], // 13 — secondary, table cells
         body: ["0.875rem", { lineHeight: "1.25rem" }], // 14 — default
         section: ["1rem", { lineHeight: "1.5rem" }], // 16 — section titles
@@ -173,6 +183,26 @@ export default {
         ]
       },
       spacing: {
+        /*
+          The two sub-steps §3 authorises below the 4/8/12/16/24/32/48 scale.
+
+          They are named rather than left as bare Tailwind fractions because
+          that is the difference between a value the system chose and one
+          somebody guessed: `space-y-field` is the label→field→helper rhythm
+          §3 specifies, and `p-card` is the lower bound of its 20–24px card
+          padding. Everything else stays on the main scale — if you find
+          yourself wanting `gap-2.5`, the answer is 2 or 3.
+        */
+        field: "0.375rem", // 6px — label → field → helper
+        card: "1.25rem", // 20px — card padding (lower bound of §3's 20–24)
+        /*
+          Padding that clears an icon sitting inside a field — the search box's
+          magnifier, the clear button opposite it. One control-height, so the
+          glyph is centred in a square at the end of the control rather than
+          parked at whatever offset looked right that day.
+        */
+        control: "2.25rem", // 36px
+
         /*
           Shell measurements and safe-area insets, so the two sides of every
           pairing read from the same value: `w-sidebar` on the sidebar and
@@ -203,7 +233,25 @@ export default {
         form: "var(--content-form)",
         read: "var(--content-read)",
         grid: "var(--content-grid)",
-        table: "var(--content-table)"
+        table: "var(--content-table)",
+
+        /* §3's empty state: 400px, centred, never a full-width bordered box. */
+        empty: "var(--content-empty)",
+
+        /*
+          Where a table cell stops growing and starts truncating. Three steps,
+          because a cell full of email addresses and a cell full of subject
+          lines want different ones — and because the alternative is what was
+          here before: six different literals across five pages, each of them a
+          guess nobody could check against another.
+        */
+        "cell-sm": "10rem", // 160px — a name, a label
+        cell: "16rem", // 256px — an email address
+        "cell-lg": "20rem", // 320px — a subject line
+
+        /* The paper an email is previewed on — not app chrome, so not a
+           content width. 680px is what the template preview frames. */
+        email: "42.5rem"
       },
       width: {
         /*
@@ -212,9 +260,21 @@ export default {
           a field is correct, not wasted.
         */
         "field-code": "7.5rem", // 120px — port, short code, count
+        "field-choice": "12rem", // 192px — a select of short enumerated options
         "field-search": "17.5rem", // 280px — search
         "field-name": "22.5rem", // 360px — email address, person's name
         "field-long": "30rem", // 480px — subject line, URL, API key
+
+        /*
+          The inbox's message-list pane, which is a reading column rather than a
+          field: wide enough for a sender and a subject line, and it earns the
+          extra 2rem at `lg` where there is room for it.
+        */
+        "list-pane": "22rem",
+        "list-pane-lg": "24rem",
+
+        /* A phone, for the template preview's device toggle. */
+        phone: "23.4375rem", // 375px
 
         /*
           The square-control widths, which have to be listed here as well as
@@ -227,19 +287,38 @@ export default {
           width, so the 44px tap target it exists to provide does not exist.
         */
         control: "2.25rem", // 36px — square icon buttons
-        touch: "2.75rem" // 44px — touch-slop pseudo-elements
+        touch: "2.75rem", // 44px — touch-slop pseudo-elements
+
+        // Icon sizes that are not the default 16px `[&_svg]:size-4`. Listed on
+        // both width and height for the reason given above.
+        "icon-tab": "1.375rem", // 22px — mobile tab bar (§5)
+        "icon-row": "1.125rem" // 18px — More-sheet and nav rows
       },
       height: {
         control: "2.25rem", // 36px — buttons, inputs, selects
-        touch: "2.75rem" // 44px — minimum comfortable touch target
+        touch: "2.75rem", // 44px — minimum comfortable touch target
+        "icon-tab": "1.375rem",
+        "icon-row": "1.125rem"
       },
       minHeight: {
         control: "2.25rem",
         touch: "2.75rem",
-        textarea: "5rem"
+        textarea: "5rem",
+        /*
+          Where an editing or preview surface starts before its content decides.
+          Three steps because a rich-text body, an HTML source view and an
+          attachment preview genuinely want different ones — and because the
+          alternative was four different pixel literals that had drifted apart
+          without anyone choosing the difference.
+        */
+        "pane-sm": "12.5rem", // 200px — rich text body
+        pane: "15rem", // 240px — attachment preview
+        "pane-lg": "17.5rem" // 280px — HTML source view
       },
       minWidth: {
-        touch: "2.75rem"
+        touch: "2.75rem",
+        /* A count badge stays circular at one digit and grows past it. */
+        badge: "1.25rem"
       },
       transitionDuration: {
         fast: "var(--motion-fast)",

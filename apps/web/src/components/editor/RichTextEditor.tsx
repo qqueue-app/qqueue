@@ -59,18 +59,20 @@ import {
   type RawBlockEventDetail
 } from "./raw-html-extension";
 import { normalizeUrl } from "./url";
+import { EMAIL_SWATCHES } from "../../lib/email-palette.js";
 
 const DEFAULT_VARIABLES = ["firstName", "lastName", "email"];
 
-// Email-friendly text colours offered in the colour picker.
+// Email-friendly text colours offered in the colour picker. Hex because these
+// are written into the message — see lib/email-palette.ts.
 const TEXT_COLORS = [
   { label: "Default", value: null },
-  { label: "Slate", value: "#1f2933" },
-  { label: "Muted", value: "#627d98" },
-  { label: "Green", value: "#2e7d63" },
-  { label: "Blue", value: "#2563eb" },
-  { label: "Red", value: "#dc2626" },
-  { label: "Amber", value: "#d97706" }
+  { label: "Ink", value: EMAIL_SWATCHES.ink },
+  { label: "Muted", value: EMAIL_SWATCHES.muted },
+  { label: "Green", value: EMAIL_SWATCHES.accent },
+  { label: "Blue", value: EMAIL_SWATCHES.blue },
+  { label: "Red", value: EMAIL_SWATCHES.red },
+  { label: "Amber", value: EMAIL_SWATCHES.amber }
 ];
 
 interface PromptField {
@@ -188,7 +190,7 @@ function EditorPromptDialog({
             </div>
           ))}
           {error ? (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body text-destructive">
               {error}
             </p>
           ) : null}
@@ -254,7 +256,7 @@ function ToolbarButton({
       aria-label={label}
       title={label}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4",
+        "inline-flex h-8 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4",
         active && "bg-primary/10 text-primary"
       )}
     >
@@ -272,7 +274,7 @@ function ColorMenu({ editor }: { editor: Editor }) {
           onMouseDown={(event) => event.preventDefault()}
           aria-label="Text colour"
           title="Text colour"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-4"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-4"
         >
           <Palette />
         </button>
@@ -292,7 +294,7 @@ function ColorMenu({ editor }: { editor: Editor }) {
             }}
           >
             <span
-              className="mr-2 inline-block h-3.5 w-3.5 rounded-full border"
+              className="mr-2 inline-block h-3.5 w-3.5 rounded-pill border"
               style={{ backgroundColor: color.value ?? "transparent" }}
             />
             {color.label}
@@ -319,7 +321,7 @@ function VariableMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="h-8 gap-1.5">
+        <Button type="button" variant="ghost" size="sm" className="h-8 gap-field">
           <Braces className="h-4 w-4" />
           Variable
         </Button>
@@ -333,7 +335,7 @@ function VariableMenu({
         <DropdownMenuSeparator />
         {variables.map((variable) => (
           <DropdownMenuItem key={variable} onSelect={() => insert(variable)}>
-            <code className="text-xs">{`{{${variable}}}`}</code>
+            <code className="text-meta">{`{{${variable}}}`}</code>
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
@@ -388,7 +390,7 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         class:
-          "prose prose-sm max-w-none min-h-[200px] px-3 py-2 focus:outline-none prose-headings:font-semibold prose-a:text-primary"
+          "prose prose-sm max-w-none min-h-pane-sm px-3 py-2 focus:outline-none prose-headings:font-semibold prose-a:text-primary"
       }
     },
     onUpdate: ({ editor: instance }) => {
@@ -605,11 +607,11 @@ export function RichTextEditor({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-md border border-input bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
+        "overflow-hidden rounded-control border border-input bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
         className
       )}
     >
-      <div className="flex flex-wrap items-center gap-0.5 border-b bg-muted/40 p-1.5">
+      <div className="flex flex-wrap items-center gap-1 border-b bg-muted/40 p-field">
         <ToolbarButton
           label="Bold"
           active={editor.isActive("bold")}
@@ -724,7 +726,7 @@ export function RichTextEditor({
           onClick={() => setButtonOpen(true)}
           aria-label={buttonSelected ? "Edit button" : "Button"}
           className={cn(
-            "h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground",
+            "h-8 gap-field px-2 text-muted-foreground hover:text-foreground",
             buttonSelected && "bg-primary/10 text-primary"
           )}
         >

@@ -226,7 +226,7 @@ export function Campaigns() {
               {row.original.template?.subject ?? "No template"}
             </div>
             {row.original.cronExpression ? (
-              <div className="mt-1 flex items-center gap-1.5 text-meta text-text-tertiary">
+              <div className="mt-1 flex items-center gap-field text-meta text-text-tertiary">
                 <Repeat className="h-3 w-3 shrink-0" />
                 <span className="truncate">
                   {describeCron(row.original.cronExpression) ??

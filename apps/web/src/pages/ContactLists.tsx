@@ -155,7 +155,7 @@ export function ContactLists() {
         header: "List",
         meta: { title: "List" },
         cell: ({ row }) => (
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-accent text-accent-foreground">
               <Users className="h-4 w-4" />
             </div>
@@ -416,13 +416,13 @@ export function ContactLists() {
                         onChange={(event) =>
                           setContactSearch(event.target.value)
                         }
-                        className="pl-9"
+                        className="pl-control"
                       />
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-                    <label className="flex min-h-touch cursor-pointer items-center gap-2.5 text-ui font-medium text-text sm:min-h-0">
+                  <div className="flex items-center justify-between border-b border-border px-2 py-field">
+                    <label className="flex min-h-touch cursor-pointer items-center gap-2 text-ui font-medium text-text sm:min-h-0">
                       <Checkbox
                         checked={
                           allFilteredSelected
@@ -460,7 +460,7 @@ export function ContactLists() {
                         return (
                           <label
                             key={contact.id}
-                            className="flex min-h-touch cursor-pointer items-center gap-2.5 rounded-control px-2 py-1.5 text-ui transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
+                            className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control px-2 py-field text-ui transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
                           >
                             <Checkbox
                               checked={selectedContactIds.includes(contact.id)}

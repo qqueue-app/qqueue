@@ -158,7 +158,7 @@ export function Deliverability() {
                   <AlertTriangle className="h-4 w-4" />
                   Reputation alerts
                 </div>
-                <ul className="space-y-1 text-sm">
+                <ul className="space-y-1 text-body">
                   {alerts.map((alert) => (
                     <li key={alert.metric}>{alert.message}</li>
                   ))}
@@ -218,13 +218,13 @@ export function Deliverability() {
                     }
                   ].map((stat) => (
                     <Card key={stat.label} className="p-4">
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-meta text-muted-foreground">
                         {stat.label}
                       </div>
-                      <div className="mt-1 text-2xl font-semibold">
+                      <div className="mt-1 text-stat font-semibold">
                         {stat.value}
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
+                      <div className="mt-1 text-meta text-muted-foreground">
                         {stat.hint}
                       </div>
                     </Card>
@@ -235,8 +235,8 @@ export function Deliverability() {
                     delivery at all. Saying so is the honest alternative to
                     printing a number derived from open tracking. */}
                 {overview.deliverySignal === "none" && (
-                  <Card className="flex items-start gap-2 p-4 text-sm text-muted-foreground">
-                    <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                  <Card className="flex items-start gap-2 p-4 text-body text-muted-foreground">
+                    <Info className="mt-1 h-4 w-4 shrink-0" />
                     <p>
                       <span className="font-medium text-foreground">
                         No delivery confirmation yet.
@@ -258,7 +258,7 @@ export function Deliverability() {
                   </Card>
                 )}
 
-                <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
+                <div className="grid grid-cols-2 gap-4 text-body md:grid-cols-4">
                   {[
                     ["Sent", overview.totals.sent],
                     ["Failed", overview.totals.failed],
@@ -307,7 +307,7 @@ export function Deliverability() {
                   </Table>
                 </div>
               ) : (
-                <p className="p-4 text-sm text-muted-foreground">
+                <p className="p-4 text-body text-muted-foreground">
                   No sends in this window yet.
                 </p>
               )}
@@ -320,7 +320,7 @@ export function Deliverability() {
                   Auto-suppression policy
                 </div>
                 {overview && (
-                  <p className="mb-3 text-xs text-muted-foreground">
+                  <p className="mb-3 text-meta text-muted-foreground">
                     {overview.totals.suppressedTotal} address
                     {overview.totals.suppressedTotal === 1 ? "" : "es"}{" "}
                     suppressed in total, {overview.totals.suppressedInWindow}{" "}
@@ -357,7 +357,7 @@ export function Deliverability() {
 
               <Card className="p-4">
                 <div className="mb-1 font-medium">Per-domain throttles</div>
-                <p className="mb-3 text-xs text-muted-foreground">
+                <p className="mb-3 text-meta text-muted-foreground">
                   Default cap: {defaultPerMinute}/min. Add a domain to override.
                 </p>
                 <form
@@ -391,11 +391,11 @@ export function Deliverability() {
                   </Button>
                 </form>
                 {throttles.length > 0 && (
-                  <ul className="space-y-1 text-sm">
+                  <ul className="space-y-1 text-body">
                     {throttles.map((throttle) => (
                       <li
                         key={throttle.id}
-                        className="flex items-center justify-between rounded border px-3 py-1.5"
+                        className="flex items-center justify-between rounded border px-3 py-field"
                       >
                         <span>
                           {throttle.domain || "(default)"} —{" "}

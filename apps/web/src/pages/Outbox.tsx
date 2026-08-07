@@ -103,11 +103,11 @@ export function Outbox() {
         header: "Email",
         meta: { title: "Email" },
         cell: ({ row }) => (
-          <div className="min-w-0 max-w-sm">
+          <div className="min-w-0 max-w-cell-lg">
             <div className="truncate font-medium">
               {row.original.subject || "(no subject)"}
             </div>
-            <div className="mt-1 flex items-center gap-1.5">
+            <div className="mt-1 flex items-center gap-field">
               <Badge variant="secondary" className="font-normal">
                 {ORIGIN_LABEL[row.original.origin]}
               </Badge>
@@ -127,7 +127,7 @@ export function Outbox() {
         meta: { title: "To", hideBelowMd: true },
         cell: ({ row }) => (
           <Hint label={row.original.to.join(", ") || "No recipients"}>
-            <span className="block max-w-[16rem] cursor-help truncate">
+            <span className="block max-w-cell cursor-help truncate">
               {describeRecipients(row.original)}
             </span>
           </Hint>

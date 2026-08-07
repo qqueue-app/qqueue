@@ -440,7 +440,7 @@ export function ApiSettings() {
               />
             ) : null}
 
-            <form onSubmit={createWebhookEndpoint} className="space-y-5">
+            <form onSubmit={createWebhookEndpoint} className="space-y-6">
               <Field>
                 <Label htmlFor="webhook-name">Endpoint name</Label>
                 <Input
@@ -536,7 +536,7 @@ export function ApiSettings() {
                       <div className="break-all text-ui text-text-secondary">
                         {endpoint.url}
                       </div>
-                      <div className="mt-1.5 flex flex-wrap gap-1">
+                      <div className="mt-field flex flex-wrap gap-1">
                         {endpoint.events.map((event) => (
                           <Badge key={event} variant="outline">
                             {event}

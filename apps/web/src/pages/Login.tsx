@@ -148,17 +148,17 @@ export function Login({ mode }: LoginProps) {
 
   if (isRegister && registrationClosed) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+      <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
         <div className="w-full max-w-md">
-          <div className="mb-6 flex items-center justify-center gap-2.5">
+          <div className="mb-6 flex items-center justify-center gap-2">
             <BrandMark className="h-10 w-10" />
-            <span className="text-xl font-semibold tracking-tight">
+            <span className="text-title font-semibold tracking-tight">
               QQueue
             </span>
           </div>
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">Registration is closed</CardTitle>
+              <CardTitle className="text-title">Registration is closed</CardTitle>
               <CardDescription>
                 This QQueue server is invite only. Ask an administrator to
                 invite you — you'll get an email link to set up your account.
@@ -176,15 +176,15 @@ export function Login({ mode }: LoginProps) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-md">
-        <div className="mb-6 flex items-center justify-center gap-2.5">
+        <div className="mb-6 flex items-center justify-center gap-2">
           <BrandMark className="h-10 w-10" />
-          <span className="text-xl font-semibold tracking-tight">QQueue</span>
+          <span className="text-title font-semibold tracking-tight">QQueue</span>
         </div>
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">
+            <CardTitle className="text-title">
               {isRegister
                 ? "Create your account"
                 : isForgot
@@ -217,7 +217,7 @@ export function Login({ mode }: LoginProps) {
                     aria-invalid={!!errors.email}
                   />
                   {errors.email ? (
-                    <p className="text-xs text-destructive">{errors.email}</p>
+                    <p className="text-meta text-destructive">{errors.email}</p>
                   ) : null}
                 </div>
               ) : (
@@ -230,7 +230,7 @@ export function Login({ mode }: LoginProps) {
                     aria-invalid={!!errors.token}
                   />
                   {errors.token ? (
-                    <p className="text-xs text-destructive">{errors.token}</p>
+                    <p className="text-meta text-destructive">{errors.token}</p>
                   ) : null}
                 </div>
               )}
@@ -250,11 +250,11 @@ export function Login({ mode }: LoginProps) {
                     aria-invalid={!!errors.password}
                   />
                   {errors.password ? (
-                    <p className="text-xs text-destructive">
+                    <p className="text-meta text-destructive">
                       {errors.password}
                     </p>
                   ) : isRegister || isReset ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-meta text-muted-foreground">
                       At least 8 characters.
                     </p>
                   ) : null}
@@ -297,9 +297,9 @@ export function Login({ mode }: LoginProps) {
               </Button>
             </form>
             {resetToken ? (
-              <div className="mt-4 rounded-lg border bg-muted/40 p-3 text-sm">
+              <div className="mt-4 rounded-card border bg-muted/40 p-3 text-body">
                 <div className="font-medium">Development reset token</div>
-                <code className="mt-2 block break-all rounded bg-background p-2 text-xs">
+                <code className="mt-2 block break-all rounded bg-background p-2 text-meta">
                   {resetToken}
                 </code>
                 <Button
@@ -316,7 +316,7 @@ export function Login({ mode }: LoginProps) {
                 </Button>
               </div>
             ) : null}
-            <p className="mt-4 text-center text-sm text-muted-foreground">
+            <p className="mt-4 text-center text-body text-muted-foreground">
               {isRegister ? "Already have an account?" : "New to QQueue?"}{" "}
               <button
                 type="button"
@@ -330,7 +330,7 @@ export function Login({ mode }: LoginProps) {
               </button>
             </p>
             {!isRegister && !isForgot && !isReset ? (
-              <p className="mt-2 text-center text-sm">
+              <p className="mt-2 text-center text-body">
                 <button
                   type="button"
                   className="font-medium text-primary hover:underline"
@@ -341,7 +341,7 @@ export function Login({ mode }: LoginProps) {
               </p>
             ) : null}
             {isForgot || isReset ? (
-              <p className="mt-4 text-center text-sm">
+              <p className="mt-4 text-center text-body">
                 <button
                   type="button"
                   className="font-medium text-primary hover:underline"
@@ -351,7 +351,7 @@ export function Login({ mode }: LoginProps) {
                 </button>
               </p>
             ) : null}
-            <div className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+            <div className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-2 text-meta text-muted-foreground">
               <Link
                 to="/terms"
                 className="hover:text-foreground hover:underline"

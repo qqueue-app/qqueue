@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/utils.js";
+import { EMAIL_LINK, EMAIL_NEUTRALS } from "../lib/email-palette.js";
 
 interface InboundHtmlFrameProps {
   /** Raw HTML body as received over IMAP. Untrusted. */
@@ -121,14 +122,14 @@ export function InboundHtmlFrame({
       `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
       "<style>",
       "html,body{margin:0;padding:0;}",
-      "body{font:14px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111;word-break:break-word;}",
+      `body{font:14px/1.6 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:${EMAIL_NEUTRALS.text};word-break:break-word;}`,
       // Received mail leans on presentational table markup; give it sane
       // defaults so a bare <table> is legible instead of running together.
       "table{border-collapse:collapse;max-width:100%;}",
       "th,td{padding:6px 10px;vertical-align:top;}",
       "img{max-width:100%;height:auto;}",
-      "blockquote{margin:0 0 0 12px;padding-left:12px;border-left:3px solid #d4d4d8;color:#52525b;}",
-      "a{color:#2563eb;}",
+      `blockquote{margin:0 0 0 12px;padding-left:12px;border-left:3px solid ${EMAIL_NEUTRALS.border};color:${EMAIL_NEUTRALS.textMuted};}`,
+      `a{color:${EMAIL_LINK};}`,
       "pre{white-space:pre-wrap;word-break:break-word;}",
       "</style></head><body>",
       prepareBody(html, {

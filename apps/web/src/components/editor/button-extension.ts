@@ -1,4 +1,5 @@
 import { mergeAttributes, Node } from "@tiptap/core";
+import { EMAIL_ACCENT, EMAIL_NEUTRALS } from "../../lib/email-palette.js";
 
 export type ButtonAlign = "left" | "center" | "right";
 export type ButtonSize = "small" | "medium" | "large";
@@ -26,8 +27,8 @@ export interface ButtonFormValue extends ButtonAttributes {
 export const BUTTON_DEFAULTS: ButtonAttributes = {
   href: "https://",
   label: "Click here",
-  background: "#2e7d63",
-  color: "#ffffff",
+  background: EMAIL_ACCENT,
+  color: EMAIL_NEUTRALS.paper,
   size: "medium",
   radius: "rounded"
 };
@@ -55,6 +56,31 @@ export function normalizeColor(value: unknown, fallback: string): string {
   return typeof value === "string" && /^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(value)
     ? value
     : fallback;
+}
+
+/**
+ * Reads a colour back out of a button's own inline `style`.
+ *
+ * Buttons saved before the `data-qq-*` attributes existed carry their
+ * appearance only in that style string, so without this they fall through to
+ * whatever `BUTTON_DEFAULTS` currently says — and the moment the default
+ * changed (the brand green, which this button had been quietly disagreeing
+ * with) every legacy button in every saved template would have silently
+ * re-coloured itself.
+ *
+ * Deliberately the raw attribute text rather than `element.style`: the CSSOM
+ * normalises a hex colour to `rgb(...)`, which `normalizeColor` then rejects as
+ * not-hex and replaces with the default — the exact bug this is here to stop.
+ */
+function colorFromInlineStyle(
+  element: HTMLElement,
+  property: "background" | "color"
+): string | null {
+  const style = element.getAttribute("style");
+  if (!style) return null;
+  // `color` would otherwise also match inside `background-color`.
+  const pattern = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*(#[0-9a-f]{3,8})`, "i");
+  return pattern.exec(style)?.[1] ?? null;
 }
 
 function oneOf<T extends string>(value: unknown, allowed: T[], fallback: T): T {
@@ -136,11 +162,13 @@ declare module "@tiptap/core" {
  * TextAlign extension already owns and parses.
  *
  * Appearance is stored as `data-qq-*` attributes alongside the inline styles.
- * Parsing reads those attributes rather than re-parsing CSS, so a button keeps
- * its settings across a save/load cycle. Buttons written before those
- * attributes existed fall back to the defaults, which reproduce the original
- * green button, and their wrapper's `text-align` is picked up by TextAlign as
- * ordinary paragraph alignment.
+ * Parsing prefers those attributes, so a button keeps its settings across a
+ * save/load cycle. Buttons written before those attributes existed have their
+ * colours recovered from their own inline style instead, and only what neither
+ * source supplies falls back to `BUTTON_DEFAULTS` — a legacy button therefore
+ * keeps looking the way it was saved even when the default changes. Their
+ * wrapper's `text-align` is picked up by TextAlign as ordinary paragraph
+ * alignment.
  */
 export const CtaButton = Node.create({
   name: "ctaButton",
@@ -165,13 +193,20 @@ export const CtaButton = Node.create({
         default: BUTTON_DEFAULTS.label,
         parseHTML: (element) => element.textContent
       },
+      // Attribute first, then the button's own inline style, then the default —
+      // so a button keeps the colour it was saved with whatever the current
+      // default happens to be. See `colorFromInlineStyle`.
       background: {
         default: BUTTON_DEFAULTS.background,
-        parseHTML: (element) => element.getAttribute("data-qq-bg")
+        parseHTML: (element) =>
+          element.getAttribute("data-qq-bg") ??
+          colorFromInlineStyle(element, "background")
       },
       color: {
         default: BUTTON_DEFAULTS.color,
-        parseHTML: (element) => element.getAttribute("data-qq-color")
+        parseHTML: (element) =>
+          element.getAttribute("data-qq-color") ??
+          colorFromInlineStyle(element, "color")
       },
       size: {
         default: BUTTON_DEFAULTS.size,

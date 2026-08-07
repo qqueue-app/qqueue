@@ -143,7 +143,7 @@ export function Dashboard() {
         header: "Recipient",
         meta: { title: "Recipient" },
         cell: ({ row }) => (
-          <span className="block max-w-[16rem] truncate font-medium text-text">
+          <span className="block max-w-cell truncate font-medium text-text">
             {row.original.toEmail}
           </span>
         )
@@ -153,7 +153,7 @@ export function Dashboard() {
         header: "Subject",
         meta: { title: "Subject" },
         cell: ({ row }) => (
-          <span className="block max-w-[20rem] truncate text-text-secondary">
+          <span className="block max-w-cell-lg truncate text-text-secondary">
             {row.original.subject || "(no subject)"}
           </span>
         )

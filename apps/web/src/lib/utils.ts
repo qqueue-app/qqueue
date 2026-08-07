@@ -21,6 +21,7 @@ import { extendTailwindMerge } from "tailwind-merge";
  * they drift apart.
  */
 export const FONT_SIZE_NAMES = [
+  "eyebrow",
   "meta",
   "ui",
   "body",

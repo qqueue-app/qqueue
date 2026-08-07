@@ -11,8 +11,8 @@ interface MobileTabBarProps {
 }
 
 const tabClass =
-  "flex min-h-touch flex-1 flex-col items-center justify-center gap-0.5 px-1 transition-colors duration-fast ease-out";
-const labelClass = "text-[0.6875rem] font-medium leading-none";
+  "flex min-h-touch flex-1 flex-col items-center justify-center gap-1 px-1 transition-colors duration-fast ease-out";
+const labelClass = "text-eyebrow font-medium leading-none";
 
 /**
  * The phone's primary navigation: five destinations across the bottom, where a
@@ -58,22 +58,22 @@ export function MobileTabBar({
                     */
                     <span
                       className={cn(
-                        "flex h-[1.75rem] w-10 items-center justify-center rounded-control transition-colors duration-fast ease-out",
+                        "flex h-7 w-10 items-center justify-center rounded-control transition-colors duration-fast ease-out",
                         active
                           ? "bg-primary text-primary-foreground"
                           : "bg-accent text-accent-foreground"
                       )}
                     >
-                      <Icon className="h-[1.375rem] w-[1.375rem]" />
+                      <Icon className="h-icon-tab w-icon-tab" />
                     </span>
                   ) : (
-                    <Icon className="h-[1.375rem] w-[1.375rem]" />
+                    <Icon className="h-icon-tab w-icon-tab" />
                   )}
                   {tab.badge === "unread" && unread > 0 ? (
                     <span
                       data-numeric
                       aria-hidden
-                      className="absolute -right-2 -top-1 min-w-[1rem] rounded-pill bg-primary px-1 text-center text-[0.625rem] font-semibold leading-4 text-primary-foreground"
+                      className="absolute -right-2 -top-1 min-w-badge rounded-pill bg-primary px-1 text-center text-eyebrow font-semibold leading-4 text-primary-foreground"
                     >
                       {unread > 99 ? "99+" : unread}
                     </span>
@@ -99,7 +99,7 @@ export function MobileTabBar({
               moreOpen ? "text-primary" : "text-text-secondary"
             )}
           >
-            <MoreHorizontal className="h-[1.375rem] w-[1.375rem]" />
+            <MoreHorizontal className="h-icon-tab w-icon-tab" />
             <span className={labelClass}>More</span>
           </button>
         </li>

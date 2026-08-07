@@ -52,7 +52,7 @@ export function OrgSwitcher({ className }: { className?: string }) {
           {(currentOrganization?.name ?? "Q").slice(0, 1).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[0.6875rem] font-medium uppercase tracking-eyebrow text-text-tertiary">
+          <div className="text-eyebrow font-medium uppercase tracking-eyebrow text-text-tertiary">
             Organization
           </div>
           <div className="truncate text-ui font-medium text-text">

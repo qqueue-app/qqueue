@@ -174,6 +174,24 @@ export function DashboardLayout() {
       {showSplash ? <DashboardSplash /> : null}
 
       {/*
+        Skip link.
+
+        The sidebar is eleven destinations, three legal links and the account
+        button — fifteen tab stops that a keyboard user crossed before reaching
+        the page on *every* navigation, because the nav precedes main in the
+        document (which is the right order for it to be in). This is the
+        standard way out of that, and it is the only element in the shell that
+        is deliberately invisible until focused: off-screen by default, and it
+        lands in the top-left corner the moment it is tabbed to.
+      */}
+      <a
+        href="#main"
+        className="sr-only z-50 rounded-control bg-surface px-4 py-2 text-body font-medium text-text shadow-overlay focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
+      >
+        Skip to content
+      </a>
+
+      {/*
         Paints the strip behind the status bar in standalone, so content
         scrolling up past a sticky header isn't visible in the notch. Collapses
         to zero height anywhere `--safe-top` is 0, which is everywhere else.
@@ -238,7 +256,14 @@ export function DashboardLayout() {
         in the tablet band the sticky bar above already occupies it.
         Bottom inset clears the tab bar and the home indicator under it.
       */}
-      <main className="min-w-0 pb-tabbar-safe pl-safe-l pr-safe-r pt-safe-t sm:pb-0 sm:pt-0 lg:pl-sidebar lg:pt-safe-t">
+      {/* `tabIndex={-1}` so the skip link above can actually move focus here:
+          without it the browser scrolls to main but focus stays on the link,
+          and the next Tab goes back into the nav. */}
+      <main
+        id="main"
+        tabIndex={-1}
+        className="min-w-0 pb-tabbar-safe pl-safe-l pr-safe-r pt-safe-t focus:outline-none sm:pb-0 sm:pt-0 lg:pl-sidebar lg:pt-safe-t"
+      >
         <Outlet />
       </main>
 
