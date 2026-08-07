@@ -5,6 +5,13 @@ import {
   SettingsLinkRow,
   type SettingsLink,
 } from "../../components/settings/SettingsLinkRow.js";
+import {
+  SetupChecklist,
+  setupSteps,
+} from "../../components/SetupChecklist.js";
+import { api } from "../../lib/api.js";
+import { qk } from "../../lib/query-client.js";
+import { useOrgQuery } from "../../lib/use-api.js";
 import { useSession } from "../../lib/session-context.js";
 import { useInstanceAdmin } from "../../lib/use-instance-admin.js";
 
@@ -101,8 +108,25 @@ const groups: { heading: string; links: HubLink[] }[] = [
  * finding.
  */
 export function SettingsHub() {
-  const { currentOrganization } = useSession();
+  const { currentOrganization, currentOrganizationId } = useSession();
   const { isInstanceAdmin } = useInstanceAdmin();
+
+  /*
+    The dashboard used to carry a permanent "3/4 ready" card. It came off that
+    screen because a checklist you finished months ago is not news forty times a
+    day — but "is this org actually set up?" is still a question, and this is
+    where you come to ask it. Same query key as the dashboard's, so the answer
+    is already cached by the time anyone opens Settings.
+  */
+  const summaryQuery = useOrgQuery(
+    currentOrganizationId,
+    qk.dashboard(currentOrganizationId ?? ""),
+    (id) => api.dashboardSummary(id),
+    // Setup state is decoration on this page; the destinations below are the
+    // content, and none of them need a toast to explain themselves.
+    { meta: { silent: true } }
+  );
+
   const isOrgAdmin =
     currentOrganization?.role === "OWNER" ||
     currentOrganization?.role === "ADMIN";
@@ -128,6 +152,15 @@ export function SettingsHub() {
       />
 
       <FormColumn>
+        {summaryQuery.data ? (
+          <div className="mb-6">
+            <SetupChecklist
+              steps={setupSteps(summaryQuery.data.setup)}
+              showWhenComplete
+            />
+          </div>
+        ) : null}
+
         <nav aria-label="Settings sections" className="space-y-6">
           {visibleGroups.map((group) => (
             <SettingsLinkGroup key={group.heading} heading={group.heading}>

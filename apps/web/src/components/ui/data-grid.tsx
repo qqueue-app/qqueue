@@ -348,14 +348,35 @@ export function DataGrid<TData>({
           ) : null}
 
           {renderMobileRow && isMobile ? null : (
-          <div className="relative overflow-x-auto rounded-card border border-border">
-            <table className="w-full caption-bottom text-ui" aria-label={label}>
+          /*
+            No `overflow-x-auto` here, and that is load-bearing rather than an
+            omission. A box with `overflow-x: auto` has its `overflow-y: visible`
+            computed to `auto` as well, which makes it a scroll container — and a
+            `position: sticky` header anchors to its nearest scrollport, not to
+            the document. This wrapper's height is its own content, so it has no
+            scrollport to speak of: the header used to scroll away with the
+            table and never stick to anything. Columns earn their room by
+            dropping out at `md`/`lg` and truncating (§3), not by pushing a
+            second scrollbar into a page that is only allowed one.
+          */
+          <div className="relative rounded-card border border-border">
+            {/*
+              `border-separate` because a sticky header cannot keep a collapsed
+              border: with `border-collapse: collapse` the bottom hairline
+              belongs to the table's border grid rather than to the header, and
+              it is left behind the moment the header lifts. Row rules therefore
+              live on the cells, which is also why the backgrounds below do.
+            */}
+            <table
+              className="w-full caption-bottom border-separate border-spacing-0 text-ui"
+              aria-label={label}
+            >
               {/* Sticky against the *document* now that main no longer
                   scrolls, so it has to clear whatever the shell has parked at
                   the top of the viewport at this width. */}
-              <thead className="sticky top-sticky-top z-10 bg-surface-sunken">
+              <thead className="sticky top-sticky-top z-10">
                 {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id} className="border-b border-border">
+                  <tr key={headerGroup.id}>
                     {headerGroup.headers.map((header) => {
                       const meta = header.column.columnDef.meta as
                         | DataGridColumnMeta
@@ -376,7 +397,10 @@ export function DataGrid<TData>({
                                   : undefined
                           }
                           className={cn(
-                            "h-10 whitespace-nowrap px-3 align-middle text-meta font-medium uppercase tracking-eyebrow text-text-tertiary",
+                            "h-10 whitespace-nowrap border-b border-border bg-surface-sunken px-3 align-middle text-meta font-medium uppercase tracking-eyebrow text-text-tertiary",
+                            // Nothing clips this wrapper any more, so the
+                            // header paints its own top corners.
+                            "first:rounded-tl-card last:rounded-tr-card",
                             alignmentClass(meta),
                             responsiveClass(meta),
                             meta?.headerClassName
@@ -412,7 +436,13 @@ export function DataGrid<TData>({
                   </tr>
                 ))}
               </thead>
-              <tbody>
+              {/*
+                The last row loses its rule and rounds into the wrapper's
+                corners. Both belong to the cells: `border-separate` does not
+                paint a `<tr>`'s own border, and a row-level background would
+                square off the two corners now that nothing clips it.
+              */}
+              <tbody className="[&>tr:last-child>td:first-child]:rounded-bl-card [&>tr:last-child>td:last-child]:rounded-br-card [&>tr:last-child>td]:border-0">
                 {rows.map((row) => (
                   <tr
                     key={row.id}
@@ -421,7 +451,17 @@ export function DataGrid<TData>({
                       onRowClick ? () => onRowClick(row.original) : undefined
                     }
                     className={cn(
-                      "border-b border-border transition-colors duration-fast ease-out last:border-0 hover:bg-surface-sunken data-[state=selected]:bg-accent",
+                      /*
+                        The hover and selected selectors are written out in
+                        full rather than stacked as `hover:[&>td]:…`, which
+                        Tailwind composes to `>td:hover` — that tints the one
+                        cell under the pointer instead of the row, and the
+                        selected variant lands on `>td[data-state=selected]`,
+                        an attribute that only ever sits on the `<tr>`.
+                      */
+                      "[&>td]:transition-colors [&>td]:duration-fast [&>td]:ease-out",
+                      "[&:hover>td]:bg-surface-sunken",
+                      "[&[data-state=selected]>td]:bg-accent",
                       onRowClick && "cursor-pointer"
                     )}
                   >
@@ -433,7 +473,7 @@ export function DataGrid<TData>({
                         <td
                           key={cell.id}
                           className={cn(
-                            "px-3 py-3 align-middle",
+                            "border-b border-border px-3 py-3 align-middle",
                             meta?.align === "right" && "tabular-nums",
                             alignmentClass(meta),
                             responsiveClass(meta),
