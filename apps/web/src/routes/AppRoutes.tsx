@@ -109,6 +109,11 @@ const Outbox = lazy(() =>
     default: module.Outbox,
   }))
 );
+const Sent = lazy(() =>
+  import("../pages/Sent.js").then((module) => ({
+    default: module.Sent,
+  }))
+);
 const SMTPConnections = lazy(() =>
   import("../pages/SMTPConnections.js").then((module) => ({
     default: module.SMTPConnections,
@@ -198,6 +203,8 @@ export function AppRoutes() {
           <Route path="/email-studio" element={<EmailStudio />} />
           <Route path="/drafts" element={<Drafts />} />
           <Route path="/outbox" element={<Outbox />} />
+          {/* The archive the outbox drains into. */}
+          <Route path="/sent" element={<Sent />} />
           {/* The standalone Send Email page was merged into Email Studio. */}
           <Route
             path="/send-email"

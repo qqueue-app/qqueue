@@ -56,6 +56,8 @@ vi.mock("../lib/api.js", () => ({
   api: {
     listEmailDrafts: vi.fn(),
     listOutbox: vi.fn(),
+    listSentEmails: vi.fn(),
+    listSMTPConnections: vi.fn(),
     listContactLists: vi.fn(),
     listContacts: vi.fn(),
     listSegments: vi.fn(),
@@ -70,6 +72,7 @@ import { ContactLists } from "./ContactLists.js";
 import { Drafts } from "./Drafts.js";
 import { Outbox } from "./Outbox.js";
 import { Segments } from "./Segments.js";
+import { Sent } from "./Sent.js";
 
 const mockedApi = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
@@ -112,6 +115,33 @@ beforeEach(() => {
       },
     },
   ]);
+  mockedApi.listSMTPConnections.mockResolvedValue([]);
+  mockedApi.listSentEmails.mockResolvedValue({
+    rows: [
+      {
+        id: "job_2",
+        subject: "Already gone",
+        to: ["sent@x.com"],
+        ccCount: 0,
+        bccCount: 0,
+        status: "SENT",
+        origin: "MANUAL",
+        sentAt: "2026-07-21T09:00:00.000Z",
+        createdAt: "2026-07-21T08:59:00.000Z",
+        campaignId: null,
+        campaignName: null,
+        sendingAccount: null,
+        delivered: true,
+        bounced: false,
+        complained: false,
+        opens: 0,
+        clicks: 0,
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25,
+  });
   mockedApi.listContactLists.mockResolvedValue([
     {
       id: "lst_1",
@@ -170,6 +200,21 @@ describe("list pages on a phone", () => {
       screen.queryByRole("table", { name: "Outbox" })
     ).not.toBeInTheDocument();
     expect(screen.getByText("Written by you")).toBeInTheDocument();
+  });
+
+  it("Sent renders the archive as cards, never a table", async () => {
+    renderPage(<Sent />);
+    expect(await screen.findByText("Already gone")).toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("table", { name: "Sent emails" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("sent@x.com")).toBeInTheDocument();
+    // The four filter selects fold behind a disclosure on a phone, so the list
+    // itself isn't pushed off the bottom of the viewport.
+    expect(
+      screen.getByRole("button", { name: /Filters/ })
+    ).toHaveAttribute("aria-expanded", "false");
   });
 
   it("Lists renders lists as cards, never a table", async () => {

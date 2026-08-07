@@ -1711,6 +1711,87 @@ export interface OutboxEmail {
   } | null;
 }
 
+/*
+  The sent archive — the other half of the outbox.
+
+  Where the outbox is a live view of what has not left yet, this is everything
+  that has: mail the pipeline finished with, whatever the outcome. It is the one
+  view in the app that can grow without bound (an org that sends a campaign a
+  week accumulates six figures of rows), so unlike every other list it filters,
+  sorts and pages **on the server**. Nothing here loads the whole table.
+*/
+
+// What happened to a sent email, as one axis rather than two. `failed` is the
+// job's own status; the rest are EmailEvent rows the pipeline wrote after the
+// message left, so they answer "did it land, and did anyone read it".
+export const SENT_EMAIL_OUTCOMES = [
+  "all",
+  "delivered",
+  "opened",
+  "clicked",
+  "bounced",
+  "complained",
+  "failed"
+] as const;
+
+export type SentEmailOutcome = (typeof SENT_EMAIL_OUTCOMES)[number];
+
+export const sentEmailQuerySchema = z.object({
+  organizationId: z.string().min(1),
+  /** Matches subject, recipient address, or campaign name. */
+  q: z.string().trim().min(1).optional(),
+  origin: z
+    .enum(["all", "CAMPAIGN", "TRANSACTIONAL", "MANUAL", "SYSTEM"])
+    .default("all"),
+  outcome: z.enum(SENT_EMAIL_OUTCOMES).default("all"),
+  /** Narrow to one sending account (the UI calls these "sending accounts"). */
+  smtpConnectionId: z.string().min(1).optional(),
+  /** Rolling window in days back from now. 0 means all time. */
+  days: z.coerce.number().int().min(0).max(365).default(0),
+  page: z.coerce.number().int().min(1).default(1),
+  // Capped at 100: this is the one endpoint someone could ask for the whole
+  // archive from, and a page is rendered as DOM rows either way.
+  pageSize: z.coerce.number().int().min(1).max(100).default(25)
+});
+
+export type SentEmailQueryInput = z.infer<typeof sentEmailQuerySchema>;
+
+// One row of the archive. The engagement fields are folded down from this job's
+// EmailEvent rows so a list of 25 emails is one query, not 25.
+export interface SentEmail {
+  id: string;
+  subject: string;
+  to: string[];
+  ccCount: number;
+  bccCount: number;
+  /** Only ever SENT or FAILED — the archive holds terminal outcomes. */
+  status: EmailJobStatus;
+  origin: EmailOrigin;
+  /** Null for a job that failed before the provider accepted it. */
+  sentAt?: string | null;
+  createdAt: string;
+  campaignId?: string | null;
+  campaignName?: string | null;
+  sendingAccount?: {
+    name: string;
+    fromEmail: string;
+    fromName?: string | null;
+  } | null;
+  delivered: boolean;
+  bounced: boolean;
+  complained: boolean;
+  opens: number;
+  clicks: number;
+}
+
+export interface SentEmailPage {
+  rows: SentEmail[];
+  /** Total matching the current filters, not the org's lifetime total. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 // Draft persistence for the composer. Drafts are intentionally permissive (the
 // recipient arrays are plain strings, not validated emails) so an in-progress
 // message can always be saved. Validation happens at send time.

@@ -549,6 +549,62 @@ export interface OutboxEmail {
   } | null;
 }
 
+// The other half of the outbox: mail the pipeline has finished with. Unlike
+// every other list in this app, the server does the filtering and paging — the
+// archive is the one table that grows with everything the org has ever sent.
+export type SentEmailOutcome =
+  | "all"
+  | "delivered"
+  | "opened"
+  | "clicked"
+  | "bounced"
+  | "complained"
+  | "failed";
+
+export interface SentEmail {
+  id: string;
+  subject: string;
+  to: string[];
+  ccCount: number;
+  bccCount: number;
+  status: "SENT" | "FAILED";
+  origin: "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
+  sentAt?: string | null;
+  createdAt: string;
+  campaignId?: string | null;
+  campaignName?: string | null;
+  sendingAccount?: {
+    name: string;
+    fromEmail: string;
+    fromName?: string | null;
+  } | null;
+  delivered: boolean;
+  bounced: boolean;
+  complained: boolean;
+  opens: number;
+  clicks: number;
+}
+
+export interface SentEmailPage {
+  rows: SentEmail[];
+  /** Total matching the current filters, not the org's lifetime total. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface SentEmailQuery {
+  organizationId: string;
+  q?: string;
+  origin?: "all" | "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
+  outcome?: SentEmailOutcome;
+  smtpConnectionId?: string;
+  /** Rolling window in days. 0 (the default) means all time. */
+  days?: number;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface EmailPreviewResult {
   subject: string;
   html: string;
@@ -1605,6 +1661,25 @@ export const api = {
     return request<OutboxEmail[]>(
       `/api/v1/outbox?organizationId=${encodeURIComponent(organizationId)}`
     );
+  },
+
+  listSentEmails(query: SentEmailQuery) {
+    const params = new URLSearchParams({
+      organizationId: query.organizationId,
+    });
+    // Only the filters that are actually set travel: an omitted parameter takes
+    // the server's default, so the query string stays readable in the network
+    // tab and an unfiltered request is just `?organizationId=…`.
+    if (query.q) params.set("q", query.q);
+    if (query.origin && query.origin !== "all") params.set("origin", query.origin);
+    if (query.outcome && query.outcome !== "all")
+      params.set("outcome", query.outcome);
+    if (query.smtpConnectionId)
+      params.set("smtpConnectionId", query.smtpConnectionId);
+    if (query.days) params.set("days", String(query.days));
+    if (query.page && query.page > 1) params.set("page", String(query.page));
+    if (query.pageSize) params.set("pageSize", String(query.pageSize));
+    return request<SentEmailPage>(`/api/v1/sent?${params.toString()}`);
   },
 
   cancelOutboxEmail(id: string, organizationId: string) {

@@ -4,6 +4,7 @@ import {
   Home,
   Inbox,
   FileEdit,
+  MailCheck,
   Send,
   PenSquare,
   Users,
@@ -45,6 +46,11 @@ const navSections: NavSection[] = [
       { to: "/email-studio", label: "Compose", icon: PenSquare },
       { to: "/drafts", label: "Drafts", icon: FileEdit },
       { to: "/outbox", label: "Outbox", icon: Send },
+      // Sits next to the Outbox because it is the same mail one step later:
+      // what left, and what happened to it. Anyone who has used a mail client
+      // looks for it here, which is the one argument strong enough to spend a
+      // sidebar row on — see the note above about keeping this list short.
+      { to: "/sent", label: "Sent", icon: MailCheck },
       // The index route "/" *is* the inbox, so it lights this up too.
       { to: "/inbox", label: "Inbox", icon: Inbox, badge: "unread", activePaths: ["/"] },
     ],

@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
  * width table in one place:
  *
  *   code    120px  port, short code, numeric count
+ *   choice  192px  a select of short enumerated options
  *   search  280px  search boxes
  *   name    360px  email address, person's name
  *   long    480px  subject line, URL, API key
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
  */
 export const fieldWidths = {
   code: "w-full xs:w-field-code",
+  choice: "w-full xs:w-field-choice",
   search: "w-full xs:w-field-search",
   name: "w-full xs:w-field-name",
   long: "w-full xs:w-field-long",

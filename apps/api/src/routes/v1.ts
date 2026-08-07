@@ -24,6 +24,7 @@ import { outboxRouter } from "../modules/outbox/routes.js";
 import { pushRouter } from "../modules/push/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { segmentRouter } from "../modules/segments/routes.js";
+import { sentRouter } from "../modules/sent/routes.js";
 import { setupRouter } from "../modules/setup/routes.js";
 import { mailcowRouter } from "../modules/mailcow/routes.js";
 import { smtpConnectionRouter } from "../modules/smtp-connections/routes.js";
@@ -98,6 +99,10 @@ v1Router.use("/email-drafts", emailDraftRouter);
 // (subjects, addresses, sending account) rather than the raw BullMQ jobs the
 // queue-operations dashboard exposes. Any member can view and cancel.
 v1Router.use("/outbox", outboxRouter);
+// Sent: the other half of the outbox — mail the pipeline has finished with,
+// whatever the outcome. The only list endpoint that filters, sorts and pages in
+// Postgres, because it is the only one whose row count grows without bound.
+v1Router.use("/sent", sentRouter);
 v1Router.use("/recurring-sends", recurringSendRouter);
 // Email attachment upload/download/delete. Blobs live in object storage; the
 // send pipeline links rows to the EmailJob and the worker streams them to SMTP.
