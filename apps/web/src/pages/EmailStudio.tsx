@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
+  ArrowUpRight,
   Eye,
   FileText,
   Paperclip,
@@ -14,8 +15,14 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { EmptyState } from "../components/EmptyState.js";
 import { EmailPreviewFrame } from "../components/EmailPreviewFrame.js";
 import { BodyEditor } from "../components/editor/BodyEditor.js";
+import {
+  Field,
+  FormSection,
+  FormSections
+} from "../components/settings/FormColumn.js";
 import {
   buildCron,
   describeCron,
@@ -29,18 +36,21 @@ import {
   type EmailAttachment,
   type EmailDraft,
   type EmailPreviewResult,
-  type RecurringSend,
   type ManualEmailDeliveryStatus,
   type RecipientDelivery,
   type RecipientSuggestion,
   type SMTPConnection,
   type Template
 } from "../lib/api.js";
+import { formatBytes } from "../lib/format.js";
+import { cn } from "../lib/utils.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
 import { Card } from "../components/ui/card.js";
 import { Checkbox } from "../components/ui/checkbox.js";
+import { fieldWidths, type FieldWidth } from "../components/ui/field.js";
+import { IconButton } from "../components/ui/icon-button.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
 import { Skeleton } from "../components/ui/skeleton.js";
@@ -98,16 +108,6 @@ function describeConnection(connection: SMTPConnection) {
     : connection.fromEmail;
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 const MAX_SUGGESTIONS = 8;
 
 interface RecipientFieldProps {
@@ -116,6 +116,8 @@ interface RecipientFieldProps {
   emails: string[];
   onChange: (emails: string[]) => void;
   suggestions?: RecipientSuggestion[];
+  /** Width by content type — see `fieldWidths`. Recipients are `long` (480px). */
+  width?: FieldWidth;
 }
 
 // A chip input with autocomplete: type part of a name or address to pick from
@@ -127,10 +129,12 @@ function RecipientField({
   label,
   emails,
   onChange,
-  suggestions = []
+  suggestions = [],
+  width = "long"
 }: RecipientFieldProps) {
   const [value, setValue] = useState("");
   const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const query = value.trim().toLowerCase();
   const matches = useMemo(() => {
@@ -182,12 +186,39 @@ function RecipientField({
   }
 
   return (
-    <div className="space-y-2">
+    <Field className={fieldWidths[width]}>
       <Label htmlFor={id}>{label}</Label>
       <div className="relative">
-        <div className="flex flex-wrap gap-1.5 rounded-lg border border-input bg-card p-1.5 shadow-sm focus-within:ring-2 focus-within:ring-ring">
+        {/*
+          Sized and styled like every other field — same border, same radius,
+          same focus outline — but it grows downward as chips wrap instead of
+          scrolling sideways. 44px tall on a phone, 36px from the tablet
+          breakpoint up, matching `fieldControlHeight`.
+        */}
+        {/*
+          Clicking anywhere in the box types into it. The text input is only
+          28px tall inside a 44px box, so without this the padding around it is
+          a dead zone on a phone — you tap the field, nothing focuses, and the
+          keyboard never comes up. `onMouseDown` with the default prevented, so
+          a tap on the padding doesn't blur-then-refocus and lose the caret.
+        */}
+        <div
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              event.preventDefault();
+              inputRef.current?.focus();
+            }
+          }}
+          className={cn(
+            "flex min-h-touch w-full cursor-text flex-wrap items-center gap-1.5 sm:min-h-control",
+            "rounded-control border border-border-strong bg-surface px-2 py-1.5",
+            "transition-colors duration-fast ease-out hover:border-text-tertiary",
+            "focus-within:outline focus-within:outline-2 focus-within:outline-offset-2",
+            "focus-within:outline-ring"
+          )}
+        >
           {emails.map((email) => (
-            <Badge key={email} variant="secondary" className="gap-1 font-normal">
+            <Badge key={email} variant="neutral" className="gap-1 pr-1">
               {email}
               <button
                 type="button"
@@ -195,15 +226,25 @@ function RecipientField({
                 onClick={() =>
                   onChange(emails.filter((current) => current !== email))
                 }
-                className="text-muted-foreground hover:text-destructive"
+                className={cn(
+                  "relative flex h-4 w-4 items-center justify-center rounded-pill",
+                  "text-text-tertiary transition-colors duration-fast ease-out hover:text-err",
+                  // A 16px glyph is not a tap target. The chip keeps its size
+                  // and grows an invisible 44px hit area on touch layouts only,
+                  // the same trick <Button> and <IconButton> use.
+                  "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
+                  "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden"
+                )}
               >
                 <X className="h-3 w-3" />
               </button>
             </Badge>
           ))}
           <input
+            ref={inputRef}
             id={id}
             type="text"
+            inputMode="email"
             value={value}
             autoComplete="off"
             role="combobox"
@@ -240,7 +281,9 @@ function RecipientField({
             }}
             onBlur={() => commit(value)}
             placeholder={emails.length === 0 ? "name@example.com" : ""}
-            className="min-w-[12ch] flex-1 bg-transparent px-1.5 py-0.5 text-sm outline-none"
+            // 16px on a phone: anything smaller and iOS zooms the viewport the
+            // moment this is focused, and the app is installed to home screens.
+            className="min-w-[12ch] flex-1 bg-transparent px-1 py-0.5 text-base outline-none placeholder:text-text-tertiary sm:text-body"
           />
         </div>
         {matches.length > 0 ? (
@@ -250,7 +293,7 @@ function RecipientField({
             // scroll-exception: the recipient combobox's listbox — §2 names
             // comboboxes alongside dropdowns as the exception to the one-scroll
             // rule. It floats above the page and can't extend it.
-            className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-md"
+            className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-dialog border border-border bg-popover p-1 shadow-overlay"
           >
             {matches.map((match, index) => (
               <li key={`${match.source}-${match.email}`}>
@@ -265,15 +308,17 @@ function RecipientField({
                     add([match.email]);
                   }}
                   onMouseEnter={() => setHighlight(index)}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
-                    index === highlight ? "bg-accent" : ""
-                  }`}
+                  className={cn(
+                    "flex min-h-touch w-full items-center gap-2 rounded-control px-2 py-1.5",
+                    "text-left text-body sm:min-h-0",
+                    index === highlight && "bg-accent"
+                  )}
                 >
                   <span className="min-w-0 flex-1 truncate">
                     {match.name ? (
                       <>
                         {match.name}{" "}
-                        <span className="text-muted-foreground">
+                        <span className="text-text-secondary">
                           {match.email}
                         </span>
                       </>
@@ -282,7 +327,7 @@ function RecipientField({
                     )}
                   </span>
                   {match.source === "recent" ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">
+                    <span className="shrink-0 text-meta text-text-tertiary">
                       Recent
                     </span>
                   ) : null}
@@ -292,7 +337,7 @@ function RecipientField({
           </ul>
         ) : null}
       </div>
-    </div>
+    </Field>
   );
 }
 
@@ -307,7 +352,6 @@ export function EmailStudio() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
-  const [recurringSends, setRecurringSends] = useState<RecurringSend[]>([]);
   const [recentRecipients, setRecentRecipients] = useState<
     RecipientSuggestion[]
   >([]);
@@ -323,6 +367,15 @@ export function EmailStudio() {
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  /*
+    Progressive disclosure (§3). Most sends carbon-copy nobody and attach
+    nothing, so neither group is on screen until it is asked for — or until
+    something puts content in it, which is what the derived flags below are
+    for: a resumed draft with a Bcc must not hide it, and a file that finished
+    uploading has to appear somewhere.
+  */
+  const [copyRevealed, setCopyRevealed] = useState(false);
+  const [attachmentsRevealed, setAttachmentsRevealed] = useState(false);
   const [scheduleForLater, setScheduleForLater] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
   const [recurring, setRecurring] = useState(false);
@@ -474,7 +527,6 @@ export function EmailStudio() {
         contactData,
         listData,
         draftData,
-        recurringData,
         recentData
       ] = await Promise.all([
         api.listTemplates(organizationId),
@@ -484,7 +536,6 @@ export function EmailStudio() {
         api.listContacts(organizationId),
         api.listContactLists(organizationId),
         api.listEmailDrafts(organizationId),
-        api.listRecurringSends(organizationId),
         // Autocomplete is a convenience: never let it fail the whole page.
         api.listRecipientSuggestions(organizationId).catch(() => [])
       ]);
@@ -493,7 +544,6 @@ export function EmailStudio() {
       setContacts(contactData);
       setContactLists(listData);
       setDrafts(draftData);
-      setRecurringSends(recurringData);
       setRecentRecipients(recentData);
     } catch (error) {
       toast.error(
@@ -508,41 +558,6 @@ export function EmailStudio() {
     void load();
   }, [load]);
 
-  async function toggleRecurringSend(send: RecurringSend) {
-    try {
-      const updated =
-        send.status === "ACTIVE"
-          ? await api.pauseRecurringSend(send.id)
-          : await api.resumeRecurringSend(send.id);
-      setRecurringSends((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item))
-      );
-      toast.success(
-        updated.status === "ACTIVE"
-          ? "Recurring send resumed."
-          : "Recurring send paused."
-      );
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to update the schedule"
-      );
-    }
-  }
-
-  async function removeRecurringSend(send: RecurringSend) {
-    try {
-      await api.deleteRecurringSend(send.id);
-      setRecurringSends((current) =>
-        current.filter((item) => item.id !== send.id)
-      );
-      toast.success("Recurring send deleted.");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to delete the schedule"
-      );
-    }
-  }
-
   function resetComposer() {
     setSMTPConnectionId(DEFAULT_SMTP);
     setTemplateId(NO_TEMPLATE);
@@ -553,6 +568,8 @@ export function EmailStudio() {
     setBccEmails([]);
     setSelectedListIds([]);
     setAttachments([]);
+    setCopyRevealed(false);
+    setAttachmentsRevealed(false);
     setScheduleForLater(false);
     setScheduledAt("");
     setRecurring(false);
@@ -907,10 +924,16 @@ export function EmailStudio() {
         if (draftId) {
           await api.deleteEmailDraft(draftId).catch(() => undefined);
         }
-        toast.success(`Recurring send created: ${describeCron(cron)}.`);
+        // The schedule now lives on its own page, so the confirmation is also
+        // the signpost to it — otherwise creating one is the last you see of it.
+        toast.success(`Recurring send created: ${describeCron(cron)}.`, {
+          action: {
+            label: "View schedules",
+            onClick: () => navigate("/campaigns/recurring")
+          }
+        });
         resetComposer();
         setDrafts(await api.listEmailDrafts(organizationId));
-        setRecurringSends(await api.listRecurringSends(organizationId));
         void created;
       } catch (error) {
         toast.error(
@@ -1006,16 +1029,25 @@ export function EmailStudio() {
 
   const noSmtp = !loading && smtpConnections.length === 0;
 
+  /*
+    Revealed on request, or because there is something in there to see: a draft
+    resumed with a Bcc, or an upload that has just landed. Without the second
+    half of each condition the content would exist with nowhere to render.
+  */
+  const copyVisible =
+    copyRevealed || ccEmails.length > 0 || bccEmails.length > 0;
+  const attachmentsVisible = attachmentsRevealed || attachments.length > 0;
+
   return (
     <>
       <PageHeader
         title="Compose"
         description="Write and send a one-off email through your delivery pipeline."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               onClick={() => setDraftsOpen(true)}
               disabled={!organizationId}
             >
@@ -1024,7 +1056,7 @@ export function EmailStudio() {
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               onClick={() => void saveDraft(false)}
               disabled={!organizationId || savingDraft || !hasContent}
             >
@@ -1035,40 +1067,55 @@ export function EmailStudio() {
         }
       />
 
-      <section className="p-5 sm:p-6">
+      <section className="px-4 py-4 sm:px-6 sm:py-6">
         {loading ? (
-          <div className="space-y-3">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+          <div className="max-w-form space-y-4">
+            <Skeleton className="h-touch w-full sm:h-control sm:w-field-name" />
+            <Skeleton className="h-touch w-full sm:h-control sm:w-field-long" />
             <Skeleton className="h-64 w-full" />
           </div>
         ) : (
-          <form onSubmit={send} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="space-y-5">
+          /*
+            Two columns, both sized to their content rather than to the window:
+            a 640px form column (§2) and a rail beside it that holds the send
+            options for this message. Below `xl` the rail drops underneath, and
+            on a phone every field inside collapses to the padded column's full
+            width — the mobile inversion, which each field carries itself via
+            its `width` prop.
+          */
+          <form
+            onSubmit={send}
+            className="grid gap-8 xl:grid-cols-[minmax(0,40rem)_19rem]"
+          >
+            <div className="min-w-0 max-w-form space-y-6">
               {noSmtp ? (
-                <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                <div className="rounded-card border border-border bg-warn-bg px-4 py-3 text-ui leading-5 text-warn">
                   <p className="font-medium">No sending account yet</p>
                   <p className="mt-1">
-                    Add a sending account before you can send email.
-                  </p>
-                </Card>
-              ) : null}
-
-              <Card className="space-y-4 p-5">
-                <div>
-                  <h2 className="text-base font-semibold">Message details</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Choose the sender, recipients, and subject before writing.
+                    Email can't go out until one is configured.{" "}
+                    <Link
+                      to="/settings/sending"
+                      className="rounded-control font-medium underline underline-offset-2"
+                    >
+                      Add a sending account
+                    </Link>
+                    .
                   </p>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
+              ) : null}
+
+              <FormSections>
+                <FormSection
+                  title="Recipients"
+                  description="Who this goes to, and the account it sends as."
+                >
+                  <Field className={fieldWidths.name}>
                     <Label htmlFor="from">From</Label>
                     <Select
                       value={smtpConnectionId}
                       onValueChange={setSMTPConnectionId}
                     >
-                      <SelectTrigger id="from">
+                      <SelectTrigger id="from" width="name">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1096,11 +1143,135 @@ export function EmailStudio() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </Field>
+
+                  <RecipientField
+                    id="to"
+                    label="To"
+                    emails={toEmails}
+                    onChange={setToEmails}
+                    suggestions={recipientSuggestions}
+                  />
+
+                  {selectedLists.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedLists.map((list) => (
+                        <Badge key={list.id} variant="outline" className="gap-1 pr-1">
+                          {list.name} ({list._count?.contacts ?? 0})
+                          <button
+                            type="button"
+                            aria-label={`Remove ${list.name}`}
+                            onClick={() =>
+                              setSelectedListIds((current) =>
+                                current.filter((id) => id !== list.id)
+                              )
+                            }
+                            className={cn(
+                              "relative flex h-4 w-4 items-center justify-center rounded-pill",
+                              "text-text-tertiary transition-colors duration-fast ease-out hover:text-err",
+                              "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
+                              "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden"
+                            )}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setContactPickerOpen(true)}
+                    >
+                      <Users className="h-4 w-4" />
+                      Add contacts
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setListPickerOpen(true)}
+                    >
+                      <Users className="h-4 w-4" />
+                      Add list
+                    </Button>
+                    {/*
+                      The reveal disappears once the fields are on screen, the
+                      way every mail client does it: a "hide" that refuses to
+                      hide because you typed an address into it is worse than
+                      no button at all.
+                    */}
+                    {copyVisible ? null : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-expanded={false}
+                        aria-controls="cc"
+                        onClick={() => setCopyRevealed(true)}
+                      >
+                        Cc / Bcc
+                      </Button>
+                    )}
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="template">Template</Label>
+
+                  {copyVisible ? (
+                    <>
+                      <RecipientField
+                        id="cc"
+                        label="Cc"
+                        emails={ccEmails}
+                        onChange={setCcEmails}
+                        suggestions={recipientSuggestions}
+                      />
+                      <RecipientField
+                        id="bcc"
+                        label="Bcc"
+                        emails={bccEmails}
+                        onChange={setBccEmails}
+                        suggestions={recipientSuggestions}
+                      />
+                    </>
+                  ) : null}
+
+                  <Field className={fieldWidths.long}>
+                    <Label htmlFor="subject">Subject</Label>
+                    <Input
+                      id="subject"
+                      width="long"
+                      value={subject}
+                      onChange={(event) => setSubject(event.target.value)}
+                      placeholder="Subject line"
+                    />
+                  </Field>
+                </FormSection>
+
+                <FormSection
+                  title="Message"
+                  action={
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void openPreview()}
+                      disabled={previewing}
+                    >
+                      {previewing ? <Spinner /> : <Eye className="h-4 w-4" />}
+                      Preview
+                    </Button>
+                  }
+                >
+                  <Field className="space-y-4">
                     <Select value={templateId} onValueChange={selectTemplate}>
-                      <SelectTrigger id="template">
+                      <SelectTrigger
+                        id="template"
+                        width="name"
+                        aria-label="Template"
+                      >
                         <SelectValue placeholder="Start from a template" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1112,180 +1283,126 @@ export function EmailStudio() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                </div>
 
-                <RecipientField
-                  id="to"
-                  label="To"
-                  emails={toEmails}
-                  onChange={setToEmails}
-                  suggestions={recipientSuggestions}
-                />
+                    {/* The editor is the one control that legitimately fills
+                        the form column — prose has no natural width. */}
+                    <BodyEditor
+                      value={html}
+                      onChange={setHtml}
+                      placeholder="Write your email…"
+                      showVariables={false}
+                      onUploadImage={uploadInlineImage}
+                    />
+                  </Field>
 
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setContactPickerOpen(true)}
-                  >
-                    <Users className="h-4 w-4" />
-                    Add contacts
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setListPickerOpen(true)}
-                  >
-                    <Users className="h-4 w-4" />
-                    Add list
-                  </Button>
-                </div>
-
-                {selectedLists.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedLists.map((list) => (
-                      <Badge key={list.id} variant="outline" className="gap-1">
-                        {list.name} ({list._count?.contacts ?? 0})
-                        <button
-                          type="button"
-                          aria-label={`Remove ${list.name}`}
-                          onClick={() =>
-                            setSelectedListIds((current) =>
-                              current.filter((id) => id !== list.id)
-                            )
-                          }
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
-
-                <RecipientField
-                  id="cc"
-                  label="Cc"
-                  emails={ccEmails}
-                  onChange={setCcEmails}
-                  suggestions={recipientSuggestions}
-                />
-                <RecipientField
-                  id="bcc"
-                  label="Bcc"
-                  emails={bccEmails}
-                  onChange={setBccEmails}
-                  suggestions={recipientSuggestions}
-                />
-
-                <div className="space-y-2">
-                  <Label htmlFor="subject">Subject</Label>
-                  <Input
-                    id="subject"
-                    value={subject}
-                    onChange={(event) => setSubject(event.target.value)}
-                    placeholder="Subject line"
+                  {/*
+                    The file input stays mounted whether or not the tray is
+                    revealed: it is the hidden control the button drives, and
+                    unmounting it would break the picker mid-upload.
+                  */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    aria-label="Add attachments"
+                    className="hidden"
+                    onChange={handleFileSelect}
                   />
-                </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Attachments</Label>
+                  {attachmentsVisible ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label>Attachments</Label>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploading || !organizationId}
+                        >
+                          {uploading ? (
+                            <Spinner />
+                          ) : (
+                            <Paperclip className="h-4 w-4" />
+                          )}
+                          Add files
+                        </Button>
+                      </div>
+                      {attachments.length > 0 ? (
+                        <ul className="space-y-1.5">
+                          {attachments.map((attachment) => (
+                            <li
+                              key={attachment.id}
+                              className="flex min-h-touch items-center gap-2 rounded-control border border-border px-3 py-2 text-ui sm:min-h-0"
+                            >
+                              <Paperclip className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+                              <span className="min-w-0 flex-1 truncate text-text">
+                                {attachment.filename}
+                              </span>
+                              <span
+                                data-numeric
+                                className="shrink-0 text-meta text-text-tertiary"
+                              >
+                                {formatBytes(attachment.size)}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={`Remove ${attachment.filename}`}
+                                onClick={() =>
+                                  void removeAttachment(attachment.id)
+                                }
+                                className={cn(
+                                  "relative flex h-5 w-5 shrink-0 items-center justify-center rounded-control",
+                                  "text-text-tertiary transition-colors duration-fast ease-out hover:text-err",
+                                  "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
+                                  "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden"
+                                )}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-meta text-text-tertiary">
+                          Nothing attached yet.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading || !organizationId}
+                      aria-expanded={false}
+                      className="-ml-3"
+                      onClick={() => setAttachmentsRevealed(true)}
                     >
-                      {uploading ? (
-                        <Spinner />
-                      ) : (
-                        <Paperclip className="h-4 w-4" />
-                      )}
-                      Add files
+                      <Paperclip className="h-4 w-4" />
+                      Attachments
                     </Button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      aria-label="Add attachments"
-                      className="hidden"
-                      onChange={handleFileSelect}
-                    />
-                  </div>
-                  {attachments.length > 0 ? (
-                    <ul className="space-y-1.5">
-                      {attachments.map((attachment) => (
-                        <li
-                          key={attachment.id}
-                          className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm"
-                        >
-                          <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate">
-                            {attachment.filename}
-                          </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {formatBytes(attachment.size)}
-                          </span>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${attachment.filename}`}
-                            onClick={() => void removeAttachment(attachment.id)}
-                            className="shrink-0 text-muted-foreground hover:text-destructive"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      No attachments added.
-                    </p>
                   )}
-                </div>
-              </Card>
-
-              <Card className="space-y-4 p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold">Composer</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Write your message and send it through your delivery
-                      pipeline.
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void openPreview()}
-                    disabled={previewing}
-                  >
-                    {previewing ? <Spinner /> : <Eye className="h-4 w-4" />}
-                    Preview
-                  </Button>
-                </div>
-
-                <BodyEditor
-                  value={html}
-                  onChange={setHtml}
-                  placeholder="Write your email…"
-                  showVariables={false}
-                  onUploadImage={uploadInlineImage}
-                />
-              </Card>
+                </FormSection>
+              </FormSections>
             </div>
 
-            <div className="space-y-5 xl:sticky xl:top-6 xl:self-start">
+            {/*
+              The rail holds the options for *this* message and nothing else.
+
+              It used to also list every recurring send in the organization, in
+              a card that grew its own scrollbar — §2's named example of the
+              rule it broke. That list is a page now (/campaigns/recurring), so
+              what is left here is short enough to sit still: nothing in this
+              column sets an overflow or a height, so it cannot scroll on its
+              own at any width.
+            */}
+            <div className="min-w-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
               <Card className="space-y-4 p-5">
                 <div>
-                  <h2 className="text-base font-semibold">Send options</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <h2 className="text-section font-semibold text-text">
+                    Send options
+                  </h2>
+                  <p className="mt-1 text-ui leading-5 text-text-secondary">
                     Send now, schedule it for later, or repeat it on a schedule.
                   </p>
                 </div>
@@ -1300,7 +1417,7 @@ export function EmailStudio() {
                   onRecurrenceChange={setRecurrence}
                 />
                 {recurring && attachments.length > 0 ? (
-                  <p className="text-xs leading-5 text-destructive">
+                  <p className="text-meta leading-5 text-err">
                     Recurring sends can&apos;t include attachments — each
                     occurrence would need its own copy.
                   </p>
@@ -1310,7 +1427,7 @@ export function EmailStudio() {
                   The running tally lives with the button that acts on it —
                   a list contributes an estimate, so it is marked approximate.
                 */}
-                <p className="text-sm text-muted-foreground">
+                <p className="text-ui leading-5 text-text-secondary">
                   {totalRecipients === 0
                     ? "No recipients yet — add people in the To field."
                     : `Sending to ${listMemberEstimate > 0 ? "~" : ""}${totalRecipients} ${
@@ -1318,6 +1435,7 @@ export function EmailStudio() {
                       }. Duplicates are removed.`}
                 </p>
 
+                {/* The one primary button in the view (§3). */}
                 <Button
                   type="submit"
                   className="w-full"
@@ -1331,77 +1449,28 @@ export function EmailStudio() {
                       : "Send email"}
                 </Button>
                 {lastSavedAt ? (
-                  <p className="text-center text-xs text-muted-foreground">
+                  <p className="text-center text-meta text-text-tertiary">
                     Draft saved
                   </p>
                 ) : null}
-              </Card>
 
-              {recurringSends.length > 0 ? (
-                <Card className="space-y-4 p-5">
-                  <div>
-                    <h2 className="text-base font-semibold">Recurring sends</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Recipients are re-resolved each time, so growing lists are
-                      picked up automatically.
-                    </p>
-                  </div>
-                  {/*
-                    Uncapped, and deliberately so. This list is the example §2
-                    uses for the rule it breaks: a card that scrolls inside
-                    itself is a second scrollbar, and the answer is to let it
-                    flow with the document. §4 has the real fix — recurring
-                    sends are scheduled campaigns and belong on their own route
-                    under Campaigns — which would take this rail back to holding
-                    send options for *this* message only.
-                  */}
-                  <div className="space-y-2 pr-1">
-                    {recurringSends.map((send) => (
-                      <div
-                        key={send.id}
-                        className="rounded-md border px-3 py-2 text-sm"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="min-w-0 flex-1 truncate font-medium">
-                            {send.name}
-                          </span>
-                          <Badge
-                            variant={
-                              send.status === "ACTIVE" ? "default" : "secondary"
-                            }
-                          >
-                            {send.status === "ACTIVE" ? "Active" : "Paused"}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {describeCron(send.cronExpression) ??
-                            send.cronExpression}{" "}
-                          · {send.timezone}
-                        </p>
-                        <div className="mt-2 flex gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void toggleRecurringSend(send)}
-                          >
-                            {send.status === "ACTIVE" ? "Pause" : "Resume"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="text-muted-foreground hover:text-destructive"
-                            onClick={() => void removeRecurringSend(send)}
-                          >
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              ) : null}
+                {/*
+                  Where the list that used to fill this rail went. It sits
+                  under the repeat switch because that is the control it
+                  explains: turning it on adds a row over there.
+                */}
+                <Link
+                  to="/campaigns/recurring"
+                  className={cn(
+                    "-mx-1 flex min-h-touch items-center justify-between gap-2 rounded-control px-1",
+                    "text-ui font-medium text-text-secondary sm:min-h-0 sm:py-1",
+                    "transition-colors duration-fast ease-out hover:text-text"
+                  )}
+                >
+                  Manage recurring sends
+                  <ArrowUpRight className="h-4 w-4 shrink-0" />
+                </Link>
+              </Card>
 
               {deliveryStatus ? (
                 <DeliveryStatusCard
@@ -1438,40 +1507,42 @@ export function EmailStudio() {
             </DialogDescription>
           </DialogHeader>
           {drafts.length === 0 ? (
-            <div className="rounded-xl border bg-muted/20 py-8 text-center text-sm text-muted-foreground">
-              No saved drafts yet.
-            </div>
+            // §3: no full-width bordered box around a "you have nothing yet".
+            <EmptyState
+              title="No saved drafts yet"
+              description="Anything you start writing here is kept automatically."
+            />
           ) : (
+            // scroll-exception: a dialog, which §2 names alongside dropdowns.
+            // Radix freezes the document while it is open, so this is still the
+            // only scrollbar on screen.
             <div className="max-h-80 space-y-1.5 overflow-auto">
               {drafts.map((draft) => (
                 <div
                   key={draft.id}
-                  className="flex items-center gap-2 rounded-xl border p-3 transition-colors hover:bg-accent/50"
+                  className="flex items-center gap-2 rounded-card border border-border p-3 transition-colors duration-fast ease-out hover:bg-surface-sunken"
                 >
                   <button
                     type="button"
                     onClick={() => void loadDraft(draft)}
-                    className="min-w-0 flex-1 text-left"
+                    className="min-h-touch min-w-0 flex-1 rounded-control text-left sm:min-h-0"
                   >
-                    <div className="truncate text-sm font-medium">
+                    <div className="truncate text-body font-medium text-text">
                       {draft.subject || "(no subject)"}
                     </div>
-                    <div className="truncate text-xs text-muted-foreground">
+                    <div className="truncate text-meta text-text-tertiary">
                       {draft.to.length || draft.listIds.length
                         ? `${draft.to.join(", ") || `${draft.listIds.length} list(s)`}`
                         : "No recipients"}
                     </div>
                   </button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Delete draft"
-                    className="text-muted-foreground hover:text-destructive"
+                  <IconButton
+                    label={`Delete ${draft.subject || "this draft"}`}
+                    variant="destructive"
                     onClick={() => setDeleteDraftTarget(draft)}
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                    <Trash2 />
+                  </IconButton>
                 </div>
               ))}
             </div>
@@ -1513,33 +1584,29 @@ export function EmailStudio() {
             </DialogDescription>
           </DialogHeader>
           {previewing ? (
-            <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 py-10 text-ui text-text-secondary">
               <Spinner />
               Rendering…
             </div>
           ) : preview ? (
             <div className="space-y-3">
-              <dl className="space-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <dl className="space-y-1 rounded-control border border-border bg-surface-sunken px-3 py-2 text-ui">
                 <div className="flex gap-2">
-                  <dt className="w-16 shrink-0 text-muted-foreground">
-                    Subject
-                  </dt>
-                  <dd className="min-w-0 font-medium">
+                  <dt className="w-16 shrink-0 text-text-tertiary">Subject</dt>
+                  <dd className="min-w-0 font-medium text-text">
                     {preview.subject || "(no subject)"}
                   </dd>
                 </div>
                 <div className="flex gap-2">
-                  <dt className="w-16 shrink-0 text-muted-foreground">To</dt>
-                  <dd className="min-w-0 break-words">
+                  <dt className="w-16 shrink-0 text-text-tertiary">To</dt>
+                  <dd className="min-w-0 break-words text-text">
                     {preview.recipients.to.join(", ") || "—"}
                   </dd>
                 </div>
                 {preview.recipients.total > preview.recipients.to.length ? (
                   <div className="flex gap-2">
-                    <dt className="w-16 shrink-0 text-muted-foreground">
-                      Also
-                    </dt>
-                    <dd className="min-w-0 text-muted-foreground">
+                    <dt className="w-16 shrink-0 text-text-tertiary">Also</dt>
+                    <dd className="min-w-0 text-text-secondary">
                       {preview.recipients.cc.length} cc,{" "}
                       {preview.recipients.bcc.length} bcc
                     </dd>
@@ -1581,26 +1648,25 @@ function DeliveryStatusCard({
 }) {
   return (
     <Card className="space-y-4 p-5" data-testid="delivery-status">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Delivery status</h2>
-        <button
-          type="button"
-          aria-label="Dismiss delivery status"
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-section font-semibold text-text">Delivery status</h2>
+        <IconButton
+          label="Dismiss delivery status"
+          size="sm"
           onClick={onDismiss}
-          className="text-muted-foreground hover:text-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </IconButton>
       </div>
 
       <div className="space-y-1.5">
         {status.recipients.map((recipient) => (
           <div
             key={`${recipient.field}-${recipient.email}`}
-            className="flex items-center justify-between gap-2 text-sm"
+            className="flex items-center justify-between gap-2 text-ui"
           >
-            <span className="min-w-0 flex-1 truncate">
-              <span className="text-muted-foreground uppercase text-[10px] mr-1.5">
+            <span className="min-w-0 flex-1 truncate text-text">
+              <span className="mr-1.5 text-meta uppercase tracking-eyebrow text-text-tertiary">
                 {recipient.field}
               </span>
               {recipient.email}
@@ -1615,22 +1681,32 @@ function DeliveryStatusCard({
         ))}
       </div>
 
-      <dl className="grid grid-cols-2 gap-2 border-t pt-3 text-sm">
-        <div className="flex justify-between">
-          <dt className="text-muted-foreground">Opens</dt>
-          <dd>{status.opens}</dd>
+      {/* Engagement aggregates across the whole send — tabular figures so the
+          four numbers line up as a block rather than jittering. */}
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-3 text-ui">
+        <div className="flex justify-between gap-2">
+          <dt className="text-text-secondary">Opens</dt>
+          <dd data-numeric className="text-text">
+            {status.opens}
+          </dd>
         </div>
-        <div className="flex justify-between">
-          <dt className="text-muted-foreground">Clicks</dt>
-          <dd>{status.clicks}</dd>
+        <div className="flex justify-between gap-2">
+          <dt className="text-text-secondary">Clicks</dt>
+          <dd data-numeric className="text-text">
+            {status.clicks}
+          </dd>
         </div>
-        <div className="flex justify-between">
-          <dt className="text-muted-foreground">Bounces</dt>
-          <dd>{status.bounces}</dd>
+        <div className="flex justify-between gap-2">
+          <dt className="text-text-secondary">Bounces</dt>
+          <dd data-numeric className="text-text">
+            {status.bounces}
+          </dd>
         </div>
-        <div className="flex justify-between">
-          <dt className="text-muted-foreground">Complaints</dt>
-          <dd>{status.complaints}</dd>
+        <div className="flex justify-between gap-2">
+          <dt className="text-text-secondary">Complaints</dt>
+          <dd data-numeric className="text-text">
+            {status.complaints}
+          </dd>
         </div>
       </dl>
     </Card>
@@ -1697,31 +1773,35 @@ function ContactPickerDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
           <Input
+            type="search"
             placeholder="Search contacts…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className="pl-9"
           />
         </div>
-        <div className="max-h-72 space-y-1 overflow-auto rounded-md border p-2">
+        {/* scroll-exception: inside a dialog (§2). */}
+        <div className="max-h-72 space-y-1 overflow-auto rounded-control border border-border p-2">
           {filtered.length === 0 ? (
-            <p className="px-1 py-2 text-sm text-muted-foreground">
+            <p className="px-1 py-2 text-ui text-text-secondary">
               No contacts found.
             </p>
           ) : (
             filtered.map((contact) => (
               <label
                 key={contact.id}
-                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
+                // The whole row is the tap target, and it is 44px tall on a
+                // phone — a 16px checkbox is not something a thumb can hit.
+                className="flex min-h-touch cursor-pointer items-center gap-2.5 rounded-control px-2 py-1.5 text-body transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
               >
                 <Checkbox
                   checked={selected.includes(contact.id)}
                   onCheckedChange={() => toggle(contact.id)}
                   aria-label={`Select ${contact.email}`}
                 />
-                <span className="truncate">{contact.email}</span>
+                <span className="truncate text-text">{contact.email}</span>
               </label>
             ))
           )}
@@ -1781,24 +1861,25 @@ function ListPickerDialog({
             Everyone in the selected lists receives this email.
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-72 space-y-1 overflow-auto rounded-md border p-2">
+        {/* scroll-exception: inside a dialog (§2). */}
+        <div className="max-h-72 space-y-1 overflow-auto rounded-control border border-border p-2">
           {lists.length === 0 ? (
-            <p className="px-1 py-2 text-sm text-muted-foreground">
+            <p className="px-1 py-2 text-ui text-text-secondary">
               No contact lists yet.
             </p>
           ) : (
             lists.map((list) => (
               <label
                 key={list.id}
-                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
+                className="flex min-h-touch cursor-pointer items-center gap-2.5 rounded-control px-2 py-1.5 text-body transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
               >
                 <Checkbox
                   checked={draft.includes(list.id)}
                   onCheckedChange={() => toggle(list.id)}
                   aria-label={`Select ${list.name}`}
                 />
-                <span className="flex-1 truncate">{list.name}</span>
-                <span className="text-xs text-muted-foreground">
+                <span className="flex-1 truncate text-text">{list.name}</span>
+                <span data-numeric className="text-meta text-text-tertiary">
                   {list._count?.contacts ?? 0}
                 </span>
               </label>

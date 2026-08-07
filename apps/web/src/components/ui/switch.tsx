@@ -35,7 +35,10 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
         "transition-colors duration-fast ease-out",
         "disabled:cursor-not-allowed disabled:opacity-50",
         checked ? "bg-primary" : "bg-border-strong",
-        "after:absolute after:inset-x-0 after:top-1/2 after:h-touch",
+        // `-inset-x-1`, not `inset-x-0`: the control is 36px wide, so a slop
+        // that only spans its own width tops out at 36 and misses the 44px
+        // minimum on the axis nobody checks. 4px each side closes the gap.
+        "after:absolute after:-inset-x-1 after:top-1/2 after:h-touch",
         "after:-translate-y-1/2 after:content-[''] sm:after:hidden",
         className
       )}

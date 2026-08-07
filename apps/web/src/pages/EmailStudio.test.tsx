@@ -390,13 +390,124 @@ describe("EmailStudio", () => {
     ).toHaveTextContent("Default · from@x.com");
   });
 
-  it("keeps Cc and Bcc visible without hunting for a button", async () => {
+  // Progressive disclosure (§3): most sends copy nobody, so Cc/Bcc start
+  // folded away behind a text button rather than costing two fields of the
+  // form column on every message.
+  it("hides Cc and Bcc behind a reveal", async () => {
+    const user = userEvent.setup();
     setup();
     await renderStudio();
 
+    expect(screen.queryByLabelText("Cc")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Bcc")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Reply-To")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cc / Bcc" }));
+
     expect(screen.getByLabelText("Cc")).toBeInTheDocument();
     expect(screen.getByLabelText("Bcc")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Reply-To")).not.toBeInTheDocument();
+    // Once the fields are on screen the reveal is gone — a "hide" that refuses
+    // to hide because you typed into it is worse than no button.
+    expect(
+      screen.queryByRole("button", { name: "Cc / Bcc" })
+    ).not.toBeInTheDocument();
+  });
+
+  // A folded-away field must never swallow content that already exists.
+  it("opens Cc and Bcc for a draft that already has them", async () => {
+    setup();
+    mockedApi.listEmailDrafts.mockResolvedValue([]);
+    mockedApi.getEmailDraft.mockResolvedValue({
+      id: "d9",
+      subject: "Resumed",
+      html: "<p>Body</p>",
+      to: ["alice@x.com"],
+      cc: ["carbon@x.com"],
+      bcc: [],
+      listIds: [],
+      attachments: [],
+      updatedAt: "now"
+    });
+
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/email-studio?draft=d9"]}>
+        <EmailStudio />
+      </MemoryRouter>,
+      { withRouter: false }
+    );
+
+    expect(await screen.findByLabelText("Cc")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remove carbon@x.com")).toBeInTheDocument();
+  });
+
+  it("hides attachments behind a reveal until there is one", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    expect(
+      screen.queryByRole("button", { name: /Add files/i })
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Attachments/i }));
+
+    expect(
+      screen.getByRole("button", { name: /Add files/i })
+    ).toBeInTheDocument();
+  });
+
+  // The rail holds this message's options only; the list of every recurring
+  // send in the org is a page of its own now (§4).
+  it("links out to the recurring sends page instead of listing them", async () => {
+    setup();
+    await renderStudio();
+
+    expect(mockedApi.listRecurringSends).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("link", { name: /Manage recurring sends/i })
+    ).toHaveAttribute("href", "/campaigns/recurring");
+  });
+
+  /*
+    §2's one-scroll rule, as a test rather than as a promise. The rail used to
+    hold a list that grew without bound inside a fixed card, and the fix is
+    structural: nothing in the composer may declare a scroll region or a height
+    that would force one. The combobox listbox is the single exception the
+    design system names, and it is a floating overlay that cannot extend the
+    page.
+  */
+  it("creates no scroll region of its own anywhere in the form", async () => {
+    const user = userEvent.setup();
+    setup();
+    const { container } = await renderStudio();
+
+    // Anything that caps its own height or asks for its own overflow. Class
+    // names rather than layout, because jsdom has none — but this is exactly
+    // how such a region would be introduced.
+    function scrollRegionsInForm() {
+      const form = container.querySelector("form")!;
+      return Array.from(form.querySelectorAll<HTMLElement>("*"))
+        .filter(
+          (element) =>
+            typeof element.className === "string" &&
+            /(^|\s)(max-h-|overflow-(y-)?(auto|scroll))/.test(element.className)
+        )
+        .map((element) => element.getAttribute("role") ?? element.tagName);
+    }
+
+    // First prove the detector can see one: the recipient combobox's listbox
+    // is the single exception §2 allows, and it is a floating overlay that
+    // cannot extend the page.
+    await user.type(screen.getByLabelText("To"), "a");
+    expect(scrollRegionsInForm()).toEqual(["listbox"]);
+
+    // Now the composer in the state that used to overflow the rail: recipient
+    // chips, an open recurrence, and the attachment tray revealed.
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByLabelText("Repeat on a schedule"));
+    await user.click(screen.getByRole("button", { name: /Attachments/i }));
+
+    expect(scrollRegionsInForm()).toEqual([]);
   });
 
   it("autocompletes recipients from contacts and past sends", async () => {

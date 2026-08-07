@@ -66,6 +66,9 @@ vi.mock("../pages/Deliverability.js", () => ({
 vi.mock("../pages/QueueOperations.js", () => ({
   QueueOperations: () => <div>Queue operations</div>,
 }));
+vi.mock("../pages/RecurringSends.js", () => ({
+  RecurringSends: () => <div>Recurring sends page</div>,
+}));
 
 import { AppRoutes } from "./AppRoutes.js";
 
@@ -112,6 +115,19 @@ describe("AppRoutes", () => {
     , { withRouter: false });
     expect(await screen.findByText("Legal terms")).toBeInTheDocument();
     expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
+  });
+
+  // A recurring send is a scheduled campaign, so it gets a route under
+  // Campaigns rather than a card in the composer's rail (§4).
+  it("serves recurring sends at their own route under campaigns", async () => {
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/campaigns/recurring"]}>
+        <AppRoutes />
+      </MemoryRouter>,
+      { withRouter: false }
+    );
+    expect(await screen.findByTestId("layout")).toBeInTheDocument();
+    expect(await screen.findByText("Recurring sends page")).toBeInTheDocument();
   });
 
   // ------------------------------------------------------------- settings §4

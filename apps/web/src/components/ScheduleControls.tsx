@@ -1,6 +1,6 @@
-import { CalendarClock, Repeat } from "lucide-react";
 import cronstrue from "cronstrue";
 import { Button } from "./ui/button.js";
+import { fieldBase, fieldControlHeight } from "./ui/field.js";
 import { Input } from "./ui/input.js";
 import { Label } from "./ui/label.js";
 import {
@@ -141,7 +141,6 @@ export function recurrenceSummary(form: RecurrenceForm) {
 }
 
 interface ToggleRowProps {
-  icon: typeof CalendarClock;
   title: string;
   description: string;
   checked: boolean;
@@ -149,8 +148,17 @@ interface ToggleRowProps {
   disabled?: boolean;
 }
 
+/**
+ * A settings row (§3): label and description on the left, control on the right,
+ * hairline between rows.
+ *
+ * Deliberately *not* a bordered box with an icon tile, which is what this used
+ * to be. These controls render inside a card — the composer's send-options rail
+ * — and a bordered box inside a card is a card inside a card. The icon tile
+ * went with it: a calendar glyph next to the words "Schedule for later" is
+ * decoration, and §6 rules that out.
+ */
 function ToggleRow({
-  icon: Icon,
   title,
   description,
   checked,
@@ -158,32 +166,28 @@ function ToggleRow({
   disabled
 }: ToggleRowProps) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-xl border bg-card p-3">
-      <div className="flex min-w-0 gap-3">
-        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div>
-          <Label
-            className="cursor-pointer text-sm font-semibold"
-            onClick={() => {
-              if (!disabled) {
-                onCheckedChange(!checked);
-              }
-            }}
-          >
-            {title}
-          </Label>
-          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-            {description}
-          </p>
-        </div>
+    <div className="flex items-start justify-between gap-4 border-b border-border py-3 first:pt-0 last:border-0 last:pb-0">
+      <div className="min-w-0">
+        <Label
+          className="cursor-pointer"
+          onClick={() => {
+            if (!disabled) {
+              onCheckedChange(!checked);
+            }
+          }}
+        >
+          {title}
+        </Label>
+        <p className="mt-1 text-meta leading-5 text-text-tertiary">
+          {description}
+        </p>
       </div>
       <Switch
         checked={checked}
         onCheckedChange={onCheckedChange}
         disabled={disabled}
         aria-label={title}
+        className="mt-0.5 shrink-0"
       />
     </div>
   );
@@ -227,10 +231,9 @@ export function ScheduleControls({
   const cronDescription = describeCron(buildCron(recurrence));
 
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn("space-y-0", className)}>
       {canToggleSchedule ? (
         <ToggleRow
-          icon={CalendarClock}
           title={scheduleLabel}
           description="Pick a date and time instead of sending immediately."
           checked={Boolean(scheduleEnabled)}
@@ -238,8 +241,13 @@ export function ScheduleControls({
         />
       ) : null}
 
+      {/*
+        Revealed detail hangs under the switch that turned it on, separated by
+        space rather than by a second border — the container these render in is
+        already a surface.
+      */}
       {scheduleVisible && !recurring ? (
-        <div className="space-y-2 rounded-xl border bg-muted/20 p-3">
+        <div className="space-y-1.5 pb-4 pt-3">
           <Label htmlFor="scheduledAt">Send at</Label>
           <Input
             id="scheduledAt"
@@ -249,7 +257,7 @@ export function ScheduleControls({
             onChange={(event) => onScheduledAtChange(event.target.value)}
             required={!canToggleSchedule || Boolean(scheduleEnabled)}
           />
-          <p className="text-xs leading-5 text-muted-foreground">
+          <p className="text-meta leading-5 text-text-tertiary">
             {scheduleSummary(scheduledAt, BROWSER_TIMEZONE)}
           </p>
         </div>
@@ -257,7 +265,6 @@ export function ScheduleControls({
 
       {showRecurring ? (
         <ToggleRow
-          icon={Repeat}
           title="Repeat on a schedule"
           description={recurringHelp}
           checked={recurring}
@@ -267,8 +274,8 @@ export function ScheduleControls({
       ) : null}
 
       {showRecurring && recurring ? (
-        <div className="space-y-3 rounded-xl border bg-muted/20 p-3">
-          <div className="space-y-2">
+        <div className="space-y-4 pb-1 pt-4">
+          <div className="space-y-1.5">
             <Label>Frequency</Label>
             <Select
               value={recurrence.preset}
@@ -292,7 +299,7 @@ export function ScheduleControls({
           </div>
 
           {recurrence.preset === "advanced" ? (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="cronExpression">Cron expression</Label>
               <Input
                 id="cronExpression"
@@ -307,9 +314,9 @@ export function ScheduleControls({
               />
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {recurrence.preset === "weekly" ? (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Label>Repeat on</Label>
                     <div className="flex flex-wrap gap-1">
@@ -328,7 +335,7 @@ export function ScheduleControls({
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-2 text-xs"
+                          className="px-2"
                           onClick={() =>
                             onRecurrenceChange({
                               ...recurrence,
@@ -349,8 +356,10 @@ export function ScheduleControls({
                           key={day.value}
                           type="button"
                           size="icon"
-                          variant={selected ? "default" : "outline"}
-                          className="h-9 w-9 rounded-full"
+                          variant={selected ? "primary" : "secondary"}
+                          // 36px like every other control, with the button's
+                          // own pseudo-element carrying the 44px tap area.
+                          className="h-control w-control rounded-pill"
                           aria-label={day.label}
                           aria-pressed={selected}
                           onClick={() =>
@@ -372,13 +381,17 @@ export function ScheduleControls({
                 </div>
               ) : null}
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              {/* Two short numeric fields, so they share a row (§2) and each is
+                  sized to what it holds rather than to the container. */}
+              <div className="flex flex-col gap-4 xs:flex-row xs:gap-4">
                 {recurrence.preset === "monthly" ? (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <Label htmlFor="dayOfMonth">Day of month</Label>
                     <Input
                       id="dayOfMonth"
                       type="number"
+                      inputMode="numeric"
+                      width="code"
                       min={1}
                       max={31}
                       value={recurrence.dayOfMonth}
@@ -391,11 +404,12 @@ export function ScheduleControls({
                     />
                   </div>
                 ) : null}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <Label htmlFor="scheduleTime">Time</Label>
                   <Input
                     id="scheduleTime"
                     type="time"
+                    width="code"
                     value={recurrence.time}
                     onChange={(event) =>
                       onRecurrenceChange({
@@ -409,11 +423,17 @@ export function ScheduleControls({
             </div>
           )}
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="timezone">Timezone</Label>
+            {/*
+              A native <select>, not the Radix one: there are ~400 timezones,
+              and a phone's own picker handles that list far better than a
+              popover can. Styled from the shared field tokens so it still
+              matches every other control on the page.
+            */}
             <select
               id="timezone"
-              className="flex h-10 w-full rounded-lg border border-input bg-card px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className={cn(fieldBase, fieldControlHeight, "pr-8")}
               value={recurrence.timezone}
               onChange={(event) =>
                 onRecurrenceChange({
@@ -430,14 +450,14 @@ export function ScheduleControls({
             </select>
           </div>
 
-          <div
+          <p
             className={cn(
-              "rounded-lg border bg-card px-3 py-2 text-sm leading-6",
-              !cronDescription && "border-destructive/30 text-destructive"
+              "text-meta leading-5",
+              cronDescription ? "text-text-tertiary" : "text-err"
             )}
           >
             {cronDescription ? recurrenceSummary(recurrence) : "Enter a valid schedule."}
-          </div>
+          </p>
         </div>
       ) : null}
     </div>

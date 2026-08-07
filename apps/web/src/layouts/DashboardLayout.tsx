@@ -61,8 +61,20 @@ const navSections: NavSection[] = [
     heading: "Campaigns",
     items: [
       { to: "/templates", label: "Templates", icon: FileText },
-      // `end`, or /campaigns/lists lights up Campaigns and Lists at once.
-      { to: "/campaigns", label: "Campaigns", icon: Megaphone, end: true },
+      {
+        to: "/campaigns",
+        label: "Campaigns",
+        icon: Megaphone,
+        // `end`, or /campaigns/lists lights up Campaigns and Lists at once.
+        end: true,
+        /*
+          Recurring sends are a tab of this destination, not a twelfth row —
+          the sidebar is already ~690px tall and must never scroll (§2/§4). So
+          it is named here instead, or the nav goes dark while you are standing
+          on a page it owns.
+        */
+        activePaths: ["/campaigns/recurring"],
+      },
     ],
   },
   {

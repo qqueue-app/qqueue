@@ -139,6 +139,11 @@ const Segments = lazy(() =>
     default: module.Segments,
   }))
 );
+const RecurringSends = lazy(() =>
+  import("../pages/RecurringSends.js").then((module) => ({
+    default: module.RecurringSends,
+  }))
+);
 /*
   The design-system reference page. Dev-only: it documents the foundation for
   whoever is building on it, and has no place in a production bundle.
@@ -211,6 +216,9 @@ export function AppRoutes() {
             path="/campaigns/segments"
             element={<Navigate to="/campaigns/lists/smart" replace />}
           />
+          {/* A recurring send is a scheduled campaign, so it lives under
+              Campaigns rather than in the composer's rail — see §4. */}
+          <Route path="/campaigns/recurring" element={<RecurringSends />} />
           <Route
             path="/campaigns/:id/analytics"
             element={<CampaignAnalytics />}

@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
 import { formatCount } from "../lib/format.js";
 import { PageHeader } from "../components/PageHeader.js";
+import { CampaignsTabs } from "../components/CampaignsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
@@ -532,6 +533,8 @@ export function Campaigns() {
           </Button>
         }
       />
+
+      <CampaignsTabs />
 
       <section className="p-4 sm:p-6">
         <DataGrid
