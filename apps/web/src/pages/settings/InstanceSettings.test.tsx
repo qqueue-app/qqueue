@@ -1,34 +1,33 @@
-import { renderWithProviders, screen, waitFor } from "../test/render.js";
+import { renderWithProviders, screen, waitFor } from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
-  // Used by actions that report progress before their result.
   loading: vi.fn(),
-  message: vi.fn()
+  message: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast }));
 
 const invalidateSetupStatus = vi.hoisted(() => vi.fn());
-vi.mock("../lib/setup-status.js", () => ({ invalidateSetupStatus }));
+vi.mock("../../lib/setup-status.js", () => ({ invalidateSetupStatus }));
 
-vi.mock("../lib/api.js", async () => {
+vi.mock("../../lib/api.js", async () => {
   const actual =
-    await vi.importActual<typeof import("../lib/api.js")>("../lib/api.js");
+    await vi.importActual<typeof import("../../lib/api.js")>("../../lib/api.js");
   return {
     ApiError: actual.ApiError,
     api: {
       getInstanceSettings: vi.fn(),
       updateInstanceSettings: vi.fn(),
-      instanceEnvStatus: vi.fn()
-    }
+      instanceEnvStatus: vi.fn(),
+    },
   };
 });
 
-import { InstanceSettingsCard } from "./InstanceSettingsCard.js";
-import { ApiError, api } from "../lib/api.js";
+import { InstanceSettings } from "./InstanceSettings.js";
+import { ApiError, api } from "../../lib/api.js";
 
 const envStatus = {
   database: { ok: true },
@@ -38,67 +37,60 @@ const envStatus = {
   urls: {
     appUrl: "http://localhost:4000",
     publicAppUrl: "http://localhost:4000",
-    webOrigin: null
+    webOrigin: null,
   },
   tunables: {
     softBounceThreshold: 5,
     softBounceWindowDays: 7,
     defaultDomainMaxPerMinute: 60,
-    attachmentMaxBytes: 10_485_760
-  }
+    attachmentMaxBytes: 10_485_760,
+  },
 };
 
 beforeEach(() => {
-  vi.mocked(api.getInstanceSettings).mockReset();
-  vi.mocked(api.updateInstanceSettings).mockReset();
-  vi.mocked(api.instanceEnvStatus).mockReset();
-  toast.success.mockReset();
-  toast.error.mockReset();
-  invalidateSetupStatus.mockReset();
+  vi.clearAllMocks();
 });
 
-describe("InstanceSettingsCard", () => {
+describe("InstanceSettings", () => {
   it("renders settings and configuration health for an admin", async () => {
     vi.mocked(api.getInstanceSettings).mockResolvedValue({
       allowPublicRegistration: true,
-      setupCompletedAt: null
+      setupCompletedAt: null,
     });
     vi.mocked(api.instanceEnvStatus).mockResolvedValue(envStatus);
 
-    renderWithProviders(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettings />);
 
-    expect(await screen.findByText("Instance")).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Allow public registration")
+      await screen.findByLabelText("Allow public registration")
     ).toBeInTheDocument();
-    // env-status renders once instanceEnvStatus resolves
     await waitFor(() =>
       expect(screen.getAllByText("Connected").length).toBeGreaterThan(0)
     );
     expect(screen.getByText("qqueue-attachments")).toBeInTheDocument();
-    // formatBytes: 10,485,760 bytes -> "10 MB"
-    expect(screen.getByText("10 MB")).toBeInTheDocument();
+    expect(screen.getByText("10.0 MB")).toBeInTheDocument();
   });
 
   it("toggles public registration and reports success", async () => {
     vi.mocked(api.getInstanceSettings).mockResolvedValue({
       allowPublicRegistration: true,
-      setupCompletedAt: null
+      setupCompletedAt: null,
     });
     vi.mocked(api.instanceEnvStatus).mockResolvedValue(envStatus);
     vi.mocked(api.updateInstanceSettings).mockResolvedValue({
       allowPublicRegistration: false,
-      setupCompletedAt: null
+      setupCompletedAt: null,
     });
 
-    renderWithProviders(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettings />);
 
-    const toggle = await screen.findByLabelText("Allow public registration");
-    await userEvent.click(toggle);
+    await userEvent.click(
+      await screen.findByLabelText("Allow public registration")
+    );
 
     await waitFor(() =>
       expect(api.updateInstanceSettings).toHaveBeenCalledWith({
-        allowPublicRegistration: false
+        allowPublicRegistration: false,
       })
     );
     expect(invalidateSetupStatus).toHaveBeenCalled();
@@ -110,42 +102,47 @@ describe("InstanceSettingsCard", () => {
   it("surfaces an error when the toggle update fails", async () => {
     vi.mocked(api.getInstanceSettings).mockResolvedValue({
       allowPublicRegistration: true,
-      setupCompletedAt: null
+      setupCompletedAt: null,
     });
     vi.mocked(api.instanceEnvStatus).mockResolvedValue(envStatus);
-    vi.mocked(api.updateInstanceSettings).mockRejectedValue(
-      new Error("boom")
+    vi.mocked(api.updateInstanceSettings).mockRejectedValue(new Error("boom"));
+
+    renderWithProviders(<InstanceSettings />);
+
+    await userEvent.click(
+      await screen.findByLabelText("Allow public registration")
     );
-
-    renderWithProviders(<InstanceSettingsCard />);
-
-    const toggle = await screen.findByLabelText("Allow public registration");
-    await userEvent.click(toggle);
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"));
   });
 
-  it("renders nothing for a non-admin (403)", async () => {
+  it("says who the page is for instead of going blank on a 403", async () => {
     vi.mocked(api.getInstanceSettings).mockRejectedValue(
       new ApiError("Forbidden", 403)
     );
 
-    const { container } = renderWithProviders(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettings />);
 
-    // Give the rejected effect a chance to run, then assert the card is absent.
-    await waitFor(() => expect(api.getInstanceSettings).toHaveBeenCalled());
-    expect(screen.queryByText("Instance")).not.toBeInTheDocument();
-    expect(container).toBeEmptyDOMElement();
+    // The hub hides this row, but the URL can still be typed — and a page that
+    // renders nothing at all reads as broken.
+    expect(
+      await screen.findByText("Instance administrators only")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Allow public registration")
+    ).not.toBeInTheDocument();
+    expect(api.instanceEnvStatus).not.toHaveBeenCalled();
   });
 
-  it("shows the card but toasts on a non-403 load failure", async () => {
+  it("treats a non-403 failure as no access rather than guessing", async () => {
     vi.mocked(api.getInstanceSettings).mockRejectedValue(
       new Error("network down")
     );
 
-    renderWithProviders(<InstanceSettingsCard />);
+    renderWithProviders(<InstanceSettings />);
 
-    expect(await screen.findByText("Instance")).toBeInTheDocument();
-    expect(toast.error).toHaveBeenCalledWith("network down");
+    expect(
+      await screen.findByText("Instance administrators only")
+    ).toBeInTheDocument();
   });
 });

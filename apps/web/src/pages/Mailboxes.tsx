@@ -385,6 +385,7 @@ export function Mailboxes() {
         <PageHeader
           title="Mailboxes"
           description="Create team mailboxes and choose who can send as them."
+          breadcrumb={{ label: "Settings", to: "/settings" }}
         />
         <section className="p-4 sm:p-6">
           <Card>
@@ -406,6 +407,7 @@ export function Mailboxes() {
       <PageHeader
         title="Mailboxes"
         description="Create team mailboxes on your mail server and choose who can send as each one."
+        breadcrumb={{ label: "Settings", to: "/settings" }}
         actions={
           status?.configured && status.reachable ? (
             <Button onClick={() => setCreateOpen(true)}>

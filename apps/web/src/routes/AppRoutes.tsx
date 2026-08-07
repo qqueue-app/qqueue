@@ -49,9 +49,39 @@ const LegalPage = lazy(() =>
     default: module.LegalPage,
   }))
 );
-const Settings = lazy(() =>
-  import("../pages/Settings.js").then((module) => ({
-    default: module.Settings,
+/*
+  Settings is eight routes behind one hub (§4). Each is its own lazy chunk: the
+  page they replaced pulled API keys, webhooks, team, and instance settings into
+  a single bundle that everyone downloaded to change an organization's name.
+*/
+const SettingsHub = lazy(() =>
+  import("../pages/settings/SettingsHub.js").then((module) => ({
+    default: module.SettingsHub,
+  }))
+);
+const OrganizationSettings = lazy(() =>
+  import("../pages/settings/OrganizationSettings.js").then((module) => ({
+    default: module.OrganizationSettings,
+  }))
+);
+const TeamSettings = lazy(() =>
+  import("../pages/settings/TeamSettings.js").then((module) => ({
+    default: module.TeamSettings,
+  }))
+);
+const ApiSettings = lazy(() =>
+  import("../pages/settings/ApiSettings.js").then((module) => ({
+    default: module.ApiSettings,
+  }))
+);
+const InstanceSettings = lazy(() =>
+  import("../pages/settings/InstanceSettings.js").then((module) => ({
+    default: module.InstanceSettings,
+  }))
+);
+const AccountSettings = lazy(() =>
+  import("../pages/settings/AccountSettings.js").then((module) => ({
+    default: module.AccountSettings,
   }))
 );
 const QueueOperations = lazy(() =>
@@ -168,10 +198,7 @@ export function AppRoutes() {
             path="/send-email"
             element={<Navigate to="/email-studio" replace />}
           />
-          <Route path="/smtp-connections" element={<SMTPConnections />} />
-          <Route path="/mailboxes" element={<Mailboxes />} />
           <Route path="/contacts" element={<Contacts />} />
-          <Route path="/suppressions" element={<Suppressions />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/templates/new" element={<TemplateEditor />} />
           <Route path="/templates/:id/edit" element={<TemplateEditor />} />
@@ -184,13 +211,53 @@ export function AppRoutes() {
             path="/campaigns/segments"
             element={<Navigate to="/campaigns/lists/smart" replace />}
           />
-          <Route path="/deliverability" element={<Deliverability />} />
           <Route
             path="/campaigns/:id/analytics"
             element={<CampaignAnalytics />}
           />
           <Route path="/queue-operations" element={<QueueOperations />} />
-          <Route path="/settings" element={<Settings />} />
+
+          {/* ------------------------------------------------------ settings */}
+          {/*
+            A hub and its destinations, not a mega-page. Every one of these was
+            a card in a two-column grid on /settings, or a top-level route the
+            sidebar had to name separately; both shapes are gone (§4).
+          */}
+          <Route path="/settings" element={<SettingsHub />} />
+          <Route
+            path="/settings/organization"
+            element={<OrganizationSettings />}
+          />
+          <Route path="/settings/team" element={<TeamSettings />} />
+          <Route path="/settings/sending" element={<SMTPConnections />} />
+          <Route path="/settings/sending/health" element={<Deliverability />} />
+          <Route path="/settings/mailboxes" element={<Mailboxes />} />
+          <Route path="/settings/suppressions" element={<Suppressions />} />
+          <Route path="/settings/api" element={<ApiSettings />} />
+          <Route path="/settings/instance" element={<InstanceSettings />} />
+          <Route path="/settings/account" element={<AccountSettings />} />
+
+          {/*
+            The paths these pages used to answer on. Bookmarks, the docs, and
+            every "see Settings → Sending accounts" line written before the move
+            still resolve — a redirect is cheap and a dead link is not.
+          */}
+          <Route
+            path="/smtp-connections"
+            element={<Navigate to="/settings/sending" replace />}
+          />
+          <Route
+            path="/mailboxes"
+            element={<Navigate to="/settings/mailboxes" replace />}
+          />
+          <Route
+            path="/suppressions"
+            element={<Navigate to="/settings/suppressions" replace />}
+          />
+          <Route
+            path="/deliverability"
+            element={<Navigate to="/settings/sending/health" replace />}
+          />
         </Route>
       </Routes>
       </SetupGate>

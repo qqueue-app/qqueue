@@ -29,7 +29,7 @@ vi.mock("../pages/Legal.js", () => ({
 vi.mock("../pages/EmailStudio.js", () => ({ EmailStudio: () => <div /> }));
 vi.mock("../pages/Inbox.js", () => ({ Inbox: () => <div>Inbox page</div> }));
 vi.mock("../pages/SMTPConnections.js", () => ({
-  SMTPConnections: () => <div />,
+  SMTPConnections: () => <div>Sending settings</div>,
 }));
 vi.mock("../pages/Contacts.js", () => ({ Contacts: () => <div /> }));
 vi.mock("../pages/Templates.js", () => ({ Templates: () => <div /> }));
@@ -38,7 +38,31 @@ vi.mock("../pages/ContactLists.js", () => ({ ContactLists: () => <div /> }));
 vi.mock("../pages/CampaignAnalytics.js", () => ({
   CampaignAnalytics: () => <div />,
 }));
-vi.mock("../pages/Settings.js", () => ({ Settings: () => <div /> }));
+vi.mock("../pages/settings/SettingsHub.js", () => ({
+  SettingsHub: () => <div>Settings hub</div>,
+}));
+vi.mock("../pages/settings/OrganizationSettings.js", () => ({
+  OrganizationSettings: () => <div>Organization settings</div>,
+}));
+vi.mock("../pages/settings/TeamSettings.js", () => ({
+  TeamSettings: () => <div />,
+}));
+vi.mock("../pages/settings/ApiSettings.js", () => ({
+  ApiSettings: () => <div>API settings</div>,
+}));
+vi.mock("../pages/settings/InstanceSettings.js", () => ({
+  InstanceSettings: () => <div />,
+}));
+vi.mock("../pages/settings/AccountSettings.js", () => ({
+  AccountSettings: () => <div>Account settings</div>,
+}));
+vi.mock("../pages/Suppressions.js", () => ({
+  Suppressions: () => <div>Suppressions page</div>,
+}));
+vi.mock("../pages/Mailboxes.js", () => ({ Mailboxes: () => <div /> }));
+vi.mock("../pages/Deliverability.js", () => ({
+  Deliverability: () => <div />,
+}));
 vi.mock("../pages/QueueOperations.js", () => ({
   QueueOperations: () => <div>Queue operations</div>,
 }));
@@ -88,5 +112,50 @@ describe("AppRoutes", () => {
     , { withRouter: false });
     expect(await screen.findByText("Legal terms")).toBeInTheDocument();
     expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
+  });
+
+  // ------------------------------------------------------------- settings §4
+  it("serves the hub at /settings, not a mega-page", async () => {
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <AppRoutes />
+      </MemoryRouter>,
+      { withRouter: false }
+    );
+    expect(await screen.findByText("Settings hub")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["/settings/organization", "Organization settings"],
+    ["/settings/sending", "Sending settings"],
+    ["/settings/suppressions", "Suppressions page"],
+    ["/settings/api", "API settings"],
+    ["/settings/account", "Account settings"],
+  ])("routes %s to its own page", async (path, text) => {
+    renderWithProviders(
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+      </MemoryRouter>,
+      { withRouter: false }
+    );
+    expect(await screen.findByText(text)).toBeInTheDocument();
+  });
+
+  /*
+    These four are where the pages used to live. Bookmarks and every docs link
+    written before the move still have to land somewhere real — a redirect is
+    cheap, a 404 is not.
+  */
+  it.each([
+    ["/smtp-connections", "Sending settings"],
+    ["/suppressions", "Suppressions page"],
+  ])("redirects the old path %s to its new home", async (path, text) => {
+    renderWithProviders(
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+      </MemoryRouter>,
+      { withRouter: false }
+    );
+    expect(await screen.findByText(text)).toBeInTheDocument();
   });
 });

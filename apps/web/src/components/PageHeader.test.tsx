@@ -95,6 +95,24 @@ describe("PageHeader", () => {
         "/templates"
       );
     });
+
+    it("renders a breadcrumb trail naming the parent and the page (§4)", () => {
+      renderWithProviders(
+        <PageHeader
+          title="Team"
+          description="d"
+          breadcrumb={{ label: "Settings", to: "/settings" }}
+        />
+      );
+      const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+      expect(within(trail).getByRole("link", { name: "Settings" })).toHaveAttribute(
+        "href",
+        "/settings"
+      );
+      expect(trail).toHaveTextContent(/Settings\s*\/\s*Team/);
+      // The trail replaces the generic back link; two ways up is one too many.
+      expect(screen.queryByRole("link", { name: /^Back/ })).not.toBeInTheDocument();
+    });
   });
 
   describe("mobile (§5)", () => {
@@ -117,6 +135,26 @@ describe("PageHeader", () => {
       expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute(
         "href",
         "/templates"
+      );
+    });
+
+    it("collapses a breadcrumb to the back chevron", () => {
+      restore = useMobileViewport();
+      renderWithProviders(
+        <PageHeader
+          title="Team"
+          description="d"
+          breadcrumb={{ label: "Settings", to: "/settings" }}
+        />
+      );
+      // A trail whose first half is the button beside it costs a row on the
+      // screen with the fewest to spare (§5).
+      expect(
+        screen.queryByRole("navigation", { name: "Breadcrumb" })
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute(
+        "href",
+        "/settings"
       );
     });
 

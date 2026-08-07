@@ -51,8 +51,13 @@ function renderLayout(initial = "/") {
           <Route path="campaigns/lists/smart" element={<div>Smart page</div>} />
           <Route path="settings" element={<div>Settings page</div>} />
           <Route
-            path="smtp-connections"
+            path="settings/sending"
             element={<div>Sending accounts page</div>}
+          />
+          {/* The one settings destination that kept a top-level path. */}
+          <Route
+            path="queue-operations"
+            element={<div>Background jobs page</div>}
           />
         </Route>
       </Routes>
@@ -132,15 +137,25 @@ describe("DashboardLayout", () => {
     });
 
     it("keeps Settings active while inside one of its hub destinations", () => {
-      renderLayout("/smtp-connections");
+      renderLayout("/settings/sending");
       expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
         "aria-current",
         "page"
       );
       // The hub's destinations are no longer sidebar entries of their own.
       expect(
-        screen.queryByRole("link", { name: "Sending accounts" })
+        screen.queryByRole("link", { name: "Sending" })
       ).not.toBeInTheDocument();
+    });
+
+    it("keeps Settings active on the one destination that kept its own path", () => {
+      // Background jobs never moved under /settings/*, so it is the only entry
+      // in the item's `activePaths` — and the only one that could go dark.
+      renderLayout("/queue-operations");
+      expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+        "aria-current",
+        "page"
+      );
     });
 
     it("merges smart lists into Lists rather than listing it separately", () => {

@@ -79,12 +79,12 @@ function setupItems(summary: DashboardSummary | null) {
     {
       label: "Sending account",
       ready: Boolean(summary?.setup.hasSmtpConnection),
-      href: "/smtp-connections"
+      href: "/settings/sending"
     },
     {
       label: "Default sender",
       ready: Boolean(summary?.setup.hasDefaultSmtp),
-      href: "/smtp-connections"
+      href: "/settings/sending"
     },
     {
       label: "Contacts",

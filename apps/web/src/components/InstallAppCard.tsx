@@ -70,26 +70,27 @@ export function InstallAppCard() {
   }
 
   return (
-    <div className="relative flex flex-col gap-3 rounded-xl border bg-primary/5 p-4 sm:flex-row sm:items-center">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <Smartphone className="h-5 w-5" />
-      </div>
+    <div className="relative flex flex-col gap-3 rounded-card border border-border bg-accent p-4 xs:flex-row xs:items-center">
+      <Smartphone
+        className="h-5 w-5 shrink-0 text-primary"
+        aria-hidden
+      />
       <div className="min-w-0 flex-1 pr-8">
-        <p className="text-sm font-semibold">Install QQueue</p>
+        <p className="text-body font-medium text-text">Install QQueue</p>
         {ios ? (
-          <p className="mt-0.5 text-sm text-muted-foreground">
+          <p className="mt-0.5 text-ui leading-5 text-text-secondary">
             Tap <Share className="inline h-3.5 w-3.5 align-text-bottom" /> Share,
-            then <strong>Add to Home Screen</strong>. On iPhone and iPad this is
-            also what unlocks notifications for new mail.
+            then <strong className="font-medium">Add to Home Screen</strong>. On
+            iPhone and iPad this is also what unlocks notifications for new mail.
           </p>
         ) : (
-          <p className="mt-0.5 text-sm text-muted-foreground">
+          <p className="mt-0.5 text-ui leading-5 text-text-secondary">
             Get a full-screen app with notifications for new mail.
           </p>
         )}
       </div>
       {promptEvent ? (
-        <Button onClick={install} className="shrink-0">
+        <Button variant="secondary" onClick={install} className="shrink-0">
           <Download className="h-4 w-4" />
           Install
         </Button>

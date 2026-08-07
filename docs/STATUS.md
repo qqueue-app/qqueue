@@ -75,7 +75,7 @@ learning a new vocabulary. What changed:
   gives sorting, search, column visibility, selection with bulk actions, and
   pagination — plus a card layout on phones, rendered as a real branch rather
   than a CSS-hidden duplicate. Adopted by Contacts, Lists, Smart lists,
-  Templates (list view), Campaigns, Drafts, Outbox, Blocked addresses, Sending
+  Templates (list view), Campaigns, Drafts, Outbox, Suppressions, Sending
   accounts, Background jobs, and Mailboxes.
 - **Mailboxes rebuilt** around three questions — what mailboxes exist, who can
   send as them, which domains each admin may use — with the access question

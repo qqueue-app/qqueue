@@ -141,6 +141,7 @@ export function Deliverability() {
       <PageHeader
         title="Sending health"
         description="How your email is landing over the last 30 days, plus auto-blocking and rate-limit controls."
+        breadcrumb={{ label: "Sending accounts", to: "/settings/sending" }}
       />
 
       <section className="space-y-6 p-6">

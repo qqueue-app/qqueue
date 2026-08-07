@@ -195,6 +195,16 @@ export default {
         // clear at the bottom on a phone.
         "tabbar-safe": "calc(var(--shell-tabbar-h) + var(--safe-bottom))"
       },
+      maxWidth: {
+        /*
+          §2's content-width table. `max-w-form` is the one every settings and
+          form page wears; `max-w-table` is the only one allowed to go wide.
+        */
+        form: "var(--content-form)",
+        read: "var(--content-read)",
+        grid: "var(--content-grid)",
+        table: "var(--content-table)"
+      },
       width: {
         /*
           Field widths are set by content type, not by container. These are the

@@ -72,18 +72,12 @@ const navSections: NavSection[] = [
         label: "Settings",
         icon: SettingsIcon,
         /*
-          Settings is a hub, but its destinations still answer on the top-level
-          routes they always did — moving them under /settings/* would break
-          every bookmark and every link in the docs. Naming them here is what
-          keeps the one Settings item lit while you are inside one of them.
+          Every settings destination now lives under /settings/*, so the default
+          prefix match lights this item for all of them. Background jobs is the
+          one exception — it kept its own top-level path — and has to be named
+          here or the sidebar goes dark while you are looking at it.
         */
-        activePaths: [
-          "/smtp-connections",
-          "/mailboxes",
-          "/deliverability",
-          "/suppressions",
-          "/queue-operations",
-        ],
+        activePaths: ["/queue-operations"],
       },
     ],
   },

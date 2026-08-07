@@ -248,6 +248,7 @@ export function QueueOperations() {
       <PageHeader
         title="Background jobs"
         description="What QQueue is working through behind the scenes. Come here when something looks stuck."
+        breadcrumb={{ label: "Settings", to: "/settings" }}
         actions={
           <Button
             type="button"

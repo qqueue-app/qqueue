@@ -60,7 +60,7 @@ The web app is the operator dashboard. Alongside login/register, password reset,
 and the public legal pages, it provides Compose (Email Studio), Drafts, Outbox,
 Inbox, Contacts, Lists, Smart lists (segments), Templates, Campaigns and
 campaign analytics, Sending accounts (SMTP connections), Sending health
-(deliverability), Blocked addresses (suppressions), Background jobs (queue
+(deliverability), Suppressions (blocked addresses), Background jobs (queue
 operations, OWNER/ADMIN only), and Organization settings (which also manages API
 keys and webhooks).
 

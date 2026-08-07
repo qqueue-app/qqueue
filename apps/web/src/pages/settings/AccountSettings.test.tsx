@@ -1,0 +1,130 @@
+import { renderWithProviders, screen, waitFor } from "../../test/render.js";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const sessionValue = vi.hoisted(() => ({
+  current: {
+    user: { id: "u1", email: "me@x.com" },
+    signOut: vi.fn(),
+  },
+}));
+vi.mock("../../lib/session-context.js", () => ({
+  useSession: () => sessionValue.current,
+}));
+
+const push = vi.hoisted(() => ({
+  current: {
+    status: "off" as string,
+    reason: null as string | null,
+    busy: false,
+    enable: vi.fn(),
+    disable: vi.fn(),
+  },
+}));
+vi.mock("../../lib/use-push-notifications.js", () => ({
+  usePushNotifications: () => push.current,
+}));
+
+// The install prompt is platform-detected and irrelevant to this page's own
+// behaviour; it has its own path through `beforeinstallprompt`.
+vi.mock("../../components/InstallAppCard.js", () => ({
+  InstallAppCard: () => null,
+}));
+
+import { AccountSettings } from "./AccountSettings.js";
+
+let originalLocation: Location;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  sessionValue.current.signOut = vi.fn();
+  push.current = {
+    status: "off",
+    reason: null,
+    busy: false,
+    enable: vi.fn(),
+    disable: vi.fn(),
+  };
+  originalLocation = window.location;
+});
+
+afterEach(() => {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: originalLocation,
+  });
+});
+
+describe("AccountSettings", () => {
+  it("shows who is signed in", () => {
+    renderWithProviders(<AccountSettings />);
+    expect(screen.getByText("me@x.com")).toBeInTheDocument();
+    expect(screen.getByText("API base URL")).toBeInTheDocument();
+  });
+
+  it("signs out and redirects", async () => {
+    const hrefSetter = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        origin: "http://localhost",
+        set href(value: string) {
+          hrefSetter(value);
+        },
+      },
+    });
+
+    renderWithProviders(<AccountSettings />);
+    await userEvent.click(screen.getByRole("button", { name: /Sign out/i }));
+
+    expect(sessionValue.current.signOut).toHaveBeenCalled();
+    expect(hrefSetter).toHaveBeenCalledWith("/login");
+  });
+
+  it("turns device notifications on from the settings row", async () => {
+    renderWithProviders(<AccountSettings />);
+
+    await userEvent.click(
+      screen.getByRole("switch", { name: "New mail alerts on this device" })
+    );
+    await waitFor(() => expect(push.current.enable).toHaveBeenCalled());
+  });
+
+  it("turns device notifications off again", async () => {
+    push.current = { ...push.current, status: "on" };
+    renderWithProviders(<AccountSettings />);
+
+    const toggle = screen.getByRole("switch", {
+      name: "New mail alerts on this device",
+    });
+    expect(toggle).toBeChecked();
+    await userEvent.click(toggle);
+    await waitFor(() => expect(push.current.disable).toHaveBeenCalled());
+  });
+
+  it("explains itself instead of offering a dead toggle when push is blocked", () => {
+    push.current = {
+      ...push.current,
+      status: "blocked",
+      reason: "Notifications are blocked for this site.",
+    };
+    renderWithProviders(<AccountSettings />);
+
+    expect(
+      screen.queryByRole("switch", { name: "New mail alerts on this device" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText("Notifications are blocked for this site.")
+    ).toBeInTheDocument();
+  });
+
+  it("shows nothing at all while the push state is still loading", () => {
+    push.current = { ...push.current, status: "loading" };
+    renderWithProviders(<AccountSettings />);
+
+    expect(
+      screen.queryByText("New mail alerts on this device")
+    ).not.toBeInTheDocument();
+  });
+});

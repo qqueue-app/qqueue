@@ -36,7 +36,7 @@ export function GetStartedCard({
       description:
         "Link a mailbox so QQueue can send on your behalf — works with Mailcow or any SMTP server.",
       done: Boolean(summary?.setup.hasSmtpConnection),
-      cta: { label: "Connect", to: "/smtp-connections" }
+      cta: { label: "Connect", to: "/settings/sending" }
     },
     {
       title: "Send your first email",

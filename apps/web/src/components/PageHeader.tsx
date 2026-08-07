@@ -43,6 +43,13 @@ interface PageHeaderProps {
   menuActions?: PageHeaderAction[];
   /** Where the mobile back chevron goes. Also renders a desktop back link. */
   backTo?: string;
+  /**
+   * The parent this page hangs off, rendered as a "Settings / Team" trail above
+   * the title on desktop (§4). On a phone it collapses to the back chevron —
+   * a trail whose first half is the button next to it is one row of noise on
+   * the screen with the least of it to spare.
+   */
+  breadcrumb?: { label: string; to: string };
 }
 
 /**
@@ -67,17 +74,21 @@ export function PageHeader({
   actions,
   menuActions,
   backTo,
+  breadcrumb,
 }: PageHeaderProps) {
   const isMobile = useIsMobile();
   const items = menuActions ?? [];
+  // A breadcrumb already names somewhere to go back to, so a page that has one
+  // never needs to repeat itself with `backTo`.
+  const backTarget = backTo ?? breadcrumb?.to;
 
   if (isMobile) {
     return (
       <header className="border-b border-border bg-surface">
         <div className="flex min-h-header-row items-center gap-1 px-2">
-          {backTo ? (
+          {backTarget ? (
             <IconButton label="Back" asChild hideTooltip>
-              <Link to={backTo}>
+              <Link to={backTarget}>
                 <ChevronLeft />
               </Link>
             </IconButton>
@@ -85,7 +96,7 @@ export function PageHeader({
           <h1
             className={cn(
               "min-w-0 flex-1 truncate text-section font-semibold text-text",
-              backTo ? "px-0" : "px-2"
+              backTarget ? "px-0" : "px-2"
             )}
           >
             {title}
@@ -110,7 +121,22 @@ export function PageHeader({
   return (
     <div className="flex flex-col gap-4 border-b border-border px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
-        {backTo ? (
+        {breadcrumb ? (
+          <nav aria-label="Breadcrumb" className="mb-1">
+            <ol className="flex items-center gap-1.5 text-ui text-text-tertiary">
+              <li>
+                <Link
+                  to={breadcrumb.to}
+                  className="-ml-1 rounded-control px-1 font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text"
+                >
+                  {breadcrumb.label}
+                </Link>
+              </li>
+              <li aria-hidden>/</li>
+              <li aria-current="page">{title}</li>
+            </ol>
+          </nav>
+        ) : backTo ? (
           <Link
             to={backTo}
             className="mb-1 -ml-1 inline-flex items-center gap-1 rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text"

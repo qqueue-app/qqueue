@@ -51,5 +51,13 @@ export const fieldBase = cn(
   "aria-[invalid=true]:border-err aria-[invalid=true]:hover:border-err"
 );
 
-/** Height for single-line controls — the same 36px as a button. */
-export const fieldControlHeight = "h-control";
+/**
+ * Height for single-line controls.
+ *
+ * 44px on a phone, 36px from the tablet breakpoint up. Buttons can keep their
+ * 36px look and grow an invisible 44px hit area with a pseudo-element, but an
+ * `<input>` is a void element — `::after` never renders on one — so the only
+ * way a field can meet §5's touch minimum is to actually be that tall. The
+ * density that matters is on the desktop, where it is unchanged.
+ */
+export const fieldControlHeight = "h-touch sm:h-control";

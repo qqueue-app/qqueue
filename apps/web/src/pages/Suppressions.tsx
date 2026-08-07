@@ -179,8 +179,9 @@ export function Suppressions() {
   return (
     <>
       <PageHeader
-        title="Blocked addresses"
+        title="Suppressions"
         description="Addresses QQueue will never email, across every send. Bounces, spam reports, and unsubscribes land here on their own."
+        breadcrumb={{ label: "Settings", to: "/settings" }}
         actions={
           <Button
             onClick={() => {
@@ -197,7 +198,7 @@ export function Suppressions() {
 
       <section className="p-4 sm:p-6">
         <DataGrid
-          label="Blocked addresses"
+          label="Suppressions"
           data={suppressionsQuery.data ?? []}
           columns={columns}
           getRowId={(row) => row.id}
