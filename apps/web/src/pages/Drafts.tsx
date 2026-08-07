@@ -74,7 +74,7 @@ export function Drafts() {
         header: "To",
         meta: { title: "To", hideBelowMd: true },
         cell: ({ row }) => (
-          <span className="block max-w-sm truncate text-muted-foreground">
+          <span className="block max-w-sm truncate text-text-secondary">
             {describeRecipients(row.original)}
           </span>
         ),
@@ -85,7 +85,7 @@ export function Drafts() {
         meta: { title: "Last edited" },
         cell: ({ getValue }) => (
           <Hint label={formatFullDate(String(getValue()))}>
-            <span className="cursor-help text-muted-foreground">
+            <span className="cursor-help text-text-secondary">
               {formatMailDate(String(getValue()))}
             </span>
           </Hint>
@@ -134,7 +134,7 @@ export function Drafts() {
         }
       />
 
-      <section className="p-4 sm:p-6">
+      <section className="max-w-table p-4 sm:p-6">
         <DataGrid
           label="Drafts"
           data={draftsQuery.data ?? []}
@@ -142,6 +142,9 @@ export function Drafts() {
           getRowId={(row) => row.id}
           loading={draftsQuery.isPending}
           onRowClick={openDraft}
+          getRowLabel={(draft) =>
+            `Open ${draft.subject || "the untitled draft"}`
+          }
           searchPlaceholder="Search drafts…"
           empty={
             <EmptyState
@@ -149,7 +152,11 @@ export function Drafts() {
               title="No drafts yet"
               description="Anything you start writing in the composer is saved here automatically."
               action={
-                <Button type="button" onClick={() => navigate("/email-studio")}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => navigate("/email-studio")}
+                >
                   <PenSquare className="h-4 w-4" />
                   Write an email
                 </Button>
@@ -164,30 +171,31 @@ export function Drafts() {
             />
           }
           renderMobileRow={(draft) => (
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate font-medium">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-text">
                   {draft.subject || "(no subject)"}
-                </div>
-                <div className="truncate text-sm text-muted-foreground">
-                  {describeRecipients(draft)}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Edited {formatMailDate(draft.updatedAt)}
-                </div>
+                </span>
+                <RowActions
+                  className="-my-1 -mr-1"
+                  rowLabel={draft.subject || "this draft"}
+                  actions={[
+                    {
+                      label: "Delete draft",
+                      icon: Trash2,
+                      primary: true,
+                      destructive: true,
+                      onSelect: () => setDeleteTarget(draft),
+                    },
+                  ]}
+                />
               </div>
-              <RowActions
-                rowLabel={draft.subject || "this draft"}
-                actions={[
-                  {
-                    label: "Delete draft",
-                    icon: Trash2,
-                    primary: true,
-                    destructive: true,
-                    onSelect: () => setDeleteTarget(draft),
-                  },
-                ]}
-              />
+              <p className="truncate text-ui text-text-secondary">
+                {describeRecipients(draft)}
+              </p>
+              <p className="text-right text-meta text-text-tertiary" data-numeric>
+                Edited {formatMailDate(draft.updatedAt)}
+              </p>
             </div>
           )}
         />

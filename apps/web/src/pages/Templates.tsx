@@ -58,7 +58,7 @@ function TemplateThumbnail({ template }: { template: Template }) {
     hr{border:none;border-top:1px solid #e4e7eb;margin:14px 0}
   </style></head><body>${body}</body></html>`;
   return (
-    <div className="pointer-events-none h-40 overflow-hidden rounded-t-lg border-b bg-white">
+    <div className="pointer-events-none h-40 overflow-hidden rounded-t-card border-b border-border bg-white">
       <iframe
         title={`${template.name} preview`}
         sandbox=""
@@ -95,13 +95,13 @@ function StarterGallery({
               key={starter.key}
               type="button"
               onClick={() => onPick(starter.key)}
-              className="rounded-lg border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent"
+              className="rounded-card border border-border bg-surface p-4 text-left shadow-card transition-colors duration-fast ease-out hover:border-border-strong hover:bg-surface-sunken"
             >
               <div className="flex items-center justify-between gap-2">
-                <h3 className="font-semibold">{starter.name}</h3>
+                <h3 className="text-body font-semibold text-text">{starter.name}</h3>
                 <Badge variant="secondary">{starter.category}</Badge>
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 text-ui text-text-secondary">
                 {starter.description}
               </p>
             </button>
@@ -221,7 +221,7 @@ export function Templates() {
         cell: ({ row }) => (
           <div className="min-w-0">
             <div className="truncate font-medium">{row.original.name}</div>
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="truncate text-meta text-text-tertiary">
               {row.original.description || row.original.subject}
             </div>
           </div>
@@ -232,7 +232,7 @@ export function Templates() {
         header: "Subject line",
         meta: { title: "Subject line", hideBelowLg: true },
         cell: ({ getValue }) => (
-          <span className="block max-w-xs truncate text-muted-foreground">
+          <span className="block max-w-xs truncate text-text-secondary">
             {String(getValue())}
           </span>
         ),
@@ -246,7 +246,7 @@ export function Templates() {
           return value ? (
             <Badge variant="secondary">{value}</Badge>
           ) : (
-            <span className="text-muted-foreground">—</span>
+            <span className="text-text-tertiary">—</span>
           );
         },
       },
@@ -256,7 +256,7 @@ export function Templates() {
         meta: { title: "Updated", hideBelowMd: true },
         cell: ({ getValue }) => (
           <Hint label={formatFullDate(String(getValue()))}>
-            <span className="cursor-help text-muted-foreground">
+            <span className="cursor-help text-text-secondary" data-numeric>
               {formatMailDate(String(getValue()))}
             </span>
           </Hint>
@@ -315,18 +315,18 @@ export function Templates() {
         }
       />
 
-      <section className="space-y-4 p-4 sm:p-6">
+      <section className="max-w-table space-y-4 p-4 sm:p-6">
         {!loading && templates.length > 0 ? (
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
             {view === "gallery" ? (
-              <div className="relative w-full lg:max-w-xs">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <div className="relative w-full xs:w-field-search">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search templates…"
                   aria-label="Search templates"
-                  className="pl-8"
+                  className="pl-9"
                 />
               </div>
             ) : null}
@@ -335,8 +335,9 @@ export function Templates() {
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
+                  aria-pressed={activeCategory === null}
                   onClick={() => setActiveCategory(null)}
-                  className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex min-h-touch items-center rounded-pill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
                 >
                   <Badge variant={activeCategory ? "outline" : "default"}>
                     All
@@ -346,8 +347,9 @@ export function Templates() {
                   <button
                     key={category}
                     type="button"
+                    aria-pressed={activeCategory === category}
                     onClick={() => setActiveCategory(category)}
-                    className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex min-h-touch items-center rounded-pill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
                   >
                     <Badge
                       variant={
@@ -361,7 +363,7 @@ export function Templates() {
               </div>
             ) : null}
 
-            <div className="flex items-center gap-0.5 rounded-lg border p-0.5 lg:ml-auto">
+            <div className="flex items-center gap-0.5 rounded-control border border-border p-0.5 lg:ml-auto">
               <IconButton
                 label="Show thumbnails"
                 size="sm"
@@ -395,23 +397,21 @@ export function Templates() {
             ))}
           </div>
         ) : templates.length === 0 ? (
-          <Card>
-            <EmptyState
-              icon={FileText}
-              title="No templates yet"
-              description="Design one once, then send it as often as you like."
-              action={
-                <Button
-                  onClick={() => setGalleryOpen(true)}
-                  disabled={!organizationId}
-                  variant="outline"
-                >
-                  <Plus className="h-4 w-4" />
-                  New template
-                </Button>
-              }
-            />
-          </Card>
+          <EmptyState
+            icon={FileText}
+            title="No templates yet"
+            description="Design one once, then send it as often as you like."
+            action={
+              <Button
+                onClick={() => setGalleryOpen(true)}
+                disabled={!organizationId}
+                variant="secondary"
+              >
+                <Plus className="h-4 w-4" />
+                New template
+              </Button>
+            }
+          />
         ) : view === "list" ? (
           <DataGrid
             label="Templates"
@@ -421,6 +421,7 @@ export function Templates() {
             onRowClick={(template) =>
               navigate(`/templates/${template.id}/edit`)
             }
+            getRowLabel={(template) => `Edit ${template.name}`}
             searchPlaceholder="Search templates…"
             empty={
               <EmptyState
@@ -429,37 +430,79 @@ export function Templates() {
                 description="Pick a different category, or choose All."
               />
             }
+            noResults={
+              <EmptyState
+                icon={Search}
+                title="No matching templates"
+                description="Try a different search."
+              />
+            }
+            /*
+              Duplicate and delete live behind hover on the desktop card, so on
+              a phone they need a tap path of their own (§5) — the row itself
+              only opens the editor.
+            */
             renderMobileRow={(template) => (
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{template.name}</div>
-                  <div className="truncate text-sm text-muted-foreground">
-                    {template.description || template.subject}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Updated {formatMailDate(template.updatedAt)}
-                  </div>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="min-w-0 flex-1 truncate text-body font-medium text-text">
+                    {template.name}
+                  </span>
+                  <RowActions
+                    className="-my-1 -mr-1"
+                    rowLabel={template.name}
+                    actions={[
+                      {
+                        label: "Make a copy",
+                        icon: Copy,
+                        disabled: duplicate.isPending,
+                        onSelect: () => duplicate.mutate(template),
+                      },
+                      {
+                        label: "Delete template",
+                        icon: Trash2,
+                        destructive: true,
+                        onSelect: () => setDeleteTarget(template),
+                      },
+                    ]}
+                  />
                 </div>
-                {template.category ? (
-                  <Badge variant="secondary">{template.category}</Badge>
-                ) : null}
+                <p className="truncate text-ui text-text-secondary">
+                  {template.description || template.subject}
+                </p>
+                <div className="flex items-center justify-between gap-2">
+                  {template.category ? (
+                    <Badge variant="secondary">{template.category}</Badge>
+                  ) : (
+                    <span />
+                  )}
+                  <span className="text-meta text-text-tertiary" data-numeric>
+                    Updated {formatMailDate(template.updatedAt)}
+                  </span>
+                </div>
               </div>
             )}
           />
         ) : galleryFiltered.length === 0 ? (
-          <Card>
-            <EmptyState
-              icon={Search}
-              title="No matches"
-              description="No templates match your search or filter."
-            />
-          </Card>
+          <EmptyState
+            icon={Search}
+            title="No matches"
+            description="No templates match your search or filter."
+          />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {galleryFiltered.map((template) => (
+              /*
+                A grid row is as tall as its tallest card, so a card whose
+                neighbour carries an extra tag row used to leave its "Updated ·
+                actions" line stranded in the middle with dead space beneath.
+                The column stretches and the meta row is pushed to the bottom
+                (`mt-auto`), so that line sits on the same baseline across a row
+                whatever each card holds above it.
+              */
               <Card
                 key={template.id}
-                className="group overflow-hidden transition-shadow hover:shadow-md"
+                className="group flex flex-col overflow-hidden transition-colors duration-fast ease-out hover:border-border-strong"
               >
                 <button
                   type="button"
@@ -469,13 +512,13 @@ export function Templates() {
                 >
                   <TemplateThumbnail template={template} />
                 </button>
-                <CardContent className="p-4">
+                <CardContent className="flex flex-1 flex-col p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h2 className="truncate font-semibold">
+                      <h2 className="truncate text-body font-semibold text-text">
                         {template.name}
                       </h2>
-                      <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                      <p className="mt-0.5 truncate text-ui text-text-secondary">
                         {template.description || template.subject}
                       </p>
                     </div>
@@ -489,16 +532,16 @@ export function Templates() {
                   {template.tags && template.tags.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {template.tags.slice(0, 4).map((tag) => (
-                        <Badge key={tag} variant="outline" className="text-xs">
+                        <Badge key={tag} variant="outline" className="font-normal">
                           {tag}
                         </Badge>
                       ))}
                     </div>
                   ) : null}
 
-                  <div className="mt-3 flex items-center justify-between">
+                  <div className="mt-auto flex items-center justify-between pt-3">
                     <Hint label={formatFullDate(template.updatedAt)}>
-                      <span className="cursor-help text-xs text-muted-foreground">
+                      <span className="cursor-help text-meta text-text-tertiary" data-numeric>
                         Updated {formatMailDate(template.updatedAt)}
                       </span>
                     </Hint>

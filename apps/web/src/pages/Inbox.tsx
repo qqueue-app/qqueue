@@ -397,15 +397,22 @@ export function Inbox() {
       {/* ---------------------------------------------------------------- list */}
       <div
         className={cn(
-          "flex min-h-0 min-w-0 flex-col border-r md:flex md:w-[22rem] md:shrink-0 lg:w-[24rem]",
-          mobileShowDetail ? "hidden" : "flex flex-1"
+          "flex min-h-0 min-w-0 flex-col md:flex md:w-[22rem] md:shrink-0 md:border-r md:border-border lg:w-[24rem]",
+          /*
+            `md:flex-none` matters: on a phone the list is the only pane, so it
+            takes `flex-1` to fill the screen — but `flex: 1 1 0%` sets a
+            flex-basis of 0, which beats the `width` beside it at every
+            breakpoint. Without this the rail ignored its own 22/24rem and grew
+            to half the viewport, and the reader shrank to match.
+          */
+          mobileShowDetail ? "hidden" : "flex flex-1 md:flex-none"
         )}
       >
-        <header className="sticky top-sticky-top z-10 shrink-0 border-b bg-surface px-4 pb-3 pt-4">
+        <header className="sticky top-sticky-top z-10 shrink-0 border-b border-border bg-surface px-4 pb-3 pt-4">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <h1 className="text-lg font-semibold tracking-tight">Inbox</h1>
-              <p className="text-xs text-muted-foreground">
+              <h1 className="text-section font-semibold text-text">Inbox</h1>
+              <p className="text-meta text-text-tertiary" data-numeric>
                 {unreadCount > 0
                   ? `${unreadCount} unread of ${filteredMessages.length}`
                   : `${filteredMessages.length} message${filteredMessages.length === 1 ? "" : "s"}`}
@@ -449,21 +456,28 @@ export function Inbox() {
               placeholder="Search mail"
               aria-label="Search mail"
               type="search"
+              width="search"
             />
           </form>
 
-          <div className="mt-3 flex items-center gap-2">
-            <div className="flex flex-1 rounded-lg border bg-muted/40 p-0.5">
+          {/*
+            Filters stack rather than share a row: the list rail is ~320px of
+            usable width, and a segmented control squeezed next to a mailbox
+            picker put both below the 44px touch minimum (§5).
+          */}
+          <div className="mt-3 flex flex-col gap-2">
+            <div className="flex rounded-control border border-border bg-surface-sunken p-0.5">
               {(["all", "unread", "read"] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => setReadFilter(value)}
+                  aria-pressed={readFilter === value}
                   className={cn(
-                    "flex-1 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors",
+                    "min-h-touch flex-1 rounded-control px-2 text-ui font-medium capitalize transition-colors duration-fast ease-out sm:min-h-0 sm:py-1.5",
                     readFilter === value
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "bg-surface text-text shadow-card"
+                      : "text-text-secondary hover:text-text"
                   )}
                 >
                   {value}
@@ -473,10 +487,7 @@ export function Inbox() {
 
             {accounts.length > 1 ? (
               <Select value={accountFilter} onValueChange={setAccountFilter}>
-                <SelectTrigger
-                  className="h-8 w-36 text-xs"
-                  aria-label="Filter by mailbox"
-                >
+                <SelectTrigger aria-label="Filter by mailbox">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -492,8 +503,8 @@ export function Inbox() {
           </div>
 
           {selectedAccount ? (
-            <div className="mt-2 flex items-center gap-2 text-[0.7rem] text-muted-foreground">
-              <Badge variant="outline" className="text-[0.65rem]">
+            <div className="mt-2 flex items-center gap-2 text-meta text-text-tertiary">
+              <Badge variant="outline" className="text-meta">
                 {selectedAccount.status}
               </Badge>
               <span className="truncate">
@@ -523,7 +534,10 @@ export function Inbox() {
               title="No mailbox connected"
               description="Connect a mailbox and replies to your emails will show up here."
               action={
-                <Button onClick={() => setConnectOpen(true)}>
+                <Button
+                  variant="secondary"
+                  onClick={() => setConnectOpen(true)}
+                >
                   <MailPlus className="h-4 w-4" />
                   Connect a mailbox
                 </Button>
@@ -542,7 +556,7 @@ export function Inbox() {
               }
             />
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-border">
               {threads.map((thread) => {
                 const selected = thread.threadKey === selectedThreadKey;
                 const unread = thread.unreadCount > 0;
@@ -553,10 +567,8 @@ export function Inbox() {
                       onClick={() => openThread(thread)}
                       aria-current={selected ? "true" : undefined}
                       className={cn(
-                        "flex w-full gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                        selected
-                          ? "bg-primary/10"
-                          : "hover:bg-accent/50"
+                        "flex min-h-touch w-full gap-3 px-4 py-3 text-left transition-colors duration-fast ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                        selected ? "bg-accent" : "hover:bg-surface-sunken"
                       )}
                     >
                       <Avatar name={thread.senderName} size="md" />
@@ -564,10 +576,10 @@ export function Inbox() {
                         <div className="flex items-baseline justify-between gap-2">
                           <span
                             className={cn(
-                              "truncate text-sm",
+                              "truncate text-ui",
                               unread
-                                ? "font-semibold text-foreground"
-                                : "text-muted-foreground"
+                                ? "font-semibold text-text"
+                                : "text-text-secondary"
                             )}
                           >
                             {thread.senderName}
@@ -577,38 +589,41 @@ export function Inbox() {
                               thread.latestMessage.receivedAt
                             )}
                           >
-                            <span className="shrink-0 cursor-help text-[0.7rem] text-muted-foreground">
+                            <span
+                              className="shrink-0 cursor-help text-meta text-text-tertiary"
+                              data-numeric
+                            >
                               {formatMailDate(thread.latestMessage.receivedAt)}
                             </span>
                           </Hint>
                         </div>
                         <div
                           className={cn(
-                            "mt-0.5 truncate text-sm",
-                            unread ? "font-semibold" : "text-foreground/80"
+                            "mt-0.5 truncate text-ui",
+                            unread ? "font-semibold text-text" : "text-text"
                           )}
                         >
                           {thread.subject}
                         </div>
-                        <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                        <p className="mt-0.5 line-clamp-1 text-meta text-text-tertiary">
                           {snippet(thread.latestMessage)}
                         </p>
                         <div className="mt-1.5 flex items-center gap-1.5">
                           {unread ? (
                             <span
-                              className="h-1.5 w-1.5 rounded-full bg-primary"
+                              className="h-1.5 w-1.5 rounded-pill bg-primary"
                               aria-label="Unread"
                             />
                           ) : null}
                           {thread.messages.length > 1 ? (
-                            <span className="text-[0.65rem] text-muted-foreground">
+                            <span className="text-meta text-text-tertiary">
                               {thread.messages.length} messages
                             </span>
                           ) : null}
                           {thread.latestMessage.attachments?.some(
                             (file) => !file.isInline
                           ) ? (
-                            <Paperclip className="h-3 w-3 text-muted-foreground" />
+                            <Paperclip className="h-3 w-3 text-text-tertiary" />
                           ) : null}
                         </div>
                       </div>
@@ -630,11 +645,11 @@ export function Inbox() {
       >
         {selectedThread ? (
           <>
-            <header className="sticky top-sticky-top z-10 shrink-0 border-b bg-surface px-4 py-3 sm:px-6">
+            <header className="sticky top-sticky-top z-10 shrink-0 border-b border-border bg-surface px-4 py-3 sm:px-6">
               <button
                 type="button"
                 onClick={() => setMobileShowDetail(false)}
-                className="mb-2 -ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground md:hidden"
+                className="mb-2 -ml-1 inline-flex min-h-touch items-center gap-1.5 rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text md:hidden"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Inbox
@@ -642,10 +657,10 @@ export function Inbox() {
 
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="truncate text-lg font-semibold tracking-tight">
+                  <h2 className="truncate text-section font-semibold text-text">
                     {selectedThread.subject}
                   </h2>
-                  <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                  <p className="mt-0.5 truncate text-ui text-text-secondary">
                     {selectedThread.senderName} · {selectedThread.senderEmail}
                   </p>
                 </div>
@@ -680,16 +695,16 @@ export function Inbox() {
               {selectedThread.messages.map((message) => (
                 <article
                   key={message.id}
-                  className="rounded-2xl border bg-card p-4 shadow-sm"
+                  className="rounded-card border border-border bg-surface p-4 shadow-card"
                 >
                   <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2.5">
                       <Avatar name={senderName(message)} size="sm" />
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">
+                        <div className="truncate text-ui font-semibold text-text">
                           {senderLabel(message)}
                         </div>
-                        <div className="text-xs text-muted-foreground">
+                        <div className="text-meta text-text-tertiary" data-numeric>
                           {formatFullDate(message.receivedAt)}
                         </div>
                       </div>
@@ -726,7 +741,7 @@ export function Inbox() {
                       title={`Message from ${senderLabel(message)}`}
                     />
                   ) : (
-                    <div className="whitespace-pre-wrap text-sm leading-6">
+                    <div className="whitespace-pre-wrap text-body leading-6 text-text">
                       {message.text || "This message has no body."}
                     </div>
                   )}
@@ -738,8 +753,8 @@ export function Inbox() {
                   */}
                   {(message.attachments ?? []).filter((file) => !file.isInline)
                     .length > 0 ? (
-                    <div className="mt-4 border-t pt-3">
-                      <div className="mb-2 text-xs font-medium text-muted-foreground">
+                    <div className="mt-4 border-t border-border pt-3">
+                      <div className="mb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
                         Attachments
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -772,7 +787,7 @@ export function Inbox() {
                                 <span className="max-w-[220px] truncate">
                                   {file.filename}
                                 </span>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-meta text-text-tertiary" data-numeric>
                                   {formatBytes(file.size)}
                                 </span>
                               </Button>
@@ -786,7 +801,7 @@ export function Inbox() {
             </div>
 
             <form
-              className="shrink-0 border-t bg-card p-4 sm:px-6"
+              className="shrink-0 border-t border-border bg-surface p-4 sm:px-6"
               onSubmit={submitReply}
             >
               <Textarea
@@ -799,7 +814,7 @@ export function Inbox() {
                 aria-label={`Reply to ${selectedThread.senderName}`}
               />
               <div className="mt-2 flex items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-meta text-text-tertiary">
                   Sends from the mailbox this arrived in.
                 </p>
                 <Button
@@ -813,13 +828,11 @@ export function Inbox() {
             </form>
           </>
         ) : (
-          <div className="flex min-h-[50vh] items-center justify-center">
-            <EmptyState
-              icon={MailOpen}
-              title="Nothing selected"
-              description="Pick a conversation on the left to read it."
-            />
-          </div>
+          <EmptyState
+            icon={MailOpen}
+            title="Nothing selected"
+            description="Pick a conversation on the left to read it."
+          />
         )}
       </div>
 

@@ -112,7 +112,7 @@ export function Outbox() {
                 {ORIGIN_LABEL[row.original.origin]}
               </Badge>
               {row.original.campaignName ? (
-                <span className="truncate text-xs text-muted-foreground">
+                <span className="truncate text-meta text-text-tertiary">
                   {row.original.campaignName}
                 </span>
               ) : null}
@@ -144,12 +144,12 @@ export function Outbox() {
               <div className="truncate">
                 {sendingAccountLabel(row.original)}
               </div>
-              <div className="truncate text-xs text-muted-foreground">
+              <div className="truncate text-meta text-text-tertiary">
                 {row.original.sendingAccount.name}
               </div>
             </div>
           ) : (
-            <span className="text-muted-foreground">Account removed</span>
+            <span className="text-text-tertiary">Account removed</span>
           ),
       },
       {
@@ -187,7 +187,7 @@ export function Outbox() {
             />
           ) : (
             <Hint label="This email has already been handed to the mail server, so it can't be pulled back.">
-              <span className="cursor-help text-xs text-muted-foreground">
+              <span className="cursor-help text-meta text-text-tertiary">
                 Too late
               </span>
             </Hint>
@@ -217,7 +217,7 @@ export function Outbox() {
         }
       />
 
-      <section className="p-4 sm:p-6">
+      <section className="max-w-table p-4 sm:p-6">
         <DataGrid
           label="Outbox"
           data={outboxQuery.data ?? []}
@@ -240,37 +240,42 @@ export function Outbox() {
             />
           }
           renderMobileRow={(email) => (
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate font-medium">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-text">
                   {email.subject || "(no subject)"}
-                </div>
-                <div className="truncate text-sm text-muted-foreground">
-                  {describeRecipients(email)}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="secondary" className="font-normal">
-                    {ORIGIN_LABEL[email.origin]}
+                </span>
+                {CANCELLABLE.has(email.status) ? (
+                  <RowActions
+                    className="-my-1 -mr-1"
+                    rowLabel={email.subject || "this email"}
+                    actions={[
+                      {
+                        label: "Cancel this email",
+                        icon: X,
+                        primary: true,
+                        destructive: true,
+                        onSelect: () => setCancelTarget(email),
+                      },
+                    ]}
+                  />
+                ) : (
+                  <Badge variant="secondary" className="shrink-0 font-normal">
+                    Sending
                   </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {whenLabel(email)}
-                  </span>
-                </div>
+                )}
               </div>
-              {CANCELLABLE.has(email.status) ? (
-                <RowActions
-                  rowLabel={email.subject || "this email"}
-                  actions={[
-                    {
-                      label: "Cancel this email",
-                      icon: X,
-                      primary: true,
-                      destructive: true,
-                      onSelect: () => setCancelTarget(email),
-                    },
-                  ]}
-                />
-              ) : null}
+              <p className="truncate text-ui text-text-secondary">
+                {describeRecipients(email)}
+              </p>
+              <div className="flex items-center justify-between gap-2">
+                <Badge variant="secondary" className="font-normal">
+                  {ORIGIN_LABEL[email.origin]}
+                </Badge>
+                <span className="text-meta text-text-tertiary" data-numeric>
+                  {whenLabel(email)}
+                </span>
+              </div>
             </div>
           )}
         />

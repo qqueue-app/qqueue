@@ -222,11 +222,11 @@ export function Campaigns() {
         cell: ({ row }) => (
           <div className="min-w-0">
             <div className="truncate font-medium">{row.original.name}</div>
-            <div className="truncate text-sm text-muted-foreground">
+            <div className="truncate text-ui text-text-secondary">
               {row.original.template?.subject ?? "No template"}
             </div>
             {row.original.cronExpression ? (
-              <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <div className="mt-1 flex items-center gap-1.5 text-meta text-text-tertiary">
                 <Repeat className="h-3 w-3 shrink-0" />
                 <span className="truncate">
                   {describeCron(row.original.cronExpression) ??
@@ -246,7 +246,7 @@ export function Campaigns() {
         header: "Audience",
         meta: { title: "Audience", hideBelowMd: true },
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {row.original.contactList?.name ?? "No list"}
           </span>
         ),
@@ -536,7 +536,7 @@ export function Campaigns() {
 
       <CampaignsTabs />
 
-      <section className="p-4 sm:p-6">
+      <section className="max-w-table p-4 sm:p-6">
         <DataGrid
           label="Campaigns"
           data={filteredCampaigns}
@@ -561,7 +561,10 @@ export function Campaigns() {
                     onClick={() => setStatusFilter(filter.value)}
                   >
                     {filter.label}
-                    <span className="ml-1 text-xs text-muted-foreground">
+                    <span
+                      className="ml-1 text-meta text-text-tertiary"
+                      data-numeric
+                    >
                       {count}
                     </span>
                   </Button>
@@ -592,25 +595,31 @@ export function Campaigns() {
             />
           }
           renderMobileRow={(campaign) => (
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate font-medium">{campaign.name}</div>
-                <div className="truncate text-sm text-muted-foreground">
-                  {campaign.template?.subject ?? "No template"}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant={statusVariant(campaign.status)}>
-                    {campaign.status}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {campaign.contactList?.name ?? "No list"}
-                  </span>
-                </div>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-text">
+                  {campaign.name}
+                </span>
+                <Badge
+                  variant={statusVariant(campaign.status)}
+                  className="shrink-0"
+                >
+                  {campaign.status}
+                </Badge>
               </div>
-              <RowActions
-                rowLabel={campaign.name}
-                actions={campaignActions(campaign)}
-              />
+              <p className="truncate text-ui text-text-secondary">
+                {campaign.template?.subject ?? "No template"}
+              </p>
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-meta text-text-tertiary">
+                  {campaign.contactList?.name ?? "No list"}
+                </span>
+                <RowActions
+                  className="-my-1 -mr-1"
+                  rowLabel={campaign.name}
+                  actions={campaignActions(campaign)}
+                />
+              </div>
             </div>
           )}
         />

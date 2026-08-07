@@ -22,8 +22,20 @@ import {
   DialogTitle
 } from "../components/ui/dialog.js";
 import { DataGrid } from "../components/ui/data-grid.js";
+import { IconButton } from "../components/ui/icon-button.js";
 import { RowActions } from "../components/ui/row-actions.js";
 import { Hint } from "../components/ui/tooltip.js";
+import { fieldBase, fieldControlHeight } from "../components/ui/field.js";
+import { cn } from "../lib/utils.js";
+
+/*
+  The rule builder's dropdowns are native <select>s — a native picker is the
+  right control on a phone, and Radix's Select would open a floating listbox
+  inside a dialog for no gain. They borrow the shared field vocabulary so they
+  match every other control: same border, same radius, same 44px-on-mobile
+  height (§5), same 16px text that keeps iOS from zooming the dialog.
+*/
+const selectClass = cn(fieldBase, fieldControlHeight, "pr-8");
 
 type ConditionField = "tags" | "status" | "emailDomain";
 
@@ -113,7 +125,7 @@ export function Segments() {
           <div className="min-w-0">
             <div className="truncate font-medium">{row.original.name}</div>
             {row.original.description ? (
-              <p className="truncate text-xs text-muted-foreground">
+              <p className="truncate text-meta text-text-tertiary">
                 {row.original.description}
               </p>
             ) : null}
@@ -127,7 +139,7 @@ export function Segments() {
         meta: { title: "Who's in it", hideBelowMd: true },
         cell: ({ getValue }) => (
           <Hint label="Members are worked out fresh every time a campaign sends to this list">
-            <span className="cursor-help text-muted-foreground">
+            <span className="cursor-help text-text-secondary">
               {String(getValue())}
             </span>
           </Hint>
@@ -138,7 +150,7 @@ export function Segments() {
         header: "Created",
         meta: { title: "Created", hideBelowLg: true },
         cell: ({ getValue }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {getValue() ? formatMailDate(String(getValue())) : "—"}
           </span>
         ),
@@ -289,7 +301,7 @@ export function Segments() {
 
       <ListsTabs />
 
-      <section className="p-4 sm:p-6">
+      <section className="max-w-table p-4 sm:p-6">
         <DataGrid
           label="Smart lists"
           data={segments}
@@ -302,6 +314,16 @@ export function Segments() {
               icon={Filter}
               title="No smart lists yet"
               description="A smart list fills itself: describe who belongs — by tag, status, or email domain — and QQueue works out the members every time you send."
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={openDialog}
+                  disabled={!organizationId}
+                >
+                  <Plus className="h-4 w-4" />
+                  New smart list
+                </Button>
+              }
             />
           }
           noResults={
@@ -312,25 +334,28 @@ export function Segments() {
             />
           }
           renderMobileRow={(segment) => (
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate font-medium">{segment.name}</div>
-                <p className="text-xs text-muted-foreground">
-                  {describeRules(segment)}
-                </p>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-text">
+                  {segment.name}
+                </span>
+                <RowActions
+                  className="-my-1 -mr-1"
+                  rowLabel={segment.name}
+                  actions={[
+                    {
+                      label: "Delete this smart list",
+                      icon: Trash2,
+                      primary: true,
+                      destructive: true,
+                      onSelect: () => setDeleteTarget(segment),
+                    },
+                  ]}
+                />
               </div>
-              <RowActions
-                rowLabel={segment.name}
-                actions={[
-                  {
-                    label: "Delete this smart list",
-                    icon: Trash2,
-                    primary: true,
-                    destructive: true,
-                    onSelect: () => setDeleteTarget(segment),
-                  },
-                ]}
-              />
+              <p className="truncate text-ui text-text-secondary">
+                {describeRules(segment)}
+              </p>
             </div>
           )}
         />
@@ -360,7 +385,7 @@ export function Segments() {
               <Label htmlFor="segment-combinator">Match</Label>
               <select
                 id="segment-combinator"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className={cn(selectClass, "w-full xs:w-field-name")}
                 value={combinator}
                 onChange={(e) => {
                   setCombinator(e.target.value as "AND" | "OR");
@@ -376,11 +401,11 @@ export function Segments() {
               {conditions.map((condition, index) => (
                 <div
                   key={index}
-                  className="flex flex-wrap items-center gap-2 rounded-md border p-3"
+                  className="flex flex-wrap items-end gap-2 rounded-card border border-border p-3"
                 >
                   <select
                     aria-label="Condition field"
-                    className="h-9 rounded-md border bg-background px-2 text-sm"
+                    className={cn(selectClass, "w-full xs:w-field-code")}
                     value={condition.field}
                     onChange={(e) =>
                       updateCondition(index, {
@@ -397,7 +422,7 @@ export function Segments() {
                     <>
                       <select
                         aria-label="Tag match"
-                        className="h-9 rounded-md border bg-background px-2 text-sm"
+                        className={cn(selectClass, "w-full xs:w-field-code")}
                         value={condition.match}
                         onChange={(e) =>
                           updateCondition(index, {
@@ -412,7 +437,7 @@ export function Segments() {
                       <Input
                         aria-label="Tag values"
                         placeholder="vip, newsletter"
-                        className="flex-1"
+                        width="name"
                         value={condition.values}
                         onChange={(e) =>
                           updateCondition(index, { values: e.target.value })
@@ -424,7 +449,7 @@ export function Segments() {
                   {condition.field === "status" && (
                     <select
                       aria-label="Status value"
-                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      className={cn(selectClass, "w-full xs:w-field-name")}
                       value={condition.status}
                       onChange={(e) =>
                         updateCondition(index, {
@@ -442,7 +467,8 @@ export function Segments() {
                     <Input
                       aria-label="Email domain"
                       placeholder="example.com"
-                      className="flex-1"
+                      width="name"
+                      inputMode="url"
                       value={condition.domain}
                       onChange={(e) =>
                         updateCondition(index, { domain: e.target.value })
@@ -451,19 +477,17 @@ export function Segments() {
                   )}
 
                   {conditions.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Remove condition"
+                    <IconButton
+                      label="Remove condition"
+                      variant="destructive"
                       onClick={() =>
                         setConditions((current) =>
                           current.filter((_, i) => i !== index)
                         )
                       }
                     >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                      <Trash2 />
+                    </IconButton>
                   )}
                 </div>
               ))}
@@ -486,7 +510,7 @@ export function Segments() {
                 Preview count
               </Button>
               {previewCount !== null && (
-                <span className="text-sm text-muted-foreground">
+                <span className="text-ui text-text-secondary" data-numeric>
                   {previewCount} matching contact
                   {previewCount === 1 ? "" : "s"}
                 </span>

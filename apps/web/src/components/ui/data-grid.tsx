@@ -92,6 +92,11 @@ export interface DataGridProps<TData> {
    * has to work as an installed PWA.
    */
   renderMobileRow?: (row: TData) => React.ReactNode;
+  /**
+   * Names a row for assistive tech. Used for the mobile card's tap target,
+   * which is a bare hit area with no text of its own.
+   */
+  getRowLabel?: (row: TData) => string;
   pageSize?: number;
   /** Hide pagination when the caller already pages server-side. */
   paginated?: boolean;
@@ -143,6 +148,7 @@ export function DataGrid<TData>({
   enableSelection = false,
   onRowClick,
   renderMobileRow,
+  getRowLabel,
   pageSize = 25,
   paginated = true,
   className,
@@ -330,13 +336,31 @@ export function DataGrid<TData>({
               {rows.map((row) => (
                 <li key={row.id}>
                   {onRowClick ? (
-                    <button
-                      type="button"
-                      onClick={() => onRowClick(row.original)}
-                      className="w-full rounded-card border border-border bg-surface p-3 text-left transition-colors duration-fast ease-out hover:bg-surface-sunken"
-                    >
-                      {renderMobileRow(row.original)}
-                    </button>
+                    /*
+                      The card is a div with a stretched hit area behind it, not
+                      a <button> wrapping the content. A card almost always ends
+                      with a RowActions menu — the tap path §5 requires for what
+                      desktop reveals on hover — and a <button> inside a <button>
+                      is invalid HTML that browsers and screen readers resolve
+                      differently, up to swallowing the inner control's activation.
+
+                      So the whole card stays tappable via an absolutely
+                      positioned button underneath. The content layer above it
+                      is transparent to the pointer, except for its own controls:
+                      a tap on the subject falls through to the hit area, a tap
+                      on ⋯ opens the menu.
+                    */
+                    <div className="relative rounded-card border border-border bg-surface p-3 transition-colors duration-fast ease-out focus-within:border-border-strong hover:bg-surface-sunken">
+                      <button
+                        type="button"
+                        onClick={() => onRowClick(row.original)}
+                        aria-label={getRowLabel?.(row.original) ?? "Open row"}
+                        className="absolute inset-0 rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      />
+                      <div className="pointer-events-none relative [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_input]:pointer-events-auto">
+                        {renderMobileRow(row.original)}
+                      </div>
+                    </div>
                   ) : (
                     <div className="rounded-card border border-border bg-surface p-3">
                       {renderMobileRow(row.original)}
@@ -410,7 +434,17 @@ export function DataGrid<TData>({
                             <button
                               type="button"
                               onClick={header.column.getToggleSortingHandler()}
-                              className="inline-flex items-center gap-1 rounded-control transition-colors duration-fast ease-out hover:text-text"
+                              /*
+                                `uppercase` is repeated from the <th> rather
+                                than inherited: preflight resets buttons to
+                                `text-transform: none`, which is more specific
+                                than inheritance and quietly stripped the
+                                eyebrow casing from every *sortable* header —
+                                so a table's own column labels disagreed with
+                                each other depending on whether you could sort
+                                by them.
+                              */
+                              className="inline-flex items-center gap-1 rounded-control uppercase tracking-eyebrow transition-colors duration-fast ease-out hover:text-text"
                             >
                               {flexRender(
                                 header.column.columnDef.header,
