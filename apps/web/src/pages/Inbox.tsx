@@ -387,7 +387,13 @@ export function Inbox() {
     (accounts.length === 1 ? accounts[0] : undefined);
 
   return (
-    <div className="flex h-full min-h-0 flex-col md:flex-row">
+    /*
+      The document is the only scroll container now (§2), so neither pane sets
+      a height or an overflow: both grow to their content and the page scrolls.
+      Their headers stay put with `sticky` instead, at the offset the shell
+      publishes — which already accounts for the notch and the tablet top bar.
+    */
+    <div className="flex min-h-0 flex-col md:flex-row">
       {/* ---------------------------------------------------------------- list */}
       <div
         className={cn(
@@ -395,7 +401,7 @@ export function Inbox() {
           mobileShowDetail ? "hidden" : "flex flex-1"
         )}
       >
-        <header className="shrink-0 border-b px-4 pb-3 pt-4">
+        <header className="sticky top-sticky-top z-10 shrink-0 border-b bg-surface px-4 pb-3 pt-4">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <h1 className="text-lg font-semibold tracking-tight">Inbox</h1>
@@ -506,7 +512,7 @@ export function Inbox() {
           ) : null}
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1">
           {loading ? (
             <div className="flex h-40 items-center justify-center">
               <Spinner />
@@ -624,7 +630,7 @@ export function Inbox() {
       >
         {selectedThread ? (
           <>
-            <header className="shrink-0 border-b bg-muted/20 px-4 py-3 sm:px-6">
+            <header className="sticky top-sticky-top z-10 shrink-0 border-b bg-surface px-4 py-3 sm:px-6">
               <button
                 type="button"
                 onClick={() => setMobileShowDetail(false)}
@@ -670,7 +676,7 @@ export function Inbox() {
               </div>
             </header>
 
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+            <div className="min-h-0 flex-1 space-y-4 p-4 sm:p-6">
               {selectedThread.messages.map((message) => (
                 <article
                   key={message.id}
@@ -807,7 +813,7 @@ export function Inbox() {
             </form>
           </>
         ) : (
-          <div className="flex h-full items-center justify-center">
+          <div className="flex min-h-[50vh] items-center justify-center">
             <EmptyState
               icon={MailOpen}
               title="Nothing selected"

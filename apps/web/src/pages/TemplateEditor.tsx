@@ -257,7 +257,13 @@ export function TemplateEditor() {
   }
 
   return (
-    <form onSubmit={save} className="flex h-[calc(100vh-3.5rem)] flex-col">
+    /*
+      Was `h-[calc(100vh-3.5rem)]` with two `overflow-auto` panes inside it —
+      three scroll containers on one route. The page flows with the document
+      now (§2); the preview keeps its viewport-height box because it holds an
+      iframe, and an iframe with no height to fill collapses to nothing.
+    */
+    <form onSubmit={save} className="flex flex-col">
       <div className="flex items-center justify-between gap-3 border-b px-6 py-3">
         <div className="flex items-center gap-3 min-w-0">
           <Button
@@ -293,9 +299,11 @@ export function TemplateEditor() {
         </div>
       </div>
 
-      <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)]">
+      {/* `items-start` so the preview cell isn't stretched to the row height —
+          a stretched cell has nowhere to stick to. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)] lg:items-start">
         {/* Left: authoring */}
-        <div className="space-y-5 overflow-auto p-6">
+        <div className="space-y-5 p-6">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
@@ -397,8 +405,8 @@ export function TemplateEditor() {
           </div>
         </div>
 
-        {/* Right: live preview */}
-        <div className="hidden border-l bg-muted/20 lg:block">
+        {/* Right: live preview — pinned beside the form as it scrolls past. */}
+        <div className="hidden border-l bg-muted/20 lg:sticky lg:top-sticky-top lg:block lg:h-[calc(100vh-var(--shell-sticky-top))]">
           <TemplatePreview
             subject={state.subject}
             html={state.html}

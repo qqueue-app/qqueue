@@ -36,6 +36,13 @@ const sheetVariants = cva(
         bottom:
           "inset-x-0 bottom-0 max-h-[85vh] rounded-t-dialog border-t border-border pb-[env(safe-area-inset-bottom)] data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
         top: "inset-x-0 top-0 max-h-[85vh] rounded-b-2xl border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+        /*
+          Edge to edge, for a sheet that is a destination rather than a detour —
+          the mobile "More" nav. No radius and no handle: it isn't a peek at the
+          page underneath, it replaces it. Safe-area padding is applied here
+          because at full height the sheet owns all four screen edges.
+        */
+        full: "inset-0 h-full w-full pb-safe-b pl-safe-l pr-safe-r pt-safe-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
       },
     },
     defaultVariants: { side: "right" },
@@ -96,6 +103,8 @@ function SheetBody({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
+      // scroll-exception: a sheet is a dialog, and Radix freezes the document
+      // behind it — so this is still the only scrollbar on screen.
       className={cn("flex-1 overflow-y-auto px-5 py-4", className)}
       {...props}
     />

@@ -247,6 +247,9 @@ function RecipientField({
           <ul
             id={`${id}-suggestions`}
             role="listbox"
+            // scroll-exception: the recipient combobox's listbox — §2 names
+            // comboboxes alongside dropdowns as the exception to the one-scroll
+            // rule. It floats above the page and can't extend it.
             className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-md"
           >
             {matches.map((match, index) => (
@@ -1344,11 +1347,15 @@ export function EmailStudio() {
                     </p>
                   </div>
                   {/*
-                    Capped rather than open-ended: a long schedule list would
-                    otherwise push the sidebar well past the composer and undo
-                    the sticky column.
+                    Uncapped, and deliberately so. This list is the example §2
+                    uses for the rule it breaks: a card that scrolls inside
+                    itself is a second scrollbar, and the answer is to let it
+                    flow with the document. §4 has the real fix — recurring
+                    sends are scheduled campaigns and belong on their own route
+                    under Campaigns — which would take this rail back to holding
+                    send options for *this* message only.
                   */}
-                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                  <div className="space-y-2 pr-1">
                     {recurringSends.map((send) => (
                       <div
                         key={send.id}

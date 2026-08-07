@@ -350,7 +350,10 @@ export function DataGrid<TData>({
           {renderMobileRow && isMobile ? null : (
           <div className="relative overflow-x-auto rounded-card border border-border">
             <table className="w-full caption-bottom text-ui" aria-label={label}>
-              <thead className="sticky top-0 z-10 bg-surface-sunken">
+              {/* Sticky against the *document* now that main no longer
+                  scrolls, so it has to clear whatever the shell has parked at
+                  the top of the viewport at this width. */}
+              <thead className="sticky top-sticky-top z-10 bg-surface-sunken">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <tr key={headerGroup.id} className="border-b border-border">
                     {headerGroup.headers.map((header) => {

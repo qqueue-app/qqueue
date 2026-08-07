@@ -98,7 +98,10 @@ export function TemplatePreview({
           </button>
         </div>
       </div>
-      <div className="flex flex-1 justify-center overflow-auto bg-muted/30 p-4">
+      {/* `overflow-hidden`, not `auto`: the iframe is its own document and does
+          its own scrolling, so a scroll region out here would be a second
+          scrollbar for the same content (§2). */}
+      <div className="flex min-h-0 flex-1 justify-center overflow-hidden bg-muted/30 p-4">
         <iframe
           title="Email preview"
           sandbox=""

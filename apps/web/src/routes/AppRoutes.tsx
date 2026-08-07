@@ -176,8 +176,14 @@ export function AppRoutes() {
           <Route path="/templates/new" element={<TemplateEditor />} />
           <Route path="/templates/:id/edit" element={<TemplateEditor />} />
           <Route path="/campaigns" element={<Campaigns />} />
+          {/* Smart lists are a tab of Lists now, not a sibling destination —
+              see §4. The old path still works so existing links don't rot. */}
           <Route path="/campaigns/lists" element={<ContactLists />} />
-          <Route path="/campaigns/segments" element={<Segments />} />
+          <Route path="/campaigns/lists/smart" element={<Segments />} />
+          <Route
+            path="/campaigns/segments"
+            element={<Navigate to="/campaigns/lists/smart" replace />}
+          />
           <Route path="/deliverability" element={<Deliverability />} />
           <Route
             path="/campaigns/:id/analytics"

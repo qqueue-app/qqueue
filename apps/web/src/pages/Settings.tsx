@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
 import { InstanceSettingsCard } from "../components/InstanceSettingsCard.js";
 import { PageHeader } from "../components/PageHeader.js";
+import { SettingsHub } from "../components/SettingsHub.js";
 import { TeamCard } from "../components/TeamCard.js";
 import { InstallAppCard } from "../components/InstallAppCard.js";
 import { NotificationsCard } from "../components/NotificationsCard.js";
@@ -443,7 +444,14 @@ export function Settings() {
         description="Your organization, your team, and the technical bits — API keys, webhooks, and notifications."
       />
 
-      {/* Device-level settings first: they're the ones a person acts on for
+      {/* The destinations that used to hang off the sidebar's Settings group.
+          Collapsing that group to one nav item (§4) is only an improvement if
+          what it contained is still one tap away — this is where. */}
+      <section className="px-4 pt-4 sm:px-6 sm:pt-6">
+        <SettingsHub />
+      </section>
+
+      {/* Device-level settings next: they're the ones a person acts on for
           themselves, and the install prompt is what unlocks notifications on
           iPhone and iPad. */}
       <section className="space-y-3 px-4 pt-4 sm:px-6 sm:pt-6">

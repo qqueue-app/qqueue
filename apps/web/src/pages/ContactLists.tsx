@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Pencil, Plus, Search, Trash2, Users } from "lucide-react";
 import { PageHeader } from "../components/PageHeader.js";
+import { ListsTabs } from "../components/ListsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { api, type ContactList } from "../lib/api.js";
@@ -275,6 +276,8 @@ export function ContactLists() {
           </Button>
         }
       />
+
+      <ListsTabs />
 
       <section className="p-4 sm:p-6">
         <DataGrid

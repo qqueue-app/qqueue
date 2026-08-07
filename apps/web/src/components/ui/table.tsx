@@ -5,7 +5,9 @@ const Table = React.forwardRef<
   HTMLTableElement,
   React.HTMLAttributes<HTMLTableElement>
 >(({ className, ...props }, ref) => (
-  <div className="relative w-full overflow-auto">
+  // `overflow-x`, not `overflow`: a wide table may scroll sideways, but this
+  // wrapper must never become a second vertical scroll container (§2).
+  <div className="relative w-full overflow-x-auto">
     <table
       ref={ref}
       className={cn("w-full caption-bottom text-ui", className)}

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Filter, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
+import { ListsTabs } from "../components/ListsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -273,8 +274,10 @@ export function Segments() {
 
   return (
     <>
+      {/* Titled "Lists", not "Smart lists": this is the Smart tab of the Lists
+          destination now, and the tab below already says which one you're on. */}
       <PageHeader
-        title="Smart lists"
+        title="Lists"
         description="Audiences that update themselves — contacts are re-matched every time a campaign sends."
         actions={
           <Button onClick={openDialog} disabled={!organizationId}>
@@ -283,6 +286,8 @@ export function Segments() {
           </Button>
         }
       />
+
+      <ListsTabs />
 
       <section className="p-4 sm:p-6">
         <DataGrid

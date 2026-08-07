@@ -172,6 +172,29 @@ export default {
           "sans-serif"
         ]
       },
+      spacing: {
+        /*
+          Shell measurements and safe-area insets, so the two sides of every
+          pairing read from the same value: `w-sidebar` on the sidebar and
+          `pl-sidebar` on main, `h-tabbar` on the tab bar and `pb-tabbar-safe`
+          on the content it must not cover.
+        */
+        sidebar: "var(--shell-sidebar-w)",
+        tabbar: "var(--shell-tabbar-h)",
+        "header-row": "var(--shell-header-h)",
+        // The tablet top bar, notch included — its own height and the offset a
+        // sticky sub-header has to clear are the same number.
+        "topbar-safe": "calc(var(--shell-topbar-h) + var(--safe-top))",
+        // Where a sticky sub-header comes to rest; see --shell-sticky-top.
+        "sticky-top": "var(--shell-sticky-top)",
+        "safe-t": "var(--safe-top)",
+        "safe-b": "var(--safe-bottom)",
+        "safe-l": "var(--safe-left)",
+        "safe-r": "var(--safe-right)",
+        // The tab bar plus the home indicator beneath it — what main has to
+        // clear at the bottom on a phone.
+        "tabbar-safe": "calc(var(--shell-tabbar-h) + var(--safe-bottom))"
+      },
       width: {
         /*
           Field widths are set by content type, not by container. These are the
