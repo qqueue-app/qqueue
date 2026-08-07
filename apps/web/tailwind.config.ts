@@ -214,7 +214,20 @@ export default {
         "field-code": "7.5rem", // 120px — port, short code, count
         "field-search": "17.5rem", // 280px — search
         "field-name": "22.5rem", // 360px — email address, person's name
-        "field-long": "30rem" // 480px — subject line, URL, API key
+        "field-long": "30rem", // 480px — subject line, URL, API key
+
+        /*
+          The square-control widths, which have to be listed here as well as
+          under `height`. Tailwind's `width` scale does not inherit from
+          `height`, and it only extends `spacing` — which these are not in — so
+          without these two lines `w-control` and `w-touch` compile to nothing
+          at all. That failure is silent and nasty: an icon button keeps its
+          36px height and collapses to the width of its glyph, and every
+          `after:w-touch` touch-slop pseudo-element gets 44px of height and no
+          width, so the 44px tap target it exists to provide does not exist.
+        */
+        control: "2.25rem", // 36px — square icon buttons
+        touch: "2.75rem" // 44px — touch-slop pseudo-elements
       },
       height: {
         control: "2.25rem", // 36px — buttons, inputs, selects
