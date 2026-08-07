@@ -96,7 +96,10 @@ export function BodyEditor({
             onClick={() => setMode("rich")}
             title="Rich text"
             className={cn(
-              "inline-flex items-center gap-field rounded px-2 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground [&_svg]:size-3.5",
+              // 24px tall was under half §5's touch minimum, on the control
+              // that switches the whole authoring surface. Full height on a
+              // phone; unchanged from the tablet breakpoint up.
+              "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
               mode === "rich" && "bg-background text-foreground shadow-sm"
             )}
           >
@@ -108,7 +111,10 @@ export function BodyEditor({
             onClick={() => setMode("html")}
             title="Edit the raw HTML"
             className={cn(
-              "inline-flex items-center gap-field rounded px-2 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground [&_svg]:size-3.5",
+              // 24px tall was under half §5's touch minimum, on the control
+              // that switches the whole authoring surface. Full height on a
+              // phone; unchanged from the tablet breakpoint up.
+              "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
               mode === "html" && "bg-background text-foreground shadow-sm"
             )}
           >

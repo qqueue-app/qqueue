@@ -9,6 +9,7 @@ import { Toaster } from "./components/ui/sonner.js";
 import { TooltipProvider } from "./components/ui/tooltip.js";
 import { createQueryClient } from "./lib/query-client.js";
 import { registerServiceWorker } from "./lib/register-sw.js";
+import { startDraftSync } from "./lib/offline-drafts.js";
 import "./styles.css";
 
 const queryClient = createQueryClient();
@@ -36,3 +37,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 
 registerServiceWorker();
+
+// Outside React: a draft written on the compose screen has to reach the server
+// even if the composer unmounted long before the network came back.
+startDraftSync();

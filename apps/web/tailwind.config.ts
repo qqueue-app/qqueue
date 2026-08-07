@@ -223,7 +223,16 @@ export default {
         "safe-r": "var(--safe-right)",
         // The tab bar plus the home indicator beneath it — what main has to
         // clear at the bottom on a phone.
-        "tabbar-safe": "calc(var(--shell-tabbar-h) + var(--safe-bottom))"
+        "tabbar-safe": "calc(var(--shell-tabbar-h) + var(--safe-bottom))",
+        /*
+          Card padding plus the home indicator — the bottom padding of anything
+          docked to the bottom edge of the screen, which below 640px is every
+          dialog (§5 turns them into bottom sheets). `pb-safe-b` alone would be
+          wrong there: it replaces the padding instead of adding to it, leaving
+          a dialog's last button flush against its own edge on a phone with no
+          inset at all.
+        */
+        "card-safe": "calc(1.25rem + var(--safe-bottom))"
       },
       maxWidth: {
         /*

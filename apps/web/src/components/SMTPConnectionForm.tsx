@@ -97,6 +97,8 @@ export function SMTPConnectionForm({
           <Label htmlFor="host">Host</Label>
           <Input
             id="host"
+            identifier
+            inputMode="url"
             placeholder="smtp.example.com"
             value={form.host}
             onChange={(e) => update({ host: e.target.value })}
@@ -126,6 +128,7 @@ export function SMTPConnectionForm({
           </Label>
           <Input
             id="username"
+            identifier
             autoComplete="off"
             placeholder={editing ? "Keep current" : ""}
             value={form.username}

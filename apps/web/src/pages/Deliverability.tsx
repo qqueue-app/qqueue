@@ -368,6 +368,8 @@ export function Deliverability() {
                     <Label htmlFor="throttle-domain">Domain</Label>
                     <Input
                       id="throttle-domain"
+                      identifier
+                      inputMode="url"
                       placeholder="gmail.com"
                       value={throttleDomain}
                       onChange={(e) => setThrottleDomain(e.target.value)}

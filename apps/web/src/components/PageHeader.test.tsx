@@ -178,10 +178,15 @@ describe("PageHeader", () => {
         screen.queryByRole("button", { name: "New template" })
       ).not.toBeInTheDocument();
 
-      // …they are behind the overflow menu.
+      /*
+        …they are behind the overflow menu, which on a phone is an action
+        sheet rather than a dropdown (§5) — so the menu is a `dialog` and its
+        entries are ordinary buttons, sized to the 44px touch minimum a 28px
+        dropdown item could never meet.
+      */
       await user.click(screen.getByRole("button", { name: "More actions" }));
-      const menu = within(await screen.findByRole("menu"));
-      await user.click(menu.getByRole("menuitem", { name: "New template" }));
+      const sheet = within(await screen.findByRole("dialog"));
+      await user.click(sheet.getByRole("button", { name: "New template" }));
       expect(onSelect).toHaveBeenCalled();
     });
 

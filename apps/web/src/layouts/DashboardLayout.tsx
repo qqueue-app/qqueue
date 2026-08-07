@@ -17,6 +17,7 @@ import {
 import { useUnreadCount } from "../lib/use-unread-count.js";
 import { BrandWordmark } from "../components/BrandWordmark.js";
 import { DashboardSplash } from "../components/DashboardSplash.js";
+import { OfflineBanner } from "../components/OfflineBanner.js";
 import { IconButton } from "../components/ui/icon-button.js";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet.js";
 import { MobileTabBar } from "../components/shell/MobileTabBar.js";
@@ -264,6 +265,9 @@ export function DashboardLayout() {
         tabIndex={-1}
         className="min-w-0 pb-tabbar-safe pl-safe-l pr-safe-r pt-safe-t focus:outline-none sm:pb-0 sm:pt-0 lg:pl-sidebar lg:pt-safe-t"
       >
+        {/* Above the routed page, so it can never cover a page header — and
+            inside main, so it clears the sidebar on desktop. */}
+        <OfflineBanner />
         <Outlet />
       </main>
 

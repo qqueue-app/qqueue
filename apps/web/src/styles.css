@@ -350,6 +350,35 @@
     padding: 0.5rem;
     background: hsl(var(--bg));
   }
+
+  /*
+    The editor toolbar's swipe strip on a phone.
+
+    Twenty-odd formatting controls at the 44px touch minimum do not fit in
+    375px, and the two ways out are both worse than this one: wrapping makes a
+    three-row toolbar that eats a third of the screen before you have written
+    anything, and burying the controls behind a menu costs a tap on every
+    formatting action in a surface where formatting is iterative. A horizontal
+    strip is also what the platform has trained people to expect here — Docs,
+    Notion and iOS Mail all scroll their format bars sideways.
+
+    Sideways, note, not vertically: §2's one-scroll rule is about the document's
+    scroll, and the containment lint deliberately allows `overflow-x`.
+
+    The mask is driven by use-overflow-fade.ts. Both offsets default to 0, which
+    collapses the gradient to a hard edge at each end — so with no JavaScript,
+    or before the first measurement, the toolbar is simply fully opaque rather
+    than partly invisible.
+  */
+  .qq-toolbar-scroller {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 var(--fade-start, 0px),
+      #000 calc(100% - var(--fade-end, 0px)),
+      transparent 100%
+    );
+  }
 }
 
 @layer utilities {

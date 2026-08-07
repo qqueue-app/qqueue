@@ -30,6 +30,7 @@ import {
   ScheduleControls
 } from "../components/ScheduleControls.js";
 import {
+  ApiError,
   api,
   type Contact,
   type ContactList,
@@ -45,6 +46,13 @@ import {
 import { formatBytes } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
 import { useSession } from "../lib/session-context.js";
+import { useOnline } from "../lib/use-online.js";
+import {
+  deletePendingDraft,
+  flushPendingDrafts,
+  listPendingDrafts,
+  savePendingDraft
+} from "../lib/offline-drafts.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
 import { Card } from "../components/ui/card.js";
@@ -109,6 +117,19 @@ function describeConnection(connection: SMTPConnection) {
 }
 
 const MAX_SUGGESTIONS = 8;
+
+/**
+ * A key for the local draft queue.
+ *
+ * `randomUUID` is unavailable on a page served over plain HTTP, which a
+ * self-hosted install on a LAN legitimately is — so this can't simply call it
+ * and hope.
+ */
+function newLocalDraftId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `draft-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 interface RecipientFieldProps {
   id: string;
@@ -453,6 +474,22 @@ export function EmailStudio() {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  /**
+   * The message is safe on this device but the server hasn't got it yet.
+   *
+   * Distinct from `lastSavedAt`, which means the opposite — that the server
+   * has it — because on a phone the difference is the whole story: one of them
+   * survives the phone being lost, the other doesn't.
+   */
+  const [pendingLocally, setPendingLocally] = useState(false);
+  /**
+   * Identifies this composed message to the local queue for as long as it is
+   * being written, and is rotated when the composer is cleared.
+   *
+   * It can't be `draftId`: a draft written offline has never reached the server
+   * and so has no server id to be keyed by.
+   */
+  const localDraftId = useRef(newLocalDraftId());
 
   const hasContent =
     subject.trim() !== "" ||
@@ -576,6 +613,11 @@ export function EmailStudio() {
     setRecurrence(emptyRecurrence);
     setDraftId(null);
     setLastSavedAt(null);
+    // Drop this message's local copy and take a fresh key: the next thing typed
+    // here is a different email, and must not overwrite the queued one.
+    void deletePendingDraft(localDraftId.current);
+    localDraftId.current = newLocalDraftId();
+    setPendingLocally(false);
   }
 
   function applyTemplate(value: string) {
@@ -696,6 +738,25 @@ export function EmailStudio() {
             smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
           templateId: templateId === NO_TEMPLATE ? undefined : templateId
         };
+
+        /*
+          Local first, network second (§5).
+
+          The order is the whole point: this app is installed on phones, and the
+          two-second auto-save below is the only thing standing between a
+          half-written email and a tunnel. Writing to IndexedDB before the
+          request means the message survives a failed save, a killed tab, and a
+          dead battery — the server copy is then just the version other devices
+          can see.
+        */
+        await savePendingDraft({
+          localId: localDraftId.current,
+          organizationId,
+          draftId,
+          payload,
+          updatedAt: new Date().toISOString()
+        });
+
         let saved: EmailDraft;
         if (draftId) {
           saved = await api.updateEmailDraft(draftId, payload);
@@ -703,16 +764,44 @@ export function EmailStudio() {
           saved = await api.createEmailDraft({ organizationId, ...payload });
           setDraftId(saved.id);
         }
+        // Acknowledged by the server, so the local copy has done its job.
+        await deletePendingDraft(localDraftId.current);
         setLastSavedAt(saved.updatedAt);
+        setPendingLocally(false);
         if (!silent) {
           toast.success("Draft saved.");
         }
         return saved.id;
       } catch (error) {
-        if (!silent) {
-          toast.error(
-            error instanceof Error ? error.message : "Unable to save draft"
-          );
+        /*
+          Two very different failures wear the same exception here, and telling
+          them apart is what keeps the offline queue honest.
+
+          Unreachable (ApiError status 0, or a 5xx) means the draft is fine and
+          the network isn't: keep the local record, say so, and let the sync
+          replay it. Anything else is the server refusing this content — a
+          validation error, a revoked membership — and replaying it would fail
+          identically forever, so the record is dropped and the real message
+          shown.
+        */
+        const retryable =
+          !(error instanceof ApiError) || error.status === 0 || error.status >= 500;
+
+        if (retryable) {
+          setPendingLocally(true);
+          if (!silent) {
+            toast.message(
+              "Saved on this device. It'll sync when the connection is back."
+            );
+          }
+        } else {
+          await deletePendingDraft(localDraftId.current);
+          setPendingLocally(false);
+          if (!silent) {
+            toast.error(
+              error instanceof Error ? error.message : "Unable to save draft"
+            );
+          }
         }
         return null;
       } finally {
@@ -756,6 +845,75 @@ export function EmailStudio() {
     templateId
   ]);
 
+  /*
+    Recover a message the server never received.
+
+    Runs once, and only into an untouched composer: if there is already
+    something on screen — a template applied, a deep-linked draft opening —
+    silently replacing it with an older local copy would be the data loss this
+    is supposed to prevent.
+  */
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !organizationId || loading || hasContent) {
+      return;
+    }
+    if (searchParams.get("draft")) {
+      return;
+    }
+    restoredRef.current = true;
+
+    void listPendingDrafts(organizationId).then((pending) => {
+      const latest = pending
+        .slice()
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      if (!latest) {
+        return;
+      }
+
+      localDraftId.current = latest.localId;
+      setDraftId(latest.draftId);
+      setSubject(latest.payload.subject);
+      setHtml(latest.payload.html);
+      setToEmails(latest.payload.to);
+      setCcEmails(latest.payload.cc);
+      setBccEmails(latest.payload.bcc);
+      setSelectedListIds(latest.payload.listIds);
+      setSMTPConnectionId(latest.payload.smtpConnectionId ?? DEFAULT_SMTP);
+      setTemplateId(latest.payload.templateId ?? NO_TEMPLATE);
+      setPendingLocally(true);
+      toast.message("Recovered a draft that hadn't finished saving.");
+    });
+  }, [organizationId, loading, hasContent, searchParams]);
+
+  /*
+    Sync on reconnect.
+
+    startDraftSync() in main.tsx flushes the queue app-wide, but a composer that
+    is open while the network returns also has to *adopt the result* — take the
+    server id its local record was just given — or the next auto-save would
+    create a second draft alongside the one that just synced.
+  */
+  const online = useOnline();
+  useEffect(() => {
+    if (!online || !organizationId || !pendingLocally) {
+      return;
+    }
+
+    void flushPendingDrafts(organizationId).then((synced) => {
+      const mine = synced.find(
+        (entry) => entry.localId === localDraftId.current
+      );
+      if (!mine) {
+        return;
+      }
+      setDraftId(mine.draft.id);
+      setLastSavedAt(mine.draft.updatedAt);
+      setPendingLocally(false);
+      toast.success("Draft synced.");
+    });
+  }, [online, organizationId, pendingLocally]);
+
   const applyDraft = useCallback((draft: EmailDraft) => {
     setDraftId(draft.id);
     setSubject(draft.subject ?? "");
@@ -770,6 +928,10 @@ export function EmailStudio() {
     setLastSavedAt(draft.updatedAt);
     setDeliveryStatus(null);
     setDraftsOpen(false);
+    // A different message is on screen now, so it gets its own queue key — and
+    // it arrived from the server, so nothing is pending locally.
+    localDraftId.current = newLocalDraftId();
+    setPendingLocally(false);
     toast.success("Draft loaded.");
   }, []);
 
@@ -1448,7 +1610,17 @@ export function EmailStudio() {
                       ? "Schedule email"
                       : "Send email"}
                 </Button>
-                {lastSavedAt ? (
+                {/*
+                  "Saved" and "saved on this device" are not the same promise,
+                  and on a phone the difference is the one that matters — so the
+                  pending state says which, rather than letting an unsynced
+                  draft wear the same reassuring line as a synced one.
+                */}
+                {pendingLocally ? (
+                  <p className="text-center text-meta text-warn">
+                    Saved on this device — syncs when you&rsquo;re back online
+                  </p>
+                ) : lastSavedAt ? (
                   <p className="text-center text-meta text-text-tertiary">
                     Draft saved
                   </p>
@@ -1775,6 +1947,7 @@ function ContactPickerDialog({
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
           <Input
+            identifier
             type="search"
             placeholder="Search contacts…"
             value={search}

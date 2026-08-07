@@ -40,13 +40,13 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger
+} from "@/components/ui/menu";
 import type { ButtonAlign, ButtonFormValue } from "./button-extension";
 import { ButtonDialog } from "./ButtonDialog";
 import { ImageDialog } from "./ImageDialog";
@@ -59,6 +59,7 @@ import {
   type RawBlockEventDetail
 } from "./raw-html-extension";
 import { normalizeUrl } from "./url";
+import { useOverflowFade } from "./use-overflow-fade";
 import { EMAIL_SWATCHES } from "../../lib/email-palette.js";
 
 const DEFAULT_VARIABLES = ["firstName", "lastName", "email"];
@@ -256,7 +257,12 @@ function ToolbarButton({
       aria-label={label}
       title={label}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4",
+        // 44px on a phone, 32px from the tablet breakpoint up (§5). A real
+        // size rather than a hit-slop pseudo-element: these buttons sit
+        // shoulder to shoulder, so 44px of invisible slop on a 32px control
+        // would overlap its neighbours and hand taps to the wrong one.
+        // `shrink-0` keeps them square in the non-wrapping mobile strip.
+        "inline-flex h-touch w-touch shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 sm:h-8 sm:w-8 [&_svg]:size-4",
         active && "bg-primary/10 text-primary"
       )}
     >
@@ -267,23 +273,23 @@ function ToolbarButton({
 
 function ColorMenu({ editor }: { editor: Editor }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Menu label="Text colour">
+      <MenuTrigger asChild>
         <button
           type="button"
           onMouseDown={(event) => event.preventDefault()}
           aria-label="Text colour"
           title="Text colour"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-4"
+          className="inline-flex h-touch w-touch shrink-0 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:h-8 sm:w-8 [&_svg]:size-4"
         >
           <Palette />
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        <DropdownMenuLabel>Text colour</DropdownMenuLabel>
-        <DropdownMenuSeparator />
+      </MenuTrigger>
+      <MenuContent align="start">
+        <MenuLabel>Text colour</MenuLabel>
+        <MenuSeparator />
         {TEXT_COLORS.map((color) => (
-          <DropdownMenuItem
+          <MenuItem
             key={color.label}
             onSelect={() => {
               if (color.value) {
@@ -298,10 +304,10 @@ function ColorMenu({ editor }: { editor: Editor }) {
               style={{ backgroundColor: color.value ?? "transparent" }}
             />
             {color.label}
-          </DropdownMenuItem>
+          </MenuItem>
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </MenuContent>
+    </Menu>
   );
 }
 
@@ -319,29 +325,34 @@ function VariableMenu({
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="h-8 gap-field">
+    <Menu label="Insert variable">
+      <MenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-touch shrink-0 gap-field sm:h-8"
+        >
           <Braces className="h-4 w-4" />
           Variable
         </Button>
-      </DropdownMenuTrigger>
+      </MenuTrigger>
       {/* Focus goes to the editor or the dialog, never back to the trigger. */}
-      <DropdownMenuContent
+      <MenuContent
         align="end"
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
-        <DropdownMenuLabel>Insert variable</DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        <MenuLabel>Insert variable</MenuLabel>
+        <MenuSeparator />
         {variables.map((variable) => (
-          <DropdownMenuItem key={variable} onSelect={() => insert(variable)}>
+          <MenuItem key={variable} onSelect={() => insert(variable)}>
             <code className="text-meta">{`{{${variable}}}`}</code>
-          </DropdownMenuItem>
+          </MenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onInsertCustom}>Custom…</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <MenuSeparator />
+        <MenuItem onSelect={onInsertCustom}>Custom…</MenuItem>
+      </MenuContent>
+    </Menu>
   );
 }
 
@@ -363,6 +374,8 @@ export function RichTextEditor({
     html: string;
   } | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  // Fades whichever end of the mobile toolbar strip still has controls past it.
+  const toolbarRef = useOverflowFade<HTMLDivElement>();
   // The document the editor is holding, as of the last time anyone looked: what
   // it was handed at mount or by the sync effect below, then whatever it reports
   // afterwards.
@@ -611,7 +624,24 @@ export function RichTextEditor({
         className
       )}
     >
-      <div className="flex flex-wrap items-center gap-1 border-b bg-muted/40 p-field">
+      {/*
+        The background and the hairline live out here, on a box that is not
+        masked — put them on the scroller and the fade takes the bottom border
+        with it, leaving the rule under the toolbar dissolving at both ends.
+      */}
+      <div className="border-b bg-muted/40">
+        <div
+          ref={toolbarRef}
+          role="toolbar"
+          aria-label="Formatting"
+          /*
+            One swipeable row on a phone, the wrapping toolbar from `sm` up.
+            `overscroll-x-contain` matters more than it looks: without it a
+            swipe past the last button hands the gesture to the browser, which
+            on iOS is the back-navigation swipe — out of the composer, mid-email.
+          */
+          className="qq-toolbar-scroller scrollbar-hidden flex flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain p-field sm:flex-wrap sm:overflow-visible sm:[mask-image:none]"
+        >
         <ToolbarButton
           label="Bold"
           active={editor.isActive("bold")}
@@ -642,7 +672,7 @@ export function RichTextEditor({
         </ToolbarButton>
         <ColorMenu editor={editor} />
 
-        <Separator orientation="vertical" className="mx-1 h-6" />
+        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
         <ToolbarButton
           label="Heading 1"
@@ -684,7 +714,7 @@ export function RichTextEditor({
           <Quote />
         </ToolbarButton>
 
-        <Separator orientation="vertical" className="mx-1 h-6" />
+        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
         <ToolbarButton
           label="Align left"
@@ -708,7 +738,7 @@ export function RichTextEditor({
           <AlignRight />
         </ToolbarButton>
 
-        <Separator orientation="vertical" className="mx-1 h-6" />
+        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
         <ToolbarButton label="Link" active={editor.isActive("link")} onClick={setLink}>
           <LinkIcon />
@@ -726,7 +756,7 @@ export function RichTextEditor({
           onClick={() => setButtonOpen(true)}
           aria-label={buttonSelected ? "Edit button" : "Button"}
           className={cn(
-            "h-8 gap-field px-2 text-muted-foreground hover:text-foreground",
+            "h-touch shrink-0 gap-field px-2 text-muted-foreground hover:text-foreground sm:h-8",
             buttonSelected && "bg-primary/10 text-primary"
           )}
         >
@@ -783,7 +813,7 @@ export function RichTextEditor({
           <Code2 />
         </ToolbarButton>
 
-        <Separator orientation="vertical" className="mx-1 h-6" />
+        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
         <ToolbarButton
           label="Undo"
@@ -800,15 +830,22 @@ export function RichTextEditor({
           <Redo />
         </ToolbarButton>
 
-        {showVariables ? (
-          <div className="ml-auto">
-            <VariableMenu
-              editor={editor}
-              variables={variables}
-              onInsertCustom={insertCustomVariable}
-            />
-          </div>
-        ) : null}
+          {showVariables ? (
+            /*
+              Pushed to the far right only where the toolbar wraps. In the
+              mobile strip an auto margin would inflate the scroll width by
+              whatever slack was left over, adding a stretch of empty toolbar
+              to swipe through before reaching it.
+            */
+            <div className="shrink-0 sm:ml-auto">
+              <VariableMenu
+                editor={editor}
+                variables={variables}
+                onInsertCustom={insertCustomVariable}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div ref={surfaceRef}>

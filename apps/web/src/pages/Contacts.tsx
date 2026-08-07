@@ -692,6 +692,7 @@ export function Contacts() {
             <Label htmlFor="filter-tags">Filter by tags</Label>
             <Input
               id="filter-tags"
+              identifier
               width="name"
               placeholder="vip, newsletter (comma separated)"
               value={filterTags}
@@ -888,6 +889,7 @@ export function Contacts() {
               <Label htmlFor="tags">Tags</Label>
               <Input
                 id="tags"
+                identifier
                 placeholder="vip, newsletter (comma separated)"
                 value={form.tags}
                 onChange={(e) => setForm({ ...form, tags: e.target.value })}

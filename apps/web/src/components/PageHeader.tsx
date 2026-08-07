@@ -1,16 +1,11 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ChevronLeft, MoreHorizontal, type LucideIcon } from "lucide-react";
 import { useIsMobile } from "../lib/use-media-query.js";
 import { cn } from "../lib/utils.js";
 import { Button } from "./ui/button.js";
 import { IconButton } from "./ui/icon-button.js";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu.js";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "./ui/menu.js";
 
 export interface PageHeaderAction {
   /** A verb that names the outcome — "Create key", not "Submit". */
@@ -198,6 +193,8 @@ function DesktopAction({ item }: { item: PageHeaderAction }) {
  * and tells you nothing. Two or more collapse, which is the rule in §5.
  */
 function MobileActions({ items }: { items: PageHeaderAction[] }) {
+  const navigate = useNavigate();
+
   if (items.length === 0) {
     return null;
   }
@@ -242,13 +239,13 @@ function MobileActions({ items }: { items: PageHeaderAction[] }) {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Menu label="Page actions">
+      <MenuTrigger asChild>
         <IconButton label="More actions" hideTooltip>
           <MoreHorizontal />
         </IconButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      </MenuTrigger>
+      <MenuContent align="end" className="w-52">
         {items.map((item) => {
           const Icon = item.icon;
           const content = (
@@ -258,28 +255,35 @@ function MobileActions({ items }: { items: PageHeaderAction[] }) {
             </>
           );
 
+          /*
+            A navigating item is rendered as a handler rather than `asChild` +
+            <Link>: as an action-sheet row this is a real <button>, and a
+            <button> can't wrap an <a>. Same destination, same single tap.
+          */
           if (item.to) {
+            const to = item.to;
             return (
-              <DropdownMenuItem key={item.label} asChild>
-                <Link to={item.to}>{content}</Link>
-              </DropdownMenuItem>
+              <MenuItem key={item.label} onSelect={() => navigate(to)}>
+                {content}
+              </MenuItem>
             );
           }
 
           return (
-            <DropdownMenuItem
+            <MenuItem
               key={item.label}
               onSelect={item.onSelect}
               disabled={item.disabled}
               className={cn(
-                item.destructive && "text-destructive focus:text-destructive"
+                item.destructive &&
+                  "text-destructive focus:text-destructive [&_svg]:text-destructive"
               )}
             >
               {content}
-            </DropdownMenuItem>
+            </MenuItem>
           );
         })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </MenuContent>
+    </Menu>
   );
 }

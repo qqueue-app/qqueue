@@ -243,6 +243,10 @@ export function DataGrid<TData>({
             <div className="relative w-full xs:w-field-search">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
               <Input
+                // Every list page searches through here, and most of what gets
+                // typed into it is an address or an ID. Autocorrect on a phone
+                // would rewrite those into something that matches nothing.
+                identifier
                 value={globalFilter}
                 onChange={(event) => setGlobalFilter(event.target.value)}
                 placeholder={searchPlaceholder}

@@ -3,12 +3,12 @@ import { MoreHorizontal, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { IconButton } from "./icon-button.js";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "./dropdown-menu.js";
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "./menu.js";
 
 export interface RowAction {
   label: string;
@@ -66,45 +66,45 @@ export function RowActions({ actions, rowLabel, className }: RowActionsProps) {
       })}
 
       {overflow.length > 0 ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <Menu label={`Actions for ${rowLabel}`}>
+          <MenuTrigger asChild>
             <IconButton label={`More actions for ${rowLabel}`} size="sm">
               <MoreHorizontal />
             </IconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          </MenuTrigger>
+          <MenuContent align="end">
             {regular.map((action) => {
               const Icon = action.icon;
               return (
-                <DropdownMenuItem
+                <MenuItem
                   key={action.label}
                   disabled={action.disabled}
                   onSelect={action.onSelect}
                 >
                   <Icon />
                   {action.label}
-                </DropdownMenuItem>
+                </MenuItem>
               );
             })}
             {destructive.length > 0 && regular.length > 0 ? (
-              <DropdownMenuSeparator />
+              <MenuSeparator />
             ) : null}
             {destructive.map((action) => {
               const Icon = action.icon;
               return (
-                <DropdownMenuItem
+                <MenuItem
                   key={action.label}
                   disabled={action.disabled}
                   onSelect={action.onSelect}
-                  className="text-err focus:text-err"
+                  className="text-err focus:text-err [&_svg]:text-err"
                 >
                   <Icon />
                   {action.label}
-                </DropdownMenuItem>
+                </MenuItem>
               );
             })}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </MenuContent>
+        </Menu>
       ) : null}
     </div>
   );

@@ -3,13 +3,13 @@ import { ChevronsUpDown, LogOut, Settings as SettingsIcon } from "lucide-react";
 import { useSession } from "../../lib/session-context.js";
 import { cn } from "../../lib/utils.js";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu.js";
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu.js";
 
 /**
  * Signed-in user, with settings and sign-out behind it.
@@ -43,8 +43,8 @@ export function AccountMenu({ className }: { className?: string }) {
   const initial = user.email?.[0]?.toUpperCase() ?? "?";
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <Menu label="Account">
+      <MenuTrigger
         className={cn(
           "flex min-h-touch w-full min-w-0 items-center gap-3 rounded-control px-2 py-2 text-left transition-colors duration-fast ease-out hover:bg-surface-sunken",
           className
@@ -62,24 +62,24 @@ export function AccountMenu({ className }: { className?: string }) {
           </div>
         </div>
         <ChevronsUpDown className="h-4 w-4 shrink-0 text-text-tertiary" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel className="truncate font-normal text-text-secondary">
+      </MenuTrigger>
+      <MenuContent align="start" className="w-56">
+        <MenuLabel className="truncate font-normal text-text-secondary">
           {user.email}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate("/settings")}>
+        </MenuLabel>
+        <MenuSeparator />
+        <MenuItem onSelect={() => navigate("/settings")}>
           <SettingsIcon className="h-4 w-4" />
           Settings
-        </DropdownMenuItem>
-        <DropdownMenuItem
+        </MenuItem>
+        <MenuItem
           onSelect={signOut}
           className="text-destructive focus:text-destructive"
         >
           <LogOut className="h-4 w-4" />
           Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </MenuItem>
+      </MenuContent>
+    </Menu>
   );
 }

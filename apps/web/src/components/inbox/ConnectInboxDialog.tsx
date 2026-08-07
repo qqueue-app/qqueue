@@ -132,6 +132,8 @@ export function ConnectInboxDialog({
               <Label htmlFor="inbox-host">Incoming mail server</Label>
               <Input
                 id="inbox-host"
+                identifier
+                inputMode="url"
                 placeholder="imap.gmail.com"
                 value={form.host}
                 onChange={(event) => set("host", event.target.value)}
@@ -160,6 +162,7 @@ export function ConnectInboxDialog({
               <Label htmlFor="inbox-username">Username</Label>
               <Input
                 id="inbox-username"
+                identifier
                 value={form.username}
                 onChange={(event) => set("username", event.target.value)}
                 required

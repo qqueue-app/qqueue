@@ -225,6 +225,7 @@ export function Login({ mode }: LoginProps) {
                   <Label htmlFor="token">Reset token</Label>
                   <Input
                     id="token"
+                    identifier
                     value={token}
                     onChange={(event) => setToken(event.target.value)}
                     aria-invalid={!!errors.token}

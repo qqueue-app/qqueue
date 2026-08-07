@@ -4,13 +4,13 @@ import { Check, ChevronsUpDown, Plus } from "lucide-react";
 import { useSession } from "../../lib/session-context.js";
 import { cn } from "../../lib/utils.js";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu.js";
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu.js";
 
 /**
  * Organization picker.
@@ -41,8 +41,8 @@ export function OrgSwitcher({ className }: { className?: string }) {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <Menu label="Switch organization">
+      <MenuTrigger
         className={cn(
           "flex min-h-touch w-full items-center gap-3 rounded-control border border-border bg-surface px-3 py-2 text-left transition-colors duration-fast ease-out hover:bg-surface-sunken",
           className
@@ -60,17 +60,17 @@ export function OrgSwitcher({ className }: { className?: string }) {
           </div>
         </div>
         <ChevronsUpDown className="h-4 w-4 shrink-0 text-text-tertiary" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel className="font-normal text-text-secondary">
+      </MenuTrigger>
+      <MenuContent align="start" className="w-56">
+        <MenuLabel className="font-normal text-text-secondary">
           Switch organization
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        </MenuLabel>
+        <MenuSeparator />
         {organizations.length === 0 ? (
-          <DropdownMenuItem disabled>No organizations</DropdownMenuItem>
+          <MenuItem disabled>No organizations</MenuItem>
         ) : (
           organizations.map((organization) => (
-            <DropdownMenuItem
+            <MenuItem
               key={organization.id}
               onSelect={() =>
                 switchOrganization(organization.id, organization.name)
@@ -80,15 +80,15 @@ export function OrgSwitcher({ className }: { className?: string }) {
               {organization.id === currentOrganizationId ? (
                 <Check className="h-4 w-4" />
               ) : null}
-            </DropdownMenuItem>
+            </MenuItem>
           ))
         )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate("/settings")}>
+        <MenuSeparator />
+        <MenuItem onSelect={() => navigate("/settings")}>
           <Plus className="h-4 w-4" />
           New organization
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </MenuItem>
+      </MenuContent>
+    </Menu>
   );
 }

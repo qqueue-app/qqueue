@@ -325,6 +325,7 @@ export function Templates() {
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
+                  identifier
                   placeholder="Search templates…"
                   aria-label="Search templates"
                   className="pl-control"

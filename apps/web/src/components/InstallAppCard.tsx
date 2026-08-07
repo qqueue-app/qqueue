@@ -33,17 +33,41 @@ export function InstallAppCard() {
     }
   });
 
+  /*
+    Installed-ness is watched, not sampled.
+
+    §5 rules out showing an install prompt inside an installed app, and reading
+    it once at render is not enough to guarantee that: accepting the prompt
+    doesn't reload the page, so the card would sit there inviting someone to
+    install an app they are already using. `appinstalled` and the display-mode
+    query between them cover both routes in — installing from this card, and
+    installing from the browser's own menu.
+  */
+  const [installed, setInstalled] = useState(isStandalone);
+
   useEffect(() => {
     function onBeforeInstallPrompt(event: Event) {
       event.preventDefault();
       setPromptEvent(event as BeforeInstallPromptEvent);
     }
+    function onInstalled() {
+      setInstalled(true);
+      setPromptEvent(null);
+    }
+
+    const displayMode = window.matchMedia("(display-mode: standalone)");
+    const onDisplayModeChange = () => setInstalled(isStandalone());
+
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    return () =>
+    window.addEventListener("appinstalled", onInstalled);
+    displayMode.addEventListener("change", onDisplayModeChange);
+    return () => {
       window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+      displayMode.removeEventListener("change", onDisplayModeChange);
+    };
   }, []);
 
-  const installed = isStandalone();
   const ios = isIos();
 
   // Nothing to say once it's installed, once it's been waved away, or on a

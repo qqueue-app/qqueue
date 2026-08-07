@@ -453,6 +453,7 @@ export function Inbox() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               onBlur={() => setSubmittedSearch(search.trim())}
+              identifier
               placeholder="Search mail"
               aria-label="Search mail"
               type="search"
