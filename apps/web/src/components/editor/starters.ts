@@ -1,4 +1,5 @@
 import type { TemplateVariable } from "@/lib/api";
+import { EMAIL_ACCENT, EMAIL_NEUTRALS } from "../../lib/email-palette.js";
 
 // Built-in starter templates for the "New template" gallery. Mirrors the
 // server-side STARTER_TEMPLATES in @qqueue/shared; kept local so the web app
@@ -33,7 +34,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
       "<h1>Welcome aboard, {{firstName}} 👋</h1>",
       "<p>We're thrilled to have you at {{company}}. Your account is ready to go.</p>",
       "<p>To get the most out of it, start by setting up your first project.</p>",
-      '<a data-qq-button="true" href="{{ctaUrl}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2e7d63;color:#ffffff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Get started</a>',
+      `<a data-qq-button="true" href="{{ctaUrl}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:${EMAIL_ACCENT};color:${EMAIL_NEUTRALS.paper};padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Get started</a>`,
       "<p>If you have any questions, just reply to this email — we're here to help.</p>",
       "<p>— The {{company}} team</p>"
     ].join("\n"),
@@ -82,7 +83,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     html: [
       "<h1>Reset your password</h1>",
       "<p>Hi {{firstName}}, we received a request to reset your password.</p>",
-      '<a data-qq-button="true" href="{{resetUrl}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2e7d63;color:#ffffff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Choose a new password</a>',
+      `<a data-qq-button="true" href="{{resetUrl}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:${EMAIL_ACCENT};color:${EMAIL_NEUTRALS.paper};padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Choose a new password</a>`,
       "<p>This link expires in 30 minutes. If you didn't request a reset, you can safely ignore this email.</p>",
       "<p>— The {{company}} team</p>"
     ].join("\n"),
@@ -107,7 +108,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
       "<h1>Say hello to {{feature}}</h1>",
       "<p>Hi {{firstName}}, we just shipped something we think you'll love.</p>",
       "<p>Describe what's new and why it matters in a sentence or two.</p>",
-      '<a data-qq-button="true" href="{{ctaUrl}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#2e7d63;color:#ffffff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Try it now</a>',
+      `<a data-qq-button="true" href="{{ctaUrl}}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:${EMAIL_ACCENT};color:${EMAIL_NEUTRALS.paper};padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">Try it now</a>`,
       "<p>— The {{company}} team</p>"
     ].join("\n"),
     variables: [

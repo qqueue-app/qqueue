@@ -31,7 +31,14 @@ export function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-/** True below Tailwind's `md` breakpoint — the app's phone/desktop dividing line. */
+/**
+ * True below 640px — the design system's mobile band (§2), and the exact width
+ * at which the shell swaps the sidebar for the bottom tab bar.
+ *
+ * It was 767px, which put the 640–767px slice in disagreement with itself: the
+ * shell called it a tablet and showed a sidebar while data grids called it a
+ * phone and rendered cards. One number, one answer.
+ */
 export function useIsMobile(): boolean {
-  return useMediaQuery("(max-width: 767px)");
+  return useMediaQuery("(max-width: 639.98px)");
 }

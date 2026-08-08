@@ -295,15 +295,15 @@ export function LegalPage({ kind }: LegalPageProps) {
         <header className="mb-8">
           <Link
             to="/"
-            className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+            className="mb-6 inline-flex items-center gap-2 text-body font-medium text-primary hover:underline"
           >
-            <BrandMark className="h-7 w-7 rounded-lg" />
+            <BrandMark className="h-7 w-7 rounded-card" />
             QQueue
           </Link>
-          <h1 className="text-3xl font-semibold tracking-tight">
+          <h1 className="text-title font-semibold tracking-tight">
             {page.title}
           </h1>
-          <p className="mt-3 text-sm text-muted-foreground">
+          <p className="mt-3 text-body text-muted-foreground">
             Effective Date: {page.effectiveDate}
           </p>
         </header>
@@ -340,7 +340,7 @@ export function LegalPage({ kind }: LegalPageProps) {
           ) : null}
         </article>
 
-        <footer className="mt-10 flex flex-wrap gap-x-4 gap-y-2 border-t pt-6 text-sm text-muted-foreground">
+        <footer className="mt-12 flex flex-wrap gap-x-4 gap-y-2 border-t pt-6 text-body text-muted-foreground">
           <Link to="/terms" className="hover:text-foreground hover:underline">
             Terms
           </Link>

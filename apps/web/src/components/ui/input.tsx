@@ -1,13 +1,57 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import {
+  fieldBase,
+  fieldControlHeight,
+  fieldWidths,
+  type FieldWidth
+} from "./field.js";
 
-const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-  ({ className, type, ...props }, ref) => {
+export interface InputProps extends React.ComponentProps<"input"> {
+  /**
+   * Width by content type — see `fieldWidths`. Defaults to `full`, which is
+   * what every existing call site currently gets implicitly; pages set a real
+   * width as they migrate.
+   */
+  width?: FieldWidth;
+  /**
+   * The value is an identifier, not prose: a hostname, a username, a token, a
+   * tag, a search term.
+   *
+   * On a phone this is not a nicety. iOS capitalises the first letter of a
+   * text field and runs autocorrect over it, which turns `smtp.gmail.com`
+   * into `Smtp.gmail.com` and quietly mangles a username — a failed SMTP
+   * connection whose cause is invisible in the form that produced it. Safari
+   * exempts `type="email"` and `type="url"` from that treatment; every other
+   * field has to opt out by hand, which is what this does.
+   *
+   * A prop rather than four attributes per call site, so the rule lives in one
+   * place and a new field gets it by saying what it holds.
+   */
+  identifier?: boolean;
+}
+
+const Input = React.forwardRef<HTMLInputElement, InputProps>(
+  ({ className, type, width = "full", identifier, ...props }, ref) => {
     return (
       <input
         type={type}
+        // Spread last so a call site can still override any single one of
+        // these — `identifier` sets the defaults, it doesn't seize the field.
+        {...(identifier
+          ? ({
+              autoCapitalize: "none",
+              autoCorrect: "off",
+              spellCheck: false,
+            } as const)
+          : null)}
         className={cn(
-          "flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
+          fieldBase,
+          fieldControlHeight,
+          fieldWidths[width],
+          // `search` renders a UA clear button that collides with our own
+          // padding in WebKit.
+          "[&::-webkit-search-cancel-button]:appearance-none",
           className
         )}
         ref={ref}

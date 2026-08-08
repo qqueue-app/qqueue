@@ -58,15 +58,15 @@ export function PermissionMatrix({
 }: PermissionMatrixProps) {
   if (rows.length === 0 || columns.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+      <p className="rounded-dialog border border-dashed p-6 text-center text-body text-muted-foreground">
         {emptyMessage}
       </p>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border">
-      <table className="w-full border-collapse text-sm">
+    <div className="overflow-x-auto rounded-dialog border">
+      <table className="w-full border-collapse text-body">
         <caption className="sr-only">
           Who can send as each {columnNoun}
         </caption>
@@ -75,7 +75,7 @@ export function PermissionMatrix({
             {/* Sticky so the name stays visible while scrolling columns. */}
             <th
               scope="col"
-              className="sticky left-0 z-10 min-w-[13rem] bg-muted/60 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur"
+              className="sticky left-0 z-10 min-w-52 bg-muted/60 px-3 py-2 text-left text-meta font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur"
             >
               Person
             </th>
@@ -83,10 +83,10 @@ export function PermissionMatrix({
               <th
                 key={column.id}
                 scope="col"
-                className="px-2 py-2.5 text-center text-xs font-semibold text-muted-foreground"
+                className="px-2 py-2 text-center text-meta font-semibold text-muted-foreground"
               >
                 <Hint label={column.hint ?? column.label} side="bottom">
-                  <span className="mx-auto block max-w-[10rem] cursor-help truncate">
+                  <span className="mx-auto block max-w-cell-sm cursor-help truncate">
                     {column.label}
                   </span>
                 </Hint>
@@ -99,14 +99,14 @@ export function PermissionMatrix({
             <tr key={row.id} className="border-b last:border-0 hover:bg-muted/30">
               <th
                 scope="row"
-                className="sticky left-0 z-10 bg-card px-3 py-2.5 text-left font-normal"
+                className="sticky left-0 z-10 bg-card px-3 py-2 text-left font-normal"
               >
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2">
                   <Avatar name={row.name} size="sm" />
                   <div className="min-w-0">
                     <div className="truncate font-medium">{row.name}</div>
                     {row.secondary ? (
-                      <div className="truncate text-xs text-muted-foreground">
+                      <div className="truncate text-meta text-muted-foreground">
                         {row.secondary}
                       </div>
                     ) : null}
@@ -121,14 +121,14 @@ export function PermissionMatrix({
 
                 if (row.alwaysAllowed) {
                   return (
-                    <td key={column.id} className="px-2 py-2.5 text-center">
+                    <td key={column.id} className="px-2 py-2 text-center">
                       <Hint
                         label={
                           row.alwaysAllowedReason ??
                           `${row.name} can always use this ${columnNoun}.`
                         }
                       >
-                        <span className="inline-flex h-7 w-7 cursor-help items-center justify-center rounded-md text-muted-foreground">
+                        <span className="inline-flex h-7 w-7 cursor-help items-center justify-center rounded-control text-muted-foreground">
                           <ShieldCheck className="h-4 w-4" />
                         </span>
                       </Hint>
@@ -137,7 +137,7 @@ export function PermissionMatrix({
                 }
 
                 return (
-                  <td key={column.id} className="px-2 py-2.5 text-center">
+                  <td key={column.id} className="px-2 py-2 text-center">
                     <Hint
                       label={
                         granted
@@ -153,7 +153,7 @@ export function PermissionMatrix({
                         disabled={disabled || busy}
                         onClick={() => onToggle(row.id, column.id, !granted)}
                         className={cn(
-                          "inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50",
+                          "inline-flex h-7 w-7 items-center justify-center rounded-control border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50",
                           granted
                             ? "border-primary bg-primary text-primary-foreground"
                             : "border-input bg-card hover:border-primary/50 hover:bg-accent"

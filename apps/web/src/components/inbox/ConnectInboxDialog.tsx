@@ -102,7 +102,7 @@ export function ConnectInboxDialog({
                 placeholder="Support"
                 required
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 What you'll call it inside QQueue.
               </p>
             </div>
@@ -132,12 +132,14 @@ export function ConnectInboxDialog({
               <Label htmlFor="inbox-host">Incoming mail server</Label>
               <Input
                 id="inbox-host"
+                identifier
+                inputMode="url"
                 placeholder="imap.gmail.com"
                 value={form.host}
                 onChange={(event) => set("host", event.target.value)}
                 required
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 Sometimes labelled "IMAP server".
               </p>
             </div>
@@ -151,7 +153,7 @@ export function ConnectInboxDialog({
                 onChange={(event) => set("port", event.target.value)}
                 required
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 993 for almost everyone.
               </p>
             </div>
@@ -160,6 +162,7 @@ export function ConnectInboxDialog({
               <Label htmlFor="inbox-username">Username</Label>
               <Input
                 id="inbox-username"
+                identifier
                 value={form.username}
                 onChange={(event) => set("username", event.target.value)}
                 required
@@ -175,7 +178,7 @@ export function ConnectInboxDialog({
                 onChange={(event) => set("password", event.target.value)}
                 required
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 If your provider uses app passwords, use one of those.
               </p>
             </div>
@@ -188,13 +191,13 @@ export function ConnectInboxDialog({
                 onChange={(event) => set("mailbox", event.target.value)}
                 required
               />
-              <p className="text-xs text-muted-foreground">Usually INBOX.</p>
+              <p className="text-meta text-muted-foreground">Usually INBOX.</p>
             </div>
 
-            <div className="flex items-center justify-between gap-3 rounded-xl border p-3">
+            <div className="flex items-center justify-between gap-3 rounded-dialog border p-3">
               <div>
                 <Label htmlFor="inbox-secure">Secure connection</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-meta text-muted-foreground">
                   Leave this on unless your provider says otherwise.
                 </p>
               </div>

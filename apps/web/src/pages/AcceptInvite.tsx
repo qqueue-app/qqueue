@@ -18,11 +18,11 @@ import {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-md">
-        <div className="mb-6 flex items-center justify-center gap-2.5">
+        <div className="mb-6 flex items-center justify-center gap-2">
           <BrandMark className="h-10 w-10" />
-          <span className="text-xl font-semibold tracking-tight">QQueue</span>
+          <span className="text-title font-semibold tracking-tight">QQueue</span>
         </div>
         {children}
       </div>
@@ -130,7 +130,7 @@ export function AcceptInvite() {
     return (
       <Shell>
         <Card>
-          <CardContent className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+          <CardContent className="flex items-center justify-center gap-2 py-12 text-body text-muted-foreground">
             <Spinner />
             Checking your invitation…
           </CardContent>
@@ -144,7 +144,7 @@ export function AcceptInvite() {
       <Shell>
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Invitation unavailable</CardTitle>
+            <CardTitle className="text-title">Invitation unavailable</CardTitle>
             <CardDescription>
               {loadError ?? "This invitation is invalid or has expired."}
             </CardDescription>
@@ -164,7 +164,7 @@ export function AcceptInvite() {
       <Shell>
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">You're in</CardTitle>
+            <CardTitle className="text-title">You're in</CardTitle>
             <CardDescription>
               You've joined {joinedOrg}. Sign in with your existing account to
               continue.
@@ -184,7 +184,7 @@ export function AcceptInvite() {
     <Shell>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">
+          <CardTitle className="text-title">
             Join {invite.organizationName}
           </CardTitle>
           <CardDescription>
@@ -197,7 +197,7 @@ export function AcceptInvite() {
         <CardContent>
           <form className="space-y-4" onSubmit={submit} noValidate>
             {invite.hasAccount ? (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-body text-muted-foreground">
                 You already have a QQueue account for this email. Accept to add
                 this organization, then sign in as usual.
               </p>
@@ -222,9 +222,9 @@ export function AcceptInvite() {
                     aria-invalid={!!passwordError}
                   />
                   {passwordError ? (
-                    <p className="text-xs text-destructive">{passwordError}</p>
+                    <p className="text-meta text-destructive">{passwordError}</p>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-meta text-muted-foreground">
                       At least 8 characters.
                     </p>
                   )}

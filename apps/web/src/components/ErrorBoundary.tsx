@@ -38,9 +38,9 @@ export class ErrorBoundary extends Component<
 
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <div className="w-full max-w-md space-y-4 rounded-lg border bg-card p-6 text-center shadow-sm">
-          <h1 className="text-lg font-semibold">Something went wrong</h1>
-          <p className="text-sm text-muted-foreground">
+        <div className="w-full max-w-md space-y-4 rounded-card border bg-card p-6 text-center shadow-sm">
+          <h1 className="text-title font-semibold">Something went wrong</h1>
+          <p className="text-body text-muted-foreground">
             The page hit an unexpected error. Your data is safe — reloading
             usually fixes it. If it keeps happening, check the browser console
             and report what you find.

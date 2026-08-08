@@ -13,6 +13,11 @@ const allowedLicenseTokens = new Set([
   "MIT",
   "MIT-0",
   "MPL-2.0",
+  // SIL Open Font License. Permissive and the standard licence for open fonts;
+  // it governs the font files themselves, which are bundled as assets rather
+  // than linked as code, and it places no reciprocal obligation on the app.
+  // Introduced by @fontsource-variable/inter (the self-hosted UI typeface).
+  "OFL-1.1",
   "PostgreSQL",
   "Python-2.0",
 ]);

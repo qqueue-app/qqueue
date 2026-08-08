@@ -32,7 +32,6 @@ import { Label } from "../components/ui/label.js";
 import { Badge } from "../components/ui/badge.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { Skeleton } from "../components/ui/skeleton.js";
-import { Card } from "../components/ui/card.js";
 import {
   Dialog,
   DialogContent,
@@ -179,7 +178,7 @@ export function Contacts() {
         header: "Email",
         meta: { title: "Email" },
         cell: ({ row }) => (
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2">
             <Avatar
               name={
                 [row.original.firstName, row.original.lastName]
@@ -199,7 +198,7 @@ export function Contacts() {
         header: "Name",
         meta: { title: "Name", hideBelowMd: true },
         cell: ({ getValue }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {String(getValue()) || "—"}
           </span>
         ),
@@ -220,7 +219,7 @@ export function Contacts() {
               ))}
             </div>
           ) : (
-            <span className="text-muted-foreground">—</span>
+            <span className="text-text-tertiary">—</span>
           ),
       },
       {
@@ -243,7 +242,7 @@ export function Contacts() {
         header: "Added",
         meta: { title: "Added", hideBelowLg: true },
         cell: ({ getValue }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary" data-numeric>
             {formatDate(getValue() as string)}
           </span>
         ),
@@ -630,83 +629,107 @@ export function Contacts() {
       <PageHeader
         title="Contacts"
         description="Store contacts and list memberships."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={handleImportFileSelected}
-            />
-            <Button
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!organizationId || importing}
-            >
-              {importing ? <Spinner /> : <Upload className="h-4 w-4" />}
-              Import
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleExport}
-              disabled={!organizationId || exporting}
-            >
-              {exporting ? <Spinner /> : <Download className="h-4 w-4" />}
-              Export
-            </Button>
-            <Button onClick={openCreate} disabled={!organizationId}>
-              <Plus className="h-4 w-4" />
-              Add contact
-            </Button>
-          </div>
-        }
+        /*
+          Declarative actions, not an `actions` node — that is what lets them
+          collapse into the trailing ⋯ menu on a phone (§5). As three rendered
+          buttons they wrapped onto two extra rows above the contacts, which is
+          precisely the header §5 rules out. Desktop is unchanged: three
+          buttons, "Add contact" the one primary.
+
+          The file input lives outside this, below, because it has to stay
+          mounted whether the header renders buttons or a menu — unmounting it
+          mid-pick would drop the file.
+        */
+        menuActions={[
+          {
+            label: "Import",
+            icon: Upload,
+            onSelect: () => fileInputRef.current?.click(),
+            disabled: !organizationId || importing,
+          },
+          {
+            label: "Export",
+            icon: Download,
+            onSelect: handleExport,
+            disabled: !organizationId || exporting,
+          },
+          {
+            label: "Add contact",
+            icon: Plus,
+            onSelect: openCreate,
+            disabled: !organizationId,
+            primary: true,
+          },
+        ]}
       />
 
-      <section className="space-y-4 p-6">
-        <Card className="p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="filter-tags">Filter by tags</Label>
-              <Input
-                id="filter-tags"
-                placeholder="vip, newsletter (comma separated)"
-                value={filterTags}
-                onChange={(event) => setFilterTags(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Match</Label>
-              <Select
-                value={filterMatch}
-                onValueChange={(value) =>
-                  setFilterMatch(value === "ALL" ? "ALL" : "ANY")
-                }
-              >
-                <SelectTrigger className="w-28">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ANY">Any tag</SelectItem>
-                  <SelectItem value="ALL">All tags</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground">
-                {parseFilterTags(filterTags).length === 0
-                  ? "Enter tags to preview"
-                  : segmentLoading
-                    ? "Counting…"
-                    : `${segmentCount ?? 0} match`}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={handleImportFileSelected}
+      />
+
+      <section className="max-w-table space-y-4 p-4 sm:p-6">
+        {/*
+          A filter row, not a card: a bordered box around three controls reads
+          as a form you have to fill in before the table below means anything,
+          and the fields inside it stretched to fill it (§6.1, §6.5). The tag
+          field is sized to its content and the row wraps on a phone, where the
+          padded column is the content width.
+        */}
+        <div className="flex flex-wrap items-end gap-3">
+          {/*
+            `w-full xs:w-auto` on the wrappers, not just on the fields inside
+            them. In a flex row a nested `w-full` resolves against the flex
+            item, which is sized by its own content — so the field stayed
+            360px-ish and the pair stayed side by side on a 375px screen, with
+            the tag placeholder clipped mid-word. §2's mobile inversion asks for
+            the opposite: pairs stack and each field fills the padded column.
+          */}
+          <div className="w-full space-y-field xs:w-auto">
+            <Label htmlFor="filter-tags">Filter by tags</Label>
+            <Input
+              id="filter-tags"
+              identifier
+              width="name"
+              placeholder="vip, newsletter (comma separated)"
+              value={filterTags}
+              onChange={(event) => setFilterTags(event.target.value)}
+            />
+          </div>
+          <div className="w-full space-y-field xs:w-auto">
+            <Label htmlFor="filter-match">Match</Label>
+            <Select
+              value={filterMatch}
+              onValueChange={(value) =>
+                setFilterMatch(value === "ALL" ? "ALL" : "ANY")
+              }
+            >
+              <SelectTrigger id="filter-match" className="w-full xs:w-field-code">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ANY">Any tag</SelectItem>
+                <SelectItem value="ALL">All tags</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {/*
+            The match count and "Create list" appear once there are tags to
+            match on. Before that they are a number that says nothing and a
+            button that cannot be pressed — on a phone they cost two rows above
+            the contacts you came to read.
+          */}
+          {parseFilterTags(filterTags).length > 0 ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-ui text-text-secondary" data-numeric>
+                {segmentLoading ? "Counting…" : `${segmentCount ?? 0} match`}
               </span>
               <Button
-                variant="outline"
-                disabled={
-                  !organizationId ||
-                  parseFilterTags(filterTags).length === 0 ||
-                  !segmentCount
-                }
+                variant="secondary"
+                disabled={!organizationId || !segmentCount}
                 onClick={() => {
                   setNewListName("");
                   setListDialogOpen(true);
@@ -716,8 +739,8 @@ export function Contacts() {
                 Create list
               </Button>
             </div>
-          </div>
-        </Card>
+          ) : null}
+        </div>
 
         <DataGrid
           label="Contacts"
@@ -767,46 +790,54 @@ export function Contacts() {
             />
           }
           renderMobileRow={(contact) => (
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate font-medium">{contact.email}</div>
-                <div className="truncate text-sm text-muted-foreground">
-                  {[contact.firstName, contact.lastName]
-                    .filter(Boolean)
-                    .join(" ") || "No name"}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1">
-                  <Badge variant={statusVariant(contact.status)}>
-                    {contact.status}
-                  </Badge>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-text">
+                  {contact.email}
+                </span>
+                <Badge
+                  variant={statusVariant(contact.status)}
+                  className="shrink-0"
+                >
+                  {contact.status}
+                </Badge>
+              </div>
+              <p className="truncate text-ui text-text-secondary">
+                {[contact.firstName, contact.lastName]
+                  .filter(Boolean)
+                  .join(" ") || "No name"}
+              </p>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-1">
                   {(contact.tags ?? []).slice(0, 2).map((tag) => (
                     <Badge key={tag} variant="outline" className="font-normal">
                       {tag}
                     </Badge>
                   ))}
                 </div>
+                <RowActions
+                  className="-my-1 -mr-1"
+                  rowLabel={contact.email}
+                  actions={[
+                    {
+                      label: "See what this person has done",
+                      icon: Activity,
+                      onSelect: () => void openActivity(contact),
+                    },
+                    {
+                      label: "Edit this contact",
+                      icon: Pencil,
+                      onSelect: () => openEdit(contact),
+                    },
+                    {
+                      label: "Delete this contact",
+                      icon: Trash2,
+                      destructive: true,
+                      onSelect: () => setDeleteTarget(contact),
+                    },
+                  ]}
+                />
               </div>
-              <RowActions
-                rowLabel={contact.email}
-                actions={[
-                  {
-                    label: "See what this person has done",
-                    icon: Activity,
-                    onSelect: () => void openActivity(contact),
-                  },
-                  {
-                    label: "Edit this contact",
-                    icon: Pencil,
-                    onSelect: () => openEdit(contact),
-                  },
-                  {
-                    label: "Delete this contact",
-                    icon: Trash2,
-                    destructive: true,
-                    onSelect: () => setDeleteTarget(contact),
-                  },
-                ]}
-              />
             </div>
           )}
         />
@@ -858,6 +889,7 @@ export function Contacts() {
               <Label htmlFor="tags">Tags</Label>
               <Input
                 id="tags"
+                identifier
                 placeholder="vip, newsletter (comma separated)"
                 value={form.tags}
                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
@@ -928,10 +960,10 @@ export function Contacts() {
                   : "space-y-4 py-4"
               }
             >
-              <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <div className="rounded-control border border-border bg-surface-sunken px-3 py-2 text-ui">
                 <span className="font-medium">{importFile?.name}</span>
                 {importFile ? (
-                  <span className="ml-2 text-muted-foreground">
+                  <span className="ml-2 text-text-secondary">
                     {Math.max(1, Math.round(importFile.size / 1024))} KB
                   </span>
                 ) : null}
@@ -997,7 +1029,7 @@ export function Contacts() {
                         }
                         placeholder="e.g. Newsletter signups"
                       />
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-meta text-text-tertiary">
                         A list with this name is reused if it already exists.
                       </p>
                     </div>
@@ -1019,12 +1051,12 @@ export function Contacts() {
               ) : null}
 
               {importErrors.length > 0 ? (
-                <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3">
-                  <div className="text-sm font-medium text-destructive">
+                <div className="space-y-1 rounded-control border border-destructive/40 bg-destructive/5 p-3">
+                  <div className="text-ui font-medium text-err">
                     {importErrors.length} row
                     {importErrors.length === 1 ? "" : "s"} couldn&apos;t be read
                   </div>
-                  <ul className="max-h-40 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
+                  <ul className="max-h-40 space-y-1 overflow-y-auto text-meta text-text-tertiary">
                     {importErrors.slice(0, 50).map((error, index) => (
                       <li key={`${error.row}-${index}`}>
                         Row {error.row}: {error.message}
@@ -1134,27 +1166,27 @@ export function Contacts() {
               ))}
             </div>
           ) : activity.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
+            <p className="py-6 text-center text-ui text-text-secondary">
               No email activity yet.
             </p>
           ) : (
             <ul className="max-h-80 space-y-3 overflow-y-auto">
               {activity.map((event) => (
-                <li key={event.id} className="flex items-start gap-3 text-sm">
-                  <Badge variant="outline" className="mt-0.5 font-normal">
+                <li key={event.id} className="flex items-start gap-3 text-ui">
+                  <Badge variant="outline" className="mt-1 font-normal">
                     {event.type}
                   </Badge>
                   <div className="min-w-0 flex-1">
                     <div className="truncate">
                       {event.subject ?? "(no subject)"}
                       {event.campaignName ? (
-                        <span className="text-muted-foreground">
+                        <span className="text-text-secondary">
                           {" "}
                           · {event.campaignName}
                         </span>
                       ) : null}
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-meta text-text-tertiary">
                       {formatDate(event.occurredAt)}
                       {event.url ? ` · ${event.url}` : ""}
                     </div>

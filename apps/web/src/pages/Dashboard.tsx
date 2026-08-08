@@ -1,108 +1,70 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  AlertCircle,
-  CheckCircle2,
-  Clock,
-  FileText,
-  Info,
-  Mail,
-  Plus,
-  Send,
-  Server,
-  Users,
-  XCircle,
-  type LucideIcon
-} from "lucide-react";
-import { toast } from "sonner";
+import type { ColumnDef } from "@tanstack/react-table";
+import { Info, Mail, Plus, Send } from "lucide-react";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { GetStartedCard } from "../components/GetStartedCard.js";
+import { StatCard } from "../components/StatCard.js";
+import { SetupChecklist, setupSteps } from "../components/SetupChecklist.js";
 import { api, type DashboardSummary } from "../lib/api.js";
+import { formatTimestamp } from "../lib/format.js";
+import { qk } from "../lib/query-client.js";
+import { useOrgQuery } from "../lib/use-api.js";
 import { fetchSetupStatus } from "../lib/setup-status.js";
 import { useSession } from "../lib/session-context.js";
 import { Badge } from "../components/ui/badge.js";
-import { Button } from "../components/ui/button.js";
-import { Card, CardContent } from "../components/ui/card.js";
-import { Skeleton } from "../components/ui/skeleton.js";
+import { DataGrid } from "../components/ui/data-grid.js";
 import {
   Alert,
   AlertDescription,
   AlertTitle
 } from "../components/ui/alert.js";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "../components/ui/table.js";
 
-interface StatCard {
-  label: string;
-  value: number;
-  detail: string;
-  icon: LucideIcon;
-  tone?: "default" | "danger";
+type RecentJob = DashboardSummary["recentEmailJobs"][number];
+
+/**
+ * Statuses read as sentences, not as enum members. "SENT" in a badge is the
+ * database shouting; this is a mail client.
+ */
+const STATUS_LABEL: Record<string, string> = {
+  PENDING: "Pending",
+  QUEUED: "Queued",
+  PROCESSING: "Sending",
+  SENT: "Sent",
+  FAILED: "Failed",
+  CANCELLED: "Cancelled",
+  SUPPRESSED: "Suppressed"
+};
+
+function statusLabel(status: string) {
+  return (
+    STATUS_LABEL[status] ??
+    status.charAt(0) + status.slice(1).toLowerCase().replace(/_/g, " ")
+  );
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) {
-    return "Not sent";
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date(value));
-}
-
+/**
+ * Tinted badge per §3 — background and text from a matching token pair, never a
+ * solid saturated pill. Only FAILED is bad news: a cancelled or suppressed send
+ * is a decision that was honoured, so it stays neutral rather than borrowing
+ * red and making a clean queue look alarming.
+ */
 function statusVariant(status: string) {
   switch (status) {
     case "SENT":
-      return "success";
+      return "ok" as const;
     case "FAILED":
-    case "CANCELLED":
-      return "destructive";
+      return "err" as const;
     case "PROCESSING":
     case "QUEUED":
-      return "warning";
+      return "warn" as const;
     default:
-      return "secondary";
+      return "neutral" as const;
   }
-}
-
-function setupItems(summary: DashboardSummary | null) {
-  return [
-    {
-      label: "Sending account",
-      ready: Boolean(summary?.setup.hasSmtpConnection),
-      href: "/smtp-connections"
-    },
-    {
-      label: "Default sender",
-      ready: Boolean(summary?.setup.hasDefaultSmtp),
-      href: "/smtp-connections"
-    },
-    {
-      label: "Contacts",
-      ready: Boolean(summary?.setup.hasContacts),
-      href: "/contacts"
-    },
-    {
-      label: "Templates",
-      ready: Boolean(summary?.setup.hasTemplates),
-      href: "/templates"
-    }
-  ];
 }
 
 export function Dashboard() {
   const { currentOrganizationId: organizationId } = useSession();
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
   const [instanceSetupCompleted, setInstanceSetupCompleted] = useState(true);
 
   useEffect(() => {
@@ -121,68 +83,121 @@ export function Dashboard() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!organizationId) {
-      setSummary(null);
-      setLoading(false);
-      return;
-    }
+  const summaryQuery = useOrgQuery(
+    organizationId,
+    qk.dashboard(organizationId ?? ""),
+    (id) => api.dashboardSummary(id)
+  );
+  const summary = summaryQuery.data ?? null;
+  const loading = summaryQuery.isPending && Boolean(organizationId);
 
-    setLoading(true);
-    api
-      .dashboardSummary(organizationId)
-      .then(setSummary)
-      .catch((error: unknown) =>
-        toast.error(
-          error instanceof Error ? error.message : "Unable to load dashboard"
-        )
-      )
-      .finally(() => setLoading(false));
-  }, [organizationId]);
+  const steps = useMemo(() => setupSteps(summary?.setup), [summary?.setup]);
 
-  const cards: StatCard[] = useMemo(
+  const cards = useMemo(
     () => [
       {
         label: "Emails today",
         value: summary?.counts.emailsToday ?? 0,
-        detail: "Queued or sent today",
-        icon: Send
+        context: "Queued or sent since midnight"
       },
       {
         label: "Failed today",
         value: summary?.counts.failedToday ?? 0,
-        detail: "Needs attention",
-        icon: AlertCircle,
-        tone: "danger"
+        // The context line carries the reassurance so the red value doesn't
+        // have to be the only thing that changes between the two states.
+        context: (summary?.counts.failedToday ?? 0) > 0
+          ? "Needs attention"
+          : "Nothing failed today",
+        alarmWhenNonZero: true
       },
       {
         label: "Processing",
         value: summary?.counts.processingEmails ?? 0,
-        detail: "Currently in progress",
-        icon: Clock
+        context: "In flight right now"
       },
       {
         label: "Contacts",
         value: summary?.counts.contacts ?? 0,
-        detail: "Available recipients",
-        icon: Users
+        context: "Available recipients"
       },
       {
         label: "Templates",
         value: summary?.counts.templates ?? 0,
-        detail: "Reusable messages",
-        icon: FileText
+        context: "Reusable messages"
       },
       {
         label: "Sending accounts",
         value: summary?.counts.smtpConnections ?? 0,
-        detail: summary?.defaultSmtpConnection
+        context: summary?.defaultSmtpConnection
           ? `Default: ${summary.defaultSmtpConnection.name}`
-          : "No default sender",
-        icon: Server
+          : "No default sender"
       }
     ],
     [summary]
+  );
+
+  const columns = useMemo<ColumnDef<RecentJob, unknown>[]>(
+    () => [
+      {
+        accessorKey: "toEmail",
+        header: "Recipient",
+        meta: { title: "Recipient" },
+        cell: ({ row }) => (
+          <span className="block max-w-cell truncate font-medium text-text">
+            {row.original.toEmail}
+          </span>
+        )
+      },
+      {
+        accessorKey: "subject",
+        header: "Subject",
+        meta: { title: "Subject" },
+        cell: ({ row }) => (
+          <span className="block max-w-cell-lg truncate text-text-secondary">
+            {row.original.subject || "(no subject)"}
+          </span>
+        )
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        meta: { title: "Status" },
+        cell: ({ row }) => (
+          <Badge variant={statusVariant(row.original.status)}>
+            {statusLabel(row.original.status)}
+          </Badge>
+        )
+      },
+      {
+        id: "sentAs",
+        accessorFn: (row) => row.smtpConnectionName ?? "Default",
+        header: "Sent as",
+        meta: { title: "Sent as", hideBelowLg: true },
+        cell: ({ row }) => (
+          <span className="text-text-secondary">
+            {row.original.smtpConnectionName ?? "Default"}
+          </span>
+        )
+      },
+      {
+        id: "when",
+        // Sorted on the instant, displayed as a stamp — sorting the formatted
+        // string would put "Aug" before "Jul".
+        accessorFn: (row) =>
+          new Date(row.sentAt ?? row.createdAt).getTime(),
+        header: "Time",
+        meta: { title: "Time", align: "right" },
+        cell: ({ row }) => {
+          const stamp = row.original.sentAt ?? row.original.createdAt;
+          return (
+            <time dateTime={stamp} className="text-text-secondary">
+              {formatTimestamp(stamp, "Not sent")}
+            </time>
+          );
+        }
+      }
+    ],
+    []
   );
 
   // A brand-new org sees a guided first-send flow instead of the (all-zero)
@@ -196,25 +211,23 @@ export function Dashboard() {
     <>
       <PageHeader
         title="Dashboard"
-        description="Overview of sending activity, setup health, and recent platform events."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline">
-              <Link to="/templates">
-                <Plus className="h-4 w-4" />
-                Template
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link to="/email-studio">
-                <Mail className="h-4 w-4" />
-                Send email
-              </Link>
-            </Button>
-          </div>
-        }
+        description="Today's sending at a glance, and the most recent send attempts."
+        menuActions={[
+          { label: "New template", to: "/templates", icon: Plus },
+          {
+            label: "Send email",
+            to: "/email-studio",
+            icon: Mail,
+            // One primary per view (§3). While the first-run guide is up it
+            // owns the loud button — its active step is the actual next thing
+            // to do, and two accent buttons pointing different directions is
+            // how a first-run screen stops having an obvious start.
+            primary: !showOnboarding
+          }
+        ]}
       />
-      <section className="space-y-6 p-6">
+
+      <section className="space-y-6 p-4 sm:p-6">
         {!organizationId ? (
           <Alert variant="info">
             <Info />
@@ -223,155 +236,97 @@ export function Dashboard() {
               Choose or create an organization in Settings to see your stats.
             </AlertDescription>
           </Alert>
-        ) : null}
-
-        {showOnboarding ? (
-          <GetStartedCard
-            summary={summary}
-            instanceSetupCompleted={instanceSetupCompleted}
-          />
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {cards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <Card key={card.label}>
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm text-muted-foreground">
-                        {card.label}
-                      </div>
-                      {loading ? (
-                        <Skeleton className="mt-3 h-8 w-14" />
-                      ) : (
-                        <div className="mt-2 text-3xl font-semibold tracking-tight">
-                          {card.value}
-                        </div>
-                      )}
-                    </div>
-                    <div
-                      className={
-                        card.tone === "danger"
-                          ? "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive"
-                          : "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
-                      }
-                    >
-                      <Icon className="h-5 w-5" />
-                    </div>
-                  </div>
-                  <div className="mt-3 truncate text-xs text-muted-foreground">
-                    {loading ? <Skeleton className="h-4 w-24" /> : card.detail}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-          </div>
-        )}
-
-        <div
-          className={
-            showOnboarding
-              ? "grid gap-4"
-              : "grid gap-4 xl:grid-cols-[360px_1fr]"
-          }
-        >
-          {!showOnboarding ? (
-          <Card>
-            <CardContent className="p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="font-semibold">Setup health</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Required pieces before regular sending.
-                  </p>
-                </div>
-                <Badge variant={setupItems(summary).every((item) => item.ready) ? "success" : "warning"}>
-                  {setupItems(summary).filter((item) => item.ready).length}/4 ready
-                </Badge>
-              </div>
-              <div className="mt-5 space-y-3">
-                {setupItems(summary).map((item) => (
-                  <Link
-                    key={item.label}
-                    to={item.href}
-                    className="flex items-center justify-between rounded-md border p-3 text-sm transition-colors hover:bg-muted/50"
-                  >
-                    <span className="font-medium">{item.label}</span>
-                    {loading ? (
-                      <Skeleton className="h-5 w-16" />
-                    ) : item.ready ? (
-                      <span className="flex items-center gap-1.5 text-success">
-                        <CheckCircle2 className="h-4 w-4" />
-                        Ready
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5 text-warning">
-                        <XCircle className="h-4 w-4" />
-                        Missing
-                      </span>
-                    )}
-                  </Link>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-          ) : null}
-
-          <Card>
-            <CardContent className="p-0">
-              <div className="border-b p-5">
-                <h2 className="font-semibold">Recent email jobs</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Latest send attempts for this organization.
-                </p>
-              </div>
-              {loading ? (
-                <div className="space-y-3 p-5">
-                  {[0, 1, 2].map((index) => (
-                    <Skeleton key={index} className="h-10 w-full" />
+          <>
+            {showOnboarding ? (
+              <GetStartedCard
+                summary={summary}
+                instanceSetupCompleted={instanceSetupCompleted}
+              />
+            ) : (
+              <>
+                {/*
+                  Nothing until the answer is known. `setupSteps(undefined)`
+                  reads as four missing steps, so rendering it mid-flight
+                  flashes "0/4 ready · Still to set up: …" at an organization
+                  that finished all of this months ago.
+                */}
+                {summary ? <SetupChecklist steps={steps} /> : null}
+                {/*
+                  1120px (§2). Six cards across an unbounded main on a 27"
+                  monitor become six wide bands of whitespace with a number
+                  parked at the left edge of each.
+                */}
+                <div className="grid max-w-grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {cards.map((card) => (
+                    <StatCard key={card.label} {...card} loading={loading} />
                   ))}
                 </div>
-              ) : summary?.recentEmailJobs.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Recipient</TableHead>
-                      <TableHead>Subject</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>SMTP</TableHead>
-                      <TableHead>Time</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {summary.recentEmailJobs.map((job) => (
-                      <TableRow key={job.id}>
-                        <TableCell className="font-medium">{job.toEmail}</TableCell>
-                        <TableCell className="max-w-[220px] truncate">
-                          {job.subject}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={statusVariant(job.status)}>
-                            {job.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{job.smtpConnectionName ?? "Default"}</TableCell>
-                        <TableCell>{formatDate(job.sentAt ?? job.createdAt)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <EmptyState
-                  icon={Send}
-                  title="No email jobs yet"
-                  description="Send your first email to see it here."
-                />
-              )}
-            </CardContent>
-          </Card>
-        </div>
+              </>
+            )}
+
+            <section aria-labelledby="recent-jobs" className="max-w-table">
+              <h2
+                id="recent-jobs"
+                className="text-section font-semibold text-text"
+              >
+                Recent email jobs
+              </h2>
+              <p className="mt-1 text-ui text-text-secondary">
+                The latest send attempts for this organization.
+              </p>
+              {/*
+                No search box: this window is the most recent jobs, not every
+                job, so a field that found nothing would be reporting on the
+                truncation rather than on your mail. Outbox and the campaign
+                views are where you go looking for a specific send.
+              */}
+              <DataGrid
+                className="mt-4"
+                label="Recent email jobs"
+                data={summary?.recentEmailJobs ?? []}
+                columns={columns}
+                getRowId={(row) => row.id}
+                loading={loading}
+                searchable={false}
+                pageSize={50}
+                empty={
+                  <EmptyState
+                    icon={Send}
+                    title="No email jobs yet"
+                    description="Send your first email and it will show up here."
+                  />
+                }
+                renderMobileRow={(job) => (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="min-w-0 truncate text-body font-medium text-text">
+                        {job.toEmail}
+                      </span>
+                      <Badge variant={statusVariant(job.status)}>
+                        {statusLabel(job.status)}
+                      </Badge>
+                    </div>
+                    <div className="truncate text-ui text-text-secondary">
+                      {job.subject || "(no subject)"}
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-meta text-text-tertiary">
+                      <span className="truncate">
+                        {job.smtpConnectionName ?? "Default"}
+                      </span>
+                      <time dateTime={job.sentAt ?? job.createdAt}>
+                        {formatTimestamp(
+                          job.sentAt ?? job.createdAt,
+                          "Not sent"
+                        )}
+                      </time>
+                    </div>
+                  </div>
+                )}
+              />
+            </section>
+          </>
+        )}
       </section>
     </>
   );

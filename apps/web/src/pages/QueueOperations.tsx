@@ -85,16 +85,25 @@ export function QueueOperations() {
       {
         accessorKey: "name",
         header: "Job",
-        meta: { title: "Job" },
+        /*
+          The cap belongs on the cell, not on the div inside it. A BullMQ repeat
+          id ("repeat:campaign-recurring-<cuid>:<epoch>") is one unbreakable
+          token, and an auto-layout table sizes a column to its content's
+          *min-content* width — which `truncate` does not reduce, because
+          `text-overflow` needs a definite width to work against. So the column
+          grew to fit the id and pushed the whole table out past its card: 1357px
+          of content in a 1280px window, the sideways scroll §7 rules out.
+        */
+        meta: { title: "Job", cellClassName: "max-w-cell-lg" },
         cell: ({ row }) => (
           <div className="min-w-0">
             <div className="truncate font-medium">{row.original.name}</div>
-            <div className="truncate font-mono text-[0.7rem] text-muted-foreground">
+            <div className="truncate font-mono text-eyebrow text-muted-foreground">
               {row.original.id}
             </div>
             {row.original.failedReason ? (
               <Hint label={row.original.failedReason}>
-                <div className="mt-1 max-w-xs cursor-help truncate text-xs text-destructive">
+                <div className="mt-1 max-w-cell-lg cursor-help truncate text-meta text-destructive">
                   {row.original.failedReason}
                 </div>
               </Hint>
@@ -106,11 +115,15 @@ export function QueueOperations() {
         id: "data",
         accessorFn: (row) => JSON.stringify(row.data),
         header: "Details",
-        meta: { title: "Details", hideBelowLg: true },
+        meta: {
+          title: "Details",
+          hideBelowLg: true,
+          cellClassName: "max-w-cell"
+        },
         enableSorting: false,
         cell: ({ getValue }) => (
           <Hint label={String(getValue())}>
-            <code className="block max-w-sm cursor-help truncate rounded bg-muted px-2 py-1 text-xs">
+            <code className="block cursor-help truncate rounded-control bg-muted px-2 py-1 text-meta">
               {String(getValue())}
             </code>
           </Hint>
@@ -218,11 +231,11 @@ export function QueueOperations() {
         renderMobileRow={(job) => (
           <div className="min-w-0">
             <div className="truncate font-medium">{job.name}</div>
-            <div className="truncate font-mono text-[0.7rem] text-muted-foreground">
+            <div className="truncate font-mono text-eyebrow text-muted-foreground">
               {job.id}
             </div>
             {job.failedReason ? (
-              <p className="mt-1 line-clamp-2 text-xs text-destructive">
+              <p className="mt-1 line-clamp-2 text-meta text-destructive">
                 {job.failedReason}
               </p>
             ) : null}
@@ -248,6 +261,7 @@ export function QueueOperations() {
       <PageHeader
         title="Background jobs"
         description="What QQueue is working through behind the scenes. Come here when something looks stuck."
+        breadcrumb={{ label: "Settings", to: "/settings" }}
         actions={
           <Button
             type="button"
@@ -280,15 +294,15 @@ export function QueueOperations() {
         ) : (
           (queuesQuery.data ?? []).map((queue) => (
             <Card key={queue.name}>
-              <CardContent className="p-4 sm:p-5">
+              <CardContent className="p-4 sm:p-card">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="font-semibold">{queueLabel(queue.name)}</h2>
-                    <p className="font-mono text-xs text-muted-foreground">
+                    <p className="font-mono text-meta text-muted-foreground">
                       {queue.name}
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-field">
                     <Hint label="Jobs waiting their turn">
                       <Badge variant="secondary" className="cursor-help">
                         {queue.counts.queued} waiting

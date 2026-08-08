@@ -1,16 +1,20 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { fieldBase } from "./field.js";
 
+/*
+  A textarea is the one control that legitimately fills the form column — the
+  anti-stretch rule is about short, known-length values, and prose has no
+  natural width short of the measure. It gets vertical padding instead of a
+  fixed height.
+*/
 const Textarea = React.forwardRef<
   HTMLTextAreaElement,
   React.ComponentProps<"textarea">
 >(({ className, ...props }, ref) => {
   return (
     <textarea
-      className={cn(
-        "flex min-h-[80px] w-full rounded-md border border-input bg-card px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
+      className={cn(fieldBase, "min-h-textarea py-2 leading-6", className)}
       ref={ref}
       {...props}
     />

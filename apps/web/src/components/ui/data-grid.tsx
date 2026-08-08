@@ -92,6 +92,11 @@ export interface DataGridProps<TData> {
    * has to work as an installed PWA.
    */
   renderMobileRow?: (row: TData) => React.ReactNode;
+  /**
+   * Names a row for assistive tech. Used for the mobile card's tap target,
+   * which is a bare hit area with no text of its own.
+   */
+  getRowLabel?: (row: TData) => string;
   pageSize?: number;
   /** Hide pagination when the caller already pages server-side. */
   paginated?: boolean;
@@ -143,6 +148,7 @@ export function DataGrid<TData>({
   enableSelection = false,
   onRowClick,
   renderMobileRow,
+  getRowLabel,
   pageSize = 25,
   paginated = true,
   className,
@@ -234,14 +240,18 @@ export function DataGrid<TData>({
       {searchable || toolbar || hideableColumns.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           {searchable ? (
-            <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <div className="relative w-full xs:w-field-search">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
               <Input
+                // Every list page searches through here, and most of what gets
+                // typed into it is an address or an ID. Autocorrect on a phone
+                // would rewrite those into something that matches nothing.
+                identifier
                 value={globalFilter}
                 onChange={(event) => setGlobalFilter(event.target.value)}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
-                className="pl-9 pr-9"
+                className="pl-control pr-control"
               />
               {globalFilter ? (
                 <IconButton
@@ -270,14 +280,14 @@ export function DataGrid<TData>({
                 </IconButton>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-56">
-                <p className="px-1 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="px-1 pb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
                   Columns
                 </p>
                 <div className="flex flex-col gap-1">
                   {hideableColumns.map((column) => (
                     <label
                       key={column.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 text-sm hover:bg-accent"
+                      className="flex cursor-pointer items-center gap-2 rounded-control px-1 py-field text-body hover:bg-accent"
                     >
                       <Checkbox
                         checked={column.getIsVisible()}
@@ -296,8 +306,8 @@ export function DataGrid<TData>({
       ) : null}
 
       {enableSelection && selectedRows.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
-          <span className="text-sm font-medium">
+        <div className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-accent px-3 py-2">
+          <span className="text-ui font-medium text-accent-foreground">
             {selectedRows.length} selected
           </span>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -310,15 +320,13 @@ export function DataGrid<TData>({
       ) : null}
 
       {loading ? (
-        <div className="space-y-2 rounded-xl border p-4">
+        <div className="space-y-2 rounded-card border border-border p-4">
           {Array.from({ length: 5 }).map((_, index) => (
             <Skeleton key={index} className="h-10 w-full" />
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border">
-          {isFiltered ? (noResults ?? empty) : empty}
-        </div>
+        <div>{isFiltered ? (noResults ?? empty) : empty}</div>
       ) : (
         <>
           {/*
@@ -332,15 +340,33 @@ export function DataGrid<TData>({
               {rows.map((row) => (
                 <li key={row.id}>
                   {onRowClick ? (
-                    <button
-                      type="button"
-                      onClick={() => onRowClick(row.original)}
-                      className="w-full rounded-xl border bg-card p-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {renderMobileRow(row.original)}
-                    </button>
+                    /*
+                      The card is a div with a stretched hit area behind it, not
+                      a <button> wrapping the content. A card almost always ends
+                      with a RowActions menu — the tap path §5 requires for what
+                      desktop reveals on hover — and a <button> inside a <button>
+                      is invalid HTML that browsers and screen readers resolve
+                      differently, up to swallowing the inner control's activation.
+
+                      So the whole card stays tappable via an absolutely
+                      positioned button underneath. The content layer above it
+                      is transparent to the pointer, except for its own controls:
+                      a tap on the subject falls through to the hit area, a tap
+                      on ⋯ opens the menu.
+                    */
+                    <div className="relative rounded-card border border-border bg-surface p-3 transition-colors duration-fast ease-out focus-within:border-border-strong hover:bg-surface-sunken">
+                      <button
+                        type="button"
+                        onClick={() => onRowClick(row.original)}
+                        aria-label={getRowLabel?.(row.original) ?? "Open row"}
+                        className="absolute inset-0 rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      />
+                      <div className="pointer-events-none relative [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_input]:pointer-events-auto">
+                        {renderMobileRow(row.original)}
+                      </div>
+                    </div>
                   ) : (
-                    <div className="rounded-xl border bg-card p-3">
+                    <div className="rounded-card border border-border bg-surface p-3">
                       {renderMobileRow(row.original)}
                     </div>
                   )}
@@ -350,11 +376,35 @@ export function DataGrid<TData>({
           ) : null}
 
           {renderMobileRow && isMobile ? null : (
-          <div className="relative overflow-x-auto rounded-xl border">
-            <table className="w-full caption-bottom text-sm" aria-label={label}>
-              <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur">
+          /*
+            No `overflow-x-auto` here, and that is load-bearing rather than an
+            omission. A box with `overflow-x: auto` has its `overflow-y: visible`
+            computed to `auto` as well, which makes it a scroll container — and a
+            `position: sticky` header anchors to its nearest scrollport, not to
+            the document. This wrapper's height is its own content, so it has no
+            scrollport to speak of: the header used to scroll away with the
+            table and never stick to anything. Columns earn their room by
+            dropping out at `md`/`lg` and truncating (§3), not by pushing a
+            second scrollbar into a page that is only allowed one.
+          */
+          <div className="relative rounded-card border border-border">
+            {/*
+              `border-separate` because a sticky header cannot keep a collapsed
+              border: with `border-collapse: collapse` the bottom hairline
+              belongs to the table's border grid rather than to the header, and
+              it is left behind the moment the header lifts. Row rules therefore
+              live on the cells, which is also why the backgrounds below do.
+            */}
+            <table
+              className="w-full caption-bottom border-separate border-spacing-0 text-ui"
+              aria-label={label}
+            >
+              {/* Sticky against the *document* now that main no longer
+                  scrolls, so it has to clear whatever the shell has parked at
+                  the top of the viewport at this width. */}
+              <thead className="sticky top-sticky-top z-10">
                 {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id} className="border-b">
+                  <tr key={headerGroup.id}>
                     {headerGroup.headers.map((header) => {
                       const meta = header.column.columnDef.meta as
                         | DataGridColumnMeta
@@ -375,7 +425,10 @@ export function DataGrid<TData>({
                                   : undefined
                           }
                           className={cn(
-                            "h-10 whitespace-nowrap px-3 align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground",
+                            "h-10 whitespace-nowrap border-b border-border bg-surface-sunken px-3 align-middle text-meta font-medium uppercase tracking-eyebrow text-text-tertiary",
+                            // Nothing clips this wrapper any more, so the
+                            // header paints its own top corners.
+                            "first:rounded-tl-card last:rounded-tr-card",
                             alignmentClass(meta),
                             responsiveClass(meta),
                             meta?.headerClassName
@@ -385,7 +438,17 @@ export function DataGrid<TData>({
                             <button
                               type="button"
                               onClick={header.column.getToggleSortingHandler()}
-                              className="inline-flex items-center gap-1 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              /*
+                                `uppercase` is repeated from the <th> rather
+                                than inherited: preflight resets buttons to
+                                `text-transform: none`, which is more specific
+                                than inheritance and quietly stripped the
+                                eyebrow casing from every *sortable* header —
+                                so a table's own column labels disagreed with
+                                each other depending on whether you could sort
+                                by them.
+                              */
+                              className="inline-flex items-center gap-1 rounded-control uppercase tracking-eyebrow transition-colors duration-fast ease-out hover:text-text"
                             >
                               {flexRender(
                                 header.column.columnDef.header,
@@ -411,7 +474,13 @@ export function DataGrid<TData>({
                   </tr>
                 ))}
               </thead>
-              <tbody>
+              {/*
+                The last row loses its rule and rounds into the wrapper's
+                corners. Both belong to the cells: `border-separate` does not
+                paint a `<tr>`'s own border, and a row-level background would
+                square off the two corners now that nothing clips it.
+              */}
+              <tbody className="[&>tr:last-child>td:first-child]:rounded-bl-card [&>tr:last-child>td:last-child]:rounded-br-card [&>tr:last-child>td]:border-0">
                 {rows.map((row) => (
                   <tr
                     key={row.id}
@@ -420,7 +489,17 @@ export function DataGrid<TData>({
                       onRowClick ? () => onRowClick(row.original) : undefined
                     }
                     className={cn(
-                      "border-b transition-colors last:border-0 hover:bg-muted/50 data-[state=selected]:bg-primary/5",
+                      /*
+                        The hover and selected selectors are written out in
+                        full rather than stacked as `hover:[&>td]:…`, which
+                        Tailwind composes to `>td:hover` — that tints the one
+                        cell under the pointer instead of the row, and the
+                        selected variant lands on `>td[data-state=selected]`,
+                        an attribute that only ever sits on the `<tr>`.
+                      */
+                      "[&>td]:transition-colors [&>td]:duration-fast [&>td]:ease-out",
+                      "[&:hover>td]:bg-surface-sunken",
+                      "[&[data-state=selected]>td]:bg-accent",
                       onRowClick && "cursor-pointer"
                     )}
                   >
@@ -432,7 +511,8 @@ export function DataGrid<TData>({
                         <td
                           key={cell.id}
                           className={cn(
-                            "px-3 py-2.5 align-middle",
+                            "border-b border-border px-3 py-3 align-middle",
+                            meta?.align === "right" && "tabular-nums",
                             alignmentClass(meta),
                             responsiveClass(meta),
                             meta?.cellClassName
@@ -455,8 +535,8 @@ export function DataGrid<TData>({
       )}
 
       {paginated && !loading && table.getPageCount() > 1 ? (
-        <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
-          <span>
+        <div className="flex items-center justify-between gap-2 text-ui text-text-secondary">
+          <span data-numeric>
             Page {table.getState().pagination.pageIndex + 1} of{" "}
             {table.getPageCount()} · {table.getFilteredRowModel().rows.length}{" "}
             {table.getFilteredRowModel().rows.length === 1 ? "row" : "rows"}

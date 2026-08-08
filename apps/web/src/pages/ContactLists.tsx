@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Pencil, Plus, Search, Trash2, Users } from "lucide-react";
 import { PageHeader } from "../components/PageHeader.js";
+import { ListsTabs } from "../components/ListsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { api, type ContactList } from "../lib/api.js";
@@ -154,14 +155,14 @@ export function ContactLists() {
         header: "List",
         meta: { title: "List" },
         cell: ({ row }) => (
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-accent text-accent-foreground">
               <Users className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="truncate font-medium">{row.original.name}</div>
               {row.original.description ? (
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="truncate text-meta text-text-tertiary">
                   {row.original.description}
                 </p>
               ) : null}
@@ -183,7 +184,7 @@ export function ContactLists() {
           const remaining = count - preview.length;
           return (
             <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">
+              <span className="text-ui font-medium text-text" data-numeric>
                 {formatCount(count)} {count === 1 ? "person" : "people"}
               </span>
               {preview.length > 0 ? (
@@ -204,7 +205,7 @@ export function ContactLists() {
                   ) : null}
                 </div>
               ) : (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-meta text-text-tertiary">
                   Nobody in it yet
                 </span>
               )}
@@ -227,7 +228,7 @@ export function ContactLists() {
                   : `${count} campaign${count === 1 ? "" : "s"} send to this list`
               }
             >
-              <span className="cursor-help text-muted-foreground">
+              <span className="cursor-help text-text-secondary" data-numeric>
                 {count} {count === 1 ? "campaign" : "campaigns"}
               </span>
             </Hint>
@@ -276,7 +277,9 @@ export function ContactLists() {
         }
       />
 
-      <section className="p-4 sm:p-6">
+      <ListsTabs />
+
+      <section className="max-w-table p-4 sm:p-6">
         <DataGrid
           label="Contact lists"
           data={listsQuery.data ?? []}
@@ -284,6 +287,7 @@ export function ContactLists() {
           getRowId={(row) => row.id}
           loading={listsQuery.isPending}
           onRowClick={openEdit}
+          getRowLabel={(list) => `Edit ${list.name}`}
           searchPlaceholder="Search lists…"
           empty={
             <EmptyState
@@ -311,31 +315,34 @@ export function ContactLists() {
             />
           }
           renderMobileRow={(list) => (
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate font-medium">{list.name}</div>
-                {list.description ? (
-                  <p className="truncate text-sm text-muted-foreground">
-                    {list.description}
-                  </p>
-                ) : null}
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatCount(memberCount(list))}{" "}
-                  {memberCount(list) === 1 ? "person" : "people"}
-                </p>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-text">
+                  {list.name}
+                </span>
+                <RowActions
+                  className="-my-1 -mr-1"
+                  rowLabel={list.name}
+                  actions={[
+                    {
+                      label: "Delete this list",
+                      icon: Trash2,
+                      primary: true,
+                      destructive: true,
+                      onSelect: () => setDeleteTarget(list),
+                    },
+                  ]}
+                />
               </div>
-              <RowActions
-                rowLabel={list.name}
-                actions={[
-                  {
-                    label: "Delete this list",
-                    icon: Trash2,
-                    primary: true,
-                    destructive: true,
-                    onSelect: () => setDeleteTarget(list),
-                  },
-                ]}
-              />
+              {list.description ? (
+                <p className="truncate text-ui text-text-secondary">
+                  {list.description}
+                </p>
+              ) : null}
+              <p className="text-right text-meta text-text-tertiary" data-numeric>
+                {formatCount(memberCount(list))}{" "}
+                {memberCount(list) === 1 ? "person" : "people"}
+              </p>
             </div>
           )}
         />
@@ -387,35 +394,36 @@ export function ContactLists() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>People</Label>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-meta text-text-tertiary" data-numeric>
                   {selectedContactIds.length} selected
                 </span>
               </div>
 
               {contacts.length === 0 ? (
-                <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+                <p className="rounded-card border border-dashed border-border p-4 text-center text-ui text-text-secondary">
                   You don't have any contacts yet. Add some first, then come
                   back and build a list.
                 </p>
               ) : (
-                <div className="rounded-lg border">
-                  <div className="border-b p-2">
+                <div className="rounded-card border border-border">
+                  <div className="border-b border-border p-2">
                     <div className="relative">
-                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
                       <Input
+                        identifier
                         placeholder="Search by name or email…"
                         aria-label="Search contacts"
                         value={contactSearch}
                         onChange={(event) =>
                           setContactSearch(event.target.value)
                         }
-                        className="h-9 pl-8"
+                        className="pl-control"
                       />
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between border-b px-2 py-1.5">
-                    <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium">
+                  <div className="flex items-center justify-between border-b border-border px-2 py-field">
+                    <label className="flex min-h-touch cursor-pointer items-center gap-2 text-ui font-medium text-text sm:min-h-0">
                       <Checkbox
                         checked={
                           allFilteredSelected
@@ -435,14 +443,14 @@ export function ContactLists() {
                       {allFilteredSelected ? "Clear all" : "Select all"}
                       {contactSearch.trim() ? " matching" : ""}
                     </label>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-meta text-text-tertiary" data-numeric>
                       {filteredContacts.length} of {contacts.length}
                     </span>
                   </div>
 
                   <div className="max-h-56 space-y-1 overflow-auto p-2">
                     {filteredContacts.length === 0 ? (
-                      <p className="px-1 py-2 text-sm text-muted-foreground">
+                      <p className="px-1 py-2 text-ui text-text-secondary">
                         Nobody matches “{contactSearch}”.
                       </p>
                     ) : (
@@ -453,7 +461,7 @@ export function ContactLists() {
                         return (
                           <label
                             key={contact.id}
-                            className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/60"
+                            className="flex min-h-touch cursor-pointer items-center gap-2 rounded-control px-2 py-field text-ui transition-colors duration-fast ease-out hover:bg-surface-sunken sm:min-h-0"
                           >
                             <Checkbox
                               checked={selectedContactIds.includes(contact.id)}
@@ -470,7 +478,7 @@ export function ContactLists() {
                               {fullName ? (
                                 <>
                                   {fullName}{" "}
-                                  <span className="text-muted-foreground">
+                                  <span className="text-text-secondary">
                                     {contact.email}
                                   </span>
                                 </>

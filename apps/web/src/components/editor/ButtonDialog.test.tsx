@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ButtonDialog } from "./ButtonDialog.js";
 import type { ButtonAlign, ButtonFormValue } from "./button-extension.js";
+import { EMAIL_SWATCHES } from "../../lib/email-palette.js";
 
 function renderDialog(
   initial?: Partial<ButtonFormValue>,
@@ -53,7 +54,7 @@ describe("ButtonDialog", () => {
       expect.objectContaining({
         size: "medium",
         radius: "rounded",
-        background: "#2e7d63"
+        background: EMAIL_SWATCHES.accent
       })
     );
   });
@@ -82,14 +83,14 @@ describe("ButtonDialog", () => {
     const { onSubmit } = renderDialog();
 
     await fillRequired(user);
-    await user.click(screen.getByLabelText("Background: #dc2626"));
+    await user.click(screen.getByLabelText(`Background: ${EMAIL_SWATCHES.red}`));
     await user.click(screen.getByRole("button", { name: "Large" }));
     await user.click(screen.getByRole("button", { name: "Pill" }));
     await user.click(screen.getByRole("button", { name: "Insert button" }));
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
-        background: "#dc2626",
+        background: EMAIL_SWATCHES.red,
         size: "large",
         radius: "pill"
       })

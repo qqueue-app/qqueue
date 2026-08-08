@@ -94,6 +94,10 @@ export const qk = {
   drafts: (orgId: string) => ["email-drafts", orgId] as const,
   draft: (id: string) => ["email-draft", id] as const,
   outbox: (orgId: string) => ["outbox", orgId] as const,
+  // The sent archive filters and pages on the server, so the filters are part
+  // of the key: each combination is its own cached page.
+  sent: (orgId: string, filters?: Record<string, unknown>) =>
+    ["sent", orgId, filters ?? {}] as const,
 
   inboxAccounts: (orgId: string) => ["inbox-accounts", orgId] as const,
   inboundMessages: (orgId: string, filters?: Record<string, unknown>) =>

@@ -9,6 +9,7 @@ import {
   normalizeButtonAttributes,
   normalizeColor
 } from "./button-extension.js";
+import { EMAIL_ACCENT, EMAIL_NEUTRALS } from "../../lib/email-palette.js";
 
 /** Mirrors RichTextEditor's extension set — alignment lives on the paragraph,
  *  so TextAlign has to be present for these to mean anything. */
@@ -52,8 +53,8 @@ function rgb(hex: string) {
 describe("buttonStyle", () => {
   it("renders inline styles, since email clients strip stylesheets", () => {
     const style = buttonStyle(BUTTON_DEFAULTS);
-    expect(style).toContain("background:#2e7d63");
-    expect(style).toContain("color:#ffffff");
+    expect(style).toContain(`background:${EMAIL_ACCENT}`);
+    expect(style).toContain(`color:${EMAIL_NEUTRALS.paper}`);
     expect(style).toContain("border-radius:8px");
     expect(style).toContain("display:inline-block");
   });
@@ -243,7 +244,7 @@ describe("CtaButton rendering", () => {
     });
 
     const html = editor.getHTML();
-    expect(parseButton(html).anchor.style.background).toBe(rgb("#2e7d63"));
+    expect(parseButton(html).anchor.style.background).toBe(rgb(EMAIL_ACCENT));
     expect(html).not.toContain("onmouseover");
   });
 

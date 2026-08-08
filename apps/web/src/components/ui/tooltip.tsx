@@ -15,7 +15,7 @@ const TooltipContent = React.forwardRef<
     ref={ref}
     sideOffset={sideOffset}
     className={cn(
-      "z-50 max-w-xs overflow-hidden rounded-lg bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-md",
+      "z-50 max-w-xs overflow-hidden rounded-control bg-text px-2 py-1 text-meta font-medium text-bg shadow-overlay",
       "animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
       "data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1",
       className
@@ -23,7 +23,7 @@ const TooltipContent = React.forwardRef<
     {...props}
   >
     {children}
-    <TooltipPrimitive.Arrow className="fill-foreground" width={10} height={5} />
+    <TooltipPrimitive.Arrow className="fill-text" width={10} height={5} />
   </TooltipPrimitive.Content>
 ));
 TooltipContent.displayName = TooltipPrimitive.Content.displayName;
@@ -60,7 +60,7 @@ export function Hint({
           <span className="flex items-center gap-2">
             <span>{label}</span>
             {shortcut ? (
-              <kbd className="rounded border border-background/25 px-1 font-sans text-[0.65rem] uppercase text-background/70">
+              <kbd className="rounded-control border border-bg/25 px-1 font-sans text-meta uppercase text-bg/70">
                 {shortcut}
               </kbd>
             ) : null}

@@ -20,8 +20,15 @@ describe("EmptyState", () => {
     expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
   });
 
+  // Asserts absence by content rather than by tag: the title is itself a <p>
+  // now, so counting paragraphs would pass or fail on markup rather than on
+  // whether the optional parts actually rendered.
   it("omits the description and action when not provided", () => {
-    const { container } = renderWithProviders(<EmptyState icon={Inbox} title="Empty" />);
-    expect(container.querySelector("p")).toBeNull();
+    renderWithProviders(<EmptyState icon={Inbox} title="Empty" />);
+    expect(screen.getByText("Empty")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Add your first contact")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });

@@ -23,17 +23,18 @@ import {
   type ButtonSize
 } from "./button-extension";
 import { normalizeUrl } from "./url";
+import { EMAIL_SWATCHES } from "../../lib/email-palette.js";
 
 // Email-safe presets, matching the editor's text colour palette.
 const BACKGROUND_SWATCHES = [
-  "#2e7d63",
-  "#2563eb",
-  "#1f2933",
-  "#dc2626",
-  "#d97706",
-  "#7c3aed"
+  EMAIL_SWATCHES.accent,
+  EMAIL_SWATCHES.blue,
+  EMAIL_SWATCHES.ink,
+  EMAIL_SWATCHES.red,
+  EMAIL_SWATCHES.amber,
+  EMAIL_SWATCHES.violet
 ];
-const TEXT_SWATCHES = ["#ffffff", "#1f2933"];
+const TEXT_SWATCHES = [EMAIL_SWATCHES.white, EMAIL_SWATCHES.ink];
 
 const ALIGN_OPTIONS: { value: ButtonAlign; label: string; icon: typeof AlignLeft }[] =
   [
@@ -84,7 +85,7 @@ function Segmented<T extends string>({
     <div
       role="group"
       aria-label={groupLabel}
-      className="inline-flex rounded-md border bg-muted/40 p-0.5"
+      className="inline-flex rounded-control border bg-muted/40 p-1"
     >
       {options.map((option) => (
         <button
@@ -93,7 +94,7 @@ function Segmented<T extends string>({
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "rounded px-3 py-1 text-sm transition-colors",
+            "rounded px-3 py-1 text-body transition-colors",
             value === option.value
               ? "bg-card font-medium text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
@@ -128,7 +129,7 @@ function ColorField({
           type="color"
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="h-8 w-12 cursor-pointer rounded border bg-card p-0.5"
+          className="h-8 w-12 cursor-pointer rounded border bg-card p-1"
         />
         {swatches.map((swatch) => (
           <button
@@ -138,7 +139,7 @@ function ColorField({
             onClick={() => onChange(swatch)}
             style={{ backgroundColor: swatch }}
             className={cn(
-              "h-6 w-6 rounded-full border transition-transform hover:scale-110",
+              "h-6 w-6 rounded-pill border transition-transform hover:scale-110",
               value.toLowerCase() === swatch.toLowerCase() &&
                 "ring-2 ring-ring ring-offset-1 ring-offset-background"
             )}
@@ -277,13 +278,13 @@ export function ButtonDialog({
 
           <div className="space-y-2">
             <Label>Alignment</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               Aligns the whole line. A button sitting beside text moves with it.
             </p>
             <div
               role="group"
               aria-label="Alignment"
-              className="inline-flex rounded-md border bg-muted/40 p-0.5"
+              className="inline-flex rounded-control border bg-muted/40 p-1"
             >
               {ALIGN_OPTIONS.map((option) => (
                 <button
@@ -346,7 +347,7 @@ export function ButtonDialog({
           <div className="space-y-2">
             <Label>Preview</Label>
             <div
-              className="rounded-md border bg-white p-4"
+              className="rounded-control border bg-email-paper p-4"
               style={{ textAlign: attrs.align }}
             >
               {/* Built from the same style functions the email uses — including
@@ -361,7 +362,7 @@ export function ButtonDialog({
           </div>
 
           {error ? (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body text-destructive">
               {error}
             </p>
           ) : null}

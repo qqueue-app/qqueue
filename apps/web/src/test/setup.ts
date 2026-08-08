@@ -13,17 +13,27 @@ if (!("ResizeObserver" in globalThis)) {
   globalThis.ResizeObserver = ResizeObserver as unknown as typeof globalThis.ResizeObserver;
 }
 
+/*
+  A plain function, deliberately not a `vi.fn()`.
+
+  This is a polyfill for an API jsdom doesn't implement, not a mock anyone
+  asserts on — and as a `vi.fn()` it was fragile in a way that took a while to
+  see: any suite calling `vi.restoreAllMocks()` in an `afterEach` wiped its
+  implementation, so from the second test onward `matchMedia()` returned
+  `undefined` and every component reading a media query threw. Nothing noticed
+  while only a handful of components did.
+*/
 if (!window.matchMedia) {
-  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+  window.matchMedia = ((query: string) => ({
     matches: false,
     media: query,
     onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn()
-  }));
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false
+  })) as unknown as typeof window.matchMedia;
 }
 
 if (!Element.prototype.scrollIntoView) {

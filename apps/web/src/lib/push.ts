@@ -75,11 +75,20 @@ export function isIos(): boolean {
   );
 }
 
-/** True when running as an installed app rather than in a browser tab. */
+/**
+ * True when running as an installed app rather than in a browser tab.
+ *
+ * All three installed display modes count, not just the `standalone` the
+ * manifest asks for: a desktop install can end up in `window-controls-overlay`,
+ * and a launcher can honour `minimal-ui` instead. Each of them means the same
+ * thing to a caller — there is no browser chrome and no install left to offer.
+ */
 export function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
   return (
-    window.matchMedia("(display-mode: standalone)").matches ||
+    window.matchMedia(
+      "(display-mode: standalone), (display-mode: minimal-ui), (display-mode: window-controls-overlay)"
+    ).matches ||
     // Safari's non-standard flag, still the only signal on iOS.
     (window.navigator as { standalone?: boolean }).standalone === true
   );

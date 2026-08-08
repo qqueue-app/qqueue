@@ -10,6 +10,8 @@ const EXEMPT_PATHS = new Set([
   "/privacy",
   "/licensing",
   "/trademark",
+  // The dev-only design-system reference renders no data and needs no instance.
+  "/design-system",
 ]);
 
 /**

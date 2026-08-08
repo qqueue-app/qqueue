@@ -156,16 +156,16 @@ export function CampaignAnalytics() {
             const Icon = card.icon;
             return (
               <Card key={card.label}>
-                <CardContent className="p-5">
+                <CardContent className="p-card">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-body text-muted-foreground">
                         {card.label}
                       </div>
                       {loading ? (
                         <Skeleton className="mt-3 h-8 w-14" />
                       ) : (
-                        <div className="mt-2 text-3xl font-semibold tracking-tight">
+                        <div className="mt-2 text-stat font-semibold tracking-tight">
                           {card.value}
                         </div>
                       )}
@@ -173,14 +173,14 @@ export function CampaignAnalytics() {
                     <div
                       className={
                         card.tone === "danger"
-                          ? "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive"
-                          : "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                          ? "flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-destructive/10 text-destructive"
+                          : "flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-primary/10 text-primary"
                       }
                     >
                       <Icon className="h-5 w-5" />
                     </div>
                   </div>
-                  <div className="mt-3 truncate text-xs text-muted-foreground">
+                  <div className="mt-3 truncate text-meta text-muted-foreground">
                     {loading ? <Skeleton className="h-4 w-24" /> : card.detail}
                   </div>
                 </CardContent>
@@ -192,14 +192,14 @@ export function CampaignAnalytics() {
         <div className="grid gap-4 xl:grid-cols-2">
           <Card>
             <CardContent className="p-0">
-              <div className="border-b p-5">
+              <div className="border-b p-card">
                 <h2 className="font-semibold">Top links</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 text-body text-muted-foreground">
                   Clicks per destination URL.
                 </p>
               </div>
               {loading ? (
-                <div className="space-y-3 p-5">
+                <div className="space-y-3 p-card">
                   {[0, 1, 2].map((index) => (
                     <Skeleton key={index} className="h-8 w-full" />
                   ))}
@@ -215,7 +215,7 @@ export function CampaignAnalytics() {
                   <TableBody>
                     {analytics.links.map((link) => (
                       <TableRow key={link.url}>
-                        <TableCell className="max-w-[360px] truncate font-medium">
+                        <TableCell className="max-w-cell-lg truncate font-medium">
                           <a
                             href={link.url}
                             target="_blank"
@@ -242,14 +242,14 @@ export function CampaignAnalytics() {
 
           <Card>
             <CardContent className="p-0">
-              <div className="border-b p-5">
+              <div className="border-b p-card">
                 <h2 className="font-semibold">Recent events</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 text-body text-muted-foreground">
                   Latest delivery activity for this campaign.
                 </p>
               </div>
               {loading ? (
-                <div className="space-y-3 p-5">
+                <div className="space-y-3 p-card">
                   {[0, 1, 2].map((index) => (
                     <Skeleton key={index} className="h-12 w-full" />
                   ))}
@@ -261,10 +261,10 @@ export function CampaignAnalytics() {
                       <Badge variant={statusVariant(event.type)}>
                         {event.type}
                       </Badge>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      <span className="min-w-0 flex-1 truncate text-body font-medium">
                         {event.toEmail}
                       </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
+                      <span className="shrink-0 text-meta text-muted-foreground">
                         {formatDate(event.occurredAt)}
                       </span>
                     </div>

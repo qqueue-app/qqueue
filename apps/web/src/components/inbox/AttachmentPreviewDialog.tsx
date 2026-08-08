@@ -151,7 +151,7 @@ export function AttachmentPreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-[240px] overflow-hidden rounded-lg border bg-muted/30">
+        <div className="min-h-pane overflow-hidden rounded-card border bg-muted/30">
           {kind === "image" && objectUrl ? (
             <img
               src={objectUrl}
@@ -175,7 +175,7 @@ export function AttachmentPreviewDialog({
           ) : null}
 
           {kind === "text" ? (
-            <pre className="max-h-[70vh] overflow-auto p-4 text-xs leading-5 whitespace-pre-wrap break-words">
+            <pre className="max-h-[70vh] overflow-auto p-4 text-meta leading-5 whitespace-pre-wrap break-words">
               {text ?? "Loading…"}
               {text && blob.size > TEXT_PREVIEW_LIMIT
                 ? "\n\n… truncated. Download the file to read the rest."

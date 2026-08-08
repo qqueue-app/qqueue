@@ -51,6 +51,27 @@ export function formatMailDate(value: string | Date | null | undefined): string 
   });
 }
 
+/**
+ * A fixed calendar stamp — "Aug 6, 9:45 AM".
+ *
+ * For tables whose rows span days, where `formatMailDate`'s relative labels
+ * ("Wed", "6 Aug") stop being comparable down a column. Rendered inside a
+ * `<time>` so it picks up tabular figures and the digits line up between rows.
+ */
+export function formatTimestamp(
+  value: string | Date | null | undefined,
+  fallback = "—"
+): string {
+  const date = toDate(value);
+  if (!date) return fallback;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** The unabbreviated form, for tooltips and detail headers. */
 export function formatFullDate(
   value: string | Date | null | undefined,

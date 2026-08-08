@@ -1,4 +1,9 @@
-import { renderWithProviders, screen, waitFor, within } from "../test/render.js";
+import {
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,7 +12,7 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
   // Used by actions that report progress before their result.
   loading: vi.fn(),
-  message: vi.fn()
+  message: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast }));
 
@@ -18,11 +23,11 @@ type SessionValue = {
 };
 
 const sessionRef = vi.hoisted(() => ({ current: {} as SessionValue }));
-vi.mock("../lib/session-context.js", () => ({
+vi.mock("../../lib/session-context.js", () => ({
   useSession: () => sessionRef.current,
 }));
 
-vi.mock("../lib/api.js", () => ({
+vi.mock("../../lib/api.js", () => ({
   api: {
     listOrganizationMembers: vi.fn(),
     listInvites: vi.fn(),
@@ -33,8 +38,8 @@ vi.mock("../lib/api.js", () => ({
   },
 }));
 
-import { TeamCard } from "./TeamCard.js";
-import { api } from "../lib/api.js";
+import { TeamSettings } from "./TeamSettings.js";
+import { api } from "../../lib/api.js";
 
 const mockedApi = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
@@ -82,18 +87,22 @@ beforeEach(() => {
   mockedApi.listInvites.mockResolvedValue(invites);
 });
 
-describe("TeamCard", () => {
-  it("renders nothing for a non-manager role", () => {
+describe("TeamSettings", () => {
+  it("tells a member why the page is empty rather than rendering nothing", () => {
     sessionRef.current = {
       ...sessionRef.current,
       currentOrganization: { id: "org_1", name: "Acme", role: "MEMBER" },
     };
-    const { container } = renderWithProviders(<TeamCard />);
-    expect(container).toBeEmptyDOMElement();
+    renderWithProviders(<TeamSettings />);
+
+    // A blank page after a tap reads as a bug; the page still has a header and
+    // says who this is for.
+    expect(screen.getByText("Owners and admins only")).toBeInTheDocument();
     expect(mockedApi.listOrganizationMembers).not.toHaveBeenCalled();
   });
 
-  it("loads and lists members and pending invitations", async () => { renderWithProviders(<TeamCard />);
+  it("loads and lists members and pending invitations", async () => {
+    renderWithProviders(<TeamSettings />);
     expect(await screen.findByText("teammate@x.com")).toBeInTheDocument();
     expect(screen.getByText("pending@x.com")).toBeInTheDocument();
     expect(screen.getByText("(you)")).toBeInTheDocument();
@@ -115,7 +124,7 @@ describe("TeamCard", () => {
       acceptUrl: "http://localhost:5173/accept-invite?token=xyz",
     });
 
-    renderWithProviders(<TeamCard />);
+    renderWithProviders(<TeamSettings />);
     await screen.findByText("teammate@x.com");
     await userEvent.type(
       screen.getByLabelText("Invite by email"),
@@ -153,7 +162,7 @@ describe("TeamCard", () => {
       acceptUrl: "http://localhost:5173/accept-invite?token=abc",
     });
 
-    renderWithProviders(<TeamCard />);
+    renderWithProviders(<TeamSettings />);
     await screen.findByText("teammate@x.com");
     await userEvent.type(
       screen.getByLabelText("Invite by email"),
@@ -171,7 +180,7 @@ describe("TeamCard", () => {
 
   it("revokes a pending invitation", async () => {
     mockedApi.revokeInvite.mockResolvedValue({});
-    renderWithProviders(<TeamCard />);
+    renderWithProviders(<TeamSettings />);
     await screen.findByText("pending@x.com");
     await userEvent.click(
       screen.getByRole("button", {
@@ -185,7 +194,7 @@ describe("TeamCard", () => {
 
   it("removes a member after confirming", async () => {
     mockedApi.removeMember.mockResolvedValue(undefined);
-    renderWithProviders(<TeamCard />);
+    renderWithProviders(<TeamSettings />);
     await screen.findByText("teammate@x.com");
     await userEvent.click(
       screen.getByRole("button", { name: /Remove teammate@x.com/ })
@@ -199,19 +208,25 @@ describe("TeamCard", () => {
     );
   });
 
+  it("cannot remove the last owner", async () => {
+    mockedApi.listOrganizationMembers.mockResolvedValue([members[0]]);
+    renderWithProviders(<TeamSettings />);
+    await screen.findByText("me@x.com");
+
+    expect(
+      screen.getByRole("button", { name: /Remove me@x.com/ })
+    ).toBeDisabled();
+  });
+
   it("changes a member's role", async () => {
     mockedApi.updateMemberRole.mockResolvedValue({
       ...members[1],
       role: "ADMIN",
     });
-    renderWithProviders(<TeamCard />);
+    renderWithProviders(<TeamSettings />);
     await screen.findByText("teammate@x.com");
 
-    // Two comboboxes: the invite-role select and the editable member's role
-    // select (the OWNER self-row shows a badge, not a select). The member's is
-    // the last one.
-    const comboboxes = screen.getAllByRole("combobox");
-    await userEvent.click(comboboxes[comboboxes.length - 1]);
+    await userEvent.click(screen.getByLabelText("Role for teammate@x.com"));
     await userEvent.click(await screen.findByRole("option", { name: "Admin" }));
 
     await waitFor(() =>
@@ -225,7 +240,7 @@ describe("TeamCard", () => {
 
   it("surfaces a load error", async () => {
     mockedApi.listOrganizationMembers.mockRejectedValue(new Error("boom"));
-    renderWithProviders(<TeamCard />);
+    renderWithProviders(<TeamSettings />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"));
   });
 });

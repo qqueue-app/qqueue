@@ -1,4 +1,4 @@
-import { renderWithProviders, screen, waitFor } from "../test/render.js";
+import { cleanup, renderWithProviders, screen, waitFor } from "../test/render.js";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -77,6 +77,17 @@ function renderDashboard() {
   , { withRouter: false });
 }
 
+/**
+ * The stat card's value node, found through its label — the numbers themselves
+ * repeat across the grid (two cards can both read 0), so the label is the only
+ * stable way in.
+ */
+function failedCardValue() {
+  return screen
+    .getByText("Failed today")
+    .parentElement?.querySelector("[data-numeric]");
+}
+
 describe("Dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,9 +99,67 @@ describe("Dashboard", () => {
     renderDashboard();
     expect((await screen.findAllByText("to@x.com")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Hello").length).toBeGreaterThan(0);
-    // setup health badge: 3 of 4 ready
+    // the compact setup checklist: 3 of 4 ready
     expect(screen.getByText("3/4 ready")).toBeInTheDocument();
     expect(screen.getByText("Default: Primary")).toBeInTheDocument();
+  });
+
+  it("lists only the setup steps still outstanding", async () => {
+    mockedApi.dashboardSummary.mockResolvedValue(summary);
+    renderDashboard();
+    // The one missing piece is a link to where you fix it...
+    expect(
+      await screen.findByRole("link", { name: "Create a template" })
+    ).toHaveAttribute("href", "/templates");
+    // ...and the three already done say nothing at all.
+    expect(
+      screen.queryByRole("link", { name: "Add a sending account" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Add contacts" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("drops the setup checklist entirely once every step is ready", async () => {
+    mockedApi.dashboardSummary.mockResolvedValue({
+      ...summary,
+      setup: {
+        hasSmtpConnection: true,
+        hasDefaultSmtp: true,
+        hasContacts: true,
+        hasTemplates: true
+      }
+    });
+    renderDashboard();
+    await screen.findByText("Default: Primary");
+    expect(screen.queryByText("4/4 ready")).not.toBeInTheDocument();
+    expect(screen.queryByText("Still to set up:")).not.toBeInTheDocument();
+  });
+
+  it("reddens the failed count, and only when something has failed", async () => {
+    mockedApi.dashboardSummary.mockResolvedValue(summary);
+    renderDashboard();
+    await screen.findByText("Default: Primary");
+    expect(failedCardValue()).toHaveTextContent("1");
+    expect(failedCardValue()).toHaveClass("text-err");
+    expect(screen.getByText("Needs attention")).toBeInTheDocument();
+
+    cleanup();
+    mockedApi.dashboardSummary.mockResolvedValue({
+      ...summary,
+      counts: { ...summary.counts, failedToday: 0 }
+    });
+    renderDashboard();
+    expect(await screen.findByText("Nothing failed today")).toBeInTheDocument();
+    expect(failedCardValue()).toHaveTextContent("0");
+    expect(failedCardValue()).not.toHaveClass("text-err");
+  });
+
+  it("humanises job statuses rather than showing the raw enum", async () => {
+    mockedApi.dashboardSummary.mockResolvedValue(summary);
+    renderDashboard();
+    expect(await screen.findByText("Sent")).toBeInTheDocument();
+    expect(screen.queryByText("SENT")).not.toBeInTheDocument();
   });
 
   it("shows the empty state when there are no jobs", async () => {
@@ -111,8 +180,8 @@ describe("Dashboard", () => {
     expect(
       await screen.findByText("Connect a sending account")
     ).toBeInTheDocument();
-    // the guide replaces the setup-health checklist for brand-new orgs
-    expect(screen.queryByText("Setup health")).not.toBeInTheDocument();
+    // the guide replaces the setup checklist for brand-new orgs
+    expect(screen.queryByText("Still to set up:")).not.toBeInTheDocument();
   });
 
   it("hides the first-run guide once an email has been sent", async () => {

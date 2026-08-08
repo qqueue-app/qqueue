@@ -7,12 +7,10 @@ import { cn } from "@/lib/utils";
  * rather than random so it survives reloads and server round-trips.
  */
 const TINTS = [
-  "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
-  "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
-  "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-  "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
-  "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300",
-  "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300",
+  "bg-identity-1-bg text-identity-1",
+  "bg-identity-2-bg text-identity-2",
+  "bg-identity-3-bg text-identity-3",
+  "bg-identity-4-bg text-identity-4",
 ] as const;
 
 function tintFor(seed: string) {
@@ -37,10 +35,10 @@ function initialsFor(name: string) {
 }
 
 const SIZES = {
-  xs: "h-6 w-6 text-[0.6rem]",
-  sm: "h-8 w-8 text-xs",
-  md: "h-10 w-10 text-sm",
-  lg: "h-12 w-12 text-base",
+  xs: "h-6 w-6 text-meta",
+  sm: "h-8 w-8 text-meta",
+  md: "h-10 w-10 text-ui",
+  lg: "h-12 w-12 text-body",
 } as const;
 
 export interface AvatarProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -62,7 +60,7 @@ export function Avatar({
     <span
       aria-hidden
       className={cn(
-        "inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold",
+        "inline-flex shrink-0 select-none items-center justify-center rounded-pill font-semibold",
         SIZES[size],
         tintFor(name || "?"),
         className

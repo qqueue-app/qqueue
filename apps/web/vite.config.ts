@@ -35,8 +35,19 @@ export default defineConfig({
         scope: "/",
         display: "standalone",
         orientation: "portrait-primary",
-        background_color: "#ffffff",
-        theme_color: "#2f6f5e",
+        /*
+          Both are --bg (#FAFAF8), not the brand green (§5).
+
+          theme_color paints the status bar and the task-switcher header, and a
+          green bar sitting above a warm-gray app reads as a banner stuck to the
+          top of the screen rather than as the app's own chrome. background_color
+          is what the OS paints during the cold-start splash before the first
+          frame renders — white there means a flash of the wrong colour on every
+          launch. These two values must track --bg in styles.css and the
+          theme-color meta in index.html; all three describe the same surface.
+        */
+        background_color: "#FAFAF8",
+        theme_color: "#FAFAF8",
         categories: ["business", "productivity"],
         icons: [
           {
@@ -51,8 +62,18 @@ export default defineConfig({
             type: "image/png",
             purpose: "any",
           },
+          /*
+            A separate asset, not the "any" icon relabelled.
+
+            Android crops a maskable icon to whatever shape the launcher uses —
+            a circle on Pixel, a squircle elsewhere — keeping only the central
+            80%. The "any" icon above is a rounded tile whose letterforms run
+            almost to its edge, so masked it loses the outer Q entirely. This
+            one bleeds the brand green to all four edges and holds the wordmark
+            inside the safe circle, so every launcher shape is a clean crop.
+          */
           {
-            src: "/images/android-chrome-512x512.png",
+            src: "/images/maskable-512x512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",

@@ -3,6 +3,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Pencil, Plus, PlugZap, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../components/PageHeader.js";
+import { SettingsLinkRow } from "../components/settings/SettingsLinkRow.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
@@ -158,7 +159,7 @@ export function SMTPConnections() {
                 </Hint>
               ) : null}
             </div>
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="truncate text-meta text-muted-foreground">
               {row.original.fromEmail}
             </div>
           </div>
@@ -182,7 +183,7 @@ export function SMTPConnections() {
         header: "Server",
         meta: { title: "Server", hideBelowMd: true },
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-meta text-muted-foreground">
             {String(getValue())}
           </span>
         ),
@@ -249,7 +250,8 @@ export function SMTPConnections() {
     <>
       <PageHeader
         title="Sending accounts"
-        description="The mailboxes QQueue sends from. Connect one to start sending — it works with Mailcow and any standard SMTP server."
+        description="The accounts QQueue sends from. Connect one to start sending — it works with Mailcow and any standard SMTP server."
+        breadcrumb={{ label: "Settings", to: "/settings" }}
         actions={
           canManage ? (
             <Button
@@ -316,10 +318,10 @@ export function SMTPConnections() {
                   </span>
                   {connection.isDefault ? <Badge>Default</Badge> : null}
                 </div>
-                <div className="truncate text-sm text-muted-foreground">
+                <div className="truncate text-body text-muted-foreground">
                   {connection.fromEmail}
                 </div>
-                <div className="mt-1 font-mono text-xs text-muted-foreground">
+                <div className="mt-1 font-mono text-meta text-muted-foreground">
                   {connection.host}:{connection.port}
                 </div>
               </div>
@@ -354,6 +356,22 @@ export function SMTPConnections() {
             </div>
           )}
         />
+      </section>
+
+      {/*
+        Sending health is part of "sending" (§4) but it is a whole page of
+        charts, so it stays its own route and is reached from here — one row in
+        the 640px column rather than a second destination on the hub competing
+        with this one.
+      */}
+      <section className="max-w-form px-4 pb-4 sm:px-6 sm:pb-6">
+        <ul className="border-t border-border">
+          <SettingsLinkRow
+            to="/settings/sending/health"
+            title="Sending health"
+            description="Bounce and complaint rates over the last 30 days, and the limits they feed."
+          />
+        </ul>
       </section>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

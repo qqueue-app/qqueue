@@ -321,11 +321,11 @@ export function Setup() {
     "We restored your draft — re-enter the password to continue.";
 
   return (
-    <main className="flex min-h-screen items-start justify-center bg-background px-4 py-10">
+    <main className="flex min-h-screen items-start justify-center bg-background px-4 py-12">
       <div className="w-full max-w-xl">
-        <div className="mb-6 flex items-center justify-center gap-2.5">
+        <div className="mb-6 flex items-center justify-center gap-2">
           <BrandMark className="h-10 w-10" />
-          <span className="text-xl font-semibold tracking-tight">QQueue</span>
+          <span className="text-title font-semibold tracking-tight">QQueue</span>
         </div>
 
         {stepIndex >= 0 ? (
@@ -334,7 +334,7 @@ export function Setup() {
               <div key={s.key} className="flex items-center gap-2">
                 <span
                   className={cn(
-                    "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
+                    "flex h-6 w-6 items-center justify-center rounded-pill text-meta font-semibold",
                     index < stepIndex
                       ? "bg-success/15 text-success"
                       : index === stepIndex
@@ -350,7 +350,7 @@ export function Setup() {
                 </span>
                 <span
                   className={cn(
-                    "hidden text-xs sm:inline",
+                    "hidden text-meta sm:inline",
                     index === stepIndex
                       ? "font-medium"
                       : "text-muted-foreground"
@@ -384,7 +384,7 @@ export function Setup() {
         {step === "welcome" ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">
+              <CardTitle className="text-title">
                 Set up your QQueue server
               </CardTitle>
               <CardDescription>
@@ -394,18 +394,18 @@ export function Setup() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <ul className="space-y-3 text-sm">
+              <ul className="space-y-3 text-body">
                 <li className="flex gap-3">
-                  <Rocket className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <Rocket className="mt-1 h-4 w-4 shrink-0 text-primary" />
                   Create the administrator account and your organization.
                 </li>
                 <li className="flex gap-3">
-                  <Mail className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <Mail className="mt-1 h-4 w-4 shrink-0 text-primary" />
                   Connect the sending account (mailbox) QQueue sends from — we
                   verify it works before moving on.
                 </li>
                 <li className="flex gap-3">
-                  <Lock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <Lock className="mt-1 h-4 w-4 shrink-0 text-primary" />
                   Choose whether other people can register on this server.
                 </li>
               </ul>
@@ -419,7 +419,7 @@ export function Setup() {
         {step === "account" ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">
+              <CardTitle className="text-title">
                 Create the administrator account
               </CardTitle>
               <CardDescription>
@@ -429,7 +429,7 @@ export function Setup() {
             </CardHeader>
             <CardContent>
               {accountDraftRestored ? (
-                <p className="mb-4 text-sm text-muted-foreground">
+                <p className="mb-4 text-body text-muted-foreground">
                   {draftRestoredHint}
                 </p>
               ) : null}
@@ -453,7 +453,7 @@ export function Setup() {
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-meta text-muted-foreground">
                     At least 8 characters.
                   </p>
                 </div>
@@ -479,7 +479,7 @@ export function Setup() {
                   />
                 </div>
                 {accountError ? (
-                  <p className="text-sm text-destructive">{accountError}</p>
+                  <p className="text-body text-destructive">{accountError}</p>
                 ) : null}
                 <Button
                   type="submit"
@@ -497,7 +497,7 @@ export function Setup() {
         {step === "smtp" ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">
+              <CardTitle className="text-title">
                 {resuming
                   ? "Welcome back — let's finish setting up"
                   : "Connect a sending account"}
@@ -516,7 +516,7 @@ export function Setup() {
                 </Alert>
               ) : null}
               {smtpDraftRestored ? (
-                <p className="mb-4 text-sm text-muted-foreground">
+                <p className="mb-4 text-body text-muted-foreground">
                   {draftRestoredHint}
                 </p>
               ) : null}
@@ -562,7 +562,7 @@ export function Setup() {
         {step === "policy" ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">
+              <CardTitle className="text-title">
                 Who can register on this server?
               </CardTitle>
               <CardDescription>
@@ -574,7 +574,7 @@ export function Setup() {
                 type="button"
                 onClick={() => setAllowPublicRegistration(false)}
                 className={cn(
-                  "w-full rounded-xl border p-4 text-left transition-colors",
+                  "w-full rounded-dialog border p-4 text-left transition-colors",
                   !allowPublicRegistration
                     ? "border-primary/50 bg-primary/[0.05]"
                     : "hover:bg-muted/40"
@@ -584,7 +584,7 @@ export function Setup() {
                   <Lock className="h-4 w-4 text-primary" />
                   Invite only (recommended)
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 text-body text-muted-foreground">
                   Registration stays closed. Only accounts you create or invite
                   can sign in — the right choice for a private server on the
                   open internet.
@@ -594,7 +594,7 @@ export function Setup() {
                 type="button"
                 onClick={() => setAllowPublicRegistration(true)}
                 className={cn(
-                  "w-full rounded-xl border p-4 text-left transition-colors",
+                  "w-full rounded-dialog border p-4 text-left transition-colors",
                   allowPublicRegistration
                     ? "border-primary/50 bg-primary/[0.05]"
                     : "hover:bg-muted/40"
@@ -604,7 +604,7 @@ export function Setup() {
                   <Globe className="h-4 w-4 text-primary" />
                   Anyone with the link can register
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 text-body text-muted-foreground">
                   Visitors can create their own account and organization on
                   this server. Choose this only if that's what you want.
                 </p>
@@ -619,7 +619,7 @@ export function Setup() {
         {step === "test-email" ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">Send yourself a test email</CardTitle>
+              <CardTitle className="text-title">Send yourself a test email</CardTitle>
               <CardDescription>
                 Optional, but the fastest way to confirm the whole pipeline
                 works — we'll send a short message to {user?.email ?? "you"}.
@@ -661,11 +661,11 @@ export function Setup() {
         {step === "done" ? (
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">Your server is ready</CardTitle>
+              <CardTitle className="text-title">Your server is ready</CardTitle>
               <CardDescription>Here's what you configured:</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <ul className="space-y-2 text-sm">
+              <ul className="space-y-2 text-body">
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-success" />
                   Administrator account{user?.email ? ` (${user.email})` : ""}
@@ -682,7 +682,7 @@ export function Setup() {
                   {allowPublicRegistration ? "open to visitors" : "invite only"}
                 </li>
               </ul>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-body text-muted-foreground">
                 Next up: add contacts, create a template, or head straight to
                 Email Studio and send something real.
               </p>

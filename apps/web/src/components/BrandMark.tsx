@@ -9,7 +9,7 @@ export function BrandMark({ className }: BrandMarkProps) {
     <img
       aria-hidden="true"
       alt=""
-      className={cn("block h-9 w-9 rounded-xl object-contain", className)}
+      className={cn("block h-9 w-9 rounded-dialog object-contain", className)}
       src="/images/qqueue-favicon.png"
     />
   );

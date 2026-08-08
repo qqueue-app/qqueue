@@ -42,7 +42,9 @@ const Checkbox = React.forwardRef<HTMLButtonElement, CheckboxProps>(
           onCheckedChange(indeterminate ? true : !isChecked);
         }}
         className={cn(
-          "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-input bg-card text-primary-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-4 w-4 shrink-0 items-center justify-center rounded-control border border-border-strong bg-surface text-primary-foreground transition-colors duration-fast ease-out disabled:cursor-not-allowed disabled:opacity-50",
+          // Touch slop — a 16px box is far under the 44px minimum.
+          "relative after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden",
           (isChecked || indeterminate) && "border-primary bg-primary",
           className
         )}

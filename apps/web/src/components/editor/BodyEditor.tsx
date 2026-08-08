@@ -90,13 +90,16 @@ export function BodyEditor({
   return (
     <div className={cn("space-y-2", className)}>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex items-center gap-1 rounded-md border bg-muted/40 p-0.5">
+        <div className="inline-flex items-center gap-1 rounded-control border bg-muted/40 p-1">
           <button
             type="button"
             onClick={() => setMode("rich")}
             title="Rich text"
             className={cn(
-              "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground [&_svg]:size-3.5",
+              // 24px tall was under half §5's touch minimum, on the control
+              // that switches the whole authoring surface. Full height on a
+              // phone; unchanged from the tablet breakpoint up.
+              "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
               mode === "rich" && "bg-background text-foreground shadow-sm"
             )}
           >
@@ -108,7 +111,10 @@ export function BodyEditor({
             onClick={() => setMode("html")}
             title="Edit the raw HTML"
             className={cn(
-              "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground [&_svg]:size-3.5",
+              // 24px tall was under half §5's touch minimum, on the control
+              // that switches the whole authoring surface. Full height on a
+              // phone; unchanged from the tablet breakpoint up.
+              "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
               mode === "html" && "bg-background text-foreground shadow-sm"
             )}
           >
@@ -126,7 +132,7 @@ export function BodyEditor({
         {/* Says what rich text is doing with markup it has no formatting for,
             so the framed blocks in the editor aren't a surprise. */}
         {mode === "rich" && frozen > 0 ? (
-          <span className="text-xs text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {frozen === 1
               ? "1 part is kept as HTML"
               : `${frozen} parts are kept as HTML`}{" "}
@@ -145,7 +151,7 @@ export function BodyEditor({
           onUploadImage={onUploadImage}
         />
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-field">
           <textarea
             value={value}
             onChange={(event) => {
@@ -159,9 +165,9 @@ export function BodyEditor({
             placeholder={
               placeholder ?? "Paste your HTML here — the preview updates as you type."
             }
-            className="min-h-[280px] w-full rounded-md border bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="min-h-pane-lg w-full rounded-control border bg-background px-3 py-2 font-mono text-meta leading-relaxed text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-muted-foreground">
             {fullDocument
               ? "Sent exactly as written. Your document supplies its own styles, so nothing is wrapped around it."
               : "A fragment is wrapped in an email-safe layout on send. Paste a full document (with <html> or <body>) to send it untouched."}
