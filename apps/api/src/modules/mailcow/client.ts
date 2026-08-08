@@ -219,6 +219,11 @@ export class MailcowClient {
   /**
    * App passwords let QQueue hold SMTP/IMAP credentials for the mailbox
    * without knowing the human's login password.
+   *
+   * The label field is `app_name` — Mailcow trims it and rejects the whole
+   * call with `app_name_empty` (as a 200 + `type: "danger"`, so it surfaces
+   * as our 502) if it arrives under any other key. `protocols` must be sent
+   * explicitly too: Mailcow stopped defaulting it to "all" in 2024.
    */
   async createAppPassword(input: {
     email: string;
@@ -228,7 +233,7 @@ export class MailcowClient {
     await this.mutate("/api/v1/add/app-passwd", {
       active: "1",
       username: input.email,
-      app_passwd_name: input.name,
+      app_name: input.name,
       app_passwd: input.password,
       app_passwd2: input.password,
       protocols: ["smtp_access", "imap_access"],

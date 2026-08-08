@@ -164,6 +164,9 @@ describe("MailcowClient", () => {
     });
   });
 
+  // Asserted whole, not with `toMatchObject`: the label previously went out as
+  // `app_passwd_name`, which Mailcow ignores and then rejects the call for an
+  // empty `app_name`. A partial match let that ship, so pin every key.
   it("sends app-password requests with SMTP and IMAP protocol access", async () => {
     fetchMock.mockResolvedValue(jsonResponse([{ type: "success" }]));
 
@@ -175,8 +178,10 @@ describe("MailcowClient", () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/api/v1/add/app-passwd");
-    expect(JSON.parse(init.body as string)).toMatchObject({
+    expect(JSON.parse(init.body as string)).toEqual({
+      active: "1",
       username: "bob@acme.test",
+      app_name: "QQueue",
       app_passwd: "app-pw",
       app_passwd2: "app-pw",
       protocols: ["smtp_access", "imap_access"],
