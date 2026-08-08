@@ -11,6 +11,8 @@ const h = vi.hoisted(() => ({
     createAppPassword: vi.fn(),
     deleteMailbox: vi.fn(),
     setMailboxPassword: vi.fn(),
+    setMailboxActive: vi.fn(),
+    listMailboxes: vi.fn(),
     verify: vi.fn(),
   } as Record<string, ReturnType<typeof vi.fn>>,
   getMailcowClient: vi.fn(),
@@ -65,6 +67,8 @@ beforeEach(() => {
     { domain_name: "acme.test", active: true },
     { domain_name: "inactive.test", active: false },
   ]);
+  h.client.listMailboxes.mockResolvedValue([]);
+  prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
   // Org membership for the assignee; no pre-existing inbox; no default yet.
   prismaMock.organizationMember.findUnique.mockResolvedValue({
     role: "MEMBER",
@@ -393,6 +397,248 @@ describe("domain access", () => {
       },
       select: { id: true },
     });
+  });
+});
+
+// The list is the union of two systems, so the interesting cases are all about
+// which side a row came from and what that permits.
+describe("mailcowService.listMailboxes", () => {
+  const serverMailbox = {
+    email: "ama@acme.test",
+    name: "Ama Mensah",
+    active: true,
+    quotaBytes: 0,
+    usedBytes: 2048,
+  };
+
+  const connectionRow = {
+    id: "s_1",
+    name: "Ama",
+    host: "mail.acme.test",
+    port: 465,
+    fromEmail: "ama@acme.test",
+    fromName: "Ama Mensah",
+    isDefault: true,
+  };
+
+  it("marks a mailbox QQueue already sends from as MANAGED", async () => {
+    h.client.listMailboxes.mockResolvedValue([serverMailbox]);
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([
+      connectionRow,
+    ] as never);
+
+    await expect(mailcowService.listMailboxes(ownerActor)).resolves.toEqual([
+      expect.objectContaining({
+        email: "ama@acme.test",
+        origin: "MANAGED",
+        smtpConnectionId: "s_1",
+        host: "mail.acme.test",
+        port: 465,
+        isDefault: true,
+        active: true,
+        usedBytes: 2048,
+      }),
+    ]);
+  });
+
+  // The whole reason this endpoint exists: a mailbox made in the Mailcow UI
+  // receives real mail, so the list has to admit it exists.
+  it("surfaces a server mailbox QQueue has no credentials for", async () => {
+    h.client.listMailboxes.mockResolvedValue([serverMailbox]);
+
+    await expect(mailcowService.listMailboxes(ownerActor)).resolves.toEqual([
+      expect.objectContaining({
+        email: "ama@acme.test",
+        origin: "SERVER_ONLY",
+        smtpConnectionId: null,
+        host: null,
+      }),
+    ]);
+  });
+
+  it("keeps a hand-added sending account with no mailbox behind it", async () => {
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([
+      { ...connectionRow, host: "email-smtp.us-east-1.amazonaws.com" },
+    ] as never);
+
+    await expect(mailcowService.listMailboxes(ownerActor)).resolves.toEqual([
+      expect.objectContaining({
+        email: "ama@acme.test",
+        origin: "EXTERNAL",
+        active: null,
+        quotaBytes: null,
+        smtpConnectionId: "s_1",
+      }),
+    ]);
+  });
+
+  it("hides server mailboxes on domains an ADMIN was not granted", async () => {
+    prismaMock.mailDomainGrant.findMany.mockResolvedValue([] as never);
+    h.client.listMailboxes.mockResolvedValue([serverMailbox]);
+
+    await expect(mailcowService.listMailboxes(adminActor)).resolves.toEqual([]);
+  });
+
+  // Losing the mail server must not blank the page: the sending accounts are
+  // still true, and status() is what reports the outage.
+  it("falls back to QQueue's own accounts when the mail server is down", async () => {
+    h.client.listDomains.mockRejectedValue(new Error("ECONNREFUSED"));
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([
+      connectionRow,
+    ] as never);
+
+    await expect(mailcowService.listMailboxes(ownerActor)).resolves.toEqual([
+      expect.objectContaining({ email: "ama@acme.test", origin: "EXTERNAL" }),
+    ]);
+  });
+
+  it("still lists sending accounts when Mailcow is not configured at all", async () => {
+    h.getMailcowClient.mockReturnValue(null);
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([
+      connectionRow,
+    ] as never);
+
+    const rows = await mailcowService.listMailboxes(ownerActor);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].origin).toBe("EXTERNAL");
+  });
+});
+
+describe("per-mailbox actions", () => {
+  const serverMailbox = {
+    email: "ama@acme.test",
+    name: "Ama Mensah",
+    active: true,
+    quotaBytes: 0,
+    usedBytes: 0,
+  };
+  const target = { organizationId: "org_1", email: "Ama@Acme.Test" };
+  const owner = { userId: "owner_1", role: "OWNER" };
+  const admin = { userId: "admin_1", role: "ADMIN" };
+
+  beforeEach(() => {
+    h.client.listMailboxes.mockResolvedValue([serverMailbox]);
+  });
+
+  it("rotates the password without touching the sending credentials", async () => {
+    const result = await mailcowService.resetPassword(target, owner);
+
+    expect(result.email).toBe("ama@acme.test");
+    expect(result.mailboxPassword).toEqual(expect.any(String));
+    expect(h.client.setMailboxPassword).toHaveBeenCalledWith(
+      "ama@acme.test",
+      result.mailboxPassword
+    );
+    // The app password QQueue sends with is a separate secret entirely.
+    expect(prismaMock.sMTPConnection.update).not.toHaveBeenCalled();
+    expect(h.client.createAppPassword).not.toHaveBeenCalled();
+  });
+
+  // Without the existence probe an admin could aim an action at any address
+  // they can spell, on a domain they happen to hold a grant for.
+  it("404s on an address the mail server does not have", async () => {
+    h.client.listMailboxes.mockResolvedValue([]);
+
+    await expect(
+      mailcowService.resetPassword(target, owner)
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(h.client.setMailboxPassword).not.toHaveBeenCalled();
+  });
+
+  it("blocks an ADMIN acting on an ungranted domain", async () => {
+    prismaMock.mailDomainGrant.findUnique.mockResolvedValue(null);
+
+    await expect(
+      mailcowService.resetPassword(target, admin)
+    ).rejects.toMatchObject({ statusCode: 403, code: "domain_not_granted" });
+    expect(h.client.setMailboxPassword).not.toHaveBeenCalled();
+    // Refused before the mailbox was even looked up.
+    expect(h.client.listMailboxes).not.toHaveBeenCalled();
+  });
+
+  it("pauses and resumes delivery", async () => {
+    await expect(
+      mailcowService.setActive({ ...target, active: false }, owner)
+    ).resolves.toEqual({ email: "ama@acme.test", active: false });
+    expect(h.client.setMailboxActive).toHaveBeenCalledWith(
+      "ama@acme.test",
+      false
+    );
+  });
+
+  it("adopts an existing mailbox into a connection + inbox, without creating one", async () => {
+    prismaMock.smtpConnectionGrant.create.mockResolvedValue({} as never);
+
+    const result = await mailcowService.adopt(
+      { ...target, assignToUserId: "user_ama" },
+      owner
+    );
+
+    expect(h.client.createMailbox).not.toHaveBeenCalled();
+    expect(h.client.createAppPassword).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "ama@acme.test", name: "QQueue" })
+    );
+    expect(result.inboxAccountId).toBe("inbox_1");
+    expect(result.email).toBe("ama@acme.test");
+
+    // The stored credential is the app password, not the human's own.
+    const created = prismaMock.sMTPConnection.create.mock.calls[0][0];
+    expect(decryptSecret(created.data.usernameEncrypted)).toBe("ama@acme.test");
+    expect(created.data.fromName).toBe("Ama Mensah");
+  });
+
+  it("409s rather than adopting an address already connected", async () => {
+    prismaMock.inboxAccount.findUnique.mockResolvedValue({
+      id: "inbox_existing",
+    } as never);
+
+    await expect(mailcowService.adopt(target, owner)).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    expect(h.client.createAppPassword).not.toHaveBeenCalled();
+  });
+
+  // Adoption must never delete a mailbox it did not create, even when QQueue's
+  // own bookkeeping fails — unlike provisioning, which owns its rollback.
+  it("leaves the mailbox alone when adopting fails halfway", async () => {
+    h.client.createAppPassword.mockRejectedValue(new Error("nope"));
+
+    await expect(mailcowService.adopt(target, owner)).rejects.toThrow("nope");
+    expect(h.client.deleteMailbox).not.toHaveBeenCalled();
+  });
+
+  it("deletes the mailbox, drops the connection, and only disables the inbox", async () => {
+    prismaMock.sMTPConnection.deleteMany.mockResolvedValue({
+      count: 1,
+    } as never);
+    prismaMock.inboxAccount.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    await expect(mailcowService.remove(target, owner)).resolves.toEqual({
+      email: "ama@acme.test",
+      smtpConnectionDeleted: true,
+      inboxAccountDisabled: true,
+    });
+
+    expect(h.client.deleteMailbox).toHaveBeenCalledWith("ama@acme.test");
+    expect(prismaMock.sMTPConnection.deleteMany).toHaveBeenCalledWith({
+      where: { organizationId: "org_1", fromEmail: "ama@acme.test" },
+    });
+    // Deleting the inbox account would cascade away every synced message.
+    expect(prismaMock.inboxAccount.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.inboxAccount.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org_1", email: "ama@acme.test" },
+      data: { status: "DISABLED" },
+    });
+  });
+
+  it("keeps QQueue's records when the mail server refuses the delete", async () => {
+    h.client.deleteMailbox.mockRejectedValue(new Error("mailcow said no"));
+
+    await expect(mailcowService.remove(target, owner)).rejects.toThrow(
+      "mailcow said no"
+    );
+    expect(prismaMock.sMTPConnection.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.inboxAccount.updateMany).not.toHaveBeenCalled();
   });
 });
 

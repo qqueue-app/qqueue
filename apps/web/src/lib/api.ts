@@ -667,6 +667,46 @@ export interface MailboxProvisionResult {
   verified: boolean;
 }
 
+/** How a mailbox row relates to the mail server and to QQueue. */
+export type MailboxOrigin = "MANAGED" | "SERVER_ONLY" | "EXTERNAL";
+
+/** One row of the Mailboxes list: mail-server inventory merged with QQueue's. */
+export interface MailboxSummary {
+  email: string;
+  domain: string;
+  name: string;
+  origin: MailboxOrigin;
+  /** Mail-server active flag; null for EXTERNAL rows the server never saw. */
+  active: boolean | null;
+  /** Bytes, 0 meaning unlimited. Null when the server didn't report. */
+  quotaBytes: number | null;
+  usedBytes: number | null;
+  smtpConnectionId: string | null;
+  host: string | null;
+  port: number | null;
+  isDefault: boolean;
+}
+
+export interface MailboxPasswordResetResult {
+  email: string;
+  /** Shown exactly once — QQueue keeps a separate app password for sending. */
+  mailboxPassword: string;
+}
+
+export interface MailboxAdoptResult {
+  smtpConnection: SMTPConnection;
+  inboxAccountId: string;
+  email: string;
+  verified: boolean;
+}
+
+export interface MailboxDeleteResult {
+  email: string;
+  smtpConnectionDeleted: boolean;
+  /** Disabled rather than deleted, so already-synced mail survives. */
+  inboxAccountDisabled: boolean;
+}
+
 export interface ApiKey {
   id: string;
   organizationId: string;
@@ -1169,6 +1209,43 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+
+  listMailboxes(organizationId: string) {
+    return request<MailboxSummary[]>(
+      `/api/v1/mailcow/mailboxes?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  adoptMailbox(
+    email: string,
+    input: { organizationId: string; name?: string; assignToUserId?: string }
+  ) {
+    return request<MailboxAdoptResult>(
+      `/api/v1/mailcow/mailboxes/${encodeURIComponent(email)}/adopt`,
+      { method: "POST", body: JSON.stringify(input) }
+    );
+  },
+
+  resetMailboxPassword(email: string, organizationId: string) {
+    return request<MailboxPasswordResetResult>(
+      `/api/v1/mailcow/mailboxes/${encodeURIComponent(email)}/password`,
+      { method: "POST", body: JSON.stringify({ organizationId }) }
+    );
+  },
+
+  setMailboxActive(email: string, organizationId: string, active: boolean) {
+    return request<{ email: string; active: boolean }>(
+      `/api/v1/mailcow/mailboxes/${encodeURIComponent(email)}`,
+      { method: "PATCH", body: JSON.stringify({ organizationId, active }) }
+    );
+  },
+
+  deleteMailbox(email: string, organizationId: string) {
+    return request<MailboxDeleteResult>(
+      `/api/v1/mailcow/mailboxes/${encodeURIComponent(email)}?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "DELETE" }
+    );
   },
 
   listMailDomainGrants(organizationId: string) {

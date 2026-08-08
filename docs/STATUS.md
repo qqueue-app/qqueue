@@ -365,6 +365,19 @@ operational and abuse-control gaps from the original audit have been closed.
   Grant management is OWNER-only.
 - [x] Members never touch SMTP credentials or the Mailcow UI; they read mail
   with the mailbox password in their own client.
+- [x] The `/mailboxes` list is the mail server's inventory merged with QQueue's
+  sending accounts, tagged `MANAGED` / `SERVER_ONLY` / `EXTERNAL` — a mailbox
+  created in the Mailcow UI is visible rather than silently absent.
+- [x] Per-mailbox actions: reset password, adopt (connect an existing mailbox,
+  the back half of provisioning with no rollback — a mailbox QQueue did not
+  create is not QQueue's to delete), pause/resume delivery, and delete.
+- [x] Every action re-checks domain access *and* that the mailbox exists on the
+  server, so an address cannot be acted on just because it can be spelled.
+- [x] Deleting removes the mailbox and its `SMTPConnection` but only *disables*
+  the `InboxAccount` — `InboundMessage` cascades from it, so deleting would
+  destroy mail already synced out of a mailbox that no longer exists.
+- [x] Resetting a password never disturbs sending: QQueue holds a separate app
+  password, so the connection and inbox sync are untouched.
 
 ### Contacts, Templates, and Campaigns
 

@@ -1,4 +1,10 @@
-import { renderWithProviders, screen, waitFor } from "../test/render.js";
+import {
+  openRowMenu,
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,12 +30,18 @@ vi.mock("../lib/session-context.js", () => ({
 vi.mock("../lib/api.js", () => ({
   api: {
     getMailcowStatus: vi.fn(),
+    listMailboxes: vi.fn(),
     listSMTPConnections: vi.fn(),
     listOrganizationMembers: vi.fn(),
     listConnectionGrants: vi.fn(),
     addConnectionGrant: vi.fn(),
     removeConnectionGrant: vi.fn(),
     provisionMailbox: vi.fn(),
+    adoptMailbox: vi.fn(),
+    resetMailboxPassword: vi.fn(),
+    setMailboxActive: vi.fn(),
+    deleteMailbox: vi.fn(),
+    verifySMTPConnection: vi.fn(),
     listMailDomainGrants: vi.fn(),
     addMailDomainGrant: vi.fn(),
     removeMailDomainGrant: vi.fn(),
@@ -70,6 +82,51 @@ const otherConnection = {
   isDefault: false,
 };
 
+// The grid is fed by the merged mailbox list; the connection fixtures below
+// still matter, because the "Who can send" matrix is built from them.
+const mailbox = {
+  email: "support@acme.test",
+  domain: "acme.test",
+  name: "Support",
+  origin: "MANAGED",
+  active: true,
+  quotaBytes: 0,
+  usedBytes: 1536,
+  smtpConnectionId: "s1",
+  host: "mail.acme.test",
+  port: 465,
+  isDefault: true,
+};
+
+const otherMailbox = {
+  email: "billing@other.test",
+  domain: "other.test",
+  name: "Billing",
+  origin: "MANAGED",
+  active: true,
+  quotaBytes: 0,
+  usedBytes: 0,
+  smtpConnectionId: "s2",
+  host: "mail.other.test",
+  port: 465,
+  isDefault: false,
+};
+
+/** On the mail server, unknown to QQueue — the case the page used to hide. */
+const unconnectedMailbox = {
+  email: "hello@acme.test",
+  domain: "acme.test",
+  name: "Hello",
+  origin: "SERVER_ONLY",
+  active: true,
+  quotaBytes: 0,
+  usedBytes: 0,
+  smtpConnectionId: null,
+  host: null,
+  port: null,
+  isDefault: false,
+};
+
 const members = [
   {
     id: "m1",
@@ -96,6 +153,7 @@ beforeEach(() => {
     currentOrganization: { id: "org_1", name: "Acme", role: "ADMIN" },
   };
   mockedApi.getMailcowStatus.mockResolvedValue(status);
+  mockedApi.listMailboxes.mockResolvedValue([mailbox]);
   mockedApi.listSMTPConnections.mockResolvedValue([connection]);
   mockedApi.listOrganizationMembers.mockResolvedValue(members);
   mockedApi.listConnectionGrants.mockResolvedValue([
@@ -118,6 +176,25 @@ beforeEach(() => {
     email: "new@acme.test",
     mailboxPassword: "generated-password-123",
     verified: true,
+  });
+  mockedApi.adoptMailbox.mockResolvedValue({
+    smtpConnection: { ...connection, id: "s3", fromEmail: "hello@acme.test" },
+    inboxAccountId: "inbox_2",
+    email: "hello@acme.test",
+    verified: true,
+  });
+  mockedApi.resetMailboxPassword.mockResolvedValue({
+    email: "support@acme.test",
+    mailboxPassword: "rotated-password-456",
+  });
+  mockedApi.setMailboxActive.mockResolvedValue({
+    email: "support@acme.test",
+    active: false,
+  });
+  mockedApi.deleteMailbox.mockResolvedValue({
+    email: "support@acme.test",
+    smtpConnectionDeleted: true,
+    inboxAccountDisabled: true,
   });
 });
 
@@ -308,6 +385,7 @@ describe("Mailboxes", () => {
   // the next one straight onto it.
   it("narrows the list to the chosen domain", async () => {
     const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([mailbox, otherMailbox]);
     mockedApi.listSMTPConnections.mockResolvedValue([
       connection,
       otherConnection,
@@ -330,6 +408,7 @@ describe("Mailboxes", () => {
 
   it("creates the new mailbox on the domain being viewed", async () => {
     const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([mailbox, otherMailbox]);
     mockedApi.listSMTPConnections.mockResolvedValue([
       connection,
       otherConnection,
@@ -369,6 +448,172 @@ describe("Mailboxes", () => {
       await screen.findByText("No mailboxes on other.test")
     ).toBeInTheDocument();
     expect(screen.queryByText("No mailboxes yet")).not.toBeInTheDocument();
+  });
+
+  // The whole point of the merged list: a mailbox made in the Mailcow UI is
+  // real mail arriving, so the page has to admit it exists.
+  it("lists mailboxes the mail server has but QQueue does not", async () => {
+    mockedApi.listMailboxes.mockResolvedValue([mailbox, unconnectedMailbox]);
+    renderWithProviders(<Mailboxes />);
+
+    expect(await screen.findByText("hello@acme.test")).toBeInTheDocument();
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
+  });
+
+  it("connects a mailbox that already exists on the server", async () => {
+    const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([mailbox, unconnectedMailbox]);
+    renderWithProviders(<Mailboxes />);
+
+    await screen.findByText("hello@acme.test");
+    // The access column fills in from a second, per-connection query, and that
+    // resolution remounts the rows. Wait for it, or the menu trigger is a
+    // detached node by the time it gets clicked.
+    await screen.findByText("+1");
+    await user.click(
+      screen.getByRole("button", { name: "Connect to QQueue" })
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: /Connect mailbox/i })
+    );
+
+    await waitFor(() =>
+      expect(mockedApi.adoptMailbox).toHaveBeenCalledWith(
+        "hello@acme.test",
+        // The mail server's own name for the mailbox seeds the From line.
+        expect.objectContaining({ organizationId: "org_1", name: "Hello" })
+      )
+    );
+  });
+
+  it("resets a mailbox password and shows it exactly once", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+
+    await screen.findByText("support@acme.test");
+    // The access column fills in from a second, per-connection query, and that
+    // resolution remounts the rows. Wait for it, or the menu trigger is a
+    // detached node by the time it gets clicked.
+    await screen.findByText("+1");
+    await openRowMenu(user, "support@acme.test");
+    await user.click(
+      await screen.findByRole("menuitem", { name: /Reset password/i })
+    );
+
+    // Locking someone out of their mail app is worth an "are you sure".
+    const confirm = await screen.findByRole("alertdialog");
+    await user.click(
+      within(confirm).getByRole("button", { name: "Reset password" })
+    );
+
+    await waitFor(() =>
+      expect(mockedApi.resetMailboxPassword).toHaveBeenCalledWith(
+        "support@acme.test",
+        "org_1"
+      )
+    );
+    expect(await screen.findByText("rotated-password-456")).toBeInTheDocument();
+    // Reassures the admin that sending kept working through the rotation.
+    expect(
+      screen.getByText(/separate password of QQueue's own/i)
+    ).toBeInTheDocument();
+  });
+
+  it("confirms before deleting a mailbox, then reports what was kept", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+
+    await screen.findByText("support@acme.test");
+    // The access column fills in from a second, per-connection query, and that
+    // resolution remounts the rows. Wait for it, or the menu trigger is a
+    // detached node by the time it gets clicked.
+    await screen.findByText("+1");
+    await openRowMenu(user, "support@acme.test");
+    await user.click(
+      await screen.findByRole("menuitem", { name: /Delete mailbox/i })
+    );
+    expect(mockedApi.deleteMailbox).not.toHaveBeenCalled();
+
+    const confirm = await screen.findByRole("alertdialog");
+    await user.click(
+      within(confirm).getByRole("button", { name: "Delete mailbox" })
+    );
+
+    await waitFor(() =>
+      expect(mockedApi.deleteMailbox).toHaveBeenCalledWith(
+        "support@acme.test",
+        "org_1"
+      )
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        expect.stringContaining("already synced into QQueue is kept")
+      )
+    );
+  });
+
+  // Switching a mailbox off loses mail, so it confirms; switching it back on
+  // only restores the status quo and goes straight through.
+  it("resumes delivery without a confirmation step", async () => {
+    const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([{ ...mailbox, active: false }]);
+    mockedApi.setMailboxActive.mockResolvedValue({
+      email: "support@acme.test",
+      active: true,
+    });
+    renderWithProviders(<Mailboxes />);
+
+    expect(await screen.findByText("Disabled")).toBeInTheDocument();
+    // The access column fills in from a second, per-connection query, and that
+    // resolution remounts the rows. Wait for it, or the menu trigger is a
+    // detached node by the time it gets clicked.
+    await screen.findByText("+1");
+    await openRowMenu(user, "support@acme.test");
+    await user.click(
+      await screen.findByRole("menuitem", { name: /Resume delivery/i })
+    );
+
+    await waitFor(() =>
+      expect(mockedApi.setMailboxActive).toHaveBeenCalledWith(
+        "support@acme.test",
+        "org_1",
+        true
+      )
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("offers no mail-server actions for a hand-added sending account", async () => {
+    const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([
+      {
+        ...mailbox,
+        email: "ses@acme.test",
+        origin: "EXTERNAL",
+        active: null,
+        quotaBytes: null,
+        usedBytes: null,
+      },
+    ]);
+    renderWithProviders(<Mailboxes />);
+
+    await screen.findByText("ses@acme.test");
+    // The access column fills in from a second, per-connection query, and that
+    // resolution remounts the rows. Wait for it, or the menu trigger is a
+    // detached node by the time it gets clicked.
+    await screen.findByText("+1");
+    await openRowMenu(user, "ses@acme.test");
+
+    expect(
+      await screen.findByRole("menuitem", { name: /Copy address/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /Reset password/i })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /Delete mailbox/i })
+    ).not.toBeInTheDocument();
   });
 
   it("tells an admin with no granted domains to ask the owner", async () => {

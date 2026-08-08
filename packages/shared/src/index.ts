@@ -377,6 +377,97 @@ export interface MailboxProvisionResult {
   verified: boolean;
 }
 
+/**
+ * How a mailbox row relates to the two systems that can hold it.
+ *
+ * The Mailboxes page lists all three together, because "what addresses exist
+ * on this domain" is one question — whether QQueue happens to hold credentials
+ * for an address is an attribute of that address, not a different subject.
+ */
+export type MailboxOrigin =
+  /** On the mail server *and* connected to QQueue — the provisioned case. */
+  | "MANAGED"
+  /** On the mail server but unknown to QQueue; adoptable. */
+  | "SERVER_ONLY"
+  /**
+   * A QQueue sending account with no matching mailbox on the mail server:
+   * added by hand, hosted elsewhere, or on a domain this caller may not
+   * manage. Mail-server actions do not apply to it.
+   */
+  | "EXTERNAL";
+
+/** One row of the Mailboxes list: the mail server and QQueue views, merged. */
+export interface MailboxSummary {
+  email: string;
+  domain: string;
+  /** Display name — the mail server's, falling back to the sending account's. */
+  name: string;
+  origin: MailboxOrigin;
+  /** Mail-server active flag; null for EXTERNAL rows the server never saw. */
+  active: boolean | null;
+  /** Quota in bytes, 0 meaning unlimited. Null when the server didn't report. */
+  quotaBytes: number | null;
+  usedBytes: number | null;
+  /** The sending account behind this address, when QQueue has one. */
+  smtpConnectionId: string | null;
+  /** SMTP host/port of that sending account, for the Server column. */
+  host: string | null;
+  port: number | null;
+  isDefault: boolean;
+}
+
+const mailboxTargetSchema = z.object({
+  organizationId: z.string().min(1),
+  email: z.string().email(),
+});
+
+export const mailboxPasswordResetSchema = mailboxTargetSchema;
+
+export type MailboxPasswordResetInput = z.infer<
+  typeof mailboxPasswordResetSchema
+>;
+
+/** A freshly rotated mailbox password, shown exactly once like provisioning's. */
+export interface MailboxPasswordResetResult {
+  email: string;
+  mailboxPassword: string;
+}
+
+export const mailboxSetActiveSchema = mailboxTargetSchema.extend({
+  active: z.boolean(),
+});
+
+export type MailboxSetActiveInput = z.infer<typeof mailboxSetActiveSchema>;
+
+/** Connect an existing mail-server mailbox to QQueue for sending and sync. */
+export const mailboxAdoptSchema = mailboxTargetSchema.extend({
+  name: z.string().max(120).optional(),
+  /** Member to grant send-as on the adopted mailbox immediately. */
+  assignToUserId: z.string().min(1).optional(),
+});
+
+export type MailboxAdoptInput = z.infer<typeof mailboxAdoptSchema>;
+
+export interface MailboxAdoptResult {
+  smtpConnection: SMTPConnection;
+  inboxAccountId: string;
+  email: string;
+  /** Whether the app-password credentials already verified end to end. */
+  verified: boolean;
+}
+
+/** What deleting a mail-server mailbox cleaned up on the QQueue side. */
+export interface MailboxDeleteResult {
+  email: string;
+  /** The sending identity is meaningless without the mailbox, so it goes. */
+  smtpConnectionDeleted: boolean;
+  /**
+   * The inbox account is *disabled*, not deleted: deleting it would cascade
+   * away every message already synced from the mailbox.
+   */
+  inboxAccountDisabled: boolean;
+}
+
 export interface EmailJob {
   id: string;
   organizationId: string;

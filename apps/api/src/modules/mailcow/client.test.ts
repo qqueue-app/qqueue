@@ -100,6 +100,70 @@ describe("MailcowClient", () => {
     });
   });
 
+  it("parses mailboxes, coercing Mailcow's string-or-number fields", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse([
+        {
+          username: "Ama@Acme.Test",
+          name: "Ama",
+          active: 1,
+          quota: "1073741824",
+          quota_used: 2048,
+        },
+        { username: "old@acme.test", name: "Old", active: "0" },
+        { no_username: true },
+      ])
+    );
+
+    await expect(client.listMailboxes()).resolves.toEqual([
+      {
+        email: "ama@acme.test",
+        name: "Ama",
+        active: true,
+        quotaBytes: 1073741824,
+        usedBytes: 2048,
+      },
+      // Missing numbers read as 0, which is Mailcow's "unlimited" for a quota.
+      {
+        email: "old@acme.test",
+        name: "Old",
+        active: false,
+        quotaBytes: 0,
+        usedBytes: 0,
+      },
+    ]);
+  });
+
+  it("scopes the mailbox listing to one domain when asked", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await client.listMailboxes("acme.test");
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://mail.example.test/api/v1/get/mailbox/all/acme.test"
+    );
+  });
+
+  // Mailcow answers an unknown domain with a non-array body rather than a 404.
+  it("reads a non-array mailbox body as no mailboxes", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}));
+
+    await expect(client.listMailboxes("nope.test")).resolves.toEqual([]);
+  });
+
+  it("toggles a mailbox active flag as Mailcow's 0/1 string", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([{ type: "success" }]));
+
+    await client.setMailboxActive("bob@acme.test", false);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/api/v1/edit/mailbox");
+    expect(JSON.parse(init.body as string)).toEqual({
+      items: ["bob@acme.test"],
+      attr: { active: "0" },
+    });
+  });
+
   it("sends app-password requests with SMTP and IMAP protocol access", async () => {
     fetchMock.mockResolvedValue(jsonResponse([{ type: "success" }]));
 

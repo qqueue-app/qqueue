@@ -10,9 +10,10 @@ import { HttpError } from "../../lib/http-error.js";
  * HTTP code. Auth is the `X-API-Key` header (Admin -> API in Mailcow; the key
  * needs read/write access).
  *
- * The client is deliberately small: exactly the calls provisioning needs
- * (list domains, create/delete mailbox, reset password, app passwords) plus a
- * `verify()` connectivity probe, mirroring how the SMTP provider exposes one.
+ * The client is deliberately small: exactly the calls the Mailboxes page needs
+ * (list domains and mailboxes, create/delete mailbox, reset password, toggle
+ * active, app passwords) plus a `verify()` connectivity probe, mirroring how
+ * the SMTP provider exposes one.
  */
 
 interface MailcowResponseEntry {
@@ -23,6 +24,23 @@ interface MailcowResponseEntry {
 export interface MailcowDomain {
   domain_name: string;
   active: boolean;
+}
+
+/** One mailbox as the server reports it, normalised to our own vocabulary. */
+export interface MailcowMailbox {
+  email: string;
+  name: string;
+  active: boolean;
+  /** Bytes; 0 means unlimited. */
+  quotaBytes: number;
+  usedBytes: number;
+}
+
+// Mailcow is inconsistent about number-vs-string across versions and fields,
+// so every numeric attribute goes through this rather than being trusted.
+function toNumber(value: unknown): number {
+  const parsed = typeof value === "string" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : 0;
 }
 
 export interface MailcowClientOptions {
@@ -131,6 +149,35 @@ export class MailcowClient {
     await this.listDomains();
   }
 
+  /**
+   * Every mailbox on the server, or just one domain's. This is what lets the
+   * Mailboxes page show addresses QQueue never provisioned — without it the
+   * page can only report on its own `SMTPConnection` rows.
+   *
+   * Mailcow answers an unknown domain with a non-array body rather than a 404,
+   * so a missing domain reads as "no mailboxes" instead of throwing.
+   */
+  async listMailboxes(domain?: string): Promise<MailcowMailbox[]> {
+    const result = await this.request(
+      domain
+        ? `/api/v1/get/mailbox/all/${encodeURIComponent(domain)}`
+        : "/api/v1/get/mailbox/all"
+    );
+    if (!Array.isArray(result)) {
+      return [];
+    }
+    return (result as Array<Record<string, unknown>>)
+      .filter((mailbox) => typeof mailbox.username === "string")
+      .map((mailbox) => ({
+        email: (mailbox.username as string).toLowerCase(),
+        name: typeof mailbox.name === "string" ? mailbox.name : "",
+        // Mailcow reports active as 0/1.
+        active: mailbox.active === 1 || mailbox.active === "1",
+        quotaBytes: toNumber(mailbox.quota),
+        usedBytes: toNumber(mailbox.quota_used),
+      }));
+  }
+
   async createMailbox(input: {
     localPart: string;
     domain: string;
@@ -155,6 +202,17 @@ export class MailcowClient {
     await this.mutate("/api/v1/edit/mailbox", {
       items: [email],
       attr: { password, password2: password },
+    });
+  }
+
+  /**
+   * Enable/disable delivery to a mailbox without destroying it. Reversible,
+   * and the mailbox keeps everything already in it.
+   */
+  async setMailboxActive(email: string, active: boolean): Promise<void> {
+    await this.mutate("/api/v1/edit/mailbox", {
+      items: [email],
+      attr: { active: active ? "1" : "0" },
     });
   }
 

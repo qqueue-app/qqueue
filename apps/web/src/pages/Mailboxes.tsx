@@ -4,8 +4,12 @@ import {
   AlertTriangle,
   Copy,
   Globe,
+  KeyRound,
+  Link2,
   Mail,
   Plus,
+  Power,
+  PowerOff,
   Server,
   ShieldCheck,
   Trash2,
@@ -17,12 +21,13 @@ import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { PermissionMatrix } from "../components/PermissionMatrix.js";
+import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
   api,
   type MailDomainGrant,
   type MailboxProvisionResult,
+  type MailboxSummary,
   type OrganizationMember,
-  type SMTPConnection,
   type SmtpConnectionGrant,
 } from "../lib/api.js";
 import { qk } from "../lib/query-client.js";
@@ -67,9 +72,39 @@ function memberName(member: OrganizationMember) {
   return member.user.name ?? member.user.email;
 }
 
-function domainOf(email: string) {
-  return email.split("@")[1] ?? "";
+function formatBytes(bytes: number) {
+  if (bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const exponent = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
+  const value = bytes / 1024 ** exponent;
+  return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${units[exponent]}`;
 }
+
+/** Mail-server storage. A quota of 0 is Mailcow's "no limit". */
+function formatUsage(mailbox: MailboxSummary) {
+  if (mailbox.usedBytes === null) return "—";
+  const used = formatBytes(mailbox.usedBytes);
+  return mailbox.quotaBytes
+    ? `${used} of ${formatBytes(mailbox.quotaBytes)}`
+    : used;
+}
+
+/** A password shown exactly once, from either creating or resetting a mailbox. */
+interface RevealedPassword {
+  kind: "created" | "reset";
+  email: string;
+  mailboxPassword: string;
+  /** Only meaningful after creation; a reset changes nothing about sending. */
+  verified: boolean | null;
+}
+
+type PendingConfirm =
+  | { kind: "reset"; mailbox: MailboxSummary }
+  | { kind: "disable"; mailbox: MailboxSummary }
+  | { kind: "delete"; mailbox: MailboxSummary };
 
 /**
  * Mailboxes — where an owner or admin creates team mailboxes and decides who
@@ -79,6 +114,10 @@ function domainOf(email: string) {
  * (owners only) which domains each admin may create mailboxes on. The access
  * question is answered by a people × mailboxes grid rather than a per-mailbox
  * grant form, so the whole picture is visible at once.
+ *
+ * The mailbox list is the mail server's inventory merged with QQueue's sending
+ * accounts, not just the latter — a mailbox someone made in the Mailcow UI
+ * receives real mail, so hiding it would make this page lie about the domain.
  */
 export function Mailboxes() {
   const { currentOrganizationId: organizationId, currentOrganization } =
@@ -91,15 +130,23 @@ export function Mailboxes() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [domainFilter, setDomainFilter] = useState(ALL_DOMAINS);
-  const [provisioned, setProvisioned] = useState<MailboxProvisionResult | null>(
-    null
-  );
+  const [revealed, setRevealed] = useState<RevealedPassword | null>(null);
+  const [adopting, setAdopting] = useState<MailboxSummary | null>(null);
+  const [confirming, setConfirming] = useState<PendingConfirm | null>(null);
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
 
   const statusQuery = useOrgQuery(
     canManage ? organizationId : null,
     qk.mailcowStatus(organizationId ?? ""),
     (id) => api.getMailcowStatus(id)
+  );
+  // The merged list backs the Mailboxes tab. The raw connection list is still
+  // needed on its own for the "Who can send" matrix, whose columns are sending
+  // accounts — a mailbox with no account in QQueue cannot be sent as at all.
+  const mailboxesQuery = useOrgQuery(
+    canManage ? organizationId : null,
+    qk.mailboxes(organizationId ?? ""),
+    (id) => api.listMailboxes(id)
   );
   const connectionsQuery = useOrgQuery(
     canManage ? organizationId : null,
@@ -117,6 +164,10 @@ export function Mailboxes() {
     (id) => api.listMailDomainGrants(id)
   );
 
+  const mailboxes = useMemo(
+    () => mailboxesQuery.data ?? [],
+    [mailboxesQuery.data]
+  );
   const connections = useMemo(
     () => connectionsQuery.data ?? [],
     [connectionsQuery.data]
@@ -159,12 +210,13 @@ export function Mailboxes() {
 
   const mailboxCountByDomain = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const connection of connections) {
-      const domain = domainOf(connection.fromEmail);
-      if (domain) counts.set(domain, (counts.get(domain) ?? 0) + 1);
+    for (const mailbox of mailboxes) {
+      if (mailbox.domain) {
+        counts.set(mailbox.domain, (counts.get(mailbox.domain) ?? 0) + 1);
+      }
     }
     return counts;
-  }, [connections]);
+  }, [mailboxes]);
 
   // Mail server domains are the ones a *new* mailbox can be created on, but a
   // sending account added by hand may live on a domain the mail server never
@@ -175,14 +227,12 @@ export function Mailboxes() {
     return [...all].sort((a, b) => a.localeCompare(b));
   }, [mailboxCountByDomain, status?.domains]);
 
-  const visibleConnections = useMemo(
+  const visibleMailboxes = useMemo(
     () =>
       domainFilter === ALL_DOMAINS
-        ? connections
-        : connections.filter(
-            (connection) => domainOf(connection.fromEmail) === domainFilter
-          ),
-    [connections, domainFilter]
+        ? mailboxes
+        : mailboxes.filter((mailbox) => mailbox.domain === domainFilter),
+    [mailboxes, domainFilter]
   );
 
   // A domain can go away under the filter — an owner revokes an admin's domain
@@ -200,6 +250,7 @@ export function Mailboxes() {
 
   const loading =
     statusQuery.isPending ||
+    mailboxesQuery.isPending ||
     connectionsQuery.isPending ||
     membersQuery.isPending;
 
@@ -255,21 +306,92 @@ export function Mailboxes() {
     }
   );
 
-  const mailboxColumns = useMemo<ColumnDef<SMTPConnection, unknown>[]>(
+  // Every mailbox mutation refetches the merged list; the ones that add or
+  // remove a sending account refetch the connection list too, because the
+  // "Who can send" matrix is built from it.
+  const mailboxKeys = [qk.mailboxes(organizationId ?? "")];
+  const mailboxAndConnectionKeys = [
+    qk.mailboxes(organizationId ?? ""),
+    qk.smtpConnections(organizationId ?? ""),
+  ];
+
+  const resetPassword = useApiMutation(
+    (mailbox: MailboxSummary) =>
+      api.resetMailboxPassword(mailbox.email, organizationId as string),
+    {
+      errorMessage: "Couldn't reset that password.",
+      onSuccess: (result) => {
+        setConfirming(null);
+        setRevealed({
+          kind: "reset",
+          email: result.email,
+          mailboxPassword: result.mailboxPassword,
+          verified: null,
+        });
+      },
+    }
+  );
+
+  const setMailboxActive = useApiMutation(
+    ({ mailbox, active }: { mailbox: MailboxSummary; active: boolean }) =>
+      api.setMailboxActive(mailbox.email, organizationId as string, active),
+    {
+      successMessage: (_result, { mailbox, active }) =>
+        active
+          ? `${mailbox.email} is receiving mail again.`
+          : `${mailbox.email} has stopped receiving mail.`,
+      errorMessage: "Couldn't change that mailbox.",
+      invalidates: mailboxKeys,
+      onSuccess: () => setConfirming(null),
+    }
+  );
+
+  const deleteMailbox = useApiMutation(
+    (mailbox: MailboxSummary) =>
+      api.deleteMailbox(mailbox.email, organizationId as string),
+    {
+      successMessage: (result) =>
+        result.inboxAccountDisabled
+          ? `${result.email} is deleted. Mail already synced into QQueue is kept.`
+          : `${result.email} is deleted.`,
+      errorMessage: "Couldn't delete that mailbox.",
+      invalidates: mailboxAndConnectionKeys,
+      onSuccess: () => setConfirming(null),
+    }
+  );
+
+  // TanStack keeps `mutate` stable across renders, unlike the mutation object
+  // itself — naming it is what lets the column memo depend on it without
+  // rebuilding every pass.
+  const { mutate: mutateMailboxActive } = setMailboxActive;
+
+  const mailboxColumns = useMemo<ColumnDef<MailboxSummary, unknown>[]>(
     () => [
       {
-        accessorKey: "fromEmail",
+        accessorKey: "email",
         header: "Address",
         meta: { title: "Address" },
         cell: ({ row }) => (
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="truncate font-medium">
-                {row.original.fromEmail}
-              </span>
+              <span className="truncate font-medium">{row.original.email}</span>
               {row.original.isDefault ? (
                 <Hint label="New mail sends from this account unless another is chosen">
                   <Badge className="cursor-help">Default</Badge>
+                </Hint>
+              ) : null}
+              {row.original.origin === "SERVER_ONLY" ? (
+                <Hint label="This mailbox exists on your mail server but QQueue can't send from it yet. Connect it to change that.">
+                  <Badge variant="secondary" className="cursor-help">
+                    Not connected
+                  </Badge>
+                </Hint>
+              ) : null}
+              {row.original.active === false ? (
+                <Hint label="Your mail server is refusing mail for this address">
+                  <Badge variant="destructive" className="cursor-help">
+                    Disabled
+                  </Badge>
                 </Hint>
               ) : null}
             </div>
@@ -284,14 +406,11 @@ export function Mailboxes() {
         header: "Name",
         meta: { title: "Name", hideBelowMd: true },
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {row.original.fromName || row.original.name}
-          </span>
+          <span className="text-muted-foreground">{row.original.name}</span>
         ),
       },
       {
-        id: "domain",
-        accessorFn: (row) => domainOf(row.fromEmail),
+        accessorKey: "domain",
         header: "Domain",
         meta: { title: "Domain", hideBelowLg: true },
         cell: ({ getValue }) => (
@@ -299,39 +418,69 @@ export function Mailboxes() {
         ),
       },
       {
-        id: "server",
-        accessorFn: (row) => `${row.host}:${row.port}`,
-        header: "Server",
-        meta: { title: "Server", hideBelowLg: true },
-        cell: ({ getValue }) => (
-          <span className="font-mono text-meta text-muted-foreground">
-            {String(getValue())}
+        id: "storage",
+        header: "Storage",
+        meta: { title: "Storage", hideBelowLg: true },
+        // Sorts on raw bytes so the fullest mailbox is one click away; the
+        // formatted string would sort "9 MB" after "10 GB".
+        accessorFn: (row) => row.usedBytes ?? -1,
+        cell: ({ row }) => (
+          <span className="text-meta text-muted-foreground">
+            {formatUsage(row.original)}
           </span>
         ),
+      },
+      {
+        id: "server",
+        accessorFn: (row) => (row.host ? `${row.host}:${row.port}` : ""),
+        header: "Server",
+        meta: { title: "Server", hideBelowLg: true },
+        cell: ({ getValue }) => {
+          const value = String(getValue());
+          return (
+            <span className="font-mono text-meta text-muted-foreground">
+              {value || "—"}
+            </span>
+          );
+        },
       },
       {
         id: "access",
         header: "Who can send",
         meta: { title: "Who can send", align: "center" },
         // Sorts by how many people hold a grant, so "nobody has access to this
-        // mailbox" surfaces at one end of the sort.
-        accessorFn: (row) => grantsByConnection.get(row.id)?.length ?? 0,
-        cell: ({ row, getValue }) => {
-          const count = Number(getValue());
-          const names = (grantsByConnection.get(row.original.id) ?? [])
+        // mailbox" surfaces at one end of the sort. Mailboxes QQueue can't send
+        // from at all sort below that, at -1.
+        accessorFn: (row) =>
+          row.smtpConnectionId
+            ? (grantsByConnection.get(row.smtpConnectionId)?.length ?? 0)
+            : -1,
+        cell: ({ row }) => {
+          const connectionId = row.original.smtpConnectionId;
+          if (!connectionId) {
+            return (
+              <Hint label="QQueue has no credentials for this mailbox yet, so nobody can send as it">
+                <span className="cursor-help text-body text-muted-foreground">
+                  —
+                </span>
+              </Hint>
+            );
+          }
+          const grants = grantsByConnection.get(connectionId) ?? [];
+          const names = grants
             .map((grant) => grant.user?.name ?? grant.user?.email ?? "someone")
             .join(", ");
           return (
             <Hint
               label={
-                count === 0
+                grants.length === 0
                   ? "Only owners and admins, who can always send as any account"
                   : `Owners and admins, plus ${names}`
               }
             >
               <span className="inline-flex cursor-help items-center gap-field text-body text-muted-foreground">
                 <Users className="h-3.5 w-3.5" />
-                {count === 0 ? "Admins only" : `+${count}`}
+                {grants.length === 0 ? "Admins only" : `+${grants.length}`}
               </span>
             </Hint>
           );
@@ -342,42 +491,87 @@ export function Mailboxes() {
         header: "",
         meta: { pinned: true, align: "right" },
         enableSorting: false,
-        cell: ({ row }) => (
-          <RowActions
-            rowLabel={row.original.fromEmail}
-            actions={[
-              {
-                label: "Test connection",
-                icon: ShieldCheck,
-                onSelect: async () => {
-                  const toastId = toast.loading("Testing connection…");
-                  try {
-                    await api.verifySMTPConnection(row.original.id);
-                    toast.success("Connection works.", { id: toastId });
-                  } catch (error) {
-                    toast.error(
-                      error instanceof Error
-                        ? error.message
-                        : "Connection failed.",
-                      { id: toastId }
-                    );
-                  }
+        cell: ({ row }) => {
+          const mailbox = row.original;
+          // EXTERNAL rows have no mailbox on this mail server to administer —
+          // they're hand-added sending accounts, or on a domain this admin
+          // wasn't granted. They keep the account-level actions and nothing more.
+          const onServer = mailbox.origin !== "EXTERNAL";
+          const connectionId = mailbox.smtpConnectionId;
+
+          return (
+            <RowActions
+              rowLabel={mailbox.email}
+              actions={[
+                {
+                  label: "Connect to QQueue",
+                  icon: Link2,
+                  primary: true,
+                  hidden: mailbox.origin !== "SERVER_ONLY",
+                  onSelect: () => setAdopting(mailbox),
                 },
-              },
-              {
-                label: "Copy address",
-                icon: Copy,
-                onSelect: async () => {
-                  await navigator.clipboard.writeText(row.original.fromEmail);
-                  toast.success("Address copied.");
+                {
+                  label: "Test connection",
+                  icon: ShieldCheck,
+                  hidden: !connectionId,
+                  onSelect: async () => {
+                    if (!connectionId) return;
+                    const toastId = toast.loading("Testing connection…");
+                    try {
+                      await api.verifySMTPConnection(connectionId);
+                      toast.success("Connection works.", { id: toastId });
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "Connection failed.",
+                        { id: toastId }
+                      );
+                    }
+                  },
                 },
-              },
-            ]}
-          />
-        ),
+                {
+                  label: "Copy address",
+                  icon: Copy,
+                  onSelect: async () => {
+                    await navigator.clipboard.writeText(mailbox.email);
+                    toast.success("Address copied.");
+                  },
+                },
+                {
+                  label: "Reset password",
+                  icon: KeyRound,
+                  hidden: !onServer,
+                  onSelect: () => setConfirming({ kind: "reset", mailbox }),
+                },
+                {
+                  label: mailbox.active ? "Stop delivery" : "Resume delivery",
+                  icon: mailbox.active ? PowerOff : Power,
+                  hidden: !onServer,
+                  onSelect: () => {
+                    // Turning a mailbox back on restores the status quo, so it
+                    // goes straight through; switching it off loses mail.
+                    if (mailbox.active) {
+                      setConfirming({ kind: "disable", mailbox });
+                    } else {
+                      mutateMailboxActive({ mailbox, active: true });
+                    }
+                  },
+                },
+                {
+                  label: "Delete mailbox",
+                  icon: Trash2,
+                  destructive: true,
+                  hidden: !onServer,
+                  onSelect: () => setConfirming({ kind: "delete", mailbox }),
+                },
+              ]}
+            />
+          );
+        },
       },
     ],
-    [grantsByConnection]
+    [grantsByConnection, mutateMailboxActive]
   );
 
   if (!canManage) {
@@ -465,9 +659,9 @@ export function Mailboxes() {
           <TabsContent value="mailboxes">
             <DataGrid
               label="Mailboxes"
-              data={visibleConnections}
+              data={visibleMailboxes}
               columns={mailboxColumns}
-              getRowId={(row) => row.id}
+              getRowId={(row) => row.smtpConnectionId ?? row.email}
               loading={loading}
               searchPlaceholder="Search mailboxes…"
               toolbar={
@@ -481,7 +675,7 @@ export function Mailboxes() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={ALL_DOMAINS}>
-                        All domains ({connections.length})
+                        All domains ({mailboxes.length})
                       </SelectItem>
                       {domains.map((candidate) => (
                         <SelectItem key={candidate} value={candidate}>
@@ -497,13 +691,13 @@ export function Mailboxes() {
                   <EmptyState
                     icon={Mail}
                     title="No mailboxes yet"
-                    description="Create one to give your team an address they can send and receive from."
+                    description="Nothing on your mail server, and no sending accounts here either. Create one to give your team an address they can send and receive from."
                   />
                 ) : (
                   <EmptyState
                     icon={Globe}
                     title={`No mailboxes on ${domainFilter}`}
-                    description={`Nothing here yet — create the first address on ${domainFilter}, or switch to another domain.`}
+                    description={`Your mail server has no addresses on ${domainFilter} yet — create the first one, or switch to another domain.`}
                   />
                 )
               }
@@ -514,28 +708,40 @@ export function Mailboxes() {
                   description="Try a different search."
                 />
               }
-              renderMobileRow={(connection) => (
-                <div className="flex items-start gap-3">
-                  <Mail className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-medium">
-                        {connection.fromEmail}
-                      </span>
-                      {connection.isDefault ? <Badge>Default</Badge> : null}
+              renderMobileRow={(mailbox) => {
+                const grants = mailbox.smtpConnectionId
+                  ? (grantsByConnection.get(mailbox.smtpConnectionId) ?? [])
+                  : null;
+                return (
+                  <div className="flex items-start gap-3">
+                    <Mail className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-medium">
+                          {mailbox.email}
+                        </span>
+                        {mailbox.isDefault ? <Badge>Default</Badge> : null}
+                        {mailbox.origin === "SERVER_ONLY" ? (
+                          <Badge variant="secondary">Not connected</Badge>
+                        ) : null}
+                        {mailbox.active === false ? (
+                          <Badge variant="destructive">Disabled</Badge>
+                        ) : null}
+                      </div>
+                      <p className="truncate text-body text-muted-foreground">
+                        {mailbox.name}
+                      </p>
+                      <p className="mt-1 text-meta text-muted-foreground">
+                        {grants === null
+                          ? "QQueue can't send as this yet"
+                          : grants.length === 0
+                            ? "Admins only"
+                            : `${grants.length} member(s) can send as this`}
+                      </p>
                     </div>
-                    <p className="truncate text-body text-muted-foreground">
-                      {connection.fromName || connection.name}
-                    </p>
-                    <p className="mt-1 text-meta text-muted-foreground">
-                      {(grantsByConnection.get(connection.id) ?? []).length ===
-                      0
-                        ? "Admins only"
-                        : `${grantsByConnection.get(connection.id)!.length} member(s) can send as this`}
-                    </p>
                   </div>
-                </div>
-              )}
+                );
+              }}
             />
           </TabsContent>
 
@@ -600,19 +806,203 @@ export function Mailboxes() {
         members={members}
         onProvisioned={(result) => {
           setCreateOpen(false);
-          setProvisioned(result);
-          void queryClient.invalidateQueries({
-            queryKey: qk.smtpConnections(organizationId ?? ""),
+          setRevealed({
+            kind: "created",
+            email: result.email,
+            mailboxPassword: result.mailboxPassword,
+            verified: result.verified,
           });
+          void Promise.all(
+            mailboxAndConnectionKeys.map((queryKey) =>
+              queryClient.invalidateQueries({ queryKey })
+            )
+          );
+        }}
+      />
+
+      <AdoptMailboxDialog
+        mailbox={adopting}
+        organizationId={organizationId ?? ""}
+        members={members}
+        onOpenChange={(open) => !open && setAdopting(null)}
+        onAdopted={() => {
+          setAdopting(null);
+          void Promise.all(
+            mailboxAndConnectionKeys.map((queryKey) =>
+              queryClient.invalidateQueries({ queryKey })
+            )
+          );
         }}
       />
 
       <MailboxPasswordDialog
-        result={provisioned}
+        result={revealed}
         mailHost={status?.mailHost ?? null}
-        onClose={() => setProvisioned(null)}
+        onClose={() => setRevealed(null)}
+      />
+
+      <ConfirmDialog
+        open={confirming !== null}
+        onOpenChange={(open) => !open && setConfirming(null)}
+        title={
+          confirming?.kind === "delete"
+            ? `Delete ${confirming.mailbox.email}?`
+            : confirming?.kind === "disable"
+              ? `Stop delivery to ${confirming.mailbox.email}?`
+              : `Reset the password for ${confirming?.mailbox.email}?`
+        }
+        description={
+          confirming?.kind === "delete"
+            ? "This permanently deletes the mailbox and everything in it from your mail server. Its QQueue sending account goes too. Mail already synced into your inbox is kept, and send history stays intact."
+            : confirming?.kind === "disable"
+              ? "Your mail server will refuse new mail for this address. Nothing already in the mailbox is deleted, and you can resume delivery whenever you like."
+              : "Whoever reads this mailbox will be locked out of their mail app until you give them the new password. Sending from QQueue is unaffected — it uses a separate app password of its own."
+        }
+        confirmLabel={
+          confirming?.kind === "delete"
+            ? "Delete mailbox"
+            : confirming?.kind === "disable"
+              ? "Stop delivery"
+              : "Reset password"
+        }
+        destructive={confirming?.kind === "delete"}
+        loading={
+          resetPassword.isPending ||
+          setMailboxActive.isPending ||
+          deleteMailbox.isPending
+        }
+        onConfirm={() => {
+          if (!confirming) return;
+          if (confirming.kind === "delete") {
+            deleteMailbox.mutate(confirming.mailbox);
+          } else if (confirming.kind === "disable") {
+            mutateMailboxActive({ mailbox: confirming.mailbox, active: false });
+          } else {
+            resetPassword.mutate(confirming.mailbox);
+          }
+        }}
       />
     </>
+  );
+}
+
+/**
+ * Connect a mailbox that already exists on the mail server. Deliberately
+ * narrower than creating one: the address is fixed, so the only open questions
+ * are what recipients see in the From line and who may send as it.
+ */
+function AdoptMailboxDialog({
+  mailbox,
+  organizationId,
+  members,
+  onOpenChange,
+  onAdopted,
+}: {
+  mailbox: MailboxSummary | null;
+  organizationId: string;
+  members: OrganizationMember[];
+  onOpenChange: (open: boolean) => void;
+  onAdopted: () => void;
+}) {
+  const [displayName, setDisplayName] = useState("");
+  const [assignTo, setAssignTo] = useState(NO_ASSIGNEE);
+
+  // Seed from whatever the mail server already calls this mailbox, and reset
+  // between mailboxes so one adoption never leaks its answers into the next.
+  useEffect(() => {
+    if (mailbox) {
+      setDisplayName(mailbox.name);
+      setAssignTo(NO_ASSIGNEE);
+    }
+  }, [mailbox]);
+
+  const adopt = useApiMutation(
+    () =>
+      api.adoptMailbox(mailbox!.email, {
+        organizationId,
+        name: displayName.trim() || undefined,
+        assignToUserId: assignTo === NO_ASSIGNEE ? undefined : assignTo,
+      }),
+    {
+      successMessage: (result) =>
+        result.verified
+          ? `${result.email} is connected and sending.`
+          : `${result.email} is connected. The credentials haven't verified yet — use "Test connection" in a minute.`,
+      errorMessage: "Couldn't connect that mailbox.",
+      onSuccess: onAdopted,
+    }
+  );
+
+  return (
+    <Dialog open={mailbox !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Connect {mailbox?.email}</DialogTitle>
+          <DialogDescription>
+            This mailbox already exists on your mail server. Connecting it gives
+            QQueue its own app password so the team can send from the address
+            and replies show up in the inbox. The person's own mailbox password
+            is untouched.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!adopt.isPending) adopt.mutate();
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="adopt-mailbox-name">Display name</Label>
+            <Input
+              id="adopt-mailbox-name"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="Support Team"
+              autoFocus
+            />
+            <p className="text-meta text-muted-foreground">
+              What recipients see in the From line. Optional.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Let someone send as this</Label>
+            <Select value={assignTo} onValueChange={setAssignTo}>
+              <SelectTrigger aria-label="Let someone send as this">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_ASSIGNEE}>Nobody yet</SelectItem>
+                {members.map((member) => (
+                  <SelectItem key={member.userId} value={member.userId}>
+                    {memberName(member)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-meta text-muted-foreground">
+              You can change this any time on the "Who can send" tab.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={adopt.isPending}>
+              {adopt.isPending ? <Spinner /> : <Link2 className="h-4 w-4" />}
+              Connect mailbox
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -801,26 +1191,36 @@ function NewMailboxDialog({
   );
 }
 
+/**
+ * The one and only sight of a mailbox password, after creating a mailbox or
+ * resetting one. Both cases say the same important thing — this is the human's
+ * mail-client password, not the credential QQueue sends with — so they share a
+ * dialog rather than drifting apart.
+ */
 function MailboxPasswordDialog({
   result,
   mailHost,
   onClose,
 }: {
-  result: MailboxProvisionResult | null;
+  result: RevealedPassword | null;
   mailHost: string | null;
   onClose: () => void;
 }) {
+  const created = result?.kind === "created";
+
   return (
     <Dialog open={result !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{result?.email} is ready</DialogTitle>
+          <DialogTitle>
+            {created
+              ? `${result?.email} is ready`
+              : `New password for ${result?.email}`}
+          </DialogTitle>
           <DialogDescription>
-            Give this password to whoever owns the mailbox so they can add it to
-            their own mail app
-            {mailHost ? ` (server: ${mailHost})` : ""}. It's shown once and
-            never again — QQueue keeps a separate password of its own for
-            sending, so nothing breaks if this one is lost.
+            {created
+              ? `Give this password to whoever owns the mailbox so they can add it to their own mail app${mailHost ? ` (server: ${mailHost})` : ""}. It's shown once and never again — QQueue keeps a separate password of its own for sending, so nothing breaks if this one is lost.`
+              : `The old password no longer works. Give this one to whoever reads the mailbox${mailHost ? ` (server: ${mailHost})` : ""} — it's shown once and never again. Sending and inbox sync carried on uninterrupted; they use a separate password of QQueue's own.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -845,7 +1245,7 @@ function MailboxPasswordDialog({
           </IconButton>
         </div>
 
-        {result && !result.verified ? (
+        {result && result.verified === false ? (
           <p className="rounded-card bg-warning/10 p-3 text-body text-warning-foreground">
             The sending credentials haven't verified yet — your mail server may
             still be activating the mailbox. Everything is saved; use "Test
