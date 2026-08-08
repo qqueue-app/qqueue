@@ -115,6 +115,41 @@ describe("PageHeader", () => {
     });
   });
 
+  /*
+    Class names rather than layout, because jsdom has none — but the container
+    is a class, so this is exactly how the alignment would break.
+  */
+  describe("page measure", () => {
+    it("keeps the rule full-bleed and the text contained when asked", () => {
+      const { container } = renderWithProviders(
+        <PageHeader title="Compose" description="d" width="container" />
+      );
+      const rule = container.firstElementChild!;
+      const inner = rule.firstElementChild!;
+
+      // The rule divides the page, so it must not be constrained...
+      expect(rule).toHaveClass("border-b");
+      expect(rule.className).not.toMatch(/(^|\s)container(\s|$)/);
+      // ...while the text takes the page's measure, lining up with the content
+      // below it. That mismatch is the whole reason this split exists.
+      expect(inner).toHaveClass("container");
+      expect(inner.className).not.toMatch(/px-6/);
+    });
+
+    it("defaults to the unconverted full-width header", () => {
+      const { container } = renderWithProviders(
+        <PageHeader title="Contacts" description="d" />
+      );
+      const inner = container.firstElementChild!.firstElementChild!;
+
+      // The gate that keeps every page this component renders byte-identical
+      // until the container rollout reaches it. A centred header over
+      // left-aligned content is worse than either alignment on its own.
+      expect(inner).toHaveClass("px-6");
+      expect(inner.className).not.toMatch(/(^|\s)container(\s|$)/);
+    });
+  });
+
   describe("mobile (§5)", () => {
     it("drops the description so the header stays one row", () => {
       restore = useMobileViewport();

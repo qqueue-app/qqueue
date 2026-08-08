@@ -651,4 +651,44 @@ describe("EmailStudio", () => {
     expect(mockedApi.previewEmail).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith("Write something to preview.");
   });
+
+  /*
+    Class names rather than layout, because jsdom has none — but the container
+    and `mx-auto` are classes, so this is exactly how the centring would break.
+  */
+  describe("page measure", () => {
+    it("centres the form+rail cluster inside the page container", async () => {
+      setup();
+      const { container } = await renderStudio();
+
+      // The header's text and the content below it sit in the same column, so
+      // the title lines up with the form's left edge.
+      expect(container.querySelectorAll(".container")).toHaveLength(2);
+
+      // Both grid tracks are fixed, so the pair has one intrinsic width. Naming
+      // it is what lets the cluster centre as a unit instead of pinning left
+      // and dumping every gained pixel on the right.
+      const form = container.querySelector("form")!;
+      expect(form).toHaveClass("mx-auto", "xl:max-w-compose");
+    });
+
+    it("puts the loading skeleton where the form will land", async () => {
+      setup();
+      // Deliberately not `renderStudio`: that waits the skeleton out, and the
+      // jump this guards against happens exactly as it disappears.
+      const { container } = renderWithProviders(
+        <MemoryRouter>
+          <EmailStudio />
+        </MemoryRouter>,
+        { withRouter: false }
+      );
+
+      const skeletonColumn = container.querySelector(".max-w-form")!;
+      expect(skeletonColumn).toHaveClass("mx-auto");
+
+      // Let the load finish before the test ends, or its state updates land
+      // outside `act` and warn.
+      await screen.findByRole("button", { name: /Send email/i });
+    });
+  });
 });

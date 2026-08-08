@@ -19,9 +19,24 @@ export default {
   */
   darkMode: "class",
   theme: {
+    /*
+      The page container: centred, with a max-width ladder that tops out at
+      1400px. Everything a page renders lives inside one, so the header rule and
+      the content beneath it share a measure — the mismatch that made wide
+      screens look lopsided was a full-bleed header over a capped section.
+
+      The padding is the `p-4 sm:p-6` every page section already used, moved
+      here so it is stated once. A page adopting `<PageContainer>` drops its own
+      horizontal padding or it doubles.
+
+      The ladder is keyed to the *viewport* while `<main>` is inset by the
+      240px sidebar, so the 1400px cap only binds above a ~1640px viewport.
+      Below that the container just fills the content box, and centring the
+      content *inside* it (`mx-auto`) is what keeps a page symmetric.
+    */
     container: {
       center: true,
-      padding: "2rem",
+      padding: { DEFAULT: "1rem", sm: "1.5rem" },
       screens: {
         "2xl": "1400px"
       }
@@ -243,6 +258,9 @@ export default {
         read: "var(--content-read)",
         grid: "var(--content-grid)",
         table: "var(--content-table)",
+
+        /* The composer's form+rail cluster, so it can centre as one unit. */
+        compose: "var(--content-compose)",
 
         /* §3's empty state: 400px, centred, never a full-width bordered box. */
         empty: "var(--content-empty)",

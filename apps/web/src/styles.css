@@ -115,6 +115,10 @@
     --content-table: 75rem; /* 1200px — data tables */
     --content-empty: 25rem; /* 400px — empty states (§3) */
     --content-rail: 19rem; /* 304px — the composer's send-options rail */
+    /* 976px — form + gap + rail. The composer's two columns are both fixed, so
+       their cluster has one intrinsic width; naming it is what lets the whole
+       thing centre in the container instead of pinning to its left edge. */
+    --content-compose: 61rem;
 
     /* ---- Shell --------------------------------------------------------- */
     /* The three fixed measurements of the app frame. They are tokens because

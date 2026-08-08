@@ -4,9 +4,13 @@ import { cn } from "../../lib/utils.js";
 /**
  * The 640px form column every settings subpage lives in (§2).
  *
- * Left-aligned rather than centred: the sidebar already anchors the page to the
- * left, and a column that drifts to the middle of a 1920px window puts the
- * content somewhere different on every screen.
+ * Still left-aligned, but no longer on principle. This used to argue that a
+ * centred column "puts the content somewhere different on every screen", which
+ * was true of centring against the raw viewport — the objection is answered by
+ * `<PageContainer>`, which caps the page at 1400px, so content centred inside
+ * one stops moving as soon as that cap binds. The composer is the first page
+ * converted; these pages keep the old alignment only until the rollout reaches
+ * them, at which point this column gets `mx-auto` too.
  *
  * The padding is the mobile inversion's other half. Fields inside collapse to
  * 100% below 480px (see `fieldWidths`), and 100% has to mean "the padded

@@ -13,6 +13,7 @@ import {
   X
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -1205,6 +1206,7 @@ export function EmailStudio() {
       <PageHeader
         title="Compose"
         description="Write and send a one-off email through your delivery pipeline."
+        width="container"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -1229,9 +1231,12 @@ export function EmailStudio() {
         }
       />
 
-      <section className="px-4 py-4 sm:px-6 sm:py-6">
+      <PageContainer>
         {loading ? (
-          <div className="max-w-form space-y-4">
+          // `mx-auto` here as well as on the form: the skeleton and the thing
+          // it stands in for have to sit in the same place, or loading ends
+          // with the whole composer jumping sideways.
+          <div className="mx-auto max-w-form space-y-4">
             <Skeleton className="h-touch w-full sm:h-control sm:w-field-name" />
             <Skeleton className="h-touch w-full sm:h-control sm:w-field-long" />
             <Skeleton className="h-64 w-full" />
@@ -1244,12 +1249,17 @@ export function EmailStudio() {
             on a phone every field inside collapses to the padded column's full
             width — the mobile inversion, which each field carries itself via
             its `width` prop.
+
+            Both tracks being fixed means the pair has one intrinsic width
+            (`--content-compose`), so it centres in the container as a unit.
+            Without that the cluster pins left and every pixel the window gains
+            piles up on the right — which is what it used to do.
           */
           <form
             onSubmit={send}
-            className="grid gap-8 xl:grid-cols-[minmax(0,var(--content-form))_var(--content-rail)]"
+            className="mx-auto grid gap-8 xl:max-w-compose xl:grid-cols-[minmax(0,var(--content-form))_var(--content-rail)]"
           >
-            <div className="min-w-0 max-w-form space-y-6">
+            <div className="mx-auto min-w-0 max-w-form space-y-6">
               {noSmtp ? (
                 <div className="rounded-card border border-border bg-warn-bg px-4 py-3 text-ui leading-5 text-warn">
                   <p className="font-medium">No sending account yet</p>
@@ -1653,7 +1663,7 @@ export function EmailStudio() {
             </div>
           </form>
         )}
-      </section>
+      </PageContainer>
 
       <ContactPickerDialog
         open={contactPickerOpen}
