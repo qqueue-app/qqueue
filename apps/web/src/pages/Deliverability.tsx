@@ -174,7 +174,7 @@ export function Deliverability() {
                     {
                       label: "Attempted",
                       value: String(overview.totals.attempted),
-                      hint: "Recipients your server tried to send to."
+                      hint: "Reached a recipient's mail server."
                     },
                     {
                       label: "Accepted by server",
@@ -259,10 +259,37 @@ export function Deliverability() {
                   </Card>
                 )}
 
-                <div className="grid grid-cols-2 gap-4 text-body md:grid-cols-4">
+                {/* The rates above deliberately exclude sends that never
+                    reached a recipient's mail server. Saying so is the point:
+                    silently dropping them would leave the reputation numbers
+                    describing a smaller send than the one you asked for. */}
+                {overview.totals.failedBeforeHandoff > 0 && (
+                  <Card className="flex items-start gap-2 border-amber-500/50 p-4 text-body text-muted-foreground">
+                    <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-amber-600" />
+                    <p>
+                      <span className="font-medium text-foreground">
+                        {overview.totals.failedBeforeHandoff} send
+                        {overview.totals.failedBeforeHandoff === 1 ? "" : "s"}{" "}
+                        never left your server
+                      </span>{" "}
+                      ({pct(overview.rates.deliveryFailure)} of everything that
+                      finished). No recipient server saw them, so they are not
+                      counted in the rates above — that is a problem with the
+                      sending account or the message, not with your reputation.
+                      Check the sending account&apos;s credentials and{" "}
+                      <span className="font-medium text-foreground">
+                        Background jobs
+                      </span>{" "}
+                      for the error.
+                    </p>
+                  </Card>
+                )}
+
+                <div className="grid grid-cols-2 gap-4 text-body md:grid-cols-5">
                   {[
                     ["Sent", overview.totals.sent],
-                    ["Failed", overview.totals.failed],
+                    ["Bounced", overview.totals.bounced],
+                    ["Never left", overview.totals.failedBeforeHandoff],
                     ["Skipped (suppressed)", overview.totals.suppressedAtSend],
                     ["Still in flight", overview.totals.inFlight]
                   ].map(([label, value]) => (
@@ -290,6 +317,7 @@ export function Deliverability() {
                         <TableHead>Accepted</TableHead>
                         <TableHead>Bounced</TableHead>
                         <TableHead>Bounce rate</TableHead>
+                        <TableHead>Never left</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -302,6 +330,15 @@ export function Deliverability() {
                           <TableCell>{row.sent}</TableCell>
                           <TableCell>{row.bounced}</TableCell>
                           <TableCell>{pct(row.bounceRate)}</TableCell>
+                          <TableCell
+                            className={
+                              row.failedBeforeHandoff > 0
+                                ? "text-amber-600"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {row.failedBeforeHandoff}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

@@ -440,10 +440,11 @@ rejections out of 100 attempts rendered as a **100% bounce rate**.
 The funnel is now a **job cohort**. `EmailJob` is exactly one row per recipient
 with a terminal status, anchored on `sentAt` (falling back to `createdAt` for
 jobs that never reached a send), so a late DSN scores against the window its
-send belongs to. `attempted` is `SENT + FAILED`; suppressed and cancelled
-recipients were never attempted and appear on neither side of a rate. Events are
-still the source for bounce classes and engagement, but always counted as
-**distinct jobs**, never as rows.
+send belongs to. Suppressed and cancelled recipients were never attempted and
+appear on neither side of a rate. Events are still the source for bounce classes
+and engagement, but always counted as **distinct jobs**, never as rows.
+
+`attempted` is **not** `SENT + FAILED` — see the entry below.
 
 **Delivery is reported only by sources that observe it.** `recordOpen` used to
 synthesize a one-time `DELIVERED` alongside the first open, reasoning that an
@@ -489,6 +490,49 @@ Three supporting choices:
 in Postgres — so every tile, every campaign analytics panel, and the per-open
 lookup on the tracking hot path were sequential scans of the largest table in
 the schema.
+
+## `attempted` Excludes Sends That Never Reached a Mail Server
+
+`FAILED` conflates two unrelated events, and the reputation rates were dividing
+by both.
+
+A `FAILED` job is either a **receiving server rejecting the recipient** — the
+send worker's `result.rejected` path, or a DSN correlated back to the job, both
+of which write a `BOUNCED` event — or **our own send throwing before handoff**:
+SMTP unreachable, credentials refused, TLS negotiation failed, a template that
+would not render. The second kind writes a `FAILED` event and no `BOUNCED`, and
+no recipient mail server ever saw the message. It carries no information about
+how recipients treat this sender, but under `attempted = SENT + FAILED` it sat
+in the denominator of every reputation rate.
+
+That deflates bounce and complaint rates precisely when they matter most, and
+it does so past a threshold. 100 recipients, an SMTP outage kills 50, 5 of the
+50 that get out bounce: the true rate is `5/50` = **10%**, comfortably past the
+5% line, but the reported rate was `5/100` = **5.0%** — and `5.0 > 5.0` is
+false, so `deriveReputationAlerts` withheld the critical alert. The same
+denominator simultaneously reported "accepted by server" at 50%, blaming
+receiving servers for an outage on our own side.
+
+So `attempted` is `SENT` plus **only the `FAILED` jobs that carry a `BOUNCED`
+event**. The excluded population is not discarded: `failedBeforeHandoff` is its
+own total, `rates.deliveryFailure` measures it against `SENT + FAILED`, and the
+dashboard raises a distinct notice pointing at the sending account rather than
+at reputation. The per-domain table keeps its own `failedBeforeHandoff` column
+and still lists a domain whose every send died before handoff — its `HAVING`
+deliberately tests the full terminal population, because dropping such a row
+would hide an outage as effectively as the old 0.0% did.
+
+Reputation numerators are counted over the same terminal cohort (`SENT` or
+`FAILED`) as the denominator, so a bounce recorded against a job that ended up
+`SUPPRESSED` can never sit in a numerator whose denominator excludes it.
+
+Relatedly, the send worker now writes its `FAILED` event **once**, on the
+attempt that gives up, with the attempt count in `metadata.attempts`. It used to
+write one per attempt, so a job exhausting three retries left three `FAILED`
+events for one failure — invisible to this aggregation, which counts statuses,
+but wrong for anything counting failures through events. The `FAILED` webhook
+now fires on that final attempt too: a send with retries left has not failed,
+and telling a consumer otherwise is a claim the retry may disprove.
 
 ## Inbox Stays Conversation-Focused
 

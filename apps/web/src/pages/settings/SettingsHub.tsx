@@ -49,7 +49,13 @@ const groups: { heading: string; links: HubLink[] }[] = [
       {
         to: "/settings/sending",
         title: "Sending accounts",
-        description: "The accounts your mail goes out as, and how it is landing.",
+        description: "The accounts your mail goes out as.",
+      },
+      {
+        to: "/settings/sending/health",
+        title: "Sending health",
+        description:
+          "Bounces, complaints, and how each recipient domain treats you.",
       },
       {
         to: "/settings/mailboxes",

@@ -49,13 +49,33 @@ function jobCohort(organizationId: string, from: Date, to: Date) {
   };
 }
 
+/**
+ * The subset of a cohort that reached a terminal send outcome.
+ *
+ * Reputation numerators are counted over this, not over the whole cohort, so a
+ * numerator can never describe a population its denominator excludes — the
+ * failure mode this module's header comment is about. Without it a bounce
+ * recorded against a job that ended up SUPPRESSED or CANCELLED would count in
+ * `bounced` while sitting outside `attempted`, and the rate could exceed 100%.
+ */
+function terminalCohort(
+  organizationId: string,
+  from: Date,
+  to: Date
+): Prisma.EmailJobWhereInput {
+  return {
+    ...jobCohort(organizationId, from, to),
+    status: { in: ["SENT", "FAILED"] }
+  };
+}
+
 /** `null` rather than 0 when there is no denominator — see the shared type. */
 const rate = (value: number, total: number): number | null =>
   total > 0 ? value / total : null;
 
 /** Distinct *jobs* matching an event filter, never a raw event count. */
 async function distinctJobs(
-  cohort: ReturnType<typeof jobCohort>,
+  cohort: Prisma.EmailJobWhereInput,
   where: Prisma.EmailEventWhereInput
 ): Promise<number> {
   const rows = await prisma.emailEvent.groupBy({
@@ -78,9 +98,11 @@ export const deliverabilityService = {
   }): Promise<DeliverabilityOverview> {
     const { from, to } = resolveWindow(input);
     const cohort = jobCohort(input.organizationId, from, to);
+    const terminal = terminalCohort(input.organizationId, from, to);
 
     const [
       byStatus,
+      failedBeforeHandoff,
       confirmedDelivered,
       deliverySource,
       bounced,
@@ -98,18 +120,25 @@ export const deliverabilityService = {
         where: cohort,
         _count: { _all: true }
       }),
-      distinctJobs(cohort, confirmedDeliveryFilter),
+      // A FAILED job with no BOUNCED event never reached a recipient's mail
+      // server: the send threw before handoff. `events: { none: ... }` rather
+      // than a FAILED-event lookup because a job can carry both (it bounced on
+      // one attempt and errored on another), and a bounce is the stronger fact.
+      prisma.emailJob.count({
+        where: { ...cohort, status: "FAILED", events: { none: { type: "BOUNCED" } } }
+      }),
+      distinctJobs(terminal, confirmedDeliveryFilter),
       // Org-wide and all-time: distinguishes "no deliveries confirmed in this
       // window" from "nothing here can confirm a delivery at all".
       prisma.emailEvent.findFirst({
         where: { organizationId: input.organizationId, ...confirmedDeliveryFilter },
         select: { id: true }
       }),
-      distinctJobs(cohort, { type: "BOUNCED" }),
-      distinctJobs(cohort, bounceClass("HARD")),
-      distinctJobs(cohort, bounceClass("SOFT")),
-      distinctJobs(cohort, bounceClass("BLOCK")),
-      distinctJobs(cohort, { type: "COMPLAINED" }),
+      distinctJobs(terminal, { type: "BOUNCED" }),
+      distinctJobs(terminal, bounceClass("HARD")),
+      distinctJobs(terminal, bounceClass("SOFT")),
+      distinctJobs(terminal, bounceClass("BLOCK")),
+      distinctJobs(terminal, { type: "COMPLAINED" }),
       distinctJobs(cohort, { type: "OPENED" }),
       distinctJobs(cohort, { type: "CLICKED" }),
       prisma.suppression.count({
@@ -136,7 +165,12 @@ export const deliverabilityService = {
     const cancelled = jobs.CANCELLED ?? 0;
     const inFlight =
       (jobs.PENDING ?? 0) + (jobs.QUEUED ?? 0) + (jobs.PROCESSING ?? 0);
-    const attempted = sent + failed;
+    // Everything that reached a terminal send outcome, of either kind.
+    const terminalTotal = sent + failed;
+    // ...minus the failures that never reached a recipient's mail server. See
+    // the shared type: folding those in here deflates every reputation rate,
+    // and an SMTP outage during a send is exactly when the rates matter most.
+    const attempted = terminalTotal - failedBeforeHandoff;
 
     const deliverySignal: DeliverySignal = deliverySource ? "confirmed" : "none";
 
@@ -147,6 +181,7 @@ export const deliverabilityService = {
         attempted,
         sent,
         failed,
+        failedBeforeHandoff,
         suppressedAtSend,
         cancelled,
         inFlight,
@@ -168,7 +203,8 @@ export const deliverabilityService = {
         bounce: rate(bounced, attempted),
         complaint: rate(complained, attempted),
         open: rate(opened, sent),
-        click: rate(clicked, sent)
+        click: rate(clicked, sent),
+        deliveryFailure: rate(failedBeforeHandoff, terminalTotal)
       }
     };
   },
@@ -194,6 +230,7 @@ export const deliverabilityService = {
         domain: string;
         attempted: bigint;
         sent: bigint;
+        failedBeforeHandoff: bigint;
         bounced: bigint;
         complained: bigint;
       }>
@@ -201,8 +238,20 @@ export const deliverabilityService = {
       SELECT
         COALESCE(NULLIF(split_part(lower(j."toEmail"), '@', 2), ''), '(unknown)')
           AS domain,
-        COUNT(*) FILTER (WHERE j.status IN ('SENT', 'FAILED')) AS attempted,
+        COUNT(*) FILTER (WHERE
+          j.status = 'SENT'
+          OR (j.status = 'FAILED' AND EXISTS (
+            SELECT 1 FROM "EmailEvent" e
+            WHERE e."emailJobId" = j.id AND e.type = 'BOUNCED'
+          ))
+        ) AS attempted,
         COUNT(*) FILTER (WHERE j.status = 'SENT') AS sent,
+        COUNT(*) FILTER (WHERE
+          j.status = 'FAILED' AND NOT EXISTS (
+            SELECT 1 FROM "EmailEvent" e
+            WHERE e."emailJobId" = j.id AND e.type = 'BOUNCED'
+          )
+        ) AS "failedBeforeHandoff",
         COUNT(*) FILTER (WHERE EXISTS (
           SELECT 1 FROM "EmailEvent" e
           WHERE e."emailJobId" = j.id AND e.type = 'BOUNCED'
@@ -218,6 +267,9 @@ export const deliverabilityService = {
           OR (j."sentAt" IS NULL AND j."createdAt" >= ${from} AND j."createdAt" <= ${to})
         )
       GROUP BY 1
+      -- Deliberately the full terminal population, not the attempted column:
+      -- a domain whose every send died before handoff has attempted = 0, and
+      -- dropping it here would hide the outage instead of reporting it.
       HAVING COUNT(*) FILTER (WHERE j.status IN ('SENT', 'FAILED')) > 0
       ORDER BY attempted DESC, domain ASC
     `);
@@ -231,6 +283,7 @@ export const deliverabilityService = {
           domain: row.domain,
           attempted,
           sent: Number(row.sent),
+          failedBeforeHandoff: Number(row.failedBeforeHandoff),
           bounced,
           complained,
           bounceRate: rate(bounced, attempted),

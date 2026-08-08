@@ -280,30 +280,51 @@ export function startEmailSendingWorker() {
         const isFinalAttempt =
           job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
 
+        /*
+          The FAILED event is written once, on the attempt that gives up.
+
+          It used to be written on every attempt, so a job that exhausted three
+          retries left three FAILED events behind for one failure. The status
+          column stayed correct, which is why the deliverability overview never
+          showed it — but anything counting failures through events (webhook
+          consumers, the Sent timeline) saw one send fail three times. The
+          attempt count moves into the metadata so the retry history is not
+          lost with the duplicate rows.
+        */
         await prisma.emailJob.update({
           where: { id: emailJob.id },
           data: {
             status: isFinalAttempt ? "FAILED" : "QUEUED",
-            events: {
-              create: {
-                organizationId: emailJob.organizationId,
-                type: "FAILED",
-                metadata: {
-                  message:
-                    error instanceof Error ? error.message : "Unknown send error"
+            ...(isFinalAttempt
+              ? {
+                  events: {
+                    create: {
+                      organizationId: emailJob.organizationId,
+                      type: "FAILED",
+                      metadata: {
+                        message:
+                          error instanceof Error
+                            ? error.message
+                            : "Unknown send error",
+                        attempts: job.attemptsMade + 1
+                      }
+                    }
+                  }
                 }
-              }
-            }
+              : {})
           }
         });
 
-        await enqueueLatestWebhookDeliveries({
-          organizationId: emailJob.organizationId,
-          emailJobId: emailJob.id,
-          type: "FAILED"
-        });
-
+        // Both of these follow the event: a send that still has retries left
+        // has not failed yet, and firing a `FAILED` webhook for one that then
+        // succeeds tells the consumer the opposite of what happened.
         if (isFinalAttempt) {
+          await enqueueLatestWebhookDeliveries({
+            organizationId: emailJob.organizationId,
+            emailJobId: emailJob.id,
+            type: "FAILED"
+          });
+
           await settleRunIfComplete(emailJob.campaignRunId);
         }
 

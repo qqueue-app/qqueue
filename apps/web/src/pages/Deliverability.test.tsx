@@ -55,6 +55,7 @@ function overview(
       attempted: 1000,
       sent: 920,
       failed: 80,
+      failedBeforeHandoff: 0,
       suppressedAtSend: 15,
       cancelled: 2,
       inFlight: 3,
@@ -77,6 +78,7 @@ function overview(
       complaint: 0.004,
       open: 0.326,
       click: 0.108,
+      deliveryFailure: 0,
       ...overrides.rates
     }
   };
@@ -167,6 +169,29 @@ describe("Deliverability", () => {
 
     await screen.findByText("Accepted by server");
     expect(screen.queryByText("0.0%")).not.toBeInTheDocument();
+  });
+
+  it("says so when sends never reached a mail server", async () => {
+    // The population excluded from the reputation rates has to stay visible:
+    // silently dropping it leaves the rates describing a smaller send than the
+    // one that was asked for, with nothing on screen to say why.
+    mockedApi.deliverabilityOverview.mockResolvedValue(
+      overview({
+        totals: { attempted: 500, sent: 450, failed: 550, failedBeforeHandoff: 500 },
+        rates: { deliveryFailure: 0.5 }
+      })
+    );
+    renderWithProviders(<Deliverability />);
+
+    await screen.findByText(/500 sends never left your server/);
+    expect(screen.getByText(/not counted in the rates above/)).toBeInTheDocument();
+  });
+
+  it("keeps the pre-handoff notice off a clean window", async () => {
+    renderWithProviders(<Deliverability />);
+
+    await screen.findByText("Accepted by server");
+    expect(screen.queryByText(/never left your server/)).not.toBeInTheDocument();
   });
 
   it("stays quiet on a handful of sends", async () => {

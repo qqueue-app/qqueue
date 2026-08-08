@@ -19,6 +19,13 @@ import { deliverabilityService } from "./service.js";
  */
 function stubOverview(input: {
   jobs: Partial<Record<string, number>>;
+  /**
+   * Of `jobs.FAILED`, how many failed *before* a recipient's mail server saw
+   * the message. The rest are bounces. Defaults to 0, which pairs with a
+   * fixture whose FAILED count equals its `bounced` count — the shape the send
+   * worker produces when every failure was an SMTP rejection.
+   */
+  failedBeforeHandoff?: number;
   confirmedDelivered?: number;
   hasDeliverySignal?: boolean;
   bounced?: number;
@@ -51,6 +58,10 @@ function stubOverview(input: {
     .mockResolvedValueOnce(jobRows(input.complained) as never)
     .mockResolvedValueOnce(jobRows(input.opened) as never)
     .mockResolvedValueOnce(jobRows(input.clicked) as never);
+
+  prismaMock.emailJob.count.mockResolvedValue(
+    (input.failedBeforeHandoff ?? 0) as never
+  );
 
   prismaMock.emailEvent.findFirst.mockResolvedValue(
     (input.hasDeliverySignal ? { id: "evt_1" } : null) as never
@@ -96,7 +107,11 @@ describe("deliverabilityService.overview", () => {
 
   it("excludes suppressed and cancelled recipients from the denominator", async () => {
     stubOverview({
-      jobs: { SENT: 40, FAILED: 10, SUPPRESSED: 25, CANCELLED: 5, QUEUED: 7 }
+      jobs: { SENT: 40, FAILED: 10, SUPPRESSED: 25, CANCELLED: 5, QUEUED: 7 },
+      // All ten failures were SMTP rejections, so all ten reached a recipient
+      // server and belong in `attempted`. See the pre-handoff tests below for
+      // the other kind.
+      bounced: 10
     });
 
     const result = await deliverabilityService.overview({
@@ -195,6 +210,66 @@ describe("deliverabilityService.overview", () => {
     expect(result.totals.suppressedTotal).toBe(137);
   });
 
+  it("keeps sends that never reached a mail server out of the denominator", async () => {
+    // An SMTP outage mid-send: 50 of 100 jobs threw before handoff, and the 50
+    // that got out produced 5 bounces. No recipient server ever saw the 50, so
+    // they are not evidence about how recipients treat this sender.
+    stubOverview({
+      jobs: { SENT: 45, FAILED: 55 },
+      failedBeforeHandoff: 50,
+      bounced: 5
+    });
+
+    const result = await deliverabilityService.overview({
+      organizationId: "org_1"
+    });
+
+    expect(result.totals.failedBeforeHandoff).toBe(50);
+    expect(result.totals.failed).toBe(55);
+    // 45 sent + 5 that bounced out of a real server, not 100.
+    expect(result.totals.attempted).toBe(50);
+    // The defect: 5/100 read as 5.0%, comfortably under the alert line, while
+    // the true rate was double that.
+    expect(result.rates.bounce).toBeCloseTo(0.1);
+    // ...and "accepted" no longer blames receiving servers for our own outage.
+    expect(result.rates.accepted).toBeCloseTo(0.9);
+    // The excluded population stays visible instead of silently disappearing.
+    expect(result.rates.deliveryFailure).toBeCloseTo(0.5);
+  });
+
+  it("treats a failure that bounced as attempted, not as a pre-handoff failure", async () => {
+    // Every FAILED job here carries a BOUNCED event, so nothing is excluded.
+    stubOverview({
+      jobs: { SENT: 90, FAILED: 10 },
+      failedBeforeHandoff: 0,
+      bounced: 10
+    });
+
+    const result = await deliverabilityService.overview({
+      organizationId: "org_1"
+    });
+
+    expect(result.totals.attempted).toBe(100);
+    expect(result.rates.deliveryFailure).toBe(0);
+  });
+
+  it("counts reputation numerators over the terminal cohort only", async () => {
+    stubOverview({ jobs: { SENT: 10 } });
+
+    await deliverabilityService.overview({ organizationId: "org_1" });
+
+    // The bounce lookup (call 2, after confirmed-delivery) must constrain the
+    // job to a terminal status: a bounce recorded against a job that ended up
+    // SUPPRESSED would otherwise sit in the numerator while its denominator
+    // excluded it, and the rate could exceed 100%.
+    const bounceCall = prismaMock.emailEvent.groupBy.mock.calls[1][0] as {
+      where: { emailJob: { status?: { in: string[] } } };
+    };
+    expect(bounceCall.where.emailJob.status).toEqual({
+      in: ["SENT", "FAILED"]
+    });
+  });
+
   it("anchors the cohort on send time, falling back to creation", async () => {
     stubOverview({ jobs: { SENT: 1 } });
 
@@ -223,6 +298,7 @@ describe("deliverabilityService.domains", () => {
         domain: "gmail.com",
         attempted: 60n,
         sent: 56n,
+        failedBeforeHandoff: 0n,
         bounced: 4n,
         complained: 1n
       },
@@ -230,6 +306,7 @@ describe("deliverabilityService.domains", () => {
         domain: "yahoo.com",
         attempted: 10n,
         sent: 0n,
+        failedBeforeHandoff: 0n,
         bounced: 10n,
         complained: 0n
       }
@@ -254,7 +331,14 @@ describe("deliverabilityService.domains", () => {
 
   it("counts bigints from Postgres as numbers", async () => {
     prismaMock.$queryRaw.mockResolvedValue([
-      { domain: "gmail.com", attempted: 3n, sent: 3n, bounced: 0n, complained: 0n }
+      {
+        domain: "gmail.com",
+        attempted: 3n,
+        sent: 3n,
+        failedBeforeHandoff: 0n,
+        bounced: 0n,
+        complained: 0n
+      }
     ] as never);
 
     const result = await deliverabilityService.domains({
@@ -282,6 +366,23 @@ describe("deliverabilityService.alerts", () => {
     const metrics = result.alerts.map((a) => a.metric);
     expect(metrics).toContain("bounceRate");
     expect(metrics).toContain("complaintRate");
+  });
+
+  it("raises the bounce alert an outage used to withhold", async () => {
+    // 1000 recipients, 500 died before handoff, 50 of the 500 that got out
+    // bounced. True rate 10%; the old SENT+FAILED denominator reported exactly
+    // 5.0%, and `5.0 > 5.0` is false — so the critical alert never fired.
+    stubOverview({
+      jobs: { SENT: 450, FAILED: 550 },
+      failedBeforeHandoff: 500,
+      bounced: 50
+    });
+
+    const result = await deliverabilityService.alerts({
+      organizationId: "org_1"
+    });
+
+    expect(result.alerts.map((a) => a.metric)).toContain("bounceRate");
   });
 
   it("stays quiet at healthy rates", async () => {

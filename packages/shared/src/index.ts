@@ -1461,10 +1461,30 @@ export interface DeliverabilityOverview {
   window: { from: string; to: string };
   deliverySignal: DeliverySignal;
   totals: {
-    /** Reached a terminal send attempt: SENT + FAILED. The denominator. */
+    /**
+     * Reached a recipient's mail server: SENT, plus the FAILED jobs whose
+     * failure was a bounce. The denominator for every reputation rate.
+     *
+     * Deliberately not `SENT + FAILED`. `FAILED` conflates two unrelated
+     * things: a receiving server rejecting the recipient (a reputation
+     * signal) and our own send throwing before handoff — SMTP down, auth
+     * refused, TLS failure, a template that would not render (not a
+     * reputation signal, because no recipient server ever saw the message).
+     * Counting the second kind inflates this denominator and *deflates*
+     * bounce and complaint rates: an outage that fails half a 100-recipient
+     * send turns a true 10% bounce rate into a reported 5.0%, which lands
+     * just under `BOUNCE_RATE_ALERT` and silently withholds the alert.
+     */
     attempted: number;
     sent: number;
+    /** Every terminal failure, both kinds. `attempted` excludes the second. */
     failed: number;
+    /**
+     * The FAILED jobs that never reached a recipient's mail server. An ops
+     * number, not a reputation one — surfaced so the population excluded
+     * from `attempted` stays visible instead of silently vanishing.
+     */
+    failedBeforeHandoff: number;
     /** Never attempted — on the suppression list, or cancelled before send. */
     suppressedAtSend: number;
     cancelled: number;
@@ -1499,13 +1519,29 @@ export interface DeliverabilityOverview {
     complaint: number | null;
     open: number | null;
     click: number | null;
+    /**
+     * Share of terminal jobs that never got out of the door, over `SENT +
+     * FAILED`. The one rate here whose denominator is *not* `attempted` — it
+     * measures the sending setup, not the reputation, and a value above zero
+     * means the reputation rates are describing a smaller send than intended.
+     */
+    deliveryFailure: number | null;
   };
 }
 
 export interface DeliverabilityDomainRow {
   domain: string;
+  /** Same definition as the overview's: SENT + FAILED-with-a-bounce. */
   attempted: number;
   sent: number;
+  /**
+   * FAILED without a bounce, for this domain. Kept as its own column rather
+   * than folded into `attempted` so a domain whose sends *all* died before
+   * handoff still appears in the table — under the old `SENT + FAILED`
+   * denominator it showed a reassuring 0.0% bounce rate, and under a naive
+   * fix it would have disappeared from the list entirely.
+   */
+  failedBeforeHandoff: number;
   bounced: number;
   complained: number;
   bounceRate: number | null;

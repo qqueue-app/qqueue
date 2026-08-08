@@ -657,6 +657,12 @@ describe("email-sending worker", () => {
       (c) => (c[0] as { data: { status: string } }).data.status === "QUEUED"
     );
     expect(failCall).toBeDefined();
+    // No FAILED event yet: a send with retries left has not failed. Writing one
+    // per attempt left three rows behind for one failure, so anything counting
+    // failures through events saw one send fail three times.
+    expect(
+      (failCall![0] as { data: { events?: unknown } }).data.events
+    ).toBeUndefined();
     expect(settleRunIfComplete).not.toHaveBeenCalled();
   });
 
@@ -691,6 +697,15 @@ describe("email-sending worker", () => {
       (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"
     );
     expect(failCall).toBeDefined();
+    // One event, on the attempt that gives up, carrying how many it took — the
+    // retry history the per-attempt rows used to record.
+    expect(
+      (
+        failCall![0] as {
+          data: { events: { create: { metadata: { attempts: number } } } };
+        }
+      ).data.events.create.metadata.attempts
+    ).toBe(3);
     expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
   });
 

@@ -334,10 +334,21 @@ export interface DeliverabilityOverview {
   window: { from: string; to: string };
   deliverySignal: DeliverySignal;
   totals: {
-    /** Reached a terminal send attempt: SENT + FAILED. The denominator. */
+    /**
+     * Reached a recipient's mail server: SENT, plus the FAILED jobs whose
+     * failure was a bounce. The denominator for every reputation rate.
+     *
+     * Not `SENT + FAILED`: that folds in sends that died before handoff (SMTP
+     * down, auth refused, a template that would not render), which no
+     * recipient server ever saw. Counting them deflates bounce and complaint
+     * rates exactly when an outage makes them matter most.
+     */
     attempted: number;
     sent: number;
+    /** Every terminal failure, both kinds. `attempted` excludes the second. */
     failed: number;
+    /** The FAILED jobs that never reached a recipient's mail server. */
+    failedBeforeHandoff: number;
     /** Never attempted — suppressed, or cancelled before send. */
     suppressedAtSend: number;
     cancelled: number;
@@ -362,6 +373,8 @@ export interface DeliverabilityOverview {
     complaint: number | null;
     open: number | null;
     click: number | null;
+    /** Over `SENT + FAILED` — the one rate not measured over `attempted`. */
+    deliveryFailure: number | null;
   };
 }
 
@@ -369,6 +382,8 @@ export interface DeliverabilityDomainRow {
   domain: string;
   attempted: number;
   sent: number;
+  /** Kept separate so an all-failed domain still appears in the table. */
+  failedBeforeHandoff: number;
   bounced: number;
   complained: number;
   bounceRate: number | null;
