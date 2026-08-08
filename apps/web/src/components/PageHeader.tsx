@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ChevronLeft, MoreHorizontal, type LucideIcon } from "lucide-react";
 import { useIsMobile } from "../lib/use-media-query.js";
 import { cn } from "../lib/utils.js";
+import { pageWidth, type PageWidth } from "./PageContainer.js";
 import { Button } from "./ui/button.js";
 import { IconButton } from "./ui/icon-button.js";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "./ui/menu.js";
@@ -46,17 +47,19 @@ interface PageHeaderProps {
    */
   breadcrumb?: { label: string; to: string };
   /**
-   * Where the header's *text* stops. `"container"` puts it in the same centred
-   * column as `<PageContainer>`, so the title lines up with the content below
-   * it; `"full"` keeps it flush left at `px-6`. The rule under it spans the
-   * page either way.
+   * Where the header's *text* stops — the title, the description and the
+   * actions. **Pass the same value as this page's `<PageContainer>`**: that is
+   * what puts the title on the form's left edge and the actions on its right,
+   * instead of the header running the full width of a container whose content
+   * is centred inside it. The rule underneath stays full-bleed either way,
+   * because it divides the page rather than the content.
    *
    * Defaults to `"full"` because this component is on every page and only the
-   * composer has been converted. A centred header over left-aligned content is
-   * worse than either alignment on its own, so this stays opt-in until the
+   * composer has been converted. A contained header over left-aligned content
+   * is worse than either alignment on its own, so this stays opt-in until the
    * rollout — at which point the default flips and the prop goes away.
    */
-  width?: "full" | "container";
+  width?: PageWidth;
 }
 
 /**
@@ -89,6 +92,9 @@ export function PageHeader({
   // A breadcrumb already names somewhere to go back to, so a page that has one
   // never needs to repeat itself with `backTo`.
   const backTarget = backTo ?? breadcrumb?.to;
+  // Resolved once, from the same helper `<PageContainer>` uses — the header
+  // and the content below it agree by construction rather than by convention.
+  const { container, measure } = pageWidth(width);
 
   if (isMobile) {
     return (
@@ -128,55 +134,60 @@ export function PageHeader({
 
   return (
     /*
-      The rule stays full-bleed — it divides the page — while the text inside it
-      takes the page's measure. A header whose title starts at the window edge
-      over content that starts 350px in is the mismatch this splits apart.
+      Three levels, because they answer three different questions: the rule
+      divides the *page* so it stays full-bleed, the container holds the page
+      padding and the 1400px cap, and the measure is where the *content* starts
+      — which is the one the title has to agree with. Collapsing the last two
+      is what left the title at the container's edge while the form it belongs
+      to sat centred 190px further in.
     */
     <div className="border-b border-border">
-      <div
-        className={cn(
-          "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between",
-          width === "container" ? "container py-6" : "px-6 py-6"
-        )}
-      >
-        <div className="min-w-0">
-          {breadcrumb ? (
-            <nav aria-label="Breadcrumb" className="mb-1">
-              <ol className="flex items-center gap-field text-ui text-text-tertiary">
-                <li>
-                  <Link
-                    to={breadcrumb.to}
-                    className="-ml-1 rounded-control px-1 font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text"
-                  >
-                    {breadcrumb.label}
-                  </Link>
-                </li>
-                <li aria-hidden>/</li>
-                <li aria-current="page">{title}</li>
-              </ol>
-            </nav>
-          ) : backTo ? (
-            <Link
-              to={backTo}
-              className="mb-1 -ml-1 inline-flex items-center gap-1 rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Back
-            </Link>
-          ) : null}
-          <h1 className="text-title font-semibold text-text">{title}</h1>
-          <p className="mt-1 max-w-read text-ui leading-6 text-text-secondary">
-            {description}
-          </p>
-        </div>
-        {actions || items.length > 0 ? (
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {actions}
-            {items.map((item) => (
-              <DesktopAction key={item.label} item={item} />
-            ))}
+      <div className={cn(container, "py-6")}>
+        <div
+          className={cn(
+            measure,
+            "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+          )}
+        >
+          <div className="min-w-0">
+            {breadcrumb ? (
+              <nav aria-label="Breadcrumb" className="mb-1">
+                <ol className="flex items-center gap-field text-ui text-text-tertiary">
+                  <li>
+                    <Link
+                      to={breadcrumb.to}
+                      className="-ml-1 rounded-control px-1 font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text"
+                    >
+                      {breadcrumb.label}
+                    </Link>
+                  </li>
+                  <li aria-hidden>/</li>
+                  <li aria-current="page">{title}</li>
+                </ol>
+              </nav>
+            ) : backTo ? (
+              <Link
+                to={backTo}
+                className="mb-1 -ml-1 inline-flex items-center gap-1 rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Back
+              </Link>
+            ) : null}
+            <h1 className="text-title font-semibold text-text">{title}</h1>
+            <p className="mt-1 max-w-read text-ui leading-6 text-text-secondary">
+              {description}
+            </p>
           </div>
-        ) : null}
+          {actions || items.length > 0 ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {actions}
+              {items.map((item) => (
+                <DesktopAction key={item.label} item={item} />
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

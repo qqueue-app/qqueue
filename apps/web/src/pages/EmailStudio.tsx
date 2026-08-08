@@ -1206,7 +1206,7 @@ export function EmailStudio() {
       <PageHeader
         title="Compose"
         description="Write and send a one-off email through your delivery pipeline."
-        width="container"
+        width="compose"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -1231,12 +1231,9 @@ export function EmailStudio() {
         }
       />
 
-      <PageContainer>
+      <PageContainer width="compose">
         {loading ? (
-          // `mx-auto` here as well as on the form: the skeleton and the thing
-          // it stands in for have to sit in the same place, or loading ends
-          // with the whole composer jumping sideways.
-          <div className="mx-auto max-w-form space-y-4">
+          <div className="space-y-4">
             <Skeleton className="h-touch w-full sm:h-control sm:w-field-name" />
             <Skeleton className="h-touch w-full sm:h-control sm:w-field-long" />
             <Skeleton className="h-64 w-full" />
@@ -1250,16 +1247,17 @@ export function EmailStudio() {
             width — the mobile inversion, which each field carries itself via
             its `width` prop.
 
-            Both tracks being fixed means the pair has one intrinsic width
-            (`--content-compose`), so it centres in the container as a unit.
-            Without that the cluster pins left and every pixel the window gains
-            piles up on the right — which is what it used to do.
+            Neither the width nor the centring is set here: `width="compose"`
+            on the container above is the single place both are stated, so the
+            header's title and actions land on this cluster's two edges. It
+            used to pin left, dumping every pixel the window gained on the
+            right — 656px of it at 1920px.
           */
           <form
             onSubmit={send}
-            className="mx-auto grid gap-8 xl:max-w-compose xl:grid-cols-[minmax(0,var(--content-form))_var(--content-rail)]"
+            className="grid gap-8 xl:grid-cols-[minmax(0,var(--content-form))_var(--content-rail)]"
           >
-            <div className="mx-auto min-w-0 max-w-form space-y-6">
+            <div className="min-w-0 space-y-6">
               {noSmtp ? (
                 <div className="rounded-card border border-border bg-warn-bg px-4 py-3 text-ui leading-5 text-warn">
                   <p className="font-medium">No sending account yet</p>

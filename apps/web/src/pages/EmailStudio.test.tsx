@@ -654,22 +654,34 @@ describe("EmailStudio", () => {
 
   /*
     Class names rather than layout, because jsdom has none — but the container
-    and `mx-auto` are classes, so this is exactly how the centring would break.
+    and the measure are classes, so this is exactly how the alignment breaks.
+    Matched on `className` rather than a CSS selector: the measure is a
+    variant, and `.xl\:max-w-compose` is more escaping than it is worth.
   */
   describe("page measure", () => {
-    it("centres the form+rail cluster inside the page container", async () => {
+    function measured(container: HTMLElement) {
+      return Array.from(container.querySelectorAll<HTMLElement>("*")).filter(
+        (element) =>
+          typeof element.className === "string" &&
+          element.className.includes("xl:max-w-compose")
+      );
+    }
+
+    it("puts the header and the composer on one shared measure", async () => {
       setup();
       const { container } = await renderStudio();
 
-      // The header's text and the content below it sit in the same column, so
-      // the title lines up with the form's left edge.
-      expect(container.querySelectorAll(".container")).toHaveLength(2);
+      // Both the header's text and the form resolve their measure from the
+      // same `width="compose"`, so the title lands on the cluster's left edge
+      // and Drafts / Save draft on its right. Two independent copies of the
+      // number is exactly how they drifted apart before.
+      const elements = measured(container);
+      expect(elements).toHaveLength(2);
+      elements.forEach((element) => expect(element).toHaveClass("mx-auto"));
 
-      // Both grid tracks are fixed, so the pair has one intrinsic width. Naming
-      // it is what lets the cluster centre as a unit instead of pinning left
-      // and dumping every gained pixel on the right.
+      // The composer itself states neither, so there is nothing to drift.
       const form = container.querySelector("form")!;
-      expect(form).toHaveClass("mx-auto", "xl:max-w-compose");
+      expect(form.className).not.toMatch(/max-w-|mx-auto/);
     });
 
     it("puts the loading skeleton where the form will land", async () => {
@@ -683,8 +695,9 @@ describe("EmailStudio", () => {
         { withRouter: false }
       );
 
-      const skeletonColumn = container.querySelector(".max-w-form")!;
-      expect(skeletonColumn).toHaveClass("mx-auto");
+      // The skeleton inherits the measure from the container rather than
+      // carrying its own, so loading cannot end with the composer moving.
+      expect(measured(container)).toHaveLength(2);
 
       // Let the load finish before the test ends, or its state updates land
       // outside `act` and warn.

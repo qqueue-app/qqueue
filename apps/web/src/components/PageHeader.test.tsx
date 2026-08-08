@@ -117,36 +117,40 @@ describe("PageHeader", () => {
 
   /*
     Class names rather than layout, because jsdom has none — but the container
-    is a class, so this is exactly how the alignment would break.
+    and the measure are classes, so this is exactly how the alignment breaks.
   */
   describe("page measure", () => {
-    it("keeps the rule full-bleed and the text contained when asked", () => {
+    it("keeps the rule full-bleed and the text on the content's measure", () => {
       const { container } = renderWithProviders(
-        <PageHeader title="Compose" description="d" width="container" />
+        <PageHeader title="Compose" description="d" width="compose" />
       );
       const rule = container.firstElementChild!;
-      const inner = rule.firstElementChild!;
+      const contained = rule.firstElementChild!;
+      const measure = contained.firstElementChild!;
 
       // The rule divides the page, so it must not be constrained...
       expect(rule).toHaveClass("border-b");
       expect(rule.className).not.toMatch(/(^|\s)container(\s|$)/);
-      // ...while the text takes the page's measure, lining up with the content
-      // below it. That mismatch is the whole reason this split exists.
-      expect(inner).toHaveClass("container");
-      expect(inner.className).not.toMatch(/px-6/);
+      // ...the container supplies the padding and the 1400px cap...
+      expect(contained).toHaveClass("container");
+      // ...and the measure is where the content actually starts. The title
+      // sitting on the container's edge while the form was centred 190px
+      // further in is the bug this third level exists to prevent.
+      expect(measure).toHaveClass("mx-auto", "max-w-form", "xl:max-w-compose");
     });
 
     it("defaults to the unconverted full-width header", () => {
       const { container } = renderWithProviders(
         <PageHeader title="Contacts" description="d" />
       );
-      const inner = container.firstElementChild!.firstElementChild!;
+      const contained = container.firstElementChild!.firstElementChild!;
 
       // The gate that keeps every page this component renders byte-identical
-      // until the container rollout reaches it. A centred header over
+      // until the container rollout reaches it. A contained header over
       // left-aligned content is worse than either alignment on its own.
-      expect(inner).toHaveClass("px-6");
-      expect(inner.className).not.toMatch(/(^|\s)container(\s|$)/);
+      expect(contained).toHaveClass("px-6");
+      expect(contained.className).not.toMatch(/(^|\s)container(\s|$)/);
+      expect(contained.firstElementChild!.className).not.toMatch(/max-w-/);
     });
   });
 
