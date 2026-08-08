@@ -1,12 +1,12 @@
+import { PageContainer } from "../../components/PageContainer.js";
 import { FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "../../components/PageHeader.js";
 import {
   Field,
-  FormColumn,
   FormSection,
   FormSections,
-} from "../../components/settings/FormColumn.js";
+} from "../../components/settings/FormLayout.js";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { FieldHint, Label } from "../../components/ui/label.js";
@@ -107,7 +107,7 @@ export function OrganizationSettings() {
         breadcrumb={{ label: "Settings", to: "/settings" }}
       />
 
-      <FormColumn>
+      <PageContainer>
         <FormSections>
           <FormSection
             title="Active organization"
@@ -195,7 +195,7 @@ export function OrganizationSettings() {
             </form>
           </FormSection>
         </FormSections>
-      </FormColumn>
+      </PageContainer>
     </>
   );
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Pause, PenSquare, Play, Repeat, Trash2 } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { CampaignsTabs } from "../components/CampaignsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -196,7 +197,7 @@ export function RecurringSends() {
 
       <CampaignsTabs />
 
-      <section className="p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Recurring sends"
           data={sendsQuery.data ?? []}
@@ -270,7 +271,7 @@ export function RecurringSends() {
             </div>
           )}
         />
-      </section>
+      </PageContainer>
 
       <ConfirmDialog
         open={deleteTarget !== null}

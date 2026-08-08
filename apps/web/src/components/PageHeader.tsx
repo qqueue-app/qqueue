@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ChevronLeft, MoreHorizontal, type LucideIcon } from "lucide-react";
 import { useIsMobile } from "../lib/use-media-query.js";
 import { cn } from "../lib/utils.js";
-import { pageWidth, type PageWidth } from "./PageContainer.js";
+import { pageContainer, pageMeasure } from "./PageContainer.js";
 import { Button } from "./ui/button.js";
 import { IconButton } from "./ui/icon-button.js";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "./ui/menu.js";
@@ -46,20 +46,6 @@ interface PageHeaderProps {
    * the screen with the least of it to spare.
    */
   breadcrumb?: { label: string; to: string };
-  /**
-   * Where the header's *text* stops — the title, the description and the
-   * actions. **Pass the same value as this page's `<PageContainer>`**: that is
-   * what puts the title on the form's left edge and the actions on its right,
-   * instead of the header running the full width of a container whose content
-   * is centred inside it. The rule underneath stays full-bleed either way,
-   * because it divides the page rather than the content.
-   *
-   * Defaults to `"full"` because this component is on every page and only the
-   * composer has been converted. A contained header over left-aligned content
-   * is worse than either alignment on its own, so this stays opt-in until the
-   * rollout — at which point the default flips and the prop goes away.
-   */
-  width?: PageWidth;
 }
 
 /**
@@ -85,16 +71,12 @@ export function PageHeader({
   menuActions,
   backTo,
   breadcrumb,
-  width = "full",
 }: PageHeaderProps) {
   const isMobile = useIsMobile();
   const items = menuActions ?? [];
   // A breadcrumb already names somewhere to go back to, so a page that has one
   // never needs to repeat itself with `backTo`.
   const backTarget = backTo ?? breadcrumb?.to;
-  // Resolved once, from the same helper `<PageContainer>` uses — the header
-  // and the content below it agree by construction rather than by convention.
-  const { container, measure } = pageWidth(width);
 
   if (isMobile) {
     return (
@@ -142,10 +124,10 @@ export function PageHeader({
       to sat centred 190px further in.
     */
     <div className="border-b border-border">
-      <div className={cn(container, "py-6")}>
+      <div className={cn(pageContainer, "py-6")}>
         <div
           className={cn(
-            measure,
+            pageMeasure,
             "flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
           )}
         >

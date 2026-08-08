@@ -120,9 +120,9 @@ describe("PageHeader", () => {
     and the measure are classes, so this is exactly how the alignment breaks.
   */
   describe("page measure", () => {
-    it("keeps the rule full-bleed and the text on the content's measure", () => {
+    it("keeps the rule full-bleed and the text on the page measure", () => {
       const { container } = renderWithProviders(
-        <PageHeader title="Compose" description="d" width="compose" />
+        <PageHeader title="Compose" description="d" />
       );
       const rule = container.firstElementChild!;
       const contained = rule.firstElementChild!;
@@ -131,26 +131,13 @@ describe("PageHeader", () => {
       // The rule divides the page, so it must not be constrained...
       expect(rule).toHaveClass("border-b");
       expect(rule.className).not.toMatch(/(^|\s)container(\s|$)/);
-      // ...the container supplies the padding and the 1400px cap...
+      // ...the container supplies the padding and the 1400px ceiling...
       expect(contained).toHaveClass("container");
-      // ...and the measure is where the content actually starts. The title
-      // sitting on the container's edge while the form was centred 190px
-      // further in is the bug this third level exists to prevent.
-      expect(measure).toHaveClass("mx-auto", "max-w-form", "xl:max-w-compose");
-    });
-
-    it("defaults to the unconverted full-width header", () => {
-      const { container } = renderWithProviders(
-        <PageHeader title="Contacts" description="d" />
-      );
-      const contained = container.firstElementChild!.firstElementChild!;
-
-      // The gate that keeps every page this component renders byte-identical
-      // until the container rollout reaches it. A contained header over
-      // left-aligned content is worse than either alignment on its own.
-      expect(contained).toHaveClass("px-6");
-      expect(contained.className).not.toMatch(/(^|\s)container(\s|$)/);
-      expect(contained.firstElementChild!.className).not.toMatch(/max-w-/);
+      // ...and the measure is where the content actually starts, which is the
+      // one the title has to agree with. Every page resolves it from the same
+      // two constants as `<PageContainer>`, so there is no per-page opt-in to
+      // forget — a header contained but not measured still looked misaligned.
+      expect(measure).toHaveClass("mx-auto", "max-w-page");
     });
   });
 

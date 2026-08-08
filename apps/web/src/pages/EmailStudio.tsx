@@ -23,7 +23,7 @@ import {
   Field,
   FormSection,
   FormSections
-} from "../components/settings/FormColumn.js";
+} from "../components/settings/FormLayout.js";
 import {
   buildCron,
   describeCron,
@@ -1206,7 +1206,6 @@ export function EmailStudio() {
       <PageHeader
         title="Compose"
         description="Write and send a one-off email through your delivery pipeline."
-        width="compose"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -1231,7 +1230,7 @@ export function EmailStudio() {
         }
       />
 
-      <PageContainer width="compose">
+      <PageContainer>
         {loading ? (
           <div className="space-y-4">
             <Skeleton className="h-touch w-full sm:h-control sm:w-field-name" />
@@ -1240,22 +1239,21 @@ export function EmailStudio() {
           </div>
         ) : (
           /*
-            Two columns, both sized to their content rather than to the window:
-            a 640px form column (§2) and a rail beside it that holds the send
-            options for this message. Below `xl` the rail drops underneath, and
-            on a phone every field inside collapses to the padded column's full
-            width — the mobile inversion, which each field carries itself via
-            its `width` prop.
+            Two columns: the message, and a rail beside it holding this send's
+            options. Below `xl` the rail drops underneath, and on a phone every
+            field inside collapses to the padded column's full width — the
+            mobile inversion, which each field carries itself via its `width`
+            prop.
 
-            Neither the width nor the centring is set here: `width="compose"`
-            on the container above is the single place both are stated, so the
-            header's title and actions land on this cluster's two edges. It
-            used to pin left, dumping every pixel the window gained on the
-            right — 656px of it at 1920px.
+            The form track is fluid so the pair fills the page rather than
+            leaving a gutter: the rail keeps its fixed 304px and the form takes
+            whatever is left — 864px at the page's full width. Both tracks being
+            fixed is what used to pin the cluster left and dump every pixel the
+            window gained on the right, 656px of it at 1920px.
           */
           <form
             onSubmit={send}
-            className="grid gap-8 xl:grid-cols-[minmax(0,var(--content-form))_var(--content-rail)]"
+            className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_var(--content-rail)]"
           >
             <div className="min-w-0 space-y-6">
               {noSmtp ? (

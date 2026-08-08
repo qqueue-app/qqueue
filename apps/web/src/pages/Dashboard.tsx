@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Info, Mail, Plus, Send } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { GetStartedCard } from "../components/GetStartedCard.js";
@@ -227,7 +228,7 @@ export function Dashboard() {
         ]}
       />
 
-      <section className="space-y-6 p-4 sm:p-6">
+      <PageContainer className="space-y-6">
         {!organizationId ? (
           <Alert variant="info">
             <Info />
@@ -257,7 +258,7 @@ export function Dashboard() {
                   monitor become six wide bands of whitespace with a number
                   parked at the left edge of each.
                 */}
-                <div className="grid max-w-grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {cards.map((card) => (
                     <StatCard key={card.label} {...card} loading={loading} />
                   ))}
@@ -265,7 +266,7 @@ export function Dashboard() {
               </>
             )}
 
-            <section aria-labelledby="recent-jobs" className="max-w-table">
+            <section aria-labelledby="recent-jobs">
               <h2
                 id="recent-jobs"
                 className="text-section font-semibold text-text"
@@ -327,7 +328,7 @@ export function Dashboard() {
             </section>
           </>
         )}
-      </section>
+      </PageContainer>
     </>
   );
 }

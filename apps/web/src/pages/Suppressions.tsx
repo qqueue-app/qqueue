@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Plus, ShieldBan, Trash2 } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -196,7 +197,7 @@ export function Suppressions() {
         }
       />
 
-      <section className="p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Suppressions"
           data={suppressionsQuery.data ?? []}
@@ -251,7 +252,7 @@ export function Suppressions() {
             );
           }}
         />
-      </section>
+      </PageContainer>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

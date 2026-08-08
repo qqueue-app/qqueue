@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Filter, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { ListsTabs } from "../components/ListsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -301,7 +302,7 @@ export function Segments() {
 
       <ListsTabs />
 
-      <section className="max-w-table p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Smart lists"
           data={segments}
@@ -359,7 +360,7 @@ export function Segments() {
             </div>
           )}
         />
-      </section>
+      </PageContainer>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

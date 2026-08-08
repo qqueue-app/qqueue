@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MailCheck, RefreshCw, X } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -217,7 +218,7 @@ export function Outbox() {
         }
       />
 
-      <section className="max-w-table p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Outbox"
           data={outboxQuery.data ?? []}
@@ -279,7 +280,7 @@ export function Outbox() {
             </div>
           )}
         />
-      </section>
+      </PageContainer>
 
       <ConfirmDialog
         open={cancelTarget !== null}

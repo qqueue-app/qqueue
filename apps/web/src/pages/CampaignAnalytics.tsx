@@ -11,6 +11,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { api, type CampaignAnalytics as CampaignAnalyticsData } from "../lib/api.js";
@@ -150,7 +151,7 @@ export function CampaignAnalytics() {
           </Button>
         }
       />
-      <section className="space-y-6 p-6">
+      <PageContainer className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {cards.map((card) => {
             const Icon = card.icon;
@@ -280,7 +281,7 @@ export function CampaignAnalytics() {
             </CardContent>
           </Card>
         </div>
-      </section>
+      </PageContainer>
     </>
   );
 }

@@ -22,6 +22,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "../components/ui/tabs.js";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { Skeleton } from "../components/ui/skeleton.js";
@@ -277,7 +278,7 @@ export function QueueOperations() {
         }
       />
 
-      <section className="space-y-6 p-4 sm:p-6">
+      <PageContainer className="space-y-6">
         {queuesQuery.isPending ? (
           <div className="space-y-3">
             <Skeleton className="h-24 w-full" />
@@ -355,7 +356,7 @@ export function QueueOperations() {
             </Card>
           ))
         )}
-      </section>
+      </PageContainer>
     </>
   );
 }

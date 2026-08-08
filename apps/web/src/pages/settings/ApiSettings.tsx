@@ -1,3 +1,4 @@
+import { PageContainer } from "../../components/PageContainer.js";
 import { FormEvent, useEffect, useState } from "react";
 import { KeyRound, RotateCcw, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
@@ -7,10 +8,9 @@ import { EmptyState } from "../../components/EmptyState.js";
 import { CopyableSecret } from "../../components/settings/CopyableSecret.js";
 import {
   Field,
-  FormColumn,
   FormSection,
   FormSections,
-} from "../../components/settings/FormColumn.js";
+} from "../../components/settings/FormLayout.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
@@ -325,7 +325,7 @@ export function ApiSettings() {
         breadcrumb={{ label: "Settings", to: "/settings" }}
       />
 
-      <FormColumn>
+      <PageContainer>
         <FormSections>
           {/* ------------------------------------------------------- keys */}
           <FormSection
@@ -668,7 +668,7 @@ export function ApiSettings() {
             </FormSection>
           ) : null}
         </FormSections>
-      </FormColumn>
+      </PageContainer>
 
       <ConfirmDialog
         open={revokeTarget !== null}

@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
 import { formatCount } from "../lib/format.js";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { CampaignsTabs } from "../components/CampaignsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -536,7 +537,7 @@ export function Campaigns() {
 
       <CampaignsTabs />
 
-      <section className="max-w-table p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Campaigns"
           data={filteredCampaigns}
@@ -623,7 +624,7 @@ export function Campaigns() {
             </div>
           )}
         />
-      </section>
+      </PageContainer>
 
       <Dialog open={campaignDialogOpen} onOpenChange={closeCampaignDialog}>
         <DialogContent>

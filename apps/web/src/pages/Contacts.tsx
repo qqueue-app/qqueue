@@ -12,6 +12,7 @@ import {
   Users
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -671,7 +672,7 @@ export function Contacts() {
         onChange={handleImportFileSelected}
       />
 
-      <section className="max-w-table space-y-4 p-4 sm:p-6">
+      <PageContainer className="space-y-4">
         {/*
           A filter row, not a card: a bordered box around three controls reads
           as a form you have to fill in before the table below means anything,
@@ -842,7 +843,7 @@ export function Contacts() {
           )}
         />
 
-      </section>
+      </PageContainer>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

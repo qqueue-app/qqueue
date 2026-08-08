@@ -2,77 +2,46 @@ import type { ReactNode } from "react";
 import { cn } from "../lib/utils.js";
 
 /**
- * How wide a page's content runs, and therefore where its header's text has to
- * start. One name covers both so they cannot drift: `<PageHeader>` and
- * `<PageContainer>` take the same value and resolve it through `pageWidth`,
- * which is what makes the title line up with the form beneath it.
- *
- * - `full` — no container at all, `px-6` flush left. The unconverted default.
- * - `page` — fills the container; for content that wants every pixel of it.
- * - `form` / `table` — the §2 measures, centred.
- * - `compose` — 640px stacked, widening to the composer's form+rail cluster
- *   once the rail moves alongside at `xl`.
+ * The container class every page in the shell wears, and the measure its
+ * content sits on. Exported so `<PageHeader>` can wear the same one: the header
+ * puts a full-bleed rule between the two, so it cannot simply nest inside a
+ * `<PageContainer>`, and a second hand-written copy of the measure is exactly
+ * how the title drifted off the content's edge the first time.
  */
-export type PageWidth = "full" | "page" | "form" | "table" | "compose";
-
-const measures: Record<PageWidth, string> = {
-  full: "",
-  page: "",
-  form: "mx-auto max-w-form",
-  table: "mx-auto max-w-table",
-  compose: "mx-auto max-w-form xl:max-w-compose"
-};
+export const pageContainer = "container";
+export const pageMeasure = "mx-auto max-w-page";
 
 /**
- * The two class strings a page width resolves to: the container that supplies
- * the horizontal padding and the 1400px cap, and the measure that centres
- * content inside it.
+ * The page: one centred column, the same width on every screen in the app.
  *
- * They are separate because they sit on different elements — a header puts a
- * full-bleed rule between them — and returning both from one place is what
- * stops a page from containing its content but not its title.
- */
-export function pageWidth(width: PageWidth): {
-  container: string;
-  measure: string;
-} {
-  return {
-    container: width === "full" ? "px-6" : "container",
-    measure: measures[width]
-  };
-}
-
-/**
- * The page container: one centred, capped column that a page's header and its
- * content both sit in.
+ * Two things were wrong before this. Content was capped but never centred, so
+ * on a wide window it pinned left and every spare pixel piled up on the right —
+ * 656px of it on the composer at 1920px. And the cap itself differed per page:
+ * 640px on Settings, 1120px on Insights, 1200px on Contacts, none at all on
+ * Suppressions. Each was defensible alone; together they meant the left edge of
+ * the app moved as you navigated, which is how nobody uses one page at a time.
  *
- * Before this, every page reached for a bare `max-w-*` with no `mx-auto`, so
- * content pinned to the left and all the slack on a wide screen piled up on the
- * right — 656px of it on the composer at 1920px. Capping a width says how wide
- * content may be; it does not say where the leftover goes, and "all of it to
- * the right" is what read as lopsided.
- *
- * Horizontal padding and the max-width ladder come from Tailwind's `container`
+ * Horizontal padding and the 1400px ceiling come from Tailwind's `container`
  * (configured in `tailwind.config.ts`), so **a page adopting this drops its own
- * `px-4 sm:px-6`** or the two stack up. Only the vertical rhythm is added here.
+ * `px-4 sm:px-6`** or the two stack up.
  *
- * A container is not a measure: content narrower than the container still needs
- * centring, which is what `width` supplies. Pass the same `width` to this
- * page's `<PageHeader>`.
+ * Content inside keeps its own measures — a field still stops at 480px, prose
+ * at `max-w-read`. A page is not the width of its widest input; it is the width
+ * of its section rules and its rows, and those are what were being squeezed.
+ *
+ * The Inbox is deliberately not in here: it is a full-height two-pane mail view
+ * and gutters around a split pane would break the thing it is imitating.
  */
 export function PageContainer({
   children,
-  width = "page",
   className
 }: {
   children: ReactNode;
-  width?: PageWidth;
   className?: string;
 }) {
-  const { container, measure } = pageWidth(width);
   return (
-    <div className={cn(container, "py-4 sm:py-6")}>
-      <div className={cn(measure, className)}>{children}</div>
+    <div className={cn(pageContainer, "py-4 sm:py-6")}>
+      <div className={cn(pageMeasure, className)}>{children}</div>
     </div>
   );
 }

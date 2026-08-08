@@ -1,5 +1,6 @@
+import { PageContainer } from "../../components/PageContainer.js";
 import { PageHeader } from "../../components/PageHeader.js";
-import { FormColumn } from "../../components/settings/FormColumn.js";
+
 import {
   SettingsLinkGroup,
   SettingsLinkRow,
@@ -151,7 +152,7 @@ export function SettingsHub() {
         description="Your organization, your team, and the technical bits."
       />
 
-      <FormColumn>
+      <PageContainer>
         {summaryQuery.data ? (
           <div className="mb-6">
             <SetupChecklist
@@ -170,7 +171,7 @@ export function SettingsHub() {
             </SettingsLinkGroup>
           ))}
         </nav>
-      </FormColumn>
+      </PageContainer>
     </>
   );
 }

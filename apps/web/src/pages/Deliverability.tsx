@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Gauge, Info, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import {
   api,
@@ -144,7 +145,7 @@ export function Deliverability() {
         breadcrumb={{ label: "Sending accounts", to: "/settings/sending" }}
       />
 
-      <section className="space-y-6 p-6">
+      <PageContainer className="space-y-6">
         {loading ? (
           <div className="space-y-3">
             <Skeleton className="h-24 w-full" />
@@ -420,7 +421,7 @@ export function Deliverability() {
             </div>
           </>
         )}
-      </section>
+      </PageContainer>
     </>
   );
 }

@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { api, type SentEmail, type SentEmailOutcome } from "../lib/api.js";
@@ -405,7 +406,7 @@ export function Sent() {
         }
       />
 
-      <section className="flex max-w-table flex-col gap-4 p-4 sm:p-6">
+      <PageContainer className="flex flex-col gap-4">
         {/* --------------------------------------------------------- table */}
         {/*
           The grid's own search and pagination are off: both work over the rows
@@ -648,7 +649,7 @@ export function Sent() {
             </div>
           </div>
         ) : null}
-      </section>
+      </PageContainer>
 
       <SentDetailDialog email={detail} onClose={() => setDetail(null)} />
     </>

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Pencil, Plus, PlugZap, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { SettingsLinkRow } from "../components/settings/SettingsLinkRow.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -268,7 +269,7 @@ export function SMTPConnections() {
         }
       />
 
-      <section className="p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Sending accounts"
           data={connections}
@@ -356,15 +357,15 @@ export function SMTPConnections() {
             </div>
           )}
         />
-      </section>
+      </PageContainer>
 
       {/*
         Sending health is part of "sending" (§4) but it is a whole page of
-        charts, so it stays its own route and is reached from here — one row in
-        the 640px column rather than a second destination on the hub competing
-        with this one.
+        charts, so it stays its own route and is reached from here — one row
+        under the grid rather than a second destination on the hub competing
+        with this one. `pt-0` because the grid above already paid the gap.
       */}
-      <section className="max-w-form px-4 pb-4 sm:px-6 sm:pb-6">
+      <PageContainer className="pt-0">
         <ul className="border-t border-border">
           <SettingsLinkRow
             to="/settings/sending/health"
@@ -372,7 +373,7 @@ export function SMTPConnections() {
             description="Bounce and complaint rates over the last 30 days, and the limits they feed."
           />
         </ul>
-      </section>
+      </PageContainer>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

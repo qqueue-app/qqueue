@@ -11,6 +11,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -316,7 +317,7 @@ export function Templates() {
         }
       />
 
-      <section className="max-w-table space-y-4 p-4 sm:p-6">
+      <PageContainer className="space-y-4">
         {!loading && templates.length > 0 ? (
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
             {view === "gallery" ? (
@@ -580,7 +581,7 @@ export function Templates() {
             ))}
           </div>
         )}
-      </section>
+      </PageContainer>
 
       <StarterGallery
         open={galleryOpen}

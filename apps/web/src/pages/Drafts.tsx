@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { FileEdit, PenSquare, Trash2 } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
@@ -134,7 +135,7 @@ export function Drafts() {
         }
       />
 
-      <section className="max-w-table p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Drafts"
           data={draftsQuery.data ?? []}
@@ -199,7 +200,7 @@ export function Drafts() {
             </div>
           )}
         />
-      </section>
+      </PageContainer>
 
       <ConfirmDialog
         open={deleteTarget !== null}

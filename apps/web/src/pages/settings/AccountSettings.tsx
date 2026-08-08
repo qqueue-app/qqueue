@@ -1,11 +1,11 @@
+import { PageContainer } from "../../components/PageContainer.js";
 import { LogOut } from "lucide-react";
 import { PageHeader } from "../../components/PageHeader.js";
 import { InstallAppCard } from "../../components/InstallAppCard.js";
 import {
-  FormColumn,
   FormSection,
   FormSections,
-} from "../../components/settings/FormColumn.js";
+} from "../../components/settings/FormLayout.js";
 import { Button } from "../../components/ui/button.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { SettingsRow, Switch } from "../../components/ui/switch.js";
@@ -46,7 +46,7 @@ export function AccountSettings() {
         breadcrumb={{ label: "Settings", to: "/settings" }}
       />
 
-      <FormColumn>
+      <PageContainer>
         <FormSections>
           <FormSection title="Signed in as">
             <dl className="border-t border-border">
@@ -122,7 +122,7 @@ export function AccountSettings() {
             </Button>
           </FormSection>
         </FormSections>
-      </FormColumn>
+      </PageContainer>
     </>
   );
 }

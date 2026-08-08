@@ -1,3 +1,4 @@
+import { PageContainer } from "../../components/PageContainer.js";
 import { FormEvent, useEffect, useState } from "react";
 import { Mail, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -5,10 +6,9 @@ import { PageHeader } from "../../components/PageHeader.js";
 import { CopyableSecret } from "../../components/settings/CopyableSecret.js";
 import {
   Field,
-  FormColumn,
   FormSection,
   FormSections,
-} from "../../components/settings/FormColumn.js";
+} from "../../components/settings/FormLayout.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
@@ -210,13 +210,13 @@ export function TeamSettings() {
           description="Members and invitations for this organization."
           breadcrumb={{ label: "Settings", to: "/settings" }}
         />
-        <FormColumn>
+        <PageContainer>
           <EmptyState
             icon={Mail}
             title="Owners and admins only"
             description="Ask an owner of this organization to change your role if you need to manage the team."
           />
-        </FormColumn>
+        </PageContainer>
       </>
     );
   }
@@ -229,7 +229,7 @@ export function TeamSettings() {
         breadcrumb={{ label: "Settings", to: "/settings" }}
       />
 
-      <FormColumn>
+      <PageContainer>
         <FormSections>
           <FormSection
             title="Invite a teammate"
@@ -423,7 +423,7 @@ export function TeamSettings() {
             )}
           </FormSection>
         </FormSections>
-      </FormColumn>
+      </PageContainer>
 
       <ConfirmDialog
         open={removeTarget !== null}

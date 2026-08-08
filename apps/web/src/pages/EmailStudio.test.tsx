@@ -655,32 +655,28 @@ describe("EmailStudio", () => {
   /*
     Class names rather than layout, because jsdom has none — but the container
     and the measure are classes, so this is exactly how the alignment breaks.
-    Matched on `className` rather than a CSS selector: the measure is a
-    variant, and `.xl\:max-w-compose` is more escaping than it is worth.
   */
   describe("page measure", () => {
     function measured(container: HTMLElement) {
-      return Array.from(container.querySelectorAll<HTMLElement>("*")).filter(
-        (element) =>
-          typeof element.className === "string" &&
-          element.className.includes("xl:max-w-compose")
-      );
+      return Array.from(container.querySelectorAll<HTMLElement>(".max-w-page"));
     }
 
     it("puts the header and the composer on one shared measure", async () => {
       setup();
       const { container } = await renderStudio();
 
-      // Both the header's text and the form resolve their measure from the
-      // same `width="compose"`, so the title lands on the cluster's left edge
-      // and Drafts / Save draft on its right. Two independent copies of the
-      // number is exactly how they drifted apart before.
+      // The header's text and the composer resolve their measure from the same
+      // two constants, so the title lands on the form's left edge and Drafts /
+      // Save draft on the rail's right. Two independent copies of the number is
+      // exactly how they drifted apart before.
       const elements = measured(container);
       expect(elements).toHaveLength(2);
       elements.forEach((element) => expect(element).toHaveClass("mx-auto"));
 
-      // The composer itself states neither, so there is nothing to drift.
+      // The form track is fluid, so the cluster fills the page instead of
+      // leaving a gutter. Nothing here states a width of its own.
       const form = container.querySelector("form")!;
+      expect(form.className).toContain("xl:grid-cols-[minmax(0,1fr)_var(--content-rail)]");
       expect(form.className).not.toMatch(/max-w-|mx-auto/);
     });
 

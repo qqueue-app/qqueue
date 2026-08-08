@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { PermissionMatrix } from "../components/PermissionMatrix.js";
@@ -387,7 +388,7 @@ export function Mailboxes() {
           description="Create team mailboxes and choose who can send as them."
           breadcrumb={{ label: "Settings", to: "/settings" }}
         />
-        <section className="p-4 sm:p-6">
+        <PageContainer>
           <Card>
             <EmptyState
               icon={Mail}
@@ -395,7 +396,7 @@ export function Mailboxes() {
               description="Ask an owner or admin to create a mailbox for you, or to let you send as an existing one."
             />
           </Card>
-        </section>
+        </PageContainer>
       </>
     );
   }
@@ -418,7 +419,7 @@ export function Mailboxes() {
         }
       />
 
-      <section className="p-4 sm:p-6">
+      <PageContainer>
         {!loading && !status?.configured ? (
           <Card>
             <EmptyState
@@ -587,7 +588,7 @@ export function Mailboxes() {
             </TabsContent>
           ) : null}
         </Tabs>
-      </section>
+      </PageContainer>
 
       <NewMailboxDialog
         open={createOpen}

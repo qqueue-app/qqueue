@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Pencil, Plus, Search, Trash2, Users } from "lucide-react";
+import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { ListsTabs } from "../components/ListsTabs.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -279,7 +280,7 @@ export function ContactLists() {
 
       <ListsTabs />
 
-      <section className="max-w-table p-4 sm:p-6">
+      <PageContainer>
         <DataGrid
           label="Contact lists"
           data={listsQuery.data ?? []}
@@ -346,7 +347,7 @@ export function ContactLists() {
             </div>
           )}
         />
-      </section>
+      </PageContainer>
 
       <Dialog
         open={dialogOpen}

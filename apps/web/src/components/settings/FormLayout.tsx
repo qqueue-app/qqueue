@@ -1,35 +1,15 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils.js";
 
-/**
- * The 640px form column every settings subpage lives in (§2).
- *
- * Still left-aligned, but no longer on principle. This used to argue that a
- * centred column "puts the content somewhere different on every screen", which
- * was true of centring against the raw viewport — the objection is answered by
- * `<PageContainer>`, which caps the page at 1400px, so content centred inside
- * one stops moving as soon as that cap binds. The composer is the first page
- * converted; these pages keep the old alignment only until the rollout reaches
- * them, at which point this column gets `mx-auto` too.
- *
- * The padding is the mobile inversion's other half. Fields inside collapse to
- * 100% below 480px (see `fieldWidths`), and 100% has to mean "the padded
- * column", not "the viewport" — which is why the 16px lives here, once, rather
- * than on each field.
- */
-export function FormColumn({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("max-w-form px-4 py-4 sm:px-6 sm:py-6", className)}>
-      {children}
-    </div>
-  );
-}
+/*
+  The form column that used to live here is gone. It was a 640px cap plus the
+  page's padding, and both of those are `<PageContainer>`'s job now that every
+  page in the shell is one width — a second component quietly capping settings
+  at half the page is exactly the drift the single measure exists to stop.
+
+  What is left is the vertical rhythm of a form, which is genuinely its own
+  concern and is unchanged.
+*/
 
 /**
  * A group of related fields under a 16px/600 title.

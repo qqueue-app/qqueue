@@ -105,20 +105,23 @@
     --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
     /* ---- Content widths ------------------------------------------------ */
-    /* §2's width table, as tokens. Content is sized by what it *is*, not by
-       what the container offers: a form stays narrow enough to read in one
-       eye-line no matter how wide the window gets, while a data table is
-       allowed to go wide. Forms never do. */
-    --content-form: 40rem; /* 640px — forms and settings pages */
-    --content-read: 45rem; /* 720px — reading content */
-    --content-grid: 70rem; /* 1120px — dashboard card grid */
-    --content-table: 75rem; /* 1200px — data tables */
+    /*
+      One width for every page in the app shell. This used to be a table of
+      four — a measure per kind of content — and the result was that the left
+      edge of the page moved as you navigated: 640px on Settings, 1120px on
+      Insights, 1200px on Contacts, and nothing at all on Suppressions. Sizing
+      content by what it *is* reads well page by page and badly in sequence,
+      which is how the app is actually used.
+
+      So: pages are all this wide, and the things *inside* them keep their own
+      measures — a field still stops at 480px, prose at `--content-read`. What
+      fills a settings page at this width is its section rules and row lists,
+      not its inputs, and those were the parts being squeezed before.
+    */
+    --content-page: 75rem; /* 1200px — every page in the shell */
+    --content-read: 45rem; /* 720px — prose line length */
     --content-empty: 25rem; /* 400px — empty states (§3) */
     --content-rail: 19rem; /* 304px — the composer's send-options rail */
-    /* 976px — form + gap + rail. The composer's two columns are both fixed, so
-       their cluster has one intrinsic width; naming it is what lets the whole
-       thing centre in the container instead of pinning to its left edge. */
-    --content-compose: 61rem;
 
     /* ---- Shell --------------------------------------------------------- */
     /* The three fixed measurements of the app frame. They are tokens because

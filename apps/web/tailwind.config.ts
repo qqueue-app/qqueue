@@ -251,16 +251,13 @@ export default {
       },
       maxWidth: {
         /*
-          §2's content-width table. `max-w-form` is the one every settings and
-          form page wears; `max-w-table` is the only one allowed to go wide.
+          `max-w-page` is the app's one page measure — `<PageContainer>` and
+          `<PageHeader>` are the only things that should wear it. `max-w-read`
+          is for prose inside a page, which wants a line length rather than a
+          page width.
         */
-        form: "var(--content-form)",
+        page: "var(--content-page)",
         read: "var(--content-read)",
-        grid: "var(--content-grid)",
-        table: "var(--content-table)",
-
-        /* The composer's form+rail cluster, so it can centre as one unit. */
-        compose: "var(--content-compose)",
 
         /* §3's empty state: 400px, centred, never a full-width bordered box. */
         empty: "var(--content-empty)",

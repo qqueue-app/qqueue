@@ -1,13 +1,13 @@
+import { PageContainer } from "../../components/PageContainer.js";
 import type { ReactNode } from "react";
 import { ServerCog } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader } from "../../components/PageHeader.js";
 import { EmptyState } from "../../components/EmptyState.js";
 import {
-  FormColumn,
   FormSection,
   FormSections,
-} from "../../components/settings/FormColumn.js";
+} from "../../components/settings/FormLayout.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { SettingsRow, Switch } from "../../components/ui/switch.js";
@@ -67,12 +67,12 @@ export function InstanceSettings() {
     return (
       <>
         {header}
-        <FormColumn>
+        <PageContainer>
           <div className="flex items-center gap-2 text-ui text-text-secondary">
             <Spinner />
             Checking access
           </div>
-        </FormColumn>
+        </PageContainer>
       </>
     );
   }
@@ -81,13 +81,13 @@ export function InstanceSettings() {
     return (
       <>
         {header}
-        <FormColumn>
+        <PageContainer>
           <EmptyState
             icon={ServerCog}
             title="Instance administrators only"
             description="These settings belong to whoever runs this server. Being an owner of an organization is a different thing."
           />
-        </FormColumn>
+        </PageContainer>
       </>
     );
   }
@@ -98,7 +98,7 @@ export function InstanceSettings() {
     <>
       {header}
 
-      <FormColumn>
+      <PageContainer>
         <FormSections>
           <FormSection
             title="Access"
@@ -180,7 +180,7 @@ export function InstanceSettings() {
             )}
           </FormSection>
         </FormSections>
-      </FormColumn>
+      </PageContainer>
     </>
   );
 }

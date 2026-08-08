@@ -192,15 +192,17 @@ describe("settings pages at <640px (§5)", () => {
   );
 
   it.each([["Settings hub", <SettingsHub key="hub" />], ...subpages])(
-    "%s: lays the content out in the padded 640px form column",
+    "%s: lays the content out in the padded page column",
     (_, page) => {
       const { container } = renderWithProviders(page);
-      const column = container.querySelector(".max-w-form");
+      // Settings used to cap itself at 640px, half the width of every other
+      // page. It wears the app's one page measure now — and, either way, the
+      // padding has to live on the column so a full-width field means "the
+      // column", not "the viewport". Tailwind's `container` supplies it: 16px
+      // on a phone, 24px from the tablet breakpoint up.
+      const column = container.querySelector(".container");
       expect(column).not.toBeNull();
-      // 16px of padding on a phone, 24px from the tablet breakpoint up. The
-      // padding lives on the column so a full-width field means "the column",
-      // not "the viewport".
-      expect(column).toHaveClass("px-4", "sm:px-6");
+      expect(column!.firstElementChild).toHaveClass("mx-auto", "max-w-page");
     }
   );
 
