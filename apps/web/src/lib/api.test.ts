@@ -171,6 +171,48 @@ describe("api lib", () => {
     expect(retryHeaders.Authorization).toBe("Bearer new");
   });
 
+  // Regression: a dashboard fires many queries at once, so one expired access
+  // token used to produce a burst of parallel /auth/refresh calls. The server
+  // rotates on each, and a single failure anywhere in the burst cleared the
+  // session — signing the user out mid-session.
+  it("collapses concurrent 401s into a single refresh call", async () => {
+    saveSession({
+      organizations: [],
+      accessToken: "old",
+      refreshToken: "refresh_1"
+    });
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+
+    fetchMock.mockImplementation((url: string, options: RequestInit) => {
+      if (String(url).includes("/auth/refresh")) {
+        return Promise.resolve(
+          jsonResponse({
+            data: { tokens: { accessToken: "new", refreshToken: "refresh_2" } }
+          })
+        );
+      }
+      const auth = (options.headers as Record<string, string>).Authorization;
+      return Promise.resolve(
+        auth === "Bearer new"
+          ? jsonResponse({ data: [{ id: "o" }] })
+          : jsonResponse(null, { status: 401 })
+      );
+    });
+
+    const results = await Promise.all([
+      api.listOrganizations(),
+      api.listOrganizations(),
+      api.listOrganizations()
+    ]);
+
+    expect(results).toEqual([[{ id: "o" }], [{ id: "o" }], [{ id: "o" }]]);
+    const refreshCalls = fetchMock.mock.calls.filter(
+      (call: unknown[]) => String(call[0]).includes("/auth/refresh")
+    );
+    expect(refreshCalls).toHaveLength(1);
+    expect(getSession().accessToken).toBe("new");
+  });
+
   it("redirects to login when refresh fails", async () => {
     saveSession({
       organizations: [],

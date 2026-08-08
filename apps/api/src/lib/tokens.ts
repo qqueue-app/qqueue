@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { env } from "../config/env.js";
 import { HttpError } from "./http-error.js";
 
@@ -7,6 +7,14 @@ interface TokenPayload {
   email: string;
   type: "access" | "refresh";
   exp: number;
+  /**
+   * Per-mint nonce. Without it the payload is a pure function of
+   * (user, type, exp-in-whole-seconds), so two mints for the same user inside
+   * the same second produce byte-identical tokens — and RefreshToken.tokenHash
+   * is unique, so persisting the second one trips P2002 and 401s a live
+   * session. Optional on verify: tokens minted before this field still pass.
+   */
+  jti?: string;
 }
 
 function encodeJson(value: unknown) {
@@ -27,6 +35,7 @@ function createToken(payload: TokenPayload, secret: string) {
 
 export function createAuthTokens(user: { id: string; email: string }) {
   const now = Math.floor(Date.now() / 1000);
+  const nonce = () => randomBytes(16).toString("base64url");
 
   return {
     accessToken: createToken(
@@ -34,7 +43,8 @@ export function createAuthTokens(user: { id: string; email: string }) {
         sub: user.id,
         email: user.email,
         type: "access",
-        exp: now + 60 * 15
+        exp: now + 60 * 15,
+        jti: nonce()
       },
       env.JWT_ACCESS_SECRET
     ),
@@ -43,7 +53,8 @@ export function createAuthTokens(user: { id: string; email: string }) {
         sub: user.id,
         email: user.email,
         type: "refresh",
-        exp: now + 60 * 60 * 24 * 30
+        exp: now + 60 * 60 * 24 * 30,
+        jti: nonce()
       },
       env.JWT_REFRESH_SECRET
     )

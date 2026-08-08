@@ -955,7 +955,7 @@ function buildErrorMessage(status: number, body: ApiErrorBody | null) {
 const AUTH_PREFIX = "/api/v1/auth/";
 
 // Exchange the stored refresh token for a fresh pair. Returns true on success.
-async function refreshTokens(): Promise<boolean> {
+async function performRefresh(): Promise<boolean> {
   const { refreshToken } = getSession();
   if (!refreshToken) {
     return false;
@@ -982,6 +982,23 @@ async function refreshTokens(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// A dashboard screen has many queries in flight at once, so an expired access
+// token surfaces as a burst of simultaneous 401s. Each one used to POST
+// /auth/refresh on its own with the same stored token; the server rotates on
+// every call, and one failure anywhere in the burst clears the session and
+// bounces the user to /login. Collapse the burst into a single request that
+// every caller awaits.
+let inFlightRefresh: Promise<boolean> | null = null;
+
+function refreshTokens(): Promise<boolean> {
+  if (!inFlightRefresh) {
+    inFlightRefresh = performRefresh().finally(() => {
+      inFlightRefresh = null;
+    });
+  }
+  return inFlightRefresh;
 }
 
 function redirectToLogin() {
