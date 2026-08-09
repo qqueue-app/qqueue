@@ -735,6 +735,81 @@ export interface MailDomainGrant {
   user?: { id: string; email: string; name?: string | null };
 }
 
+/* ------------------------------------------------------------------------
+ * Instance administration
+ *
+ * The install-scope view, gated on the signed-in user's `isInstanceAdmin`.
+ * Deliberately the infrastructure layer only — orgs, members, domains,
+ * mailboxes, sending accounts, send counts — and never message bodies,
+ * contacts or campaign content.
+ * --------------------------------------------------------------------- */
+
+export interface InstanceOrganizationSummary {
+  id: string;
+  name: string;
+  memberCount: number;
+  domainCount: number;
+  sendingAccountCount: number;
+  createdAt: string;
+  /** Muted out of *this* admin's lists. Cosmetic — never an access control. */
+  muted?: boolean;
+}
+
+export interface InstanceOrganizationDetail
+  extends InstanceOrganizationSummary {
+  members: {
+    id: string;
+    email: string;
+    name?: string | null;
+    role: string;
+    joinedAt: string;
+  }[];
+  domains: string[];
+  sendingAccounts: {
+    id: string;
+    name: string;
+    fromEmail: string;
+    isDefault: boolean;
+  }[];
+  stats: {
+    sent: number;
+    failed: number;
+    bounced: number;
+    suppressed: number;
+  };
+}
+
+export interface InstanceMailDomainSummary extends MailDomainSummary {
+  organizationId: string | null;
+  organizationName: string | null;
+  muted?: boolean;
+}
+
+export interface InstanceMailboxSummary {
+  email: string;
+  domain: string;
+  name: string;
+  active: boolean;
+  quotaBytes: number;
+  usedBytes: number;
+  organizationId: string | null;
+  organizationName: string | null;
+  connected: boolean;
+}
+
+export interface InstanceMailDomainGrant extends MailDomainGrant {
+  organization?: { id: string; name: string };
+}
+
+export type InstanceMuteScope = "ORG" | "DOMAIN";
+
+export interface InstanceAdminMute {
+  id: string;
+  scope: InstanceMuteScope;
+  target: string;
+  createdAt: string;
+}
+
 export interface MailboxProvisionResult {
   smtpConnection: SMTPConnection;
   inboxAccountId: string;
@@ -1188,6 +1263,25 @@ export const api = {
     });
   },
 
+  /**
+   * The signed-in user as the server currently sees them.
+   *
+   * The session in localStorage is written at sign-in and never revalidated,
+   * so role and `isInstanceAdmin` go stale there. This is the authoritative
+   * read and the basis for every instance-admin gate in the UI.
+   */
+  getMe() {
+    return request<{
+      user: {
+        id: string;
+        email: string;
+        name?: string | null;
+        isInstanceAdmin: boolean;
+      };
+      organizations: Array<{ id: string; name: string; role: string }>;
+    }>("/api/v1/auth/me");
+  },
+
   /** Revoke a refresh token server-side (Phase 5). Best-effort on sign-out. */
   logout(refreshToken: string) {
     return request<{ message: string }>("/api/v1/auth/logout", {
@@ -1343,30 +1437,55 @@ export const api = {
     );
   },
 
-  listMailDomains(organizationId: string) {
-    return request<MailDomainSummary[]>(
-      `/api/v1/mailcow/domains?organizationId=${encodeURIComponent(organizationId)}`
+  /* --------------------------------------------------------------------
+   * Instance administration
+   *
+   * None of these take an organizationId: they are install-scoped, gated on
+   * isInstanceAdmin rather than org membership. Mail domains moved here from
+   * /mailcow because a Mailcow domain is instance-global — org OWNER was never
+   * the right permission for the mail server everyone shares.
+   * ------------------------------------------------------------------ */
+
+  listInstanceOrganizations() {
+    return request<InstanceOrganizationSummary[]>(
+      "/api/v1/instance-admin/organizations"
     );
   },
 
-  createMailDomain(input: Record<string, unknown>) {
-    return request<{ domain: MailDomainSummary; dns: MailDomainDnsStatus }>(
-      "/api/v1/mailcow/domains",
-      { method: "POST", body: JSON.stringify(input) }
+  getInstanceOrganization(id: string) {
+    return request<InstanceOrganizationDetail>(
+      `/api/v1/instance-admin/organizations/${encodeURIComponent(id)}`
     );
   },
 
-  updateMailDomain(domain: string, input: Record<string, unknown>) {
-    return request<MailDomainSummary>(
-      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}`,
+  listInstanceMailDomains() {
+    return request<InstanceMailDomainSummary[]>(
+      "/api/v1/instance-admin/domains"
+    );
+  },
+
+  createInstanceMailDomain(input: Record<string, unknown>) {
+    return request<{
+      domain: InstanceMailDomainSummary;
+      dns: MailDomainDnsStatus;
+    }>("/api/v1/instance-admin/domains", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateInstanceMailDomain(domain: string, input: Record<string, unknown>) {
+    return request<InstanceMailDomainSummary>(
+      `/api/v1/instance-admin/domains/${encodeURIComponent(domain)}`,
       { method: "PATCH", body: JSON.stringify(input) }
     );
   },
 
-  claimMailDomain(domain: string, organizationId: string) {
-    return request<MailDomainSummary>(
-      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}/claim?organizationId=${encodeURIComponent(organizationId)}`,
-      { method: "POST" }
+  /** Assign a domain to an org, or pass null to hand it back to the instance. */
+  assignInstanceMailDomain(domain: string, organizationId: string | null) {
+    return request<InstanceMailDomainSummary | null>(
+      `/api/v1/instance-admin/domains/${encodeURIComponent(domain)}/assignment`,
+      { method: "PUT", body: JSON.stringify({ organizationId }) }
     );
   },
 
@@ -1374,49 +1493,73 @@ export const api = {
    * The confirmation goes in the body rather than the query string: deleting a
    * domain must not be reproducible by replaying a URL.
    */
-  deleteMailDomain(
-    domain: string,
-    input: { organizationId: string; confirm: string }
-  ) {
+  deleteInstanceMailDomain(domain: string, input: { confirm: string }) {
     return request<MailDomainDeleteResult>(
-      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}?organizationId=${encodeURIComponent(input.organizationId)}`,
+      `/api/v1/instance-admin/domains/${encodeURIComponent(domain)}`,
       { method: "DELETE", body: JSON.stringify(input) }
     );
   },
 
-  getMailDomainDns(domain: string, organizationId: string) {
+  getInstanceMailDomainDns(domain: string) {
     return request<MailDomainDnsStatus>(
-      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}/dns?organizationId=${encodeURIComponent(organizationId)}`
+      `/api/v1/instance-admin/domains/${encodeURIComponent(domain)}/dns`
     );
   },
 
-  generateMailDomainDkim(domain: string, organizationId: string) {
+  generateInstanceMailDomainDkim(domain: string) {
     return request<MailDomainDnsStatus>(
-      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}/dkim?organizationId=${encodeURIComponent(organizationId)}`,
+      `/api/v1/instance-admin/domains/${encodeURIComponent(domain)}/dkim`,
       { method: "POST" }
     );
   },
 
-  listMailDomainGrants(organizationId: string) {
-    return request<MailDomainGrant[]>(
-      `/api/v1/mailcow/domain-grants?organizationId=${encodeURIComponent(organizationId)}`
+  listInstanceMailboxes() {
+    return request<InstanceMailboxSummary[]>(
+      "/api/v1/instance-admin/mailboxes"
     );
   },
 
-  addMailDomainGrant(input: {
+  listInstanceMailDomainGrants(organizationId?: string) {
+    const query = organizationId
+      ? `?organizationId=${encodeURIComponent(organizationId)}`
+      : "";
+    return request<InstanceMailDomainGrant[]>(
+      `/api/v1/instance-admin/domain-grants${query}`
+    );
+  },
+
+  addInstanceMailDomainGrant(input: {
     organizationId: string;
     userId: string;
     domain: string;
   }) {
-    return request<MailDomainGrant>("/api/v1/mailcow/domain-grants", {
+    return request<InstanceMailDomainGrant>(
+      "/api/v1/instance-admin/domain-grants",
+      { method: "POST", body: JSON.stringify(input) }
+    );
+  },
+
+  removeInstanceMailDomainGrant(id: string) {
+    return request<void>(
+      `/api/v1/instance-admin/domain-grants/${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  listInstanceMutes() {
+    return request<InstanceAdminMute[]>("/api/v1/instance-admin/mutes");
+  },
+
+  addInstanceMute(input: { scope: InstanceMuteScope; target: string }) {
+    return request<InstanceAdminMute>("/api/v1/instance-admin/mutes", {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
 
-  removeMailDomainGrant(id: string, organizationId: string) {
+  removeInstanceMute(id: string) {
     return request<void>(
-      `/api/v1/mailcow/domain-grants/${encodeURIComponent(id)}?organizationId=${encodeURIComponent(organizationId)}`,
+      `/api/v1/instance-admin/mutes/${encodeURIComponent(id)}`,
       { method: "DELETE" }
     );
   },

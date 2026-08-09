@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Check,
   Copy,
+  Eye,
+  EyeOff,
   Globe,
   HelpCircle,
   KeyRound,
@@ -17,7 +19,7 @@ import type {
   MailDnsProvider,
   MailDnsRecord,
   MailDomainDnsStatus,
-  MailDomainSummary,
+  InstanceMailDomainSummary,
 } from "../../lib/api.js";
 import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
@@ -50,14 +52,23 @@ import { Switch } from "../ui/switch.js";
 import { Hint } from "../ui/tooltip.js";
 
 /**
- * Domains — the mail server's domains, as an owner sees them.
+ * Domains — the mail server's domains, as an *instance administrator* sees them.
  *
- * The panel's real job is not the create form, which is one API call. It is
- * the DNS drawer: a domain exists in Mailcow the moment it is created but
- * neither sends nor receives until MX, SPF, DKIM and DMARC are published, so
- * "created" and "working" are different states and the UI has to say which one
- * you are in. Everything else here is in service of getting to a green
- * checklist.
+ * A Mailcow domain is instance-global: one API key, one server, shared by every
+ * org on the install. It used to be managed per-org by OWNERs, which meant
+ * managed by anyone, since creating an org makes you one. So this panel now
+ * lists every domain on the server and says which org holds each — assignment
+ * is the administrator's call, not a self-serve claim.
+ *
+ * The panel's real job is not the create form, which is one API call. It is the
+ * DNS drawer: a domain exists in Mailcow the moment it is created but neither
+ * sends nor receives until MX, SPF, DKIM and DMARC are published, so "created"
+ * and "working" are different states and the UI has to say which one you are
+ * in. Everything else here is in service of getting to a green checklist.
+ *
+ * Muting is cosmetic and personal — it hides a row from *this* administrator's
+ * list and changes nothing about who can reach the domain. Assignment is the
+ * access control. The two are labelled distinctly on purpose.
  */
 
 const PROVIDER_LABELS: Record<MailDnsProvider, string> = {
@@ -333,7 +344,7 @@ function DomainFormDialog({
   onSubmit,
 }: {
   open: boolean;
-  editing: MailDomainSummary | null;
+  editing: InstanceMailDomainSummary | null;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: MailDomainFormValues) => void;
@@ -506,7 +517,7 @@ function DeleteDomainDialog({
   onOpenChange,
   onConfirm,
 }: {
-  domain: MailDomainSummary | null;
+  domain: InstanceMailDomainSummary | null;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (confirm: string) => void;
@@ -581,7 +592,7 @@ function DeleteDomainDialog({
 }
 
 export interface MailDomainsPanelProps {
-  domains: MailDomainSummary[];
+  domains: InstanceMailDomainSummary[];
   loading: boolean;
   /** Null unless a DNS drawer is open. */
   dnsDomain: string | null;
@@ -597,7 +608,12 @@ export interface MailDomainsPanelProps {
   onGenerateDkim: (domain: string) => void;
   onCreate: (values: MailDomainFormValues) => void;
   onUpdate: (domain: string, values: MailDomainFormValues) => void;
-  onClaim: (domain: MailDomainSummary) => void;
+  /** Organizations a domain can be handed to, for the assignment menu. */
+  organizations: { id: string; name: string }[];
+  /** Pass null to unassign — the domain goes back to being instance-only. */
+  onAssign: (domain: InstanceMailDomainSummary, organizationId: string | null) => void;
+  /** Mute/unmute this domain from the caller's own lists. Cosmetic only. */
+  onToggleMute: (domain: InstanceMailDomainSummary) => void;
   onDelete: (domain: string, confirm: string) => void;
 }
 
@@ -613,14 +629,16 @@ export function MailDomainsPanel({
   onGenerateDkim,
   onCreate,
   onUpdate,
-  onClaim,
+  organizations,
+  onAssign,
+  onToggleMute,
   onDelete,
 }: MailDomainsPanelProps) {
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<MailDomainSummary | null>(null);
-  const [deleting, setDeleting] = useState<MailDomainSummary | null>(null);
+  const [editing, setEditing] = useState<InstanceMailDomainSummary | null>(null);
+  const [deleting, setDeleting] = useState<InstanceMailDomainSummary | null>(null);
 
-  const columns = useMemo<DataGridColumn<MailDomainSummary>[]>(
+  const columns = useMemo<DataGridColumn<InstanceMailDomainSummary>[]>(
     () => [
       {
         accessorKey: "domain",
@@ -630,10 +648,21 @@ export function MailDomainsPanel({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate font-medium">{row.original.domain}</span>
-              {row.original.ownership === "UNCLAIMED" ? (
-                <Hint label="This domain is on the mail server but no organization has claimed it. Claim it to keep it out of other organizations' view.">
-                  <Badge variant="secondary" className="cursor-help">
-                    Unclaimed
+              {row.original.organizationName ? (
+                <Badge variant="secondary">
+                  {row.original.organizationName}
+                </Badge>
+              ) : (
+                <Hint label="On the mail server but assigned to no organization, so it reaches none of them. Assign it to hand it over.">
+                  <Badge variant="outline" className="cursor-help">
+                    Unassigned
+                  </Badge>
+                </Hint>
+              )}
+              {row.original.muted ? (
+                <Hint label="Hidden from your own lists. This changes nothing about who can reach the domain.">
+                  <Badge variant="outline" className="cursor-help">
+                    Muted
                   </Badge>
                 </Hint>
               ) : null}
@@ -715,11 +744,27 @@ export function MailDomainsPanel({
                 primary: true,
                 onSelect: () => onOpenDns(row.original.domain),
               },
-              {
-                label: "Claim for this organization",
+              ...organizations.map((organization) => ({
+                label:
+                  row.original.organizationId === organization.id
+                    ? `Assigned to ${organization.name}`
+                    : `Assign to ${organization.name}`,
                 icon: ShieldCheck,
-                hidden: row.original.ownership !== "UNCLAIMED",
-                onSelect: () => onClaim(row.original),
+                disabled: row.original.organizationId === organization.id,
+                onSelect: () => onAssign(row.original, organization.id),
+              })),
+              {
+                label: "Unassign from organization",
+                icon: ShieldCheck,
+                hidden: !row.original.organizationId,
+                onSelect: () => onAssign(row.original, null),
+              },
+              {
+                label: row.original.muted
+                  ? "Show in my lists"
+                  : "Hide from my lists",
+                icon: row.original.muted ? Eye : EyeOff,
+                onSelect: () => onToggleMute(row.original),
               },
               {
                 label: "Edit domain",
@@ -740,7 +785,7 @@ export function MailDomainsPanel({
         ),
       },
     ],
-    [onClaim, onOpenDns]
+    [onAssign, onToggleMute, onOpenDns, organizations]
   );
 
   return (

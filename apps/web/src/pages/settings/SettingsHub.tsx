@@ -76,7 +76,10 @@ const groups: { heading: string; links: HubLink[] }[] = [
     ],
   },
   {
-    heading: "Advanced",
+    // Install scope, not organization scope. The whole group disappears for
+    // everyone who isn't an instance administrator, since empty groups drop out
+    // below — which is most people, on most instances.
+    heading: "This server",
     links: [
       {
         to: "/settings/instance",
@@ -84,6 +87,30 @@ const groups: { heading: string; links: HubLink[] }[] = [
         description: "Server-wide settings and configuration health.",
         instanceAdminOnly: true,
       },
+      {
+        to: "/settings/instance/organizations",
+        title: "Organizations",
+        description: "Every organization on this server, and who is in them.",
+        instanceAdminOnly: true,
+      },
+      {
+        to: "/settings/instance/domains",
+        title: "Domains",
+        description:
+          "The mail server everyone shares, and which organization holds each domain.",
+        instanceAdminOnly: true,
+      },
+      {
+        to: "/settings/instance/mailboxes",
+        title: "All mailboxes",
+        description: "Every mailbox on the mail server, across organizations.",
+        instanceAdminOnly: true,
+      },
+    ],
+  },
+  {
+    heading: "Advanced",
+    links: [
       {
         to: "/queue-operations",
         title: "Background jobs",

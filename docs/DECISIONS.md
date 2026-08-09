@@ -739,3 +739,65 @@ unread badge, the members-only queue view — opt out with `meta: { silent: true
 Error identity is checked **by shape** (`typeof error.status === "number"`)
 rather than `instanceof ApiError`, because an error can cross a module boundary
 and lose its prototype while still carrying everything we read off it.
+
+## Mail infrastructure is instance scope, not org scope (2026-08-09)
+
+Mailcow domains are instance-global: one API key, one mail server, shared by
+every organization on the install. They were gated on `requireOrgRole("OWNER")`,
+and an unclaimed domain was visible to *every* org as a pool to claim from — the
+mechanism that kept a single-org instance working unchanged when `OrgMailDomain`
+was introduced.
+
+That gate was never real. `POST /organizations` is ungated and creating an
+organization makes you its OWNER, so "org OWNER" is a role any user on the
+instance can award themselves. Anyone invited to a workspace could create their
+own, and from there list the unclaimed pool, claim from it, create domains on
+the shared mail server, and delete them.
+
+So the axis moved. Domain management, domain assignment and domain grants now
+live under `/api/v1/instance-admin`, behind `User.isInstanceAdmin`. An
+organization reaches a domain only when an administrator assigned it; a domain
+with no assignment reaches nobody. Self-serve claiming is gone — "whichever org
+looks first wins" is not an access control.
+
+### The org boundary was not given a superuser bypass
+
+The cheap version of this is five lines: have `getMembership` /
+`assertOrgAccess` (`lib/org-access.ts`) return a synthetic OWNER membership when
+the caller is an instance admin, and every org-scoped route answers for every
+org at once.
+
+It was deliberately not done. That seam backs 121 `requireOrgMembership` call
+sites across 44 modules, `inbox` and `contacts` among them, so the bypass would
+have handed administrators every tenant's mail as a side effect of letting them
+manage domains — with no place to draw the line afterwards. `instance-admin` is
+a separate surface that never calls `requireOrgMembership`; the org boundary
+stays absolute and these endpoints simply are not org-scoped.
+
+The consequence is a deliberate scope limit: the instance view covers
+organizations, members, domains, mailboxes, sending accounts and send counts.
+Not message bodies, contacts, or campaign content. Running the mail server is
+not the same as being entitled to read everyone's mail.
+
+### Muting is cosmetic, and labelled that way
+
+Administrators can hide an org or a domain from their own lists
+(`InstanceAdminMute`). It is per-user and changes nothing about access; lists
+say how many rows it hid so nothing goes silently missing. Access is
+`OrgMailDomain` (assignment) and `MailDomainGrant` (delegation), and the two
+concepts are kept verbally distinct everywhere they appear. A filter that
+quietly revoked access, or an access control presenting as a filter, are both
+traps: one hides a permission you still have, the other hides one you just took
+away.
+
+### The upgrade needed a backfill, for a reason that is easy to miss
+
+Tightening the gate revokes access an org already had unless the assignments it
+was relying on are written first. `20260809000000` already derived them once —
+but mailbox provisioning (`connectMailbox`) writes an `SMTPConnection` and an
+`InboxAccount` and *never* an `OrgMailDomain` row, so any mailbox provisioned
+onto an unclaimed domain since then works today with no ownership record.
+`20260810000000` re-derives from the same three sources (sending accounts,
+synced inboxes, existing grants), idempotently. Domains with none of that
+evidence stay unassigned: nothing is sending or receiving on them, so no access
+is being taken away.

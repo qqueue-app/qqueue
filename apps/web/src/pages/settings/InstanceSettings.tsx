@@ -11,7 +11,11 @@ import {
 import { Badge } from "../../components/ui/badge.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { SettingsRow, Switch } from "../../components/ui/switch.js";
-import { api, type InstanceEnvStatus } from "../../lib/api.js";
+import {
+  api,
+  type InstanceEnvStatus,
+  type InstanceSettings as InstanceSettingsData,
+} from "../../lib/api.js";
 import { formatBytes } from "../../lib/format.js";
 import { qk } from "../../lib/query-client.js";
 import { useApiMutation } from "../../lib/use-api.js";
@@ -27,7 +31,16 @@ import { invalidateSetupStatus } from "../../lib/setup-status.js";
  * a URL can be typed.
  */
 export function InstanceSettings() {
-  const { isInstanceAdmin, settings, isPending } = useInstanceAdmin();
+  const { isInstanceAdmin, isPending } = useInstanceAdmin();
+
+  // Both gated on the admin check rather than fired speculatively: for everyone
+  // else these are guaranteed 403s.
+  const settingsQuery = useQuery<InstanceSettingsData>({
+    queryKey: qk.instanceSettings(),
+    queryFn: () => api.getInstanceSettings(),
+    enabled: isInstanceAdmin === true,
+  });
+  const settings = settingsQuery.data ?? null;
 
   const envStatusQuery = useQuery<InstanceEnvStatus>({
     queryKey: qk.instanceEnvStatus(),

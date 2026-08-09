@@ -77,10 +77,11 @@ learning a new vocabulary. What changed:
   than a CSS-hidden duplicate. Adopted by Contacts, Lists, Smart lists,
   Templates (list view), Campaigns, Drafts, Outbox, Suppressions, Sending
   accounts, Background jobs, and Mailboxes.
-- **Mailboxes rebuilt** around three questions — what mailboxes exist, who can
-  send as them, which domains each admin may use — with the access question
-  answered by a people × mailboxes permission grid (`PermissionMatrix`) instead
-  of a per-mailbox grant form.
+- **Mailboxes rebuilt** around two questions — what mailboxes exist and who can
+  send as them — with the access question answered by a people × mailboxes
+  permission grid (`PermissionMatrix`) instead of a per-mailbox grant form.
+  Which *domains* an org may build on is decided under `/settings/instance`,
+  since a Mailcow domain is instance-global.
 - **Server state moved to TanStack Query** (`lib/query-client.ts`,
   `lib/use-api.ts`). Query keys carry the organization id, so switching orgs
   swaps caches; a first load that fails toasts once, and background refetch
@@ -362,18 +363,52 @@ operational and abuse-control gaps from the original audit have been closed.
   record what we created", never "the handshake didn't work yet".
 - [x] `MailDomainGrant` scopes which domains an admin may provision on —
   default deny, validated against Mailcow's active domains, stored lowercase.
-  Grant management is OWNER-only.
-- [x] `OrgMailDomain` records which org claims each server domain. Mailcow
-  domains are instance-global, so without it every org OWNER could see and
-  provision on every other org's domains. An unclaimed domain stays visible to
-  OWNERs and is claimable, which keeps a single-org instance unchanged; the
-  migration backfills each org's claims from the addresses it already uses.
+  Grant management is **instance-admin-only**.
+- [x] `OrgMailDomain` records which org an instance administrator assigned each
+  server domain to. Mailcow domains are instance-global, so without it every
+  org OWNER could see and provision on every other org's domains. A domain with
+  no row reaches **no** org — it is not a pool orgs may claim from, because
+  `POST /organizations` is ungated and "org OWNER" is therefore a role any user
+  can award themselves.
 
-### Mailcow Domain Management (OWNER-only)
+### Instance Administration (`modules/instance-admin`, instance-admin-only)
 
-- [x] Domains tab on `/settings/mailboxes`: list, create, edit, claim and
-  delete mail-server domains. Every route is `requireOrgRole("OWNER")` —
-  creating a domain changes the mail server the whole instance shares.
+- [x] Install-scope surface behind `User.isInstanceAdmin`: every organization on
+  the instance, the mail domains they share, every mailbox on the server, and
+  domain-grant management. Mounted at `/api/v1/instance-admin`.
+- [x] Deliberately the **infrastructure** layer only — orgs, members, domains,
+  mailboxes, sending accounts, send counts. Never message bodies, contacts or
+  campaign content: running the mail server is not the same as being entitled
+  to read everyone's mail.
+- [x] No superuser bypass in `lib/org-access.ts`. Teaching `getMembership` to
+  wave instance admins through would have widened all 121 `requireOrgMembership`
+  call sites at once, inbox and contacts included. These routes simply are not
+  org-scoped, and never call `requireOrgMembership`.
+- [x] `PUT /domains/:domain/assignment` assigns a domain to an org or hands it
+  back to the instance, replacing the old self-serve claim. Reassignment drops
+  the losing org's grants — a grant is delegation *within* an assignment and
+  cannot outlive one.
+- [x] `InstanceAdminMute` is a **personal, cosmetic** view filter: it hides an
+  org or domain from one administrator's own lists and changes nothing about
+  who can reach it. Lists report how many rows it hid, so nothing is silently
+  invisible. Kept strictly apart from assignment and grants, which are the
+  access controls.
+- [x] `GET /auth/me` returns the signed-in user including `isInstanceAdmin`,
+  replacing the old workaround of inferring admin-ness from a 403 on
+  `/instance-settings`. The stored session is written at sign-in and never
+  revalidated, so this is the authoritative read.
+- [x] Migration `20260810000000` re-derives `OrgMailDomain` from each org's
+  sending accounts, synced inboxes and existing grants before the gate tightens.
+  Mailbox provisioning writes an `SMTPConnection` and `InboxAccount` but never
+  an ownership row, so orgs that provisioned onto an unclaimed domain would
+  otherwise have lost working mail on upgrade.
+
+### Mailcow Domain Management (instance-admin-only)
+
+- [x] `/settings/instance/domains`: list, create, edit, assign and delete
+  mail-server domains. Gated on `User.isInstanceAdmin`, not org OWNER —
+  creating or deleting a domain changes the mail server the whole instance
+  shares.
 - [x] Creating a domain generates its DKIM key in the same flow, so the DNS
   panel can show the complete record set in one pass.
 - [x] DNS panel per domain: the MX / SPF / DKIM / DMARC records to publish,

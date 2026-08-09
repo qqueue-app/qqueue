@@ -12,6 +12,7 @@ import { domainThrottleRouter } from "../modules/domain-throttles/routes.js";
 import { emailDraftRouter } from "../modules/email-drafts/routes.js";
 import { imagePublicRouter, imageRouter } from "../modules/images/routes.js";
 import { inboxRouter } from "../modules/inbox/routes.js";
+import { instanceAdminRouter } from "../modules/instance-admin/routes.js";
 import { instanceSettingsRouter } from "../modules/instance-settings/routes.js";
 import {
   invitationPublicRouter,
@@ -75,6 +76,10 @@ v1Router.use("/organizations", organizationRouter);
 v1Router.use("/invitations", invitationRouter);
 // Install-scope settings (registration policy, env status) — instance admins only.
 v1Router.use("/instance-settings", instanceSettingsRouter);
+// Install-scope administration: every org on the instance, plus the mail
+// domains and mailboxes they share. Instance admins only, and deliberately not
+// org-scoped — see the module's routes.ts.
+v1Router.use("/instance-admin", instanceAdminRouter);
 v1Router.use("/queue-operations", queueOperationsRouter);
 v1Router.use("/smtp-connections", smtpConnectionRouter);
 v1Router.use("/mailcow", mailcowRouter);

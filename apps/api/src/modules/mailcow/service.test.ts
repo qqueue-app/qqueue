@@ -91,10 +91,18 @@ beforeEach(() => {
     { domain_name: "inactive.test", active: false },
   ]);
   h.client.listMailboxes.mockResolvedValue([]);
-  // No domain claimed by anyone: every server domain reads as unclaimed, which
-  // is the single-org case and what these provisioning tests assume.
-  prismaMock.orgMailDomain.findMany.mockResolvedValue([] as never);
-  prismaMock.orgMailDomain.findUnique.mockResolvedValue(null);
+  // Both server domains are assigned to org_1 — the ordinary state once an
+  // instance administrator has handed them over, and the precondition these
+  // provisioning tests assume. An *unassigned* domain now reaches no org at
+  // all, so leaving these empty would default-deny every case below; that
+  // boundary is pinned in service.domains.test.ts instead.
+  prismaMock.orgMailDomain.findMany.mockResolvedValue([
+    { domain: "acme.test" },
+    { domain: "inactive.test" },
+  ] as never);
+  prismaMock.orgMailDomain.findUnique.mockResolvedValue({
+    organizationId: "org_1",
+  } as never);
   prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
   // Org membership for the assignee; no pre-existing inbox; no default yet.
   prismaMock.organizationMember.findUnique.mockResolvedValue({
@@ -666,76 +674,5 @@ describe("per-mailbox actions", () => {
     );
     expect(prismaMock.sMTPConnection.deleteMany).not.toHaveBeenCalled();
     expect(prismaMock.inboxAccount.updateMany).not.toHaveBeenCalled();
-  });
-});
-
-describe("domain-grant management", () => {
-  it("adds an idempotent lowercase grant for an org member on a real domain", async () => {
-    prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN",
-    } as never);
-    prismaMock.mailDomainGrant.upsert.mockResolvedValue({
-      id: "dg_1",
-    } as never);
-
-    await mailcowService.addDomainGrant({
-      organizationId: "org_1",
-      userId: "admin_1",
-      domain: "Acme.Test",
-    });
-
-    expect(prismaMock.mailDomainGrant.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          organizationId_userId_domain: {
-            organizationId: "org_1",
-            userId: "admin_1",
-            domain: "acme.test",
-          },
-        },
-        create: {
-          organizationId: "org_1",
-          userId: "admin_1",
-          domain: "acme.test",
-        },
-      })
-    );
-  });
-
-  it("rejects granting a domain Mailcow does not serve", async () => {
-    prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN",
-    } as never);
-
-    await expect(
-      mailcowService.addDomainGrant({
-        organizationId: "org_1",
-        userId: "admin_1",
-        domain: "not-ours.test",
-      })
-    ).rejects.toMatchObject({ statusCode: 400 });
-    expect(prismaMock.mailDomainGrant.upsert).not.toHaveBeenCalled();
-  });
-
-  it("rejects granting to a non-member", async () => {
-    prismaMock.organizationMember.findUnique.mockResolvedValue(null);
-
-    await expect(
-      mailcowService.addDomainGrant({
-        organizationId: "org_1",
-        userId: "stranger",
-        domain: "acme.test",
-      })
-    ).rejects.toMatchObject({ statusCode: 400 });
-  });
-
-  it("removes a grant scoped to the org", async () => {
-    prismaMock.mailDomainGrant.deleteMany.mockResolvedValue({
-      count: 1,
-    } as never);
-    await mailcowService.removeDomainGrant("dg_1", "org_1");
-    expect(prismaMock.mailDomainGrant.deleteMany).toHaveBeenCalledWith({
-      where: { id: "dg_1", organizationId: "org_1" },
-    });
   });
 });

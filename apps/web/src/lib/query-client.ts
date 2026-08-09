@@ -77,10 +77,6 @@ export const qk = {
 
   mailcowStatus: (orgId: string) => ["mailcow-status", orgId] as const,
   mailboxes: (orgId: string) => ["mailboxes", orgId] as const,
-  mailDomainGrants: (orgId: string) => ["mail-domain-grants", orgId] as const,
-  mailDomains: (orgId: string) => ["mail-domains", orgId] as const,
-  mailDomainDns: (orgId: string, domain: string) =>
-    ["mail-domain-dns", orgId, domain] as const,
 
   contacts: (orgId: string) => ["contacts", orgId] as const,
   contactActivity: (contactId: string) =>
@@ -132,8 +128,23 @@ export const qk = {
   recipientSuggestions: (orgId: string) =>
     ["recipient-suggestions", orgId] as const,
 
+  /** The signed-in user as the server sees them, incl. isInstanceAdmin. */
+  me: () => ["me"] as const,
+
   instanceSettings: () => ["instance-settings"] as const,
   instanceEnvStatus: () => ["instance-env-status"] as const,
+
+  // Install-scope administration. No org id in any of these keys — that is the
+  // point: they are not org-scoped, so they must not be cached per-org.
+  instanceOrganizations: () => ["instance-organizations"] as const,
+  instanceOrganization: (id: string) => ["instance-organization", id] as const,
+  instanceMailDomains: () => ["instance-mail-domains"] as const,
+  instanceMailDomainDns: (domain: string) =>
+    ["instance-mail-domain-dns", domain] as const,
+  instanceMailboxes: () => ["instance-mailboxes"] as const,
+  instanceMailDomainGrants: (orgId?: string) =>
+    ["instance-mail-domain-grants", orgId ?? "all"] as const,
+  instanceMutes: () => ["instance-mutes"] as const,
 
   pushPublicKey: () => ["push-public-key"] as const,
 } as const;

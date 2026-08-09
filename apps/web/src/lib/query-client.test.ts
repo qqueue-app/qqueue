@@ -28,6 +28,18 @@ describe("qk query key factory", () => {
     "organizations",
     "instanceSettings",
     "instanceEnvStatus",
+    // The signed-in user, and install-scope administration. These are
+    // deliberately *not* org-scoped: they describe the whole instance, so
+    // keying them per-org would cache the same answer once per organization and
+    // imply a boundary the endpoints do not have.
+    "me",
+    "instanceOrganizations",
+    "instanceOrganization",
+    "instanceMailDomains",
+    "instanceMailDomainDns",
+    "instanceMailboxes",
+    "instanceMailDomainGrants",
+    "instanceMutes",
     "pushPublicKey"
   ]);
 

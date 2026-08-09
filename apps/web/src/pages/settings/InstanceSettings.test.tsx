@@ -19,6 +19,7 @@ vi.mock("../../lib/api.js", async () => {
   return {
     ApiError: actual.ApiError,
     api: {
+      getMe: vi.fn(),
       getInstanceSettings: vi.fn(),
       updateInstanceSettings: vi.fn(),
       instanceEnvStatus: vi.fn(),
@@ -47,8 +48,22 @@ const envStatus = {
   },
 };
 
+/**
+ * Admin-ness comes from GET /auth/me now, not from whether instance settings
+ * 403s. The default here is an administrator; the two access tests below
+ * override it, because that is the thing they are actually about.
+ */
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.getMe).mockResolvedValue({
+    user: {
+      id: "u1",
+      email: "admin@acme.test",
+      name: "Admin",
+      isInstanceAdmin: true,
+    },
+    organizations: [],
+  });
 });
 
 describe("InstanceSettings", () => {
@@ -117,9 +132,7 @@ describe("InstanceSettings", () => {
   });
 
   it("says who the page is for instead of going blank on a 403", async () => {
-    vi.mocked(api.getInstanceSettings).mockRejectedValue(
-      new ApiError("Forbidden", 403)
-    );
+    vi.mocked(api.getMe).mockRejectedValue(new ApiError("Forbidden", 403));
 
     renderWithProviders(<InstanceSettings />);
 
@@ -135,9 +148,7 @@ describe("InstanceSettings", () => {
   });
 
   it("treats a non-403 failure as no access rather than guessing", async () => {
-    vi.mocked(api.getInstanceSettings).mockRejectedValue(
-      new Error("network down")
-    );
+    vi.mocked(api.getMe).mockRejectedValue(new Error("network down"));
 
     renderWithProviders(<InstanceSettings />);
 

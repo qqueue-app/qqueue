@@ -145,6 +145,7 @@ model User {
   invitesSent         OrganizationInvite[] @relation("InvitesSent")
   smtpGrants          SmtpConnectionGrant[]
   mailDomainGrants    MailDomainGrant[]
+  instanceAdminMutes  InstanceAdminMute[]
   pushSubscriptions   PushSubscription[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
@@ -313,18 +314,21 @@ model SMTPConnection {
   updatedAt         DateTime              @updatedAt
 }
 
-/// Which Mailcow domains an organization claims.
+/// Which Mailcow domain the instance administrator has assigned to an org.
 ///
 /// Mailcow domains are instance-global — one API key, one mail server — so
 /// without this row every org OWNER could see, and provision mailboxes on,
-/// every other org's domains. A domain created through QQueue is claimed by
-/// the creating org at creation time.
+/// every other org's domains. Since any user may create an org and become its
+/// OWNER, that made the shared mail server reachable by everyone on the
+/// install. Assignment is therefore an instance-admin act, not a self-serve
+/// one; see the instance-admin module.
 ///
 /// `domain` is globally unique on purpose: a mail domain is one physical thing
-/// on one server, and letting two orgs claim it would reintroduce exactly the
-/// leak this model closes. Domains that no org has claimed stay visible to
-/// OWNERs as "unclaimed" and can be claimed, which is what keeps a single-org
-/// self-hosted instance working unchanged after the upgrade.
+/// on one server, and letting two orgs hold it would reintroduce exactly the
+/// leak this model closes. A domain with no row here reaches **no** org — it is
+/// instance infrastructure, visible only to instance administrators. It is
+/// deliberately not an unclaimed pool orgs may take from: "whichever org looks
+/// first wins" is not an access control.
 model OrgMailDomain {
   id             String       @id @default(cuid())
   /// Stored lowercase; matches a domain on the Mailcow server.
@@ -337,9 +341,13 @@ model OrgMailDomain {
 }
 
 /// Mailbox-provisioning domain access: an org OWNER may provision Mailcow
-/// mailboxes under any domain the org claims (see OrgMailDomain); an ADMIN only
-/// under domains granted here (default deny). Managed by OWNERs from the
-/// Mailboxes page.
+/// mailboxes under any domain assigned to the org (see OrgMailDomain); an ADMIN
+/// only under domains granted here (default deny).
+///
+/// Managed by instance administrators, not org OWNERs. The grant is what
+/// separates an ADMIN's reach from an OWNER's, and both roles are self-serve —
+/// anyone can create an org and own it — so leaving grant management inside the
+/// org let a user widen their own reach over shared mail infrastructure.
 model MailDomainGrant {
   id             String       @id @default(cuid())
   organizationId String
@@ -352,6 +360,37 @@ model MailDomainGrant {
 
   @@unique([organizationId, userId, domain])
   @@index([organizationId, userId])
+}
+
+/// What an instance administrator has muted out of their *own* lists.
+enum InstanceMuteScope {
+  ORG
+  DOMAIN
+}
+
+/// A personal, cosmetic view filter for one instance administrator.
+///
+/// Hides an org or a domain from that administrator's own instance-wide lists
+/// and does nothing else. It never changes what anyone — including the muter —
+/// is allowed to reach; access is OrgMailDomain (assignment) and
+/// MailDomainGrant (delegation).
+///
+/// The separation is deliberate and worth preserving. A filter that quietly
+/// revoked access, or an access control that presented as a filter, would each
+/// be a trap: one hides a permission you still have, the other hides a
+/// permission you just took away. Lists that apply a mute say how many rows it
+/// hid, so nothing is ever silently invisible.
+model InstanceAdminMute {
+  id        String            @id @default(cuid())
+  userId    String
+  scope     InstanceMuteScope
+  /// Organization id, or lowercase domain name, per `scope`.
+  target    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime          @default(now())
+
+  @@unique([userId, scope, target])
+  @@index([userId])
 }
 
 /// Send-as permission (Phase 4): MEMBERs may only send from connections they

@@ -79,6 +79,21 @@ const InstanceSettings = lazy(() =>
     default: module.InstanceSettings,
   }))
 );
+const InstanceOrganizations = lazy(() =>
+  import("../pages/settings/InstanceOrganizations.js").then((module) => ({
+    default: module.InstanceOrganizations,
+  }))
+);
+const InstanceDomains = lazy(() =>
+  import("../pages/settings/InstanceDomains.js").then((module) => ({
+    default: module.InstanceDomains,
+  }))
+);
+const InstanceMailboxes = lazy(() =>
+  import("../pages/settings/InstanceMailboxes.js").then((module) => ({
+    default: module.InstanceMailboxes,
+  }))
+);
 const AccountSettings = lazy(() =>
   import("../pages/settings/AccountSettings.js").then((module) => ({
     default: module.AccountSettings,
@@ -250,6 +265,20 @@ export function AppRoutes() {
           <Route path="/settings/suppressions" element={<Suppressions />} />
           <Route path="/settings/api" element={<ApiSettings />} />
           <Route path="/settings/instance" element={<InstanceSettings />} />
+          {/* Install-scope administration. Each page defends itself rather than
+              relying on a route guard, because a URL can be typed. */}
+          <Route
+            path="/settings/instance/organizations"
+            element={<InstanceOrganizations />}
+          />
+          <Route
+            path="/settings/instance/domains"
+            element={<InstanceDomains />}
+          />
+          <Route
+            path="/settings/instance/mailboxes"
+            element={<InstanceMailboxes />}
+          />
           <Route path="/settings/account" element={<AccountSettings />} />
 
           {/*

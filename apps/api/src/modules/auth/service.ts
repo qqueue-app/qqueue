@@ -22,12 +22,16 @@ function serializeUser(user: {
   id: string;
   email: string;
   name: string | null;
+  isInstanceAdmin: boolean;
   createdAt: Date;
 }) {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
+    // Install-scope administrator. Distinct from org OWNER — anyone may create
+    // an org and own it — and the only thing that unlocks /instance-admin.
+    isInstanceAdmin: user.isInstanceAdmin,
     createdAt: user.createdAt.toISOString()
   };
 }
@@ -180,6 +184,35 @@ export const authService = {
         role: member.role
       })),
       tokens
+    };
+  },
+
+  /**
+   * The signed-in user as the server currently sees them.
+   *
+   * The web session is written to localStorage at login and never revalidated,
+   * so anything that can change server-side — org membership, role, and
+   * `isInstanceAdmin` — goes stale there until the next sign-in. This is the
+   * authoritative read, and the reason the dashboard no longer has to infer
+   * admin-ness by probing a 403 out of /instance-settings.
+   */
+  async me(userId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { members: { include: { organization: true } } }
+    });
+
+    if (!user) {
+      throw new HttpError(401, "Authentication required");
+    }
+
+    return {
+      user: serializeUser(user),
+      organizations: user.members.map((member: UserOrganizationMember) => ({
+        id: member.organization.id,
+        name: member.organization.name,
+        role: member.role
+      }))
     };
   },
 

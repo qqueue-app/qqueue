@@ -24,17 +24,11 @@ import { PermissionMatrix } from "../components/PermissionMatrix.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
   api,
-  type MailDomainGrant,
-  type MailDomainSummary,
   type MailboxProvisionResult,
   type MailboxSummary,
   type OrganizationMember,
   type SmtpConnectionGrant,
 } from "../lib/api.js";
-import {
-  MailDomainsPanel,
-  type MailDomainFormValues,
-} from "../components/settings/MailDomainsPanel.js";
 import { qk } from "../lib/query-client.js";
 import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
@@ -88,24 +82,6 @@ function formatBytes(bytes: number) {
   return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${units[exponent]}`;
 }
 
-/**
- * Domain form values -> API payload.
- *
- * A blank numeric field is *omitted*, never sent as 0: Mailcow reads 0 as
- * "unlimited", so posting a zero for a box the owner simply left empty would
- * silently strip the server's own limits.
- */
-function domainPayload(values: MailDomainFormValues) {
-  const maxMailboxes = values.maxMailboxes.trim();
-  const defaultQuota = values.defaultQuotaMiB.trim();
-  return {
-    description: values.description.trim(),
-    active: values.active,
-    ...(maxMailboxes === "" ? {} : { maxMailboxes: Number(maxMailboxes) }),
-    ...(defaultQuota === "" ? {} : { defaultQuotaMiB: Number(defaultQuota) }),
-  };
-}
-
 /** Mail-server storage. A quota of 0 is Mailcow's "no limit". */
 function formatUsage(mailbox: MailboxSummary) {
   if (mailbox.usedBytes === null) return "—";
@@ -133,10 +109,14 @@ type PendingConfirm =
  * Mailboxes — where an owner or admin creates team mailboxes and decides who
  * may send as each one.
  *
- * Three questions, three tabs: what mailboxes exist, who can send as them, and
- * (owners only) which domains each admin may create mailboxes on. The access
- * question is answered by a people × mailboxes grid rather than a per-mailbox
- * grant form, so the whole picture is visible at once.
+ * Two questions, two tabs: what mailboxes exist, and who can send as them. The
+ * access question is answered by a people × mailboxes grid rather than a
+ * per-mailbox grant form, so the whole picture is visible at once.
+ *
+ * Which *domains* this org can build on is not decided here. A Mailcow domain
+ * is instance-global, so both domain management and the per-admin domain grants
+ * live under /settings/instance, behind isInstanceAdmin. This page works within
+ * whatever an administrator assigned, reported by `status.domains`.
  *
  * The mailbox list is the mail server's inventory merged with QQueue's sending
  * accounts, not just the latter — a mailbox someone made in the Mailcow UI
@@ -149,12 +129,9 @@ export function Mailboxes() {
   const canManage =
     currentOrganization?.role === "OWNER" ||
     currentOrganization?.role === "ADMIN";
-  const isOwner = currentOrganization?.role === "OWNER";
 
   const [createOpen, setCreateOpen] = useState(false);
   const [domainFilter, setDomainFilter] = useState(ALL_DOMAINS);
-  /** The domain whose DNS drawer is open, if any. */
-  const [dnsDomain, setDnsDomain] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<RevealedPassword | null>(null);
   const [adopting, setAdopting] = useState<MailboxSummary | null>(null);
   const [confirming, setConfirming] = useState<PendingConfirm | null>(null);
@@ -183,24 +160,11 @@ export function Mailboxes() {
     qk.members(organizationId ?? ""),
     (id) => api.listOrganizationMembers(id)
   );
-  const domainGrantsQuery = useOrgQuery(
-    isOwner ? organizationId : null,
-    qk.mailDomainGrants(organizationId ?? ""),
-    (id) => api.listMailDomainGrants(id)
-  );
-  const mailDomainsQuery = useOrgQuery(
-    isOwner ? organizationId : null,
-    qk.mailDomains(organizationId ?? ""),
-    (id) => api.listMailDomains(id)
-  );
-  // Fetched only while the drawer is open. Each entry costs a handful of live
-  // DNS lookups, so prefetching every domain's records would make opening the
-  // tab far more expensive than reading it.
-  const dnsQuery = useOrgQuery(
-    isOwner && dnsDomain ? organizationId : null,
-    qk.mailDomainDns(organizationId ?? "", dnsDomain ?? ""),
-    (id) => api.getMailDomainDns(dnsDomain as string, id)
-  );
+  // Domain management and domain grants are not on this page. A Mailcow domain
+  // is instance-global — one mail server shared by every org — so both moved to
+  // /settings/instance/domains, behind isInstanceAdmin. What an org can reach
+  // here is whatever an instance administrator assigned it, reported by
+  // `status.domains`.
 
   const mailboxes = useMemo(
     () => mailboxesQuery.data ?? [],
@@ -320,116 +284,6 @@ export function Mailboxes() {
       });
     }
   }
-
-  const addDomainGrant = useApiMutation(
-    (input: { userId: string; domain: string }) =>
-      api.addMailDomainGrant({
-        organizationId: organizationId as string,
-        ...input,
-      }),
-    {
-      successMessage: "Domain access granted.",
-      errorMessage: "Couldn't grant that domain.",
-      invalidates: [qk.mailDomainGrants(organizationId ?? "")],
-    }
-  );
-
-  const removeDomainGrant = useApiMutation(
-    (grant: MailDomainGrant) =>
-      api.removeMailDomainGrant(grant.id, organizationId as string),
-    {
-      successMessage: "Domain access removed.",
-      errorMessage: "Couldn't remove that domain.",
-      invalidates: [qk.mailDomainGrants(organizationId ?? "")],
-    }
-  );
-
-  // Domain management (owners only). Every mutation invalidates the status
-  // query too: the provisioning domain picker on the Mailboxes tab is fed by
-  // `status.domains`, so adding or disabling a domain has to move both.
-  const domainKeys = [
-    qk.mailDomains(organizationId ?? ""),
-    qk.mailcowStatus(organizationId ?? ""),
-  ];
-
-  const createDomain = useApiMutation(
-    (values: MailDomainFormValues) =>
-      api.createMailDomain({
-        organizationId: organizationId as string,
-        ...domainPayload(values),
-        domain: values.domain.trim().toLowerCase(),
-      }),
-    {
-      errorMessage: "Couldn't add that domain.",
-      invalidates: domainKeys,
-      onSuccess: (result) => {
-        // Straight into the DNS drawer: a domain that exists but has no
-        // records published is not yet a working domain, and this is the one
-        // moment the owner is guaranteed to be paying attention.
-        setDnsDomain(result.domain.domain);
-        toast.success(
-          `${result.domain.domain} added. Publish its DNS records to finish.`
-        );
-      },
-    }
-  );
-
-  const updateDomain = useApiMutation(
-    (input: { domain: string; values: MailDomainFormValues }) =>
-      api.updateMailDomain(input.domain, {
-        organizationId: organizationId as string,
-        ...domainPayload(input.values),
-      }),
-    {
-      successMessage: "Domain updated.",
-      errorMessage: "Couldn't update that domain.",
-      invalidates: domainKeys,
-    }
-  );
-
-  const claimDomain = useApiMutation(
-    (domain: MailDomainSummary) =>
-      api.claimMailDomain(domain.domain, organizationId as string),
-    {
-      successMessage: "Domain claimed for this organization.",
-      errorMessage: "Couldn't claim that domain.",
-      invalidates: domainKeys,
-    }
-  );
-
-  const deleteDomain = useApiMutation(
-    (input: { domain: string; confirm: string }) =>
-      api.deleteMailDomain(input.domain, {
-        organizationId: organizationId as string,
-        confirm: input.confirm,
-      }),
-    {
-      successMessage: "Domain deleted.",
-      errorMessage: "Couldn't delete that domain.",
-      // Deleting a domain removes the sending accounts under it, so the
-      // mailbox list and the "Who can send" matrix both go stale.
-      invalidates: [
-        ...domainKeys,
-        qk.mailboxes(organizationId ?? ""),
-        qk.smtpConnections(organizationId ?? ""),
-      ],
-    }
-  );
-
-  const generateDkim = useApiMutation(
-    (domain: string) =>
-      api.generateMailDomainDkim(domain, organizationId as string),
-    {
-      successMessage: "DKIM key generated. Publish the new record.",
-      errorMessage: "Couldn't generate a DKIM key.",
-      invalidates: domainKeys,
-      onSuccess: () => {
-        void queryClient.invalidateQueries({
-          queryKey: qk.mailDomainDns(organizationId ?? "", dnsDomain ?? ""),
-        });
-      },
-    }
-  );
 
   // Every mailbox mutation refetches the merged list; the ones that add or
   // remove a sending account refetch the connection list too, because the
@@ -720,8 +574,6 @@ export function Mailboxes() {
     );
   }
 
-  const admins = members.filter((member) => member.role === "ADMIN");
-
   return (
     <>
       <PageHeader
@@ -773,18 +625,6 @@ export function Mailboxes() {
               <Users className="h-4 w-4" />
               Who can send
             </TabsTrigger>
-            {isOwner ? (
-              <TabsTrigger value="server-domains">
-                <Globe className="h-4 w-4" />
-                Domains
-              </TabsTrigger>
-            ) : null}
-            {isOwner ? (
-              <TabsTrigger value="domains">
-                <ShieldCheck className="h-4 w-4" />
-                Domain access
-              </TabsTrigger>
-            ) : null}
           </TabsList>
 
           <TabsContent value="mailboxes">
@@ -910,55 +750,6 @@ export function Mailboxes() {
             </div>
           </TabsContent>
 
-          {isOwner ? (
-            <TabsContent value="server-domains">
-              <MailDomainsPanel
-                domains={mailDomainsQuery.data ?? []}
-                loading={mailDomainsQuery.isPending}
-                dnsDomain={dnsDomain}
-                dns={dnsQuery.data}
-                dnsLoading={dnsQuery.isPending}
-                pending={{
-                  save: createDomain.isPending || updateDomain.isPending,
-                  delete: deleteDomain.isPending,
-                  dkim: generateDkim.isPending,
-                }}
-                onOpenDns={setDnsDomain}
-                onRefreshDns={() =>
-                  void queryClient.invalidateQueries({
-                    queryKey: qk.mailDomainDns(
-                      organizationId ?? "",
-                      dnsDomain ?? ""
-                    ),
-                  })
-                }
-                onGenerateDkim={(domain) => generateDkim.mutate(domain)}
-                onCreate={(values) => createDomain.mutate(values)}
-                onUpdate={(domain, values) =>
-                  updateDomain.mutate({ domain, values })
-                }
-                onClaim={(domain) => claimDomain.mutate(domain)}
-                onDelete={(domain, confirm) =>
-                  deleteDomain.mutate({ domain, confirm })
-                }
-              />
-            </TabsContent>
-          ) : null}
-
-          {isOwner ? (
-            <TabsContent value="domains">
-              <DomainAccessPanel
-                admins={admins}
-                domains={status?.domains ?? []}
-                grants={domainGrantsQuery.data ?? []}
-                loading={domainGrantsQuery.isPending}
-                onGrant={(userId, domain) =>
-                  addDomainGrant.mutate({ userId, domain })
-                }
-                onRevoke={(grant) => removeDomainGrant.mutate(grant)}
-              />
-            </TabsContent>
-          ) : null}
         </Tabs>
       </PageContainer>
 
@@ -1424,172 +1215,5 @@ function MailboxPasswordDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function DomainAccessPanel({
-  admins,
-  domains,
-  grants,
-  loading,
-  onGrant,
-  onRevoke,
-}: {
-  admins: OrganizationMember[];
-  domains: string[];
-  grants: MailDomainGrant[];
-  loading: boolean;
-  onGrant: (userId: string, domain: string) => void;
-  onRevoke: (grant: MailDomainGrant) => void;
-}) {
-  const [picks, setPicks] = useState<Record<string, string>>({});
-
-  if (loading) {
-    return <p className="p-6 text-body text-muted-foreground">Loading…</p>;
-  }
-
-  if (admins.length === 0) {
-    return (
-      <Card>
-        <EmptyState
-          icon={Globe}
-          title="No admins to restrict"
-          description="You can create mailboxes on every domain. This tab matters once you have admins — it's how you decide which domains each of them may use."
-        />
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-body text-muted-foreground">
-        You can create mailboxes on every domain. Admins can only use the
-        domains you list here.
-      </p>
-
-      <div className="overflow-x-auto rounded-dialog border">
-        <table className="w-full text-body">
-          <thead className="border-b bg-muted/60">
-            <tr>
-              <th
-                scope="col"
-                className="px-3 py-2 text-left text-meta font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                Admin
-              </th>
-              <th
-                scope="col"
-                className="px-3 py-2 text-left text-meta font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                Domains they can use
-              </th>
-              <th
-                scope="col"
-                className="w-72 px-3 py-2 text-left text-meta font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                Add a domain
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {admins.map((admin) => {
-              const theirs = grants.filter(
-                (grant) => grant.userId === admin.userId
-              );
-              const held = new Set(theirs.map((grant) => grant.domain));
-              const available = domains.filter(
-                (candidate) => !held.has(candidate.toLowerCase())
-              );
-              const pick = picks[admin.userId] ?? "";
-
-              return (
-                <tr key={admin.userId} className="border-b last:border-0">
-                  <td className="px-3 py-3 align-top">
-                    <div className="font-medium">{memberName(admin)}</div>
-                    <div className="text-meta text-muted-foreground">
-                      {admin.user.email}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 align-top">
-                    {theirs.length === 0 ? (
-                      <span className="text-muted-foreground">
-                        None — they can't create mailboxes yet.
-                      </span>
-                    ) : (
-                      <div className="flex flex-wrap gap-field">
-                        {theirs.map((grant) => (
-                          <Badge
-                            key={grant.id}
-                            variant="secondary"
-                            className="gap-1 pr-1"
-                          >
-                            {grant.domain}
-                            <IconButton
-                              label={`Remove ${grant.domain} from ${memberName(admin)}`}
-                              size="sm"
-                              variant="destructive"
-                              className="h-5 w-5"
-                              onClick={() => onRevoke(grant)}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </IconButton>
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 align-top">
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={pick}
-                        onValueChange={(value) =>
-                          setPicks((current) => ({
-                            ...current,
-                            [admin.userId]: value,
-                          }))
-                        }
-                        disabled={available.length === 0}
-                      >
-                        <SelectTrigger
-                          aria-label={`Choose a domain for ${memberName(admin)}`}
-                        >
-                          <SelectValue
-                            placeholder={
-                              available.length === 0
-                                ? "All domains granted"
-                                : "Choose a domain"
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {available.map((candidate) => (
-                            <SelectItem key={candidate} value={candidate}>
-                              {candidate}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        variant="outline"
-                        disabled={!pick}
-                        onClick={() => {
-                          onGrant(admin.userId, pick);
-                          setPicks((current) => ({
-                            ...current,
-                            [admin.userId]: "",
-                          }));
-                        }}
-                      >
-                        Add
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { rateLimit } from "../../middleware/rate-limit.js";
+import { requireAuth } from "../../middleware/require-auth.js";
 import { authController } from "./controller.js";
 
 export const authRouter = Router();
@@ -17,6 +18,10 @@ const refreshLimit = rateLimit({
   max: 60,
   key: (req) => req.ip || "unknown"
 });
+
+// The only authenticated route on this router — the rest are the ways in, and
+// the router is mounted before requireAuth in v1.ts.
+authRouter.get("/me", requireAuth, authController.me);
 
 authRouter.post("/register", authWriteLimit, authController.register);
 authRouter.post("/login", authWriteLimit, authController.login);

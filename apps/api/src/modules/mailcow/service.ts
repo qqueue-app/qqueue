@@ -8,12 +8,7 @@ import type {
   MailboxProvisionResult,
   MailboxSummary,
   MailcowStatus,
-  MailDomainCreateInput,
-  MailDomainDeleteInput,
-  MailDomainDeleteResult,
   MailDomainDnsStatus,
-  MailDomainSummary,
-  MailDomainUpdateInput,
 } from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { encryptSecret } from "../../lib/crypto.js";
@@ -63,40 +58,38 @@ function sleep(ms: number) {
 /**
  * Which of the server's domains this *organization* may act on at all.
  *
- * Mailcow domains are instance-global but the Mailboxes page is org-scoped, so
- * an org reaches a domain only when it claims it (`OrgMailDomain`) or when no
- * org has. The unclaimed case is what keeps a single-org self-hosted instance
- * behaving exactly as it did before ownership existed; on a multi-org instance
- * it is the pool an owner claims from, not a hole — a claimed domain is
- * invisible to every other org from here on.
+ * Mailcow domains are instance-global infrastructure — creating or deleting one
+ * changes the mail server every org on the install shares. So an org reaches a
+ * domain only when the instance administrator has assigned it (`OrgMailDomain`).
+ *
+ * An *unassigned* domain belongs to nobody but the instance admin. It is
+ * deliberately not a pool orgs claim from: "whichever org looks first wins" is
+ * not an access control, and since anyone may create an org and own it, that
+ * pool was reachable by every user on the instance. The assignment surface
+ * lives in the instance-admin module.
  */
 async function orgDomainScope(
   organizationId: string,
   activeDomains: string[]
 ): Promise<{ visible: string[]; claimed: Set<string> }> {
   const rows = await prisma.orgMailDomain.findMany({
-    where: { domain: { in: activeDomains.map((d) => d.toLowerCase()) } },
-    select: { domain: true, organizationId: true },
+    where: {
+      organizationId,
+      domain: { in: activeDomains.map((d) => d.toLowerCase()) },
+    },
+    select: { domain: true },
   });
-  const ownerByDomain = new Map(
-    rows.map((row) => [row.domain, row.organizationId])
+  const claimed = new Set(rows.map((row) => row.domain));
+  const visible = activeDomains.filter((domain) =>
+    claimed.has(domain.toLowerCase())
   );
-  const claimed = new Set(
-    rows
-      .filter((row) => row.organizationId === organizationId)
-      .map((row) => row.domain)
-  );
-  const visible = activeDomains.filter((domain) => {
-    const owner = ownerByDomain.get(domain.toLowerCase());
-    return owner === undefined || owner === organizationId;
-  });
   return { visible, claimed };
 }
 
 /**
- * Domain access (per-role): an OWNER may provision under any domain the org
- * reaches; an ADMIN only under domains an owner granted them (default deny).
- * The route already restricts callers to OWNER/ADMIN.
+ * Domain access (per-role): an OWNER may provision under any domain assigned to
+ * the org; an ADMIN only under domains an instance administrator granted them
+ * (default deny). The route already restricts callers to OWNER/ADMIN.
  */
 async function visibleDomains(
   actor: { organizationId: string; userId: string; role: string },
@@ -117,21 +110,29 @@ async function visibleDomains(
 
 /**
  * Domain access for a *mutating* action, the enforcement half of
- * `visibleDomains`. An OWNER may act on any domain the org reaches; an ADMIN
- * only on granted ones (default deny).
+ * `visibleDomains`. An OWNER may act on any domain assigned to the org; an
+ * ADMIN only on granted ones (default deny).
  */
 async function assertDomainAccess(
   actor: { organizationId: string; userId: string; role: string },
   domain: string,
   verb: string
 ): Promise<void> {
-  // Applies to every role: a domain another org has claimed is not ours to
-  // touch, however senior the caller is inside their own org.
+  // Applies to every role, however senior inside their own org: a domain is
+  // ours only if the instance administrator assigned it to us. Default deny —
+  // an unassigned domain is instance infrastructure, not free real estate.
   const owner = await prisma.orgMailDomain.findUnique({
     where: { domain },
     select: { organizationId: true },
   });
-  if (owner && owner.organizationId !== actor.organizationId) {
+  if (!owner) {
+    throw new HttpError(
+      403,
+      `${domain} is not assigned to your organization`,
+      "domain_not_granted"
+    );
+  }
+  if (owner.organizationId !== actor.organizationId) {
     throw new HttpError(
       403,
       `${domain} belongs to another organization on this instance`,
@@ -162,7 +163,7 @@ async function assertDomainAccess(
 }
 
 /** The configured client, or a 404 explaining that provisioning is off. */
-function requireClient(): MailcowClient {
+export function requireClient(): MailcowClient {
   const client = getMailcowClient();
   if (!client) {
     throw new HttpError(
@@ -175,7 +176,7 @@ function requireClient(): MailcowClient {
 }
 
 /** The mail host every provisioned identity and DNS record points at. */
-function requireMailHost(): string {
+export function requireMailHost(): string {
   const mailHost = mailcowMailHost();
   if (!mailHost) {
     throw new HttpError(
@@ -192,7 +193,7 @@ function requireMailHost(): string {
  * unknown domain by doing nothing rather than erroring, so without this an
  * edit or a DNS check on a typo would report cheerful success.
  */
-async function assertDomainExists(
+export async function assertDomainExists(
   client: MailcowClient,
   domain: string
 ): Promise<void> {
@@ -215,7 +216,7 @@ async function assertDomainExists(
  * creation that actually succeeded — leaving the domain and its claim in place
  * while the caller is told it failed.
  */
-async function buildDnsStatus(
+export async function buildDnsStatus(
   client: MailcowClient,
   domain: string,
   mailHost: string
@@ -240,7 +241,7 @@ async function buildDnsStatus(
   };
 }
 
-function domainOf(email: string): string {
+export function domainOf(email: string): string {
   return email.split("@")[1]?.toLowerCase() ?? "";
 }
 
@@ -786,449 +787,5 @@ export const mailcowService = {
       smtpConnectionDeleted: connections.count > 0,
       inboxAccountDisabled: inboxes.count > 0,
     };
-  },
-
-  // Domain management. Routes restrict every one of these to org OWNERs:
-  // creating a domain changes the shared mail server, and claiming one decides
-  // which org reaches it, so neither is an ADMIN's call to make.
-
-  /**
-   * Domains on the mail server this org may act on, with the server's own
-   * numbers attached. Unclaimed domains are included and labelled, because an
-   * owner cannot claim what the page refuses to show them.
-   */
-  async listDomains(actor: {
-    organizationId: string;
-    userId: string;
-    role: string;
-  }): Promise<MailDomainSummary[]> {
-    const client = requireClient();
-    const domains = await client.listDomains();
-    const { visible, claimed } = await orgDomainScope(
-      actor.organizationId,
-      domains.map((domain) => domain.domain_name)
-    );
-    const visibleSet = new Set(visible.map((domain) => domain.toLowerCase()));
-
-    // One DKIM read per visible domain, concurrently. Mailcow has no bulk
-    // endpoint for it, and the flag is what tells an owner whether their mail
-    // is being signed at all.
-    const rows = await Promise.all(
-      domains
-        .filter((domain) => visibleSet.has(domain.domain_name))
-        .map(async (domain): Promise<MailDomainSummary> => {
-          const hasDkim = await client
-            .getDkim(domain.domain_name)
-            .then((key) => key !== null)
-            // A failed DKIM read must not blank the whole list; the domain's
-            // own DNS panel reports the real state.
-            .catch(() => false);
-          return {
-            domain: domain.domain_name,
-            ownership: claimed.has(domain.domain_name)
-              ? "CLAIMED"
-              : "UNCLAIMED",
-            active: domain.active,
-            description: domain.description,
-            mailboxCount: domain.mailboxCount,
-            maxMailboxes: domain.maxMailboxes,
-            defaultQuotaBytes: domain.defaultQuotaBytes,
-            maxQuotaBytes: domain.maxQuotaBytes,
-            backupmx: domain.backupmx,
-            hasDkim,
-          };
-        })
-    );
-
-    return rows.sort((a, b) => a.domain.localeCompare(b.domain));
-  },
-
-  /**
-   * Create a domain on the mail server and claim it for this org.
-   *
-   * DKIM is generated as part of creation rather than left for later: Mailcow
-   * signs with the key from the moment it exists, so generating it now is what
-   * lets the DNS panel show the complete record set in one pass, instead of
-   * sending the owner back to publish another record days later.
-   *
-   * Takes no actor, unlike its siblings: a domain that does not exist yet has
-   * no per-domain access to check. The route restricts this to OWNERs, and the
-   * "claimed by another org" guard below is the rest of the answer.
-   */
-  async createDomain(
-    input: MailDomainCreateInput
-  ): Promise<{ domain: MailDomainSummary; dns: MailDomainDnsStatus }> {
-    const client = requireClient();
-    const mailHost = requireMailHost();
-    const domain = input.domain;
-
-    const existing = await client.listDomains();
-    if (existing.some((candidate) => candidate.domain_name === domain)) {
-      throw new HttpError(
-        409,
-        `${domain} already exists on the mail server`,
-        "conflict"
-      );
-    }
-
-    // "Claimed by another org" is a different answer from "already exists",
-    // and the owner needs to be able to tell them apart.
-    const claimedElsewhere = await prisma.orgMailDomain.findUnique({
-      where: { domain },
-      select: { organizationId: true },
-    });
-    if (
-      claimedElsewhere &&
-      claimedElsewhere.organizationId !== input.organizationId
-    ) {
-      throw new HttpError(
-        409,
-        `${domain} is claimed by another organization on this instance`,
-        "conflict"
-      );
-    }
-
-    await client.createDomain(domain, {
-      description: input.description,
-      maxMailboxes: input.maxMailboxes,
-      defaultQuotaMiB: input.defaultQuotaMiB,
-      maxQuotaMiB: input.maxQuotaMiB,
-      totalQuotaMiB: input.totalQuotaMiB,
-      active: input.active,
-    });
-
-    try {
-      if (input.generateDkim) {
-        // Non-fatal: a domain without DKIM still delivers, just unsigned, and
-        // the DNS panel offers to generate the key on demand.
-        await client.generateDkim(domain).catch((error) => {
-          console.error(
-            `[mailcow] created ${domain} but DKIM generation failed`,
-            error
-          );
-        });
-      }
-
-      await prisma.orgMailDomain.create({
-        data: { domain, organizationId: input.organizationId },
-      });
-    } catch (error) {
-      // The domain exists on the server but QQueue could not record who owns
-      // it. Leaving it would make it unclaimed — and so visible to every org
-      // on the instance — so undo the creation. Cleanup is best-effort; the
-      // original error is the one that matters.
-      await client.deleteDomain(domain).catch((cleanupError) => {
-        console.error(
-          `[mailcow] failed to record ownership of ${domain} and cleanup also failed — delete the domain in Mailcow by hand`,
-          cleanupError
-        );
-      });
-      throw error;
-    }
-
-    // Built directly rather than through dnsStatus/listDomains: both re-list
-    // the server's domains to guard themselves, and a Mailcow that hasn't yet
-    // surfaced the domain we just created would fail a creation that worked.
-    const dns = await buildDnsStatus(client, domain, mailHost);
-
-    return {
-      domain: {
-        domain,
-        ownership: "CLAIMED",
-        active: input.active !== false,
-        description: input.description ?? "",
-        mailboxCount: 0,
-        maxMailboxes: input.maxMailboxes ?? 0,
-        defaultQuotaBytes: 0,
-        maxQuotaBytes: 0,
-        backupmx: false,
-        // Authoritative: this is what Mailcow actually holds a moment later,
-        // not what we asked for — DKIM generation is allowed to have failed.
-        hasDkim: dns.records.some((record) => record.key === "dkim"),
-      },
-      dns,
-    };
-  },
-
-  /** Edit a domain's description, limits or active flag. The name is fixed. */
-  async updateDomain(
-    input: MailDomainUpdateInput,
-    actor: { userId: string; role: string }
-  ): Promise<MailDomainSummary> {
-    const client = requireClient();
-    const domain = input.domain;
-    const scoped = { ...actor, organizationId: input.organizationId };
-
-    await assertDomainAccess(scoped, domain, "manage");
-    await assertDomainExists(client, domain);
-
-    await client.updateDomain(domain, {
-      description: input.description,
-      maxMailboxes: input.maxMailboxes,
-      defaultQuotaMiB: input.defaultQuotaMiB,
-      maxQuotaMiB: input.maxQuotaMiB,
-      totalQuotaMiB: input.totalQuotaMiB,
-      active: input.active,
-    });
-
-    const rows = await mailcowService.listDomains(scoped);
-    const updated = rows.find((row) => row.domain === domain);
-    if (!updated) {
-      throw new HttpError(404, `${domain} is no longer visible`, "not_found");
-    }
-    return updated;
-  },
-
-  /**
-   * Claim an unclaimed server domain for this org.
-   *
-   * The path for domains that predate QQueue or were created in the Mailcow
-   * UI. Claiming makes the domain invisible to every other org, so the unique
-   * constraint on `OrgMailDomain.domain` — not this read — is what actually
-   * settles two orgs racing for the same one.
-   */
-  async claimDomain(
-    input: { organizationId: string; domain: string },
-    actor: { userId: string; role: string }
-  ): Promise<MailDomainSummary> {
-    const client = requireClient();
-    const domain = input.domain.trim().toLowerCase();
-    const scoped = { ...actor, organizationId: input.organizationId };
-
-    await assertDomainExists(client, domain);
-
-    const existing = await prisma.orgMailDomain.findUnique({
-      where: { domain },
-      select: { organizationId: true },
-    });
-    if (existing && existing.organizationId !== input.organizationId) {
-      throw new HttpError(
-        409,
-        `${domain} is already claimed by another organization`,
-        "conflict"
-      );
-    }
-    if (!existing) {
-      await prisma.orgMailDomain.create({
-        data: { domain, organizationId: input.organizationId },
-      });
-    }
-
-    const rows = await mailcowService.listDomains(scoped);
-    const claimed = rows.find((row) => row.domain === domain);
-    if (!claimed) {
-      throw new HttpError(404, `${domain} is no longer visible`, "not_found");
-    }
-    return claimed;
-  },
-
-  /**
-   * Delete a domain from the mail server.
-   *
-   * Refused while any mailbox still exists on it. Mailcow would happily delete
-   * the domain and every mailbox, alias and message under it in one call, and
-   * that is far too much to hang on a single button — emptying the domain
-   * first makes the blast radius something the owner has already seen.
-   */
-  async deleteDomain(
-    input: MailDomainDeleteInput,
-    actor: { userId: string; role: string }
-  ): Promise<MailDomainDeleteResult> {
-    const client = requireClient();
-    const domain = input.domain;
-    const scoped = { ...actor, organizationId: input.organizationId };
-
-    if (input.confirm !== domain) {
-      throw new HttpError(
-        400,
-        "Type the domain name exactly to confirm deletion",
-        "validation_error"
-      );
-    }
-
-    await assertDomainAccess(scoped, domain, "delete");
-    await assertDomainExists(client, domain);
-
-    const mailboxes = await client.listMailboxes(domain);
-    if (mailboxes.length > 0) {
-      throw new HttpError(
-        409,
-        `${domain} still has ${mailboxes.length} mailbox${
-          mailboxes.length === 1 ? "" : "es"
-        }. Delete those first — removing the domain would destroy every message in them.`,
-        "conflict"
-      );
-    }
-
-    await client.deleteDomain(domain);
-
-    // Same ordering rule as mailbox removal: the server goes first, so a
-    // failure afterwards leaves recoverable bookkeeping rather than stripping
-    // access to something still live. Inbox accounts are disabled rather than
-    // deleted, because InboundMessage cascades from them.
-    const suffix = `@${domain}`;
-    const [connections, inboxes] = await prisma.$transaction([
-      prisma.sMTPConnection.deleteMany({
-        where: {
-          organizationId: input.organizationId,
-          fromEmail: { endsWith: suffix, mode: "insensitive" },
-        },
-      }),
-      prisma.inboxAccount.updateMany({
-        where: {
-          organizationId: input.organizationId,
-          email: { endsWith: suffix, mode: "insensitive" },
-        },
-        data: { status: "DISABLED" },
-      }),
-      prisma.mailDomainGrant.deleteMany({
-        where: { organizationId: input.organizationId, domain },
-      }),
-      prisma.orgMailDomain.deleteMany({
-        where: { organizationId: input.organizationId, domain },
-      }),
-    ]);
-
-    return {
-      domain,
-      smtpConnectionsDeleted: connections.count,
-      inboxAccountsDisabled: inboxes.count,
-    };
-  },
-
-  /**
-   * What this domain needs in DNS, and how much of it is live.
-   *
-   * Read-only and advisory: a lookup can fail without failing the request,
-   * because "we could not check" and "the record is missing" are different
-   * answers and only one of them is the owner's problem.
-   */
-  async dnsStatus(
-    input: { organizationId: string; domain: string },
-    actor: { userId: string; role: string }
-  ): Promise<MailDomainDnsStatus> {
-    const client = requireClient();
-    const mailHost = requireMailHost();
-    const domain = input.domain.trim().toLowerCase();
-    const scoped = { ...actor, organizationId: input.organizationId };
-
-    await assertDomainAccess(scoped, domain, "manage");
-    await assertDomainExists(client, domain);
-
-    return buildDnsStatus(client, domain, mailHost);
-  },
-
-  /**
-   * Generate a DKIM key for a domain that has none.
-   *
-   * Never a rotation: Mailcow starts signing with the new key immediately, so
-   * replacing a key whose record is already published would break every
-   * signature until DNS caught up. Rotation stays in Mailcow, deliberately.
-   */
-  async generateDkim(
-    input: { organizationId: string; domain: string },
-    actor: { userId: string; role: string }
-  ): Promise<MailDomainDnsStatus> {
-    const client = requireClient();
-    const domain = input.domain.trim().toLowerCase();
-    const scoped = { ...actor, organizationId: input.organizationId };
-
-    await assertDomainAccess(scoped, domain, "manage");
-    await assertDomainExists(client, domain);
-
-    const existing = await client.getDkim(domain).catch(() => null);
-    if (existing) {
-      throw new HttpError(
-        409,
-        `${domain} already has a DKIM key. Rotate it in Mailcow if you mean to replace it.`,
-        "conflict"
-      );
-    }
-
-    await client.generateDkim(domain);
-    return mailcowService.dnsStatus(
-      { organizationId: input.organizationId, domain },
-      actor
-    );
-  },
-
-  // Domain-grant management. Routes restrict all three to org OWNERs — the
-  // grant is what separates an ADMIN's provisioning reach from an OWNER's,
-  // so admins must not be able to grant themselves.
-
-  listDomainGrants(organizationId: string) {
-    return prisma.mailDomainGrant.findMany({
-      where: { organizationId },
-      include: { user: { select: { id: true, email: true, name: true } } },
-      orderBy: [{ userId: "asc" }, { domain: "asc" }],
-    });
-  },
-
-  async addDomainGrant(input: {
-    organizationId: string;
-    userId: string;
-    domain: string;
-  }) {
-    const domain = input.domain.trim().toLowerCase();
-
-    const granteeMembership = await getMembership(
-      input.userId,
-      input.organizationId
-    );
-    if (!granteeMembership) {
-      throw new HttpError(
-        400,
-        "That user is not a member of this organization",
-        "validation_error"
-      );
-    }
-
-    // Only real, active Mailcow domains are grantable — a typo here would
-    // silently grant nothing.
-    const client = getMailcowClient();
-    if (!client) {
-      throw new HttpError(
-        404,
-        "Mailcow provisioning is not configured on this instance",
-        "mailcow_not_configured"
-      );
-    }
-    const domains = await client.listDomains();
-    if (
-      !domains.some(
-        (candidate) =>
-          candidate.active && candidate.domain_name.toLowerCase() === domain
-      )
-    ) {
-      throw new HttpError(
-        400,
-        `${domain} is not an active domain on the Mailcow server`,
-        "validation_error"
-      );
-    }
-
-    // Idempotent: re-granting is a no-op rather than an error.
-    return prisma.mailDomainGrant.upsert({
-      where: {
-        organizationId_userId_domain: {
-          organizationId: input.organizationId,
-          userId: input.userId,
-          domain,
-        },
-      },
-      create: {
-        organizationId: input.organizationId,
-        userId: input.userId,
-        domain,
-      },
-      update: {},
-      include: { user: { select: { id: true, email: true, name: true } } },
-    });
-  },
-
-  async removeDomainGrant(id: string, organizationId: string) {
-    await prisma.mailDomainGrant.deleteMany({
-      where: { id, organizationId },
-    });
   },
 };

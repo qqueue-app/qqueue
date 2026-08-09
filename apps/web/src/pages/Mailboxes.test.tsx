@@ -327,58 +327,35 @@ describe("Mailboxes", () => {
     ).not.toBeInTheDocument();
   });
 
-  // Domain access: owners manage which domains each admin may provision on.
-  it("shows owners the Domain access editor and removes a grant", async () => {
-    const user = userEvent.setup();
+  /*
+    Domain access moved out. Both the Domains tab and the per-admin Domain
+    access editor now live under /settings/instance, behind isInstanceAdmin —
+    a Mailcow domain is instance-global, and org OWNER is a role any user can
+    award themselves by creating an organization. Owners see exactly what
+    admins see here.
+  */
+  it("no longer offers domain management to owners", async () => {
     session.current = {
       currentOrganizationId: "org_1",
       currentOrganization: { id: "org_1", name: "Acme", role: "OWNER" },
     };
-    mockedApi.listOrganizationMembers.mockResolvedValue([
-      ...members,
-      {
-        id: "m3",
-        organizationId: "org_1",
-        userId: "user_admin",
-        role: "ADMIN",
-        createdAt: "2026-01-01",
-        user: { id: "user_admin", email: "admin@acme.test", name: "Adjoa" },
-      },
-    ]);
-    mockedApi.listMailDomainGrants.mockResolvedValue([
-      {
-        id: "dg_1",
-        organizationId: "org_1",
-        userId: "user_admin",
-        domain: "acme.test",
-        createdAt: "2026-01-02",
-        user: { id: "user_admin", email: "admin@acme.test", name: "Adjoa" },
-      },
-    ]);
     renderWithProviders(<Mailboxes />);
 
-    await user.click(
-      await screen.findByRole("tab", { name: /Domain access/ })
-    );
-    // The admin row lists their granted domain as a removable chip.
-    const remove = await screen.findByLabelText(
-      "Remove acme.test from Adjoa"
-    );
-    await user.click(remove);
-    await waitFor(() =>
-      expect(mockedApi.removeMailDomainGrant).toHaveBeenCalledWith(
-        "dg_1",
-        "org_1"
-      )
-    );
-  });
-
-  it("hides the Domain access tab from admins", async () => { renderWithProviders(<Mailboxes />); // default session role is ADMIN
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: /Domain access/ })
     ).not.toBeInTheDocument();
-    expect(mockedApi.listMailDomainGrants).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("tab", { name: /^Domains$/ })
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the Domain access tab from admins", async () => {
+    renderWithProviders(<Mailboxes />); // default session role is ADMIN
+    expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: /Domain access/ })
+    ).not.toBeInTheDocument();
   });
 
   // Domain-scoped management: pick a domain, see only its mailboxes, and add

@@ -44,27 +44,40 @@ just fails DKIM verification at the recipient.
 
 ## Managing Domains From QQueue
 
-With `MAILCOW_API_URL` and `MAILCOW_API_KEY` configured, an org **owner** gets a
-**Domains** tab under **Settings → Mailboxes** that manages the domains on your
-mail server directly.
+With `MAILCOW_API_URL` and `MAILCOW_API_KEY` configured, an **instance
+administrator** gets **Settings → Domains** (under "This server") to manage the
+domains on your mail server directly.
 
-This is owner-only on purpose. Your Mailcow credentials are instance-level, so
-the mail server is shared by every organization on the instance — adding or
-deleting a domain changes it for all of them.
+This is instance-admin-only on purpose, and that is a stricter bar than org
+owner. Your Mailcow credentials are instance-level, so the mail server is shared
+by every organization on the install — adding or deleting a domain changes it
+for all of them. Anyone can create an organization and become its owner, so org
+owner was never a meaningful gate on a server-wide action.
 
-From that tab you can:
+From that page you can:
 
 - **Add a domain.** Creates it in Mailcow and generates its DKIM key in the same
-  step, then opens the DNS panel.
+  step, then opens the DNS panel. You can leave it unassigned and hand it over
+  later.
 - **Edit** its description, mailbox limit, default quota, and whether it accepts
   mail.
-- **Claim** a domain that already exists on the server. Claiming records that
-  this organization owns it, which hides it from other organizations on the
-  instance. Domains nobody has claimed stay visible to every owner — on a
-  single-org instance that means nothing changes.
+- **Assign** it to an organization. That is what lets the organization provision
+  mailboxes on it. A domain assigned to nobody reaches no organization at all —
+  it is not a pool organizations can claim from. Reassigning moves it wholesale,
+  including dropping the previous organization's per-admin domain grants.
+- **Hide** a domain from your own lists. This is a personal view filter and
+  nothing more — it does not change who can reach the domain.
 - **Delete** a domain, once every mailbox on it is gone. QQueue refuses while
   mailboxes remain, because Mailcow would delete the domain and every message
   under it in one call.
+
+### If you are upgrading
+
+Domains your organizations already use keep working: the upgrade records an
+assignment for every domain each organization has a sending account, a synced
+inbox, or an existing domain grant for. Domains with none of that evidence
+become unassigned — nothing was sending or receiving on them — and an
+administrator assigns them from the page above.
 
 ### The DNS panel
 

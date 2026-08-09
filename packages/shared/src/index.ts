@@ -328,8 +328,9 @@ export interface MailcowStatus {
   configured: boolean;
   reachable: boolean;
   /**
-   * Active Mailcow domains the *caller* may provision under. OWNERs get every
-   * server domain; ADMINs only their granted ones.
+   * Active Mailcow domains the *caller* may provision under: those an instance
+   * administrator assigned to this org, narrowed for an ADMIN to their granted
+   * ones. An org with no assigned domains gets an empty list.
    */
   domains: string[];
   /** Host provisioned mailboxes use for SMTP/IMAP (for mail-client setup). */
@@ -393,12 +394,14 @@ export interface MailDnsRecord {
 
 /** How a domain on the mail server relates to the caller's organization. */
 export type MailDomainOwnership =
-  /** This org claims it. */
+  /** Assigned to an organization by an instance administrator. */
   | "CLAIMED"
   /**
-   * On the server but claimed by no org. Visible to OWNERs and claimable —
-   * this is what keeps a single-org instance working after the ownership
-   * model was introduced.
+   * On the mail server but assigned to no organization, so it reaches none of
+   * them. Visible only to instance administrators, who assign it. Deliberately
+   * not a pool orgs may claim from: since anyone can create an org and own it,
+   * "whichever org looks first wins" left the shared mail server open to every
+   * user on the instance.
    */
   | "UNCLAIMED";
 
@@ -633,6 +636,176 @@ export interface MailboxDeleteResult {
    */
   inboxAccountDisabled: boolean;
 }
+
+/* -------------------------------------------------------------------------
+ * Instance administration
+ *
+ * The install-scope view: every organization on the instance and the mail
+ * infrastructure they share. Gated on `User.isInstanceAdmin`, which is a
+ * different thing from org OWNER — anyone may create an org and own it.
+ *
+ * Deliberately the *infrastructure* layer only: orgs, members, domains,
+ * mailboxes, sending accounts and send volume. Never message bodies, contacts
+ * or campaign content. An instance administrator runs the server; that is not
+ * the same as being entitled to read everyone's mail.
+ * ---------------------------------------------------------------------- */
+
+/** One organization as the instance sees it. */
+export interface InstanceOrganizationSummary {
+  id: string;
+  name: string;
+  memberCount: number;
+  /** Mail domains assigned to this org. */
+  domainCount: number;
+  sendingAccountCount: number;
+  createdAt: string;
+  /** True when this admin has muted the org out of their own lists. */
+  muted?: boolean;
+}
+
+/** One organization in full: members, what it holds, and how much it sends. */
+export interface InstanceOrganizationDetail extends InstanceOrganizationSummary {
+  members: {
+    id: string;
+    email: string;
+    name?: string | null;
+    role: UserRole;
+    joinedAt: string;
+  }[];
+  domains: string[];
+  sendingAccounts: {
+    id: string;
+    name: string;
+    fromEmail: string;
+    isDefault: boolean;
+  }[];
+  /** Send volume over the trailing 30 days. Counts only — never content. */
+  stats: {
+    sent: number;
+    failed: number;
+    bounced: number;
+    suppressed: number;
+  };
+}
+
+/** A domains-list row for the instance view: the server plus its assignment. */
+export interface InstanceMailDomainSummary extends MailDomainSummary {
+  /** The org this domain is assigned to, or null when it reaches none. */
+  organizationId: string | null;
+  organizationName: string | null;
+  muted?: boolean;
+}
+
+/** Every mailbox on the server, with the org that holds its domain. */
+export interface InstanceMailboxSummary {
+  email: string;
+  domain: string;
+  name: string;
+  active: boolean;
+  quotaBytes: number;
+  usedBytes: number;
+  organizationId: string | null;
+  organizationName: string | null;
+  /** True when QQueue holds a sending account for it, not just the server. */
+  connected: boolean;
+}
+
+/**
+ * Create a domain on the mail server. `organizationId` is optional: an
+ * administrator may stand a domain up before deciding who gets it, which is
+ * safe now that an unassigned domain reaches nobody.
+ */
+export const instanceMailDomainCreateSchema = z.object({
+  domain: mailDomainNameSchema,
+  organizationId: z.string().min(1).nullish(),
+  description: z.string().max(255).optional(),
+  maxMailboxes: z.number().int().min(0).max(10_000).optional(),
+  defaultQuotaMiB: quotaMiB.optional(),
+  maxQuotaMiB: quotaMiB.optional(),
+  totalQuotaMiB: quotaMiB.optional(),
+  active: z.boolean().optional(),
+  generateDkim: z.boolean().optional().default(true),
+});
+
+export type InstanceMailDomainCreateInput = z.infer<
+  typeof instanceMailDomainCreateSchema
+>;
+
+/** Edit is create's attribute half; the domain name itself is immutable. */
+export const instanceMailDomainUpdateSchema = z.object({
+  domain: mailDomainNameSchema,
+  description: z.string().max(255).optional(),
+  maxMailboxes: z.number().int().min(0).max(10_000).optional(),
+  defaultQuotaMiB: quotaMiB.optional(),
+  maxQuotaMiB: quotaMiB.optional(),
+  totalQuotaMiB: quotaMiB.optional(),
+  active: z.boolean().optional(),
+});
+
+export type InstanceMailDomainUpdateInput = z.infer<
+  typeof instanceMailDomainUpdateSchema
+>;
+
+/** Deleting destroys every mailbox under the domain, so retype the name. */
+export const instanceMailDomainDeleteSchema = z.object({
+  domain: mailDomainNameSchema,
+  confirm: mailDomainNameSchema,
+});
+
+export type InstanceMailDomainDeleteInput = z.infer<
+  typeof instanceMailDomainDeleteSchema
+>;
+
+/**
+ * Assign a domain to an organization, or hand it back to the instance.
+ *
+ * `null` unassigns. This replaces the old self-serve claim: an org used to be
+ * able to take any unclaimed domain for itself, which is not an access control
+ * when anyone can create an org.
+ */
+export const mailDomainAssignSchema = z.object({
+  organizationId: z.string().min(1).nullable(),
+});
+
+export type MailDomainAssignInput = z.infer<typeof mailDomainAssignSchema>;
+
+/** Grant one user provisioning access to one domain, within their org. */
+export const instanceMailDomainGrantCreateSchema = z.object({
+  organizationId: z.string().min(1),
+  userId: z.string().min(1),
+  domain: z.string().min(1),
+});
+
+export type InstanceMailDomainGrantCreateInput = z.infer<
+  typeof instanceMailDomainGrantCreateSchema
+>;
+
+/** What an instance administrator can mute out of their own lists. */
+export type InstanceMuteScope = "ORG" | "DOMAIN";
+
+/**
+ * A personal, cosmetic view filter.
+ *
+ * Hides an org or domain from *this* administrator's own instance-wide lists
+ * and nothing more. It never changes what anyone can reach — that is
+ * `OrgMailDomain` (assignment) and `MailDomainGrant` (delegation). Keeping the
+ * two apart is the whole point: a filter that quietly revoked access, or an
+ * access control that looked like a filter, would both be traps.
+ */
+export interface InstanceAdminMute {
+  id: string;
+  scope: InstanceMuteScope;
+  /** Organization id, or lowercase domain name. */
+  target: string;
+  createdAt: string;
+}
+
+export const instanceMuteCreateSchema = z.object({
+  scope: z.enum(["ORG", "DOMAIN"]),
+  target: z.string().min(1),
+});
+
+export type InstanceMuteCreateInput = z.infer<typeof instanceMuteCreateSchema>;
 
 export interface EmailJob {
   id: string;

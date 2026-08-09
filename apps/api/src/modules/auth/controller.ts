@@ -21,6 +21,10 @@ export const authController = {
     res.json({ data: result });
   },
 
+  async me(req: Request, res: Response) {
+    res.json({ data: await authService.me(req.userId as string) });
+  },
+
   async refresh(req: Request, res: Response) {
     const input = refreshSchema.parse(req.body);
     const result = await authService.refresh(input.refreshToken);
