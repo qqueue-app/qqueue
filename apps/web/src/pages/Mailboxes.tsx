@@ -21,7 +21,10 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { EmptyState } from "../components/EmptyState.js";
-import { PermissionMatrix } from "../components/PermissionMatrix.js";
+import {
+  SendAccessEditor,
+  type AccessMailbox,
+} from "../components/SendAccessEditor.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
   api,
@@ -111,8 +114,11 @@ type PendingConfirm =
  * may send as each one.
  *
  * Two questions, two tabs: what mailboxes exist, and who can send as them. The
- * access question is answered by a people × mailboxes grid rather than a
- * per-mailbox grant form, so the whole picture is visible at once.
+ * access question is answered person-first — pick a teammate, see every address
+ * they could send as grouped by domain — because that is the shape the question
+ * arrives in ("what can this new hire send as"), and because a grid of every
+ * person against every mailbox stops fitting the moment an org has more than a
+ * handful of either.
  *
  * Which *domains* this org can build on is not decided here. A Mailcow domain
  * is instance-global, so both domain management and the per-admin domain grants
@@ -145,8 +151,8 @@ export function Mailboxes() {
     (id) => api.getMailcowStatus(id)
   );
   // The merged list backs the Mailboxes tab. The raw connection list is still
-  // needed on its own for the "Who can send" matrix, whose columns are sending
-  // accounts — a mailbox with no account in QQueue cannot be sent as at all.
+  // needed on its own for the "Who can send" tab, which offers sending accounts
+  // — a mailbox with no account in QQueue cannot be sent as at all.
   const mailboxesQuery = useOrgQuery(
     canManage ? organizationId : null,
     qk.mailboxes(organizationId ?? ""),
@@ -181,7 +187,7 @@ export function Mailboxes() {
 
   // One grants query per connection rather than a combined endpoint: each has
   // its own cache entry, so toggling access on one mailbox refetches only that
-  // mailbox instead of the whole matrix.
+  // mailbox instead of every mailbox at once.
   //
   // `combine` is essential, not cosmetic: the raw `useQueries` result is a new
   // array on every render, which would make every memo derived from it — and
@@ -211,6 +217,34 @@ export function Mailboxes() {
     });
     return set;
   }, [grantsByConnection]);
+
+  /*
+    The access editor's mailboxes. Built from the *connection* list, not the
+    merged one: an address with no credentials in QQueue cannot be sent as at
+    all, so offering it as something to grant would be a lie. The merged list
+    supplies the display name and the domain where it has them — a sending
+    account added by hand may sit on a domain the mail server never reported,
+    hence the fall back to the address's own domain.
+  */
+  const accessMailboxes = useMemo<AccessMailbox[]>(() => {
+    const byConnection = new Map(
+      mailboxes
+        .filter((mailbox) => mailbox.smtpConnectionId)
+        .map((mailbox) => [mailbox.smtpConnectionId as string, mailbox])
+    );
+    return connections.map((connection) => {
+      const mailbox = byConnection.get(connection.id);
+      return {
+        id: connection.id,
+        address: connection.fromEmail,
+        label: mailbox?.name || connection.fromName || connection.name,
+        domain:
+          mailbox?.domain ||
+          connection.fromEmail.split("@")[1]?.toLowerCase() ||
+          "Other",
+      };
+    });
+  }, [connections, mailboxes]);
 
   const mailboxCountByDomain = useMemo(() => {
     const counts = new Map<string, number>();
@@ -289,7 +323,7 @@ export function Mailboxes() {
 
   // Every mailbox mutation refetches the merged list; the ones that add or
   // remove a sending account refetch the connection list too, because the
-  // "Who can send" matrix is built from it.
+  // "Who can send" tab is built from it.
   const mailboxKeys = [qk.mailboxes(organizationId ?? "")];
   const mailboxAndConnectionKeys = [
     qk.mailboxes(organizationId ?? ""),
@@ -742,28 +776,23 @@ export function Mailboxes() {
           <TabsContent value="access">
             <div className="space-y-3">
               <p className="text-body text-muted-foreground">
-                Tick a box to let someone send as that mailbox. Owners and
-                admins can always send as any of them, so their rows are locked.
+                Pick a teammate to see every address they could send as, grouped
+                by domain, and tick the ones they should have. Owners and admins
+                can always send as any of them.
               </p>
-              <PermissionMatrix
-                columnNoun="mailbox"
-                emptyMessage={
-                  connections.length === 0
-                    ? "Create a mailbox first — then you can decide who sends as it."
-                    : "Invite teammates from Settings, then come back to give them access."
-                }
-                columns={connections.map((connection) => ({
-                  id: connection.id,
-                  label: connection.fromEmail,
-                  hint: `${connection.fromName || connection.name} · ${connection.fromEmail}`,
-                }))}
-                rows={members.map((member) => ({
+              <SendAccessEditor
+                people={members.map((member) => ({
                   id: member.userId,
                   name: memberName(member),
-                  secondary: member.user.email,
+                  email: member.user.email,
+                  roleLabel:
+                    member.role.charAt(0) + member.role.slice(1).toLowerCase(),
                   alwaysAllowed: member.role !== "MEMBER",
                   alwaysAllowedReason: `${memberName(member)} is an ${member.role.toLowerCase()} and can send as every mailbox.`,
                 }))}
+                mailboxes={accessMailboxes}
+                noPeopleMessage="Invite teammates from Settings, then come back to give them access."
+                noMailboxesMessage="Create a mailbox first — then you can decide who sends as it."
                 isGranted={(userId, connectionId) =>
                   grantedUserIds.has(`${userId}:${connectionId}`)
                 }

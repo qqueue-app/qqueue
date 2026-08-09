@@ -318,14 +318,26 @@ describe("Mailboxes", () => {
     expect(screen.getByText(/haven't verified yet/i)).toBeInTheDocument();
   });
 
-  it("shows who can send as each mailbox and revokes access from the grid", async () => {
+  /** Open the access tab and pick a teammate out of the people list. */
+  async function openAccessFor(
+    user: ReturnType<typeof userEvent.setup>,
+    email: string
+  ) {
+    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
+    const people = await screen.findByRole("list", { name: "People" });
+    await user.click(
+      within(people).getByRole("button", { name: new RegExp(email, "i") })
+    );
+  }
+
+  it("opens a person and revokes their access from the domain list", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
 
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
+    await openAccessFor(user, "ama@acme.test");
 
-    // Ama is a MEMBER holding a grant, so her cell is ticked.
+    // Ama is a MEMBER holding a grant, so her row is ticked.
     const cell = await screen.findByRole("checkbox", {
       name: "Ama can send as support@acme.test",
     });
@@ -340,17 +352,103 @@ describe("Mailboxes", () => {
     );
   });
 
-  it("locks the row for people who can always send as any mailbox", async () => {
+  it("locks the rows for people who can always send as any mailbox", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
+    await openAccessFor(user, "owner@acme.test");
 
+    expect(
+      await screen.findByText(/is an owner and can send as every mailbox/i)
+    ).toBeInTheDocument();
     // The owner needs no grant, so there is no checkbox to toggle for them.
     expect(
       screen.queryByRole("checkbox", {
         name: "Owner can send as support@acme.test",
       })
+    ).not.toBeInTheDocument();
+  });
+
+  it("searches the people list", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+    expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
+
+    const people = await screen.findByRole("list", { name: "People" });
+    expect(within(people).getByText("owner@acme.test")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Search people"), "ama");
+    expect(within(people).queryByText("owner@acme.test")).not.toBeInTheDocument();
+    expect(within(people).getByText("ama@acme.test")).toBeInTheDocument();
+  });
+
+  it("groups a person's mailboxes by domain and can show only what they hold", async () => {
+    const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([mailbox, otherMailbox]);
+    mockedApi.listSMTPConnections.mockResolvedValue([
+      connection,
+      otherConnection,
+    ]);
+    // Ama holds support@acme.test and nothing on other.test.
+    mockedApi.listConnectionGrants.mockImplementation(
+      async (smtpConnectionId: string) =>
+        smtpConnectionId === "s1"
+          ? [
+              {
+                id: "g1",
+                organizationId: "org_1",
+                smtpConnectionId: "s1",
+                userId: "user_ama",
+                createdAt: "2026-01-02",
+                user: { id: "user_ama", email: "ama@acme.test", name: "Ama" },
+              },
+            ]
+          : []
+    );
+
+    renderWithProviders(<Mailboxes />);
+    expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    await openAccessFor(user, "ama@acme.test");
+
+    // Both domains are listed, each with its own mailboxes under it.
+    expect(
+      await screen.findByRole("list", { name: "Mailboxes on acme.test" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("list", { name: "Mailboxes on other.test" })
+    ).toBeInTheDocument();
+
+    // Narrowing to what she holds drops the domain she holds nothing on.
+    await user.click(
+      screen.getByRole("button", { name: /Only what they can use/ })
+    );
+    expect(
+      screen.getByRole("list", { name: "Mailboxes on acme.test" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("list", { name: "Mailboxes on other.test" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("searches a person's mailboxes by address or domain", async () => {
+    const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([mailbox, otherMailbox]);
+    mockedApi.listSMTPConnections.mockResolvedValue([
+      connection,
+      otherConnection,
+    ]);
+
+    renderWithProviders(<Mailboxes />);
+    expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
+    await openAccessFor(user, "ama@acme.test");
+
+    await user.type(screen.getByLabelText("Search mailboxes"), "other.test");
+    expect(
+      await screen.findByRole("list", { name: "Mailboxes on other.test" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("list", { name: "Mailboxes on acme.test" })
     ).not.toBeInTheDocument();
   });
 
