@@ -290,12 +290,14 @@ export default {
         "field-long": "30rem", // 480px — subject line, URL, API key
 
         /*
-          The inbox's message-list pane, which is a reading column rather than a
-          field: wide enough for a sender and a subject line, and it earns the
-          extra 2rem at `lg` where there is room for it.
+          The sender column of an inbox row above `sm`, where the row is one
+          line — sender, subject, preview, date. Fixed rather than content-sized
+          so subjects start on the same vertical line down the whole list, which
+          is what makes a screen of mail scannable; long names truncate instead
+          of pushing the column around. (This replaced `list-pane`, the 22rem
+          rail the inbox used while it was a split view.)
         */
-        "list-pane": "22rem",
-        "list-pane-lg": "24rem",
+        "list-sender": "13rem",
 
         /* A phone, for the template preview's device toggle. */
         phone: "23.4375rem", // 375px

@@ -676,6 +676,26 @@ Signing in lands on `/inbox`. The old stats-first home moved to `/insights`
 the app feel like a mail client rather than a reporting tool — a dashboard is
 something you consult, an inbox is something you live in.
 
+### The Inbox is one screen at a time, not a split view
+
+The inbox listed conversations in a 22rem rail with a permanently-open reader
+beside it. That is the desktop-mail-client layout, and it was wrong here for two
+reasons. The rail was too narrow to show a sender, a subject and a preview on
+one line, so every row stacked into four; and the reader got whatever was left,
+which on a laptop is *narrower* than the same message on a phone. It also
+auto-selected the first conversation, which meant arriving at the inbox marked
+mail read without anyone touching it.
+
+It works like Gmail now: the list owns the full page width and a row is one line
+(sender, subject, preview, date) above `sm`, stacked below it; tapping a row
+replaces the list with the message. Nothing is open until it is opened.
+
+The open conversation is held in state **as the thread**, not as a key into the
+list. Opening marks it read, which refetches, and under the "unread" filter that
+drops the thread being read — a key would resolve to nothing and shut the reader
+mid-sentence. The live thread is preferred whenever it is still in the list, so
+a reply arriving in the open conversation still appears.
+
 ### Tooltips are enforced by the type system, not by discipline
 
 `IconButton` takes a **required** `label` and renders it as both the tooltip and

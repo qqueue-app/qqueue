@@ -56,6 +56,11 @@ learning a new vocabulary. What changed:
 
 - **The app opens on the Inbox.** The stats page still exists at `/insights`
   (`/dashboard` redirects there) but you go to it deliberately.
+- **The Inbox is one screen at a time.** The list runs the full width of the
+  page with a Gmail-shaped row — sender, subject, preview, date on one line
+  above `sm` — and tapping a row replaces the list with that message. The old
+  two-pane split (22rem rail + reader) and its auto-selected first conversation
+  are gone, so opening the inbox no longer marks anything read.
 - **It installs as an app.** A web manifest and a Workbox service worker
   (`apps/web/src/sw.ts`, `injectManifest`) give an installable, offline-opening
   PWA with a home-screen icon and shortcuts.

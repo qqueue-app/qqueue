@@ -72,13 +72,19 @@ function setup(messages: Record<string, unknown>[]) {
   );
 }
 
-/**
- * The conversation list row. The first thread is auto-selected on load, so the
- * subject also appears in the detail pane — queries that mean "the list row"
- * must be scoped, or they match two elements.
- */
+/** The conversation's row in the list. */
 async function findRow(subject = /Quarterly numbers/) {
   return screen.findByRole("button", { name: subject });
+}
+
+/**
+ * Open the conversation, which is what puts the reader on screen: the inbox
+ * lists everything full-width and shows a message only once it is tapped, so
+ * nothing is selected on load.
+ */
+async function openRow(user: ReturnType<typeof userEvent.setup>, subject = /Quarterly numbers/) {
+  await user.click(await findRow(subject));
+  return screen.findByRole("button", { name: /^inbox$/i });
 }
 
 beforeEach(() => {
@@ -87,6 +93,58 @@ beforeEach(() => {
   // downloads and inline images both rely on.
   URL.createObjectURL = vi.fn(() => "blob:qqueue/inline-1");
   URL.revokeObjectURL = vi.fn();
+});
+
+describe("Inbox single-screen navigation", () => {
+  // The list used to sit in a 22rem rail beside a permanently-open reader, and
+  // the first conversation was auto-selected — so the inbox marked a message
+  // read before anyone touched it.
+  it("shows only the list until a conversation is tapped", async () => {
+    setup([makeMessage({ readAt: null })]);
+    renderWithProviders(<Inbox />);
+
+    await findRow();
+    expect(screen.queryByRole("button", { name: /^reply$/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText(/Reply to Sender/)
+    ).not.toBeInTheDocument();
+    expect(mockedApi.markInboundMessageRead).not.toHaveBeenCalled();
+  });
+
+  it("opens the conversation full-width and comes back to the list", async () => {
+    const user = userEvent.setup();
+    setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);
+    renderWithProviders(<Inbox />);
+
+    const back = await openRow(user);
+    // The reader replaces the list rather than sitting beside it.
+    expect(screen.queryByPlaceholderText("Search mail")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Reply to Sender/)).toBeInTheDocument();
+
+    await user.click(back);
+    expect(await screen.findByPlaceholderText("Search mail")).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText(/Reply to Sender/)
+    ).not.toBeInTheDocument();
+  });
+
+  it("marks a conversation unread and returns to the list", async () => {
+    const user = userEvent.setup();
+    setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);
+    renderWithProviders(<Inbox />);
+    await openRow(user);
+
+    await user.click(screen.getByLabelText("Mark as unread"));
+
+    await waitFor(() =>
+      expect(mockedApi.markInboundMessageRead).toHaveBeenCalledWith("m1", {
+        organizationId: "org_1",
+        read: false
+      })
+    );
+    // Staying in the reader would re-mark it read the moment it was reopened.
+    expect(await screen.findByPlaceholderText("Search mail")).toBeInTheDocument();
+  });
 });
 
 describe("Inbox read/unread emphasis", () => {
@@ -137,7 +195,9 @@ describe("Inbox message body rendering", () => {
         text: "Q1 42"
       })
     ]);
+    const user = userEvent.setup();
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
     const frame = await screen.findByTitle(/^Message from/);
     expect(frame.tagName).toBe("IFRAME");
@@ -151,17 +211,20 @@ describe("Inbox message body rendering", () => {
 
   it("falls back to the text part when there is no HTML", async () => {
     setup([makeMessage({ html: null, text: "plain text fallback" })]);
+    const user = userEvent.setup();
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
-    await findRow();
     expect(screen.queryByTitle(/^Message from/)).not.toBeInTheDocument();
-    // Rendered as text in the detail pane, not as markup.
+    // Rendered as text in the open conversation, not as markup.
     expect(screen.getAllByText("plain text fallback").length).toBeGreaterThan(0);
   });
 
   it("loads remote images without an opt-in", async () => {
     setup([makeMessage({ html: '<img src="https://tracker.test/pixel.gif">' })]);
+    const user = userEvent.setup();
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
     const frame = await screen.findByTitle(/^Message from/);
     // Reading the mail is enough: img-src admits remote hosts and the src
@@ -180,7 +243,9 @@ describe("Inbox message body rendering", () => {
         html: '<script>alert(1)</script><img src="https://tracker.test/p.gif">'
       })
     ]);
+    const user = userEvent.setup();
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
     // Widening img-src must not widen anything else: the frame stays
     // script-less and default-src stays shut.
@@ -212,7 +277,9 @@ describe("Inbox message body rendering", () => {
     mockedApi.downloadInboundAttachment.mockResolvedValue(
       new Blob(["png"], { type: "image/png" })
     );
+    const user = userEvent.setup();
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
     await waitFor(() =>
       expect(
@@ -244,8 +311,10 @@ describe("Inbox attachments", () => {
     });
 
   it("lists a received attachment with its size", async () => {
+    const user = userEvent.setup();
     setup([withAttachment()]);
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
     expect(await screen.findByText("Attachments")).toBeInTheDocument();
     expect(screen.getByText("report.pdf")).toBeInTheDocument();
@@ -266,9 +335,10 @@ describe("Inbox attachments", () => {
         ]
       })
     ]);
+    const user = userEvent.setup();
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
-    await findRow();
     expect(screen.queryByText("logo.png")).not.toBeInTheDocument();
     expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
   });
@@ -282,6 +352,7 @@ describe("Inbox attachments", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click");
 
     renderWithProviders(<Inbox />);
+    await openRow(user);
     await user.click(await screen.findByRole("button", { name: /report\.pdf/ }));
 
     await waitFor(() => {
@@ -324,6 +395,7 @@ describe("Inbox attachments", () => {
       .mockImplementation(() => {});
 
     renderWithProviders(<Inbox />);
+    await openRow(user);
     await user.click(
       await screen.findByRole("button", { name: /books\.xlsx/ })
     );
@@ -339,6 +411,7 @@ describe("Inbox attachments", () => {
     mockedApi.downloadInboundAttachment.mockRejectedValue(new Error("nope"));
 
     renderWithProviders(<Inbox />);
+    await openRow(user);
     await user.click(await screen.findByRole("button", { name: /report\.pdf/ }));
 
     await waitFor(() => {
@@ -413,6 +486,7 @@ describe("Inbox reply", () => {
       status: "QUEUED"
     });
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
     const box = await screen.findByPlaceholderText(/Reply to Sender/);
     await user.type(box, "Thanks!");
@@ -434,6 +508,7 @@ describe("Inbox reply", () => {
     setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);
     mockedApi.replyToInboundMessage.mockRejectedValue(new Error("smtp down"));
     renderWithProviders(<Inbox />);
+    await openRow(user);
 
     const box = await screen.findByPlaceholderText(/Reply to Sender/);
     await user.type(box, "Hi");
