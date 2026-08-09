@@ -339,6 +339,172 @@ export interface MailcowStatus {
   error?: string;
 }
 
+/**
+ * Where a domain's DNS is hosted, detected from its live NS records.
+ *
+ * `OTHER` means nameservers resolved but matched no known host; `UNKNOWN`
+ * means the lookup itself failed, which is also what a brand-new domain looks
+ * like. The UI must not treat those two as the same thing.
+ */
+export type MailDnsProvider =
+  | "CLOUDFLARE"
+  | "ROUTE53"
+  | "GODADDY"
+  | "NAMECHEAP"
+  | "GOOGLE"
+  | "DIGITALOCEAN"
+  | "VULTR"
+  | "HETZNER"
+  | "LINODE"
+  | "NS1"
+  | "DNSIMPLE"
+  | "NAMECOM"
+  | "PORKBUN"
+  | "AZURE"
+  | "OTHER"
+  | "UNKNOWN";
+
+/** Whether a required record was found in live DNS. */
+export type MailDnsRecordStatus =
+  /** Present and correct. */
+  | "OK"
+  /** Resolved cleanly, and this record is not there. */
+  | "MISSING"
+  /** The lookup failed — says nothing about the zone. */
+  | "UNKNOWN";
+
+/** One DNS record a Mailcow domain needs, and whether it is published. */
+export interface MailDnsRecord {
+  /** Stable identifier (`mx`, `spf`, `dkim`, `dmarc`, ...) for UI keying. */
+  key: string;
+  type: "MX" | "TXT" | "CNAME" | "A";
+  /** Fully-qualified record name. */
+  name: string;
+  value: string;
+  /** MX only. */
+  priority?: number;
+  /** False for the convenience records mail delivery does not depend on. */
+  required: boolean;
+  /** Plain-language explanation of what breaks without it. */
+  purpose: string;
+  /** Absent until the record has been checked against live DNS. */
+  status?: MailDnsRecordStatus;
+}
+
+/** How a domain on the mail server relates to the caller's organization. */
+export type MailDomainOwnership =
+  /** This org claims it. */
+  | "CLAIMED"
+  /**
+   * On the server but claimed by no org. Visible to OWNERs and claimable —
+   * this is what keeps a single-org instance working after the ownership
+   * model was introduced.
+   */
+  | "UNCLAIMED";
+
+/** One row of the Domains list: the mail server's view plus QQueue's claim. */
+export interface MailDomainSummary {
+  domain: string;
+  ownership: MailDomainOwnership;
+  active: boolean;
+  description: string;
+  /** Mailboxes defined on the server for this domain. */
+  mailboxCount: number;
+  /** 0 means Mailcow's own default applies. */
+  maxMailboxes: number;
+  defaultQuotaBytes: number;
+  maxQuotaBytes: number;
+  /** A relay/backup MX rather than a domain whose mail lands here. */
+  backupmx: boolean;
+  /** True once Mailcow holds a DKIM key for the domain. */
+  hasDkim: boolean;
+}
+
+/** A domain's DNS picture: who hosts it and what still needs publishing. */
+export interface MailDomainDnsStatus {
+  domain: string;
+  /** The host every record points at. */
+  mailHost: string;
+  provider: MailDnsProvider;
+  nameservers: string[];
+  records: MailDnsRecord[];
+  /** True when every `required` record checked out as OK. */
+  ready: boolean;
+}
+
+// Quota ceilings are sanity bounds, not policy: Mailcow enforces its own, and
+// 0 means unlimited in every one of these fields.
+const quotaMiB = z.number().int().min(0).max(10_000_000);
+
+/**
+ * A domain name, normalised to lowercase. Rejects a bare label, a URL and an
+ * address so the value that reaches Mailcow is only ever a domain.
+ */
+export const mailDomainNameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3)
+  .max(253)
+  .regex(
+    /^(?!-)[a-z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/,
+    "Enter a domain like example.com"
+  );
+
+export const mailDomainCreateSchema = z.object({
+  organizationId: z.string().min(1),
+  domain: mailDomainNameSchema,
+  description: z.string().max(255).optional(),
+  maxMailboxes: z.number().int().min(0).max(10_000).optional(),
+  defaultQuotaMiB: quotaMiB.optional(),
+  maxQuotaMiB: quotaMiB.optional(),
+  totalQuotaMiB: quotaMiB.optional(),
+  active: z.boolean().optional(),
+  /**
+   * Generate a DKIM key immediately. On by default: a domain without one sends
+   * unsigned mail, and the whole point of showing DNS records at creation is
+   * that the DKIM record is among them.
+   */
+  generateDkim: z.boolean().optional().default(true),
+});
+
+export type MailDomainCreateInput = z.infer<typeof mailDomainCreateSchema>;
+
+/** Edit is create's attribute half; the domain name itself is immutable. */
+export const mailDomainUpdateSchema = z.object({
+  organizationId: z.string().min(1),
+  domain: mailDomainNameSchema,
+  description: z.string().max(255).optional(),
+  maxMailboxes: z.number().int().min(0).max(10_000).optional(),
+  defaultQuotaMiB: quotaMiB.optional(),
+  maxQuotaMiB: quotaMiB.optional(),
+  totalQuotaMiB: quotaMiB.optional(),
+  active: z.boolean().optional(),
+});
+
+export type MailDomainUpdateInput = z.infer<typeof mailDomainUpdateSchema>;
+
+/**
+ * Deleting a domain destroys every mailbox and message under it, so the caller
+ * must retype the domain name. The service also refuses while mailboxes exist.
+ */
+export const mailDomainDeleteSchema = z.object({
+  organizationId: z.string().min(1),
+  domain: mailDomainNameSchema,
+  confirm: mailDomainNameSchema,
+});
+
+export type MailDomainDeleteInput = z.infer<typeof mailDomainDeleteSchema>;
+
+/** What deleting a domain removed on each side. */
+export interface MailDomainDeleteResult {
+  domain: string;
+  /** Sending accounts removed because their mailboxes no longer exist. */
+  smtpConnectionsDeleted: number;
+  /** Inbox accounts disabled — never deleted, that would cascade messages. */
+  inboxAccountsDisabled: number;
+}
+
 /** Grants an ADMIN provisioning access to one Mailcow domain. */
 export interface MailDomainGrant {
   id: string;

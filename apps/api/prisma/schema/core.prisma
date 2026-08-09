@@ -228,6 +228,7 @@ model Organization {
   smtpConnections   SMTPConnection[]
   smtpConnectionGrants SmtpConnectionGrant[]
   mailDomainGrants  MailDomainGrant[]
+  orgMailDomains    OrgMailDomain[]
   contacts          Contact[]
   contactLists      ContactList[]
   suppressions      Suppression[]
@@ -312,9 +313,33 @@ model SMTPConnection {
   updatedAt         DateTime              @updatedAt
 }
 
+/// Which Mailcow domains an organization claims.
+///
+/// Mailcow domains are instance-global — one API key, one mail server — so
+/// without this row every org OWNER could see, and provision mailboxes on,
+/// every other org's domains. A domain created through QQueue is claimed by
+/// the creating org at creation time.
+///
+/// `domain` is globally unique on purpose: a mail domain is one physical thing
+/// on one server, and letting two orgs claim it would reintroduce exactly the
+/// leak this model closes. Domains that no org has claimed stay visible to
+/// OWNERs as "unclaimed" and can be claimed, which is what keeps a single-org
+/// self-hosted instance working unchanged after the upgrade.
+model OrgMailDomain {
+  id             String       @id @default(cuid())
+  /// Stored lowercase; matches a domain on the Mailcow server.
+  domain         String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+}
+
 /// Mailbox-provisioning domain access: an org OWNER may provision Mailcow
-/// mailboxes under any domain the server offers; an ADMIN only under domains
-/// granted here (default deny). Managed by OWNERs from the Mailboxes page.
+/// mailboxes under any domain the org claims (see OrgMailDomain); an ADMIN only
+/// under domains granted here (default deny). Managed by OWNERs from the
+/// Mailboxes page.
 model MailDomainGrant {
   id             String       @id @default(cuid())
   organizationId String

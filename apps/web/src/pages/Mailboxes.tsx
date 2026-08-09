@@ -25,11 +25,16 @@ import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import {
   api,
   type MailDomainGrant,
+  type MailDomainSummary,
   type MailboxProvisionResult,
   type MailboxSummary,
   type OrganizationMember,
   type SmtpConnectionGrant,
 } from "../lib/api.js";
+import {
+  MailDomainsPanel,
+  type MailDomainFormValues,
+} from "../components/settings/MailDomainsPanel.js";
 import { qk } from "../lib/query-client.js";
 import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
@@ -83,6 +88,24 @@ function formatBytes(bytes: number) {
   return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${units[exponent]}`;
 }
 
+/**
+ * Domain form values -> API payload.
+ *
+ * A blank numeric field is *omitted*, never sent as 0: Mailcow reads 0 as
+ * "unlimited", so posting a zero for a box the owner simply left empty would
+ * silently strip the server's own limits.
+ */
+function domainPayload(values: MailDomainFormValues) {
+  const maxMailboxes = values.maxMailboxes.trim();
+  const defaultQuota = values.defaultQuotaMiB.trim();
+  return {
+    description: values.description.trim(),
+    active: values.active,
+    ...(maxMailboxes === "" ? {} : { maxMailboxes: Number(maxMailboxes) }),
+    ...(defaultQuota === "" ? {} : { defaultQuotaMiB: Number(defaultQuota) }),
+  };
+}
+
 /** Mail-server storage. A quota of 0 is Mailcow's "no limit". */
 function formatUsage(mailbox: MailboxSummary) {
   if (mailbox.usedBytes === null) return "—";
@@ -130,6 +153,8 @@ export function Mailboxes() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [domainFilter, setDomainFilter] = useState(ALL_DOMAINS);
+  /** The domain whose DNS drawer is open, if any. */
+  const [dnsDomain, setDnsDomain] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<RevealedPassword | null>(null);
   const [adopting, setAdopting] = useState<MailboxSummary | null>(null);
   const [confirming, setConfirming] = useState<PendingConfirm | null>(null);
@@ -162,6 +187,19 @@ export function Mailboxes() {
     isOwner ? organizationId : null,
     qk.mailDomainGrants(organizationId ?? ""),
     (id) => api.listMailDomainGrants(id)
+  );
+  const mailDomainsQuery = useOrgQuery(
+    isOwner ? organizationId : null,
+    qk.mailDomains(organizationId ?? ""),
+    (id) => api.listMailDomains(id)
+  );
+  // Fetched only while the drawer is open. Each entry costs a handful of live
+  // DNS lookups, so prefetching every domain's records would make opening the
+  // tab far more expensive than reading it.
+  const dnsQuery = useOrgQuery(
+    isOwner && dnsDomain ? organizationId : null,
+    qk.mailDomainDns(organizationId ?? "", dnsDomain ?? ""),
+    (id) => api.getMailDomainDns(dnsDomain as string, id)
   );
 
   const mailboxes = useMemo(
@@ -303,6 +341,93 @@ export function Mailboxes() {
       successMessage: "Domain access removed.",
       errorMessage: "Couldn't remove that domain.",
       invalidates: [qk.mailDomainGrants(organizationId ?? "")],
+    }
+  );
+
+  // Domain management (owners only). Every mutation invalidates the status
+  // query too: the provisioning domain picker on the Mailboxes tab is fed by
+  // `status.domains`, so adding or disabling a domain has to move both.
+  const domainKeys = [
+    qk.mailDomains(organizationId ?? ""),
+    qk.mailcowStatus(organizationId ?? ""),
+  ];
+
+  const createDomain = useApiMutation(
+    (values: MailDomainFormValues) =>
+      api.createMailDomain({
+        organizationId: organizationId as string,
+        ...domainPayload(values),
+        domain: values.domain.trim().toLowerCase(),
+      }),
+    {
+      errorMessage: "Couldn't add that domain.",
+      invalidates: domainKeys,
+      onSuccess: (result) => {
+        // Straight into the DNS drawer: a domain that exists but has no
+        // records published is not yet a working domain, and this is the one
+        // moment the owner is guaranteed to be paying attention.
+        setDnsDomain(result.domain.domain);
+        toast.success(
+          `${result.domain.domain} added. Publish its DNS records to finish.`
+        );
+      },
+    }
+  );
+
+  const updateDomain = useApiMutation(
+    (input: { domain: string; values: MailDomainFormValues }) =>
+      api.updateMailDomain(input.domain, {
+        organizationId: organizationId as string,
+        ...domainPayload(input.values),
+      }),
+    {
+      successMessage: "Domain updated.",
+      errorMessage: "Couldn't update that domain.",
+      invalidates: domainKeys,
+    }
+  );
+
+  const claimDomain = useApiMutation(
+    (domain: MailDomainSummary) =>
+      api.claimMailDomain(domain.domain, organizationId as string),
+    {
+      successMessage: "Domain claimed for this organization.",
+      errorMessage: "Couldn't claim that domain.",
+      invalidates: domainKeys,
+    }
+  );
+
+  const deleteDomain = useApiMutation(
+    (input: { domain: string; confirm: string }) =>
+      api.deleteMailDomain(input.domain, {
+        organizationId: organizationId as string,
+        confirm: input.confirm,
+      }),
+    {
+      successMessage: "Domain deleted.",
+      errorMessage: "Couldn't delete that domain.",
+      // Deleting a domain removes the sending accounts under it, so the
+      // mailbox list and the "Who can send" matrix both go stale.
+      invalidates: [
+        ...domainKeys,
+        qk.mailboxes(organizationId ?? ""),
+        qk.smtpConnections(organizationId ?? ""),
+      ],
+    }
+  );
+
+  const generateDkim = useApiMutation(
+    (domain: string) =>
+      api.generateMailDomainDkim(domain, organizationId as string),
+    {
+      successMessage: "DKIM key generated. Publish the new record.",
+      errorMessage: "Couldn't generate a DKIM key.",
+      invalidates: domainKeys,
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: qk.mailDomainDns(organizationId ?? "", dnsDomain ?? ""),
+        });
+      },
     }
   );
 
@@ -649,8 +774,14 @@ export function Mailboxes() {
               Who can send
             </TabsTrigger>
             {isOwner ? (
-              <TabsTrigger value="domains">
+              <TabsTrigger value="server-domains">
                 <Globe className="h-4 w-4" />
+                Domains
+              </TabsTrigger>
+            ) : null}
+            {isOwner ? (
+              <TabsTrigger value="domains">
+                <ShieldCheck className="h-4 w-4" />
                 Domain access
               </TabsTrigger>
             ) : null}
@@ -778,6 +909,41 @@ export function Mailboxes() {
               />
             </div>
           </TabsContent>
+
+          {isOwner ? (
+            <TabsContent value="server-domains">
+              <MailDomainsPanel
+                domains={mailDomainsQuery.data ?? []}
+                loading={mailDomainsQuery.isPending}
+                dnsDomain={dnsDomain}
+                dns={dnsQuery.data}
+                dnsLoading={dnsQuery.isPending}
+                pending={{
+                  save: createDomain.isPending || updateDomain.isPending,
+                  delete: deleteDomain.isPending,
+                  dkim: generateDkim.isPending,
+                }}
+                onOpenDns={setDnsDomain}
+                onRefreshDns={() =>
+                  void queryClient.invalidateQueries({
+                    queryKey: qk.mailDomainDns(
+                      organizationId ?? "",
+                      dnsDomain ?? ""
+                    ),
+                  })
+                }
+                onGenerateDkim={(domain) => generateDkim.mutate(domain)}
+                onCreate={(values) => createDomain.mutate(values)}
+                onUpdate={(domain, values) =>
+                  updateDomain.mutate({ domain, values })
+                }
+                onClaim={(domain) => claimDomain.mutate(domain)}
+                onDelete={(domain, confirm) =>
+                  deleteDomain.mutate({ domain, confirm })
+                }
+              />
+            </TabsContent>
+          ) : null}
 
           {isOwner ? (
             <TabsContent value="domains">

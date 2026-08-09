@@ -78,6 +78,9 @@ export const qk = {
   mailcowStatus: (orgId: string) => ["mailcow-status", orgId] as const,
   mailboxes: (orgId: string) => ["mailboxes", orgId] as const,
   mailDomainGrants: (orgId: string) => ["mail-domain-grants", orgId] as const,
+  mailDomains: (orgId: string) => ["mail-domains", orgId] as const,
+  mailDomainDns: (orgId: string, domain: string) =>
+    ["mail-domain-dns", orgId, domain] as const,
 
   contacts: (orgId: string) => ["contacts", orgId] as const,
   contactActivity: (contactId: string) =>

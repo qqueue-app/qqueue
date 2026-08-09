@@ -57,6 +57,52 @@ mailcowRouter.delete(
   requireOrgRole("OWNER", "ADMIN"),
   mailcowController.deleteMailbox
 );
+// Domain management is OWNER-only, a step above the mailbox routes above.
+// Mailcow domains are instance-global — creating or deleting one changes the
+// shared mail server for everyone on it, and claiming one decides which org
+// reaches it at all. `:domain` is the domain name, URL-encoded.
+mailcowRouter.get(
+  "/domains",
+  requireOrgMembership,
+  requireOrgRole("OWNER"),
+  mailcowController.listDomains
+);
+mailcowRouter.post(
+  "/domains",
+  requireOrgMembership,
+  requireOrgRole("OWNER"),
+  mailcowController.createDomain
+);
+mailcowRouter.get(
+  "/domains/:domain/dns",
+  requireOrgMembership,
+  requireOrgRole("OWNER"),
+  mailcowController.domainDns
+);
+mailcowRouter.post(
+  "/domains/:domain/dkim",
+  requireOrgMembership,
+  requireOrgRole("OWNER"),
+  mailcowController.generateDomainDkim
+);
+mailcowRouter.post(
+  "/domains/:domain/claim",
+  requireOrgMembership,
+  requireOrgRole("OWNER"),
+  mailcowController.claimDomain
+);
+mailcowRouter.patch(
+  "/domains/:domain",
+  requireOrgMembership,
+  requireOrgRole("OWNER"),
+  mailcowController.updateDomain
+);
+mailcowRouter.delete(
+  "/domains/:domain",
+  requireOrgMembership,
+  requireOrgRole("OWNER"),
+  mailcowController.deleteDomain
+);
 mailcowRouter.get(
   "/domain-grants",
   requireOrgMembership,

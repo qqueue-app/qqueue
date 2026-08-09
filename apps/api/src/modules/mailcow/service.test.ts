@@ -13,16 +13,33 @@ const h = vi.hoisted(() => ({
     setMailboxPassword: vi.fn(),
     setMailboxActive: vi.fn(),
     listMailboxes: vi.fn(),
+    createDomain: vi.fn(),
+    updateDomain: vi.fn(),
+    deleteDomain: vi.fn(),
+    getDkim: vi.fn(),
+    generateDkim: vi.fn(),
     verify: vi.fn(),
   } as Record<string, ReturnType<typeof vi.fn>>,
   getMailcowClient: vi.fn(),
   mailcowMailHost: vi.fn(),
   verifyConnection: vi.fn(),
+  buildDnsRecords: vi.fn(),
+  checkDnsRecords: vi.fn(),
+  detectDnsProvider: vi.fn(),
 }));
 
 vi.mock("./client.js", () => ({
   getMailcowClient: h.getMailcowClient,
   mailcowMailHost: h.mailcowMailHost,
+}));
+
+// DNS is stubbed wholesale: these tests pin the service's orchestration and
+// authorisation, and a real resolver would make them slow and network-bound.
+// dns.test.ts covers the record building and matching.
+vi.mock("./dns.js", () => ({
+  buildDnsRecords: h.buildDnsRecords,
+  checkDnsRecords: h.checkDnsRecords,
+  detectDnsProvider: h.detectDnsProvider,
 }));
 
 // Keep normalizeDefault/smtpConnectionSelect real; stub only the SMTP probe so
@@ -61,6 +78,12 @@ beforeEach(() => {
     fn.mockReset().mockResolvedValue(undefined);
   }
   h.verifyConnection.mockReset().mockResolvedValue(undefined);
+  h.buildDnsRecords.mockReset().mockReturnValue([]);
+  h.checkDnsRecords.mockReset().mockResolvedValue([]);
+  h.detectDnsProvider
+    .mockReset()
+    .mockResolvedValue({ provider: "UNKNOWN", nameservers: [] });
+  h.client.getDkim.mockResolvedValue(null);
   h.getMailcowClient.mockReturnValue(h.client);
   h.mailcowMailHost.mockReturnValue("mail.acme.test");
   h.client.listDomains.mockResolvedValue([
@@ -68,6 +91,10 @@ beforeEach(() => {
     { domain_name: "inactive.test", active: false },
   ]);
   h.client.listMailboxes.mockResolvedValue([]);
+  // No domain claimed by anyone: every server domain reads as unclaimed, which
+  // is the single-org case and what these provisioning tests assume.
+  prismaMock.orgMailDomain.findMany.mockResolvedValue([] as never);
+  prismaMock.orgMailDomain.findUnique.mockResolvedValue(null);
   prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
   // Org membership for the assignee; no pre-existing inbox; no default yet.
   prismaMock.organizationMember.findUnique.mockResolvedValue({

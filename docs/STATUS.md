@@ -363,6 +363,33 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] `MailDomainGrant` scopes which domains an admin may provision on —
   default deny, validated against Mailcow's active domains, stored lowercase.
   Grant management is OWNER-only.
+- [x] `OrgMailDomain` records which org claims each server domain. Mailcow
+  domains are instance-global, so without it every org OWNER could see and
+  provision on every other org's domains. An unclaimed domain stays visible to
+  OWNERs and is claimable, which keeps a single-org instance unchanged; the
+  migration backfills each org's claims from the addresses it already uses.
+
+### Mailcow Domain Management (OWNER-only)
+
+- [x] Domains tab on `/settings/mailboxes`: list, create, edit, claim and
+  delete mail-server domains. Every route is `requireOrgRole("OWNER")` —
+  creating a domain changes the mail server the whole instance shares.
+- [x] Creating a domain generates its DKIM key in the same flow, so the DNS
+  panel can show the complete record set in one pass.
+- [x] DNS panel per domain: the MX / SPF / DKIM / DMARC records to publish,
+  plus optional autodiscover and autoconfig, each checked against live DNS and
+  reported `OK` / `MISSING` / `UNKNOWN`. "Couldn't check" never reads as ready.
+- [x] The DNS host is detected from the domain's live NS records (Cloudflare,
+  Route 53, GoDaddy, Namecheap, …), so the panel can say where to put them.
+- [x] Record matching is loose by design — a hand-tightened SPF or a stricter
+  DMARC counts as correct. DKIM is the exception and compares the `p=` key
+  exactly, because a mismatched key fails every signature.
+- [x] Deleting a domain is refused while any mailbox still exists on it, and
+  requires retyping the domain name. Mailcow would otherwise destroy every
+  mailbox and message under it in one call.
+- [x] DKIM generation is offered only for a domain with no key: rotating one
+  whose record is already published would break signing until DNS caught up,
+  so rotation stays in Mailcow deliberately.
 - [x] Members never touch SMTP credentials or the Mailcow UI; they read mail
   with the mailbox password in their own client.
 - [x] The `/mailboxes` list is the mail server's inventory merged with QQueue's

@@ -663,6 +663,69 @@ export interface MailcowStatus {
   error?: string;
 }
 
+export type MailDnsProvider =
+  | "CLOUDFLARE"
+  | "ROUTE53"
+  | "GODADDY"
+  | "NAMECHEAP"
+  | "GOOGLE"
+  | "DIGITALOCEAN"
+  | "VULTR"
+  | "HETZNER"
+  | "LINODE"
+  | "NS1"
+  | "DNSIMPLE"
+  | "NAMECOM"
+  | "PORKBUN"
+  | "AZURE"
+  | "OTHER"
+  | "UNKNOWN";
+
+/** "UNKNOWN" means the lookup failed, not that the record is absent. */
+export type MailDnsRecordStatus = "OK" | "MISSING" | "UNKNOWN";
+
+export interface MailDnsRecord {
+  key: string;
+  type: "MX" | "TXT" | "CNAME" | "A";
+  name: string;
+  value: string;
+  priority?: number;
+  required: boolean;
+  purpose: string;
+  status?: MailDnsRecordStatus;
+}
+
+export type MailDomainOwnership = "CLAIMED" | "UNCLAIMED";
+
+/** One row of the Domains list: the mail server's view plus QQueue's claim. */
+export interface MailDomainSummary {
+  domain: string;
+  ownership: MailDomainOwnership;
+  active: boolean;
+  description: string;
+  mailboxCount: number;
+  maxMailboxes: number;
+  defaultQuotaBytes: number;
+  maxQuotaBytes: number;
+  backupmx: boolean;
+  hasDkim: boolean;
+}
+
+export interface MailDomainDnsStatus {
+  domain: string;
+  mailHost: string;
+  provider: MailDnsProvider;
+  nameservers: string[];
+  records: MailDnsRecord[];
+  ready: boolean;
+}
+
+export interface MailDomainDeleteResult {
+  domain: string;
+  smtpConnectionsDeleted: number;
+  inboxAccountsDisabled: number;
+}
+
 export interface MailDomainGrant {
   id: string;
   organizationId: string;
@@ -1277,6 +1340,60 @@ export const api = {
     return request<MailboxDeleteResult>(
       `/api/v1/mailcow/mailboxes/${encodeURIComponent(email)}?organizationId=${encodeURIComponent(organizationId)}`,
       { method: "DELETE" }
+    );
+  },
+
+  listMailDomains(organizationId: string) {
+    return request<MailDomainSummary[]>(
+      `/api/v1/mailcow/domains?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  createMailDomain(input: Record<string, unknown>) {
+    return request<{ domain: MailDomainSummary; dns: MailDomainDnsStatus }>(
+      "/api/v1/mailcow/domains",
+      { method: "POST", body: JSON.stringify(input) }
+    );
+  },
+
+  updateMailDomain(domain: string, input: Record<string, unknown>) {
+    return request<MailDomainSummary>(
+      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    );
+  },
+
+  claimMailDomain(domain: string, organizationId: string) {
+    return request<MailDomainSummary>(
+      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}/claim?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "POST" }
+    );
+  },
+
+  /**
+   * The confirmation goes in the body rather than the query string: deleting a
+   * domain must not be reproducible by replaying a URL.
+   */
+  deleteMailDomain(
+    domain: string,
+    input: { organizationId: string; confirm: string }
+  ) {
+    return request<MailDomainDeleteResult>(
+      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}?organizationId=${encodeURIComponent(input.organizationId)}`,
+      { method: "DELETE", body: JSON.stringify(input) }
+    );
+  },
+
+  getMailDomainDns(domain: string, organizationId: string) {
+    return request<MailDomainDnsStatus>(
+      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}/dns?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  generateMailDomainDkim(domain: string, organizationId: string) {
+    return request<MailDomainDnsStatus>(
+      `/api/v1/mailcow/domains/${encodeURIComponent(domain)}/dkim?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "POST" }
     );
   },
 

@@ -8,9 +8,14 @@ Mailcow-specific provider is required for the current self-hosted flow.
 - A running Mailcow instance with SMTP submission enabled.
 - A Mailcow mailbox or app-specific SMTP user that QQueue can authenticate as.
 - DNS for the sending domain already configured for Mailcow, including SPF,
-  DKIM, and DMARC.
+  DKIM, and DMARC. (QQueue can show you exactly which records to publish — see
+  [Managing Domains From QQueue](#managing-domains-from-qqueue).)
 - QQueue running with a stable `ENCRYPTION_KEY`; changing it later invalidates
   stored SMTP credentials.
+
+For mailbox and domain management from within QQueue you also need
+`MAILCOW_API_URL` and `MAILCOW_API_KEY` set, with the API key granted
+**read/write** access (Mailcow → Admin → API). Sending works without them.
 
 ## Recommended SMTP Settings
 
@@ -30,15 +35,72 @@ connection:
 Port `465` can also work with **Secure** enabled if your Mailcow deployment is
 configured for implicit TLS SMTP.
 
-## Sending Domain (DKIM Mode)
+## DKIM
 
-If you add a **sending domain** for Mailcow-relayed mail, create it in
-**EXTERNAL** DKIM mode. Mailcow signs DKIM itself, so you publish **Mailcow's**
-DKIM key in DNS (alongside SPF and DMARC) and let Mailcow do the signing. The
-domain's status will show `NA`, which is expected for EXTERNAL mode.
+Mailcow signs outbound mail itself. QQueue never holds a signing key and never
+signs on Mailcow's behalf — it reads Mailcow's public key so it can show you
+the DNS record to publish. If the record isn't published, mail still sends, it
+just fails DKIM verification at the recipient.
 
-Do **not** use **MANAGED** mode for Mailcow-relayed mail — that would have QQueue
-sign with its own key and bypass Mailcow's signer.
+## Managing Domains From QQueue
+
+With `MAILCOW_API_URL` and `MAILCOW_API_KEY` configured, an org **owner** gets a
+**Domains** tab under **Settings → Mailboxes** that manages the domains on your
+mail server directly.
+
+This is owner-only on purpose. Your Mailcow credentials are instance-level, so
+the mail server is shared by every organization on the instance — adding or
+deleting a domain changes it for all of them.
+
+From that tab you can:
+
+- **Add a domain.** Creates it in Mailcow and generates its DKIM key in the same
+  step, then opens the DNS panel.
+- **Edit** its description, mailbox limit, default quota, and whether it accepts
+  mail.
+- **Claim** a domain that already exists on the server. Claiming records that
+  this organization owns it, which hides it from other organizations on the
+  instance. Domains nobody has claimed stay visible to every owner — on a
+  single-org instance that means nothing changes.
+- **Delete** a domain, once every mailbox on it is gone. QQueue refuses while
+  mailboxes remain, because Mailcow would delete the domain and every message
+  under it in one call.
+
+### The DNS panel
+
+A domain exists in Mailcow the moment you create it, but it neither sends nor
+receives until its DNS is published. Open **DNS records** on any domain to see
+what's needed and what's already live:
+
+| Record | Purpose |
+| --- | --- |
+| `MX` | Routes mail for the domain to your mail server. |
+| `TXT` (SPF) | Authorises your server to send for the domain. |
+| `TXT` (DKIM) | Publishes the key Mailcow signs with. |
+| `TXT` (DMARC) | Tells recipients how to treat mail that fails SPF and DKIM. |
+| `CNAME` (autodiscover / autoconfig) | Optional; lets mail clients self-configure. |
+
+Each is checked against live DNS and marked **Live**, **Missing**, or
+**Unchecked**. *Unchecked* means the lookup itself failed — it says nothing
+about your zone, so it is never treated as ready.
+
+QQueue also reads the domain's nameservers to tell you where its DNS is hosted
+(Cloudflare, Route 53, GoDaddy, Namecheap, and so on). It does not write records
+for you; publish them at that host, then use **Re-check**.
+
+Two deliberate behaviours worth knowing:
+
+- **Matching is loose except for DKIM.** A hand-tightened SPF or a stricter
+  DMARC policy counts as correct, because it is. DKIM compares the public key
+  exactly — a key that isn't Mailcow's fails every signature.
+- **DMARC is suggested at `p=none`.** A stricter policy on a domain whose SPF
+  and DKIM aren't live yet would quarantine legitimate mail on day one. Tighten
+  it once the reports look clean.
+
+QQueue offers to generate a DKIM key only for a domain that has none. Rotating
+an existing key would make Mailcow sign with it immediately, breaking every
+signature until the new DNS record propagated — do that in Mailcow if you mean
+to.
 
 ## Setup Flow
 
