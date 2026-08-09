@@ -170,7 +170,13 @@ export function startEmailSendingWorker() {
           to: emailJob.toEmail,
           cc: cc.length ? cc : undefined,
           bcc: bcc.length ? bcc : undefined,
-          replyTo: emailJob.replyTo ?? undefined,
+          // The account's default Reply-To, unless this send named its own.
+          // Resolved here rather than at job creation so it lands on every
+          // origin at once — campaign fan-out, recurring runs, transactional
+          // and manual sends all reach this one line — and so editing a
+          // sending account also corrects jobs already sitting in the queue.
+          replyTo:
+            emailJob.replyTo ?? emailJob.smtpConnection.replyTo ?? undefined,
           inReplyTo: emailJob.inReplyTo ?? undefined,
           references: emailJob.references.length ? emailJob.references : undefined,
           subject: emailJob.subject,

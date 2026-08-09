@@ -7,6 +7,7 @@ import {
   KeyRound,
   Link2,
   Mail,
+  Pencil,
   Plus,
   Power,
   PowerOff,
@@ -134,6 +135,7 @@ export function Mailboxes() {
   const [domainFilter, setDomainFilter] = useState(ALL_DOMAINS);
   const [revealed, setRevealed] = useState<RevealedPassword | null>(null);
   const [adopting, setAdopting] = useState<MailboxSummary | null>(null);
+  const [editing, setEditing] = useState<MailboxSummary | null>(null);
   const [confirming, setConfirming] = useState<PendingConfirm | null>(null);
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
 
@@ -385,7 +387,18 @@ export function Mailboxes() {
         header: "Name",
         meta: { title: "Name", hideBelowMd: true },
         cell: ({ row }) => (
-          <span className="text-muted-foreground">{row.original.name}</span>
+          <div className="min-w-0">
+            <div className="truncate text-muted-foreground">
+              {row.original.name}
+            </div>
+            {/* Only when set: the common case is no Reply-To, and a row that
+                said "Replies → none" on every mailbox would be noise. */}
+            {row.original.replyTo ? (
+              <div className="truncate text-meta text-text-tertiary">
+                Replies to {row.original.replyTo}
+              </div>
+            ) : null}
+          </div>
         ),
       },
       {
@@ -488,6 +501,16 @@ export function Mailboxes() {
                   primary: true,
                   hidden: mailbox.origin !== "SERVER_ONLY",
                   onSelect: () => setAdopting(mailbox),
+                },
+                {
+                  // Edits what QQueue sends as, so it needs a sending account
+                  // rather than a mailbox: a SERVER_ONLY row has nowhere to
+                  // keep a display name or a Reply-To until it is connected.
+                  label: "Edit mailbox",
+                  icon: Pencil,
+                  primary: true,
+                  hidden: !connectionId,
+                  onSelect: () => setEditing(mailbox),
                 },
                 {
                   label: "Test connection",
@@ -792,6 +815,20 @@ export function Mailboxes() {
         }}
       />
 
+      <EditMailboxDialog
+        mailbox={editing}
+        organizationId={organizationId ?? ""}
+        onOpenChange={(open) => !open && setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          void Promise.all(
+            mailboxAndConnectionKeys.map((queryKey) =>
+              queryClient.invalidateQueries({ queryKey })
+            )
+          );
+        }}
+      />
+
       <MailboxPasswordDialog
         result={revealed}
         mailHost={status?.mailHost ?? null}
@@ -840,6 +877,123 @@ export function Mailboxes() {
         }}
       />
     </>
+  );
+}
+
+/**
+ * Edit what a connected mailbox sends as: the display name recipients read in
+ * the From line, and where their replies land.
+ *
+ * Both live on the sending account rather than on the mail server, which is
+ * why this works for an EXTERNAL row too (a hand-added SES or Postmark
+ * account has no mailbox behind it) and why it keeps working when Mailcow is
+ * unreachable — you should be able to fix a typo in a Reply-To without the
+ * mail server's permission. Credentials are not here on purpose: rotating them
+ * belongs to "Reset password" and the sending-accounts page, and mixing them
+ * in would make a rename re-run an SMTP handshake.
+ */
+function EditMailboxDialog({
+  mailbox,
+  organizationId,
+  onOpenChange,
+  onSaved,
+}: {
+  mailbox: MailboxSummary | null;
+  organizationId: string;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [displayName, setDisplayName] = useState("");
+  const [replyTo, setReplyTo] = useState("");
+
+  // Re-seed per mailbox so one row's edits never open on the next one.
+  useEffect(() => {
+    if (mailbox) {
+      setDisplayName(mailbox.name);
+      setReplyTo(mailbox.replyTo ?? "");
+    }
+  }, [mailbox]);
+
+  const save = useApiMutation(
+    () =>
+      api.updateSMTPConnection(mailbox!.smtpConnectionId as string, {
+        organizationId,
+        // Both sent even when blank: "" is how either field is cleared, where
+        // omitting it would read as "leave whatever is stored".
+        fromName: displayName.trim(),
+        replyTo: replyTo.trim(),
+      }),
+    {
+      successMessage: `Saved ${mailbox?.email ?? "the mailbox"}.`,
+      errorMessage: "Couldn't save that mailbox.",
+      onSuccess: onSaved,
+    }
+  );
+
+  return (
+    <Dialog open={mailbox !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit {mailbox?.email}</DialogTitle>
+          <DialogDescription>
+            How this mailbox appears to the people it writes to. The address
+            itself and its credentials don't change.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!save.isPending) save.mutate();
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="edit-mailbox-name">Display name</Label>
+            <Input
+              id="edit-mailbox-name"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="Support Team"
+              autoFocus
+            />
+            <p className="text-meta text-muted-foreground">
+              What recipients see in the From line, beside the address.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="edit-mailbox-reply-to">Reply-To (optional)</Label>
+            <Input
+              id="edit-mailbox-reply-to"
+              type="email"
+              value={replyTo}
+              onChange={(event) => setReplyTo(event.target.value)}
+              placeholder={mailbox?.email ?? "replies@example.com"}
+            />
+            <p className="text-meta text-muted-foreground">
+              Where answers go when someone hits Reply — on campaigns and
+              one-off sends alike. Leave empty and replies come back to{" "}
+              {mailbox?.email ?? "this address"}.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={save.isPending}>
+              {save.isPending ? <Spinner /> : <Pencil className="h-4 w-4" />}
+              Save mailbox
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

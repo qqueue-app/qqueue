@@ -114,6 +114,7 @@ const smtpConnection = {
   secure: false,
   fromEmail: "from@example.com",
   fromName: "Sender",
+  replyTo: null as string | null,
   usernameEncrypted: "u-enc",
   passwordEncrypted: "p-enc"
 };
@@ -370,6 +371,49 @@ describe("email-sending worker", () => {
         bcc: ["bcc@example.com"],
         replyTo: "reply@example.com"
       })
+    );
+  });
+
+  // The sending account's default Reply-To. Resolved in the worker rather than
+  // at job creation, so it reaches every origin — campaign fan-out and
+  // recurring runs never set the column at all.
+  it("falls back to the sending account's Reply-To when the job has none", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      replyTo: null,
+      smtpConnection: { ...smtpConnection, replyTo: "support@example.com" }
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ replyTo: "support@example.com" })
+    );
+  });
+
+  it("lets the job's own Reply-To win over the account default", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      replyTo: "thisone@example.com",
+      smtpConnection: { ...smtpConnection, replyTo: "support@example.com" }
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ replyTo: "thisone@example.com" })
     );
   });
 

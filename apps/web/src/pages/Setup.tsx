@@ -237,6 +237,7 @@ export function Setup() {
         password: form.password,
         fromEmail: form.fromEmail,
         fromName: form.fromName || undefined,
+        replyTo: form.replyTo || undefined,
         // The wizard's connection is the org default by definition.
         isDefault: true,
       });
@@ -542,6 +543,7 @@ export function Setup() {
                       username: values.username,
                       fromEmail: values.fromEmail,
                       fromName: values.fromName,
+                      replyTo: values.replyTo,
                     },
                   })
                 }

@@ -456,6 +456,29 @@ describe("mailcowService.listMailboxes", () => {
     isDefault: true,
   };
 
+  /*
+    The sending account's name and Reply-To are what recipients actually see,
+    so they win over the mail server's own label. Deferring to Mailcow here
+    would make renaming a connected mailbox in QQueue look like a no-op.
+  */
+  it("prefers the sending account's name and surfaces its Reply-To", async () => {
+    h.client.listMailboxes.mockResolvedValue([serverMailbox]);
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([
+      {
+        ...connectionRow,
+        fromName: "Support Team",
+        replyTo: "replies@acme.test",
+      },
+    ] as never);
+
+    await expect(mailcowService.listMailboxes(ownerActor)).resolves.toEqual([
+      expect.objectContaining({
+        name: "Support Team",
+        replyTo: "replies@acme.test",
+      }),
+    ]);
+  });
+
   it("marks a mailbox QQueue already sends from as MANAGED", async () => {
     h.client.listMailboxes.mockResolvedValue([serverMailbox]);
     prismaMock.sMTPConnection.findMany.mockResolvedValue([

@@ -306,6 +306,11 @@ model SMTPConnection {
   passwordEncrypted String
   fromEmail         String
   fromName          String?
+  /// Default Reply-To for every send on this connection, overridable per send
+  /// (`EmailJob.replyTo` wins). NULL means no Reply-To header unless the send
+  /// supplies one. Resolved in the send worker, beside the From it builds from
+  /// this same row, so a change here also reaches jobs already queued.
+  replyTo           String?
   isDefault         Boolean               @default(false)
   organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   emailJobs         EmailJob[]

@@ -310,6 +310,8 @@ export interface SMTPConnection {
   secure: boolean;
   fromEmail: string;
   fromName?: string | null;
+  /** Default Reply-To applied to every send on this connection. */
+  replyTo?: string | null;
   isDefault: boolean;
 }
 
@@ -579,6 +581,11 @@ export interface MailboxSummary {
   usedBytes: number | null;
   /** The sending account behind this address, when QQueue has one. */
   smtpConnectionId: string | null;
+  /**
+   * Default Reply-To on that sending account. Null for a SERVER_ONLY row:
+   * there is no sending account to hold one until the mailbox is connected.
+   */
+  replyTo: string | null;
   /** SMTP host/port of that sending account, for the Server column. */
   host: string | null;
   port: number | null;
@@ -888,6 +895,16 @@ export interface WebhookDelivery {
 }
 
 export const emailAddressSchema = z.string().email();
+
+/**
+ * A default Reply-To address, or `""` to clear one that is already set.
+ *
+ * The empty string is part of the contract rather than an accident: a cleared
+ * text input yields `""`, and with `.optional()` alone that would arrive as
+ * `undefined` — indistinguishable from "field untouched", so the address would
+ * survive the edit that meant to delete it. Services normalize `""` to NULL.
+ */
+export const replyToSchema = z.union([emailAddressSchema, z.literal("")]);
 
 export const registerSchema = z.object({
   email: emailAddressSchema,
@@ -2356,6 +2373,7 @@ export const smtpConnectionSchema = z.object({
   password: z.string().min(1),
   fromEmail: emailAddressSchema,
   fromName: z.string().optional(),
+  replyTo: replyToSchema.optional(),
   isDefault: z.boolean().optional(),
 });
 

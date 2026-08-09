@@ -68,6 +68,9 @@ export function SMTPConnections() {
           secure: form.secure,
           fromEmail: form.fromEmail,
           fromName: form.fromName || undefined,
+          // Sent even when empty: "" is how the API is told to clear a stored
+          // Reply-To, where `undefined` would mean "leave it as it was".
+          replyTo: form.replyTo,
           isDefault: form.isDefault,
         };
         if (form.username) payload.username = form.username;
@@ -84,6 +87,7 @@ export function SMTPConnections() {
         password: form.password,
         fromEmail: form.fromEmail,
         fromName: form.fromName || undefined,
+        replyTo: form.replyTo || undefined,
         isDefault: form.isDefault,
       });
     },
@@ -136,6 +140,7 @@ export function SMTPConnections() {
         password: "",
         fromEmail: editing.fromEmail,
         fromName: editing.fromName ?? "",
+        replyTo: editing.replyTo ?? "",
         isDefault: editing.isDefault,
       }
     : {

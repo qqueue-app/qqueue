@@ -358,6 +358,9 @@ operational and abuse-control gaps from the original audit have been closed.
   sync-enabled `InboxAccount`, and optionally a send-as grant.
 - [x] The `InboxAccount` is mandatory — it is what gives that identity DSN
   bounce visibility.
+- [x] "Edit mailbox" (OWNER/ADMIN) sets the display name and an optional
+  default Reply-To. Both live on the `SMTPConnection`, so the editor also
+  covers EXTERNAL rows and keeps working while Mailcow is unreachable.
 - [x] Post-provision SMTP verification retries briefly (Mailcow needs a moment
   to activate a fresh app password); rollback is reserved for "we couldn't
   record what we created", never "the handshake didn't work yet".

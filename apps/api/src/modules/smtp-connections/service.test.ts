@@ -163,6 +163,49 @@ describe("smtpConnectionService.update", () => {
     expect(data.isDefault).toBe(false);
   });
 
+  // Renaming or re-pointing a Reply-To says nothing about the credentials, so
+  // the handshake is skipped: it costs a round trip, and a mail server that is
+  // down would otherwise block an edit that has nothing to do with it.
+  it("skips the SMTP handshake when no transport field changed", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(existing as never);
+    prismaMock.sMTPConnection.update.mockResolvedValue({ id: "s1" } as never);
+
+    await smtpConnectionService.update("s1", "user_1", {
+      name: "Renamed",
+      replyTo: "support@b.com"
+    });
+
+    expect(verify).not.toHaveBeenCalled();
+    const data = prismaMock.sMTPConnection.update.mock.calls[0][0].data;
+    expect(data.replyTo).toBe("support@b.com");
+  });
+
+  it("still verifies when a transport field changes", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(existing as never);
+    prismaMock.sMTPConnection.update.mockResolvedValue({ id: "s1" } as never);
+
+    await smtpConnectionService.update("s1", "user_1", { host: "new.host" });
+
+    expect(verify).toHaveBeenCalled();
+  });
+
+  // "" is the only way a cleared text input can say "remove this"; `undefined`
+  // has to keep meaning "leave it alone" or every partial update would wipe it.
+  it("clears a stored Reply-To on an empty string and leaves it alone when omitted", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(existing as never);
+    prismaMock.sMTPConnection.update.mockResolvedValue({ id: "s1" } as never);
+
+    await smtpConnectionService.update("s1", "user_1", { replyTo: "" });
+    expect(prismaMock.sMTPConnection.update.mock.calls[0][0].data.replyTo).toBe(
+      null
+    );
+
+    await smtpConnectionService.update("s1", "user_1", { name: "Renamed" });
+    expect(
+      prismaMock.sMTPConnection.update.mock.calls[1][0].data.replyTo
+    ).toBeUndefined();
+  });
+
   it("re-encrypts new secrets and recomputes default when toggled on", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(existing as never);
     prismaMock.sMTPConnection.updateMany.mockResolvedValue({ count: 0 } as never);

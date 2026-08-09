@@ -62,6 +62,10 @@ Beyond `to`, `subject`, and content, the body also accepts `cc`, `bcc`,
 `replyTo`, `attachmentIds`, and `inReplyTo` / `references` (for threading
 replies).
 
+`replyTo` is optional in a second sense: omit it and the send inherits the
+default Reply-To configured on the sending account it goes out through, if that
+account has one. Passing `replyTo` overrides that default for the one send.
+
 ## Idempotency
 
 To make a send safe to retry (e.g. after a network timeout), pass a unique

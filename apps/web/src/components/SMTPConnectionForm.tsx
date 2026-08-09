@@ -12,6 +12,7 @@ export interface SMTPConnectionFormValues {
   password: string;
   fromEmail: string;
   fromName: string;
+  replyTo: string;
   isDefault: boolean;
 }
 
@@ -36,6 +37,7 @@ export const emptySMTPConnectionForm: SMTPConnectionFormValues = {
   password: "",
   fromEmail: "",
   fromName: "",
+  replyTo: "",
   isDefault: false,
 };
 
@@ -171,6 +173,20 @@ export function SMTPConnectionForm({
             onChange={(e) => update({ fromName: e.target.value })}
           />
         </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="replyTo">Reply-To (optional)</Label>
+        <Input
+          id="replyTo"
+          type="email"
+          placeholder={form.fromEmail || "hello@example.com"}
+          value={form.replyTo}
+          onChange={(e) => update({ replyTo: e.target.value })}
+        />
+        <p className="text-meta text-muted-foreground">
+          Where replies go when someone answers mail from this account. Leave
+          empty to have replies go back to the From address.
+        </p>
       </div>
       <div className="flex flex-wrap gap-6">
         <div className="space-y-field">

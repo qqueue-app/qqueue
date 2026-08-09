@@ -42,6 +42,7 @@ vi.mock("../lib/api.js", () => ({
     setMailboxActive: vi.fn(),
     deleteMailbox: vi.fn(),
     verifySMTPConnection: vi.fn(),
+    updateSMTPConnection: vi.fn(),
     listMailDomainGrants: vi.fn(),
     addMailDomainGrant: vi.fn(),
     removeMailDomainGrant: vi.fn(),
@@ -93,6 +94,7 @@ const mailbox = {
   quotaBytes: 0,
   usedBytes: 1536,
   smtpConnectionId: "s1",
+  replyTo: null as string | null,
   host: "mail.acme.test",
   port: 465,
   isDefault: true,
@@ -107,6 +109,7 @@ const otherMailbox = {
   quotaBytes: 0,
   usedBytes: 0,
   smtpConnectionId: "s2",
+  replyTo: null as string | null,
   host: "mail.other.test",
   port: 465,
   isDefault: false,
@@ -122,6 +125,7 @@ const unconnectedMailbox = {
   quotaBytes: 0,
   usedBytes: 0,
   smtpConnectionId: null,
+  replyTo: null as string | null,
   host: null,
   port: null,
   isDefault: false,
@@ -196,6 +200,7 @@ beforeEach(() => {
     smtpConnectionDeleted: true,
     inboxAccountDisabled: true,
   });
+  mockedApi.updateSMTPConnection.mockResolvedValue(connection);
 });
 
 describe("Mailboxes", () => {
@@ -462,6 +467,77 @@ describe("Mailboxes", () => {
         expect.objectContaining({ organizationId: "org_1", name: "Hello" })
       )
     );
+  });
+
+  /*
+    Reply-To lives on the sending account, so editing it is an account write,
+    not a mail-server one: it must not need Mailcow, and it must reach the
+    EXTERNAL rows that have no mailbox behind them at all.
+  */
+  it("edits a mailbox's display name and Reply-To", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+
+    await screen.findByText("support@acme.test");
+    await screen.findByText("+1");
+    await user.click(screen.getByRole("button", { name: "Edit mailbox" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.type(
+      within(dialog).getByLabelText("Reply-To (optional)"),
+      "replies@acme.test"
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: /Save mailbox/i })
+    );
+
+    await waitFor(() =>
+      expect(mockedApi.updateSMTPConnection).toHaveBeenCalledWith("s1", {
+        organizationId: "org_1",
+        fromName: "Support",
+        replyTo: "replies@acme.test",
+      })
+    );
+  });
+
+  it("clears a Reply-To by emptying the field", async () => {
+    const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([
+      { ...mailbox, replyTo: "replies@acme.test" },
+    ]);
+    renderWithProviders(<Mailboxes />);
+
+    await screen.findByText("support@acme.test");
+    await screen.findByText("+1");
+    await user.click(screen.getByRole("button", { name: "Edit mailbox" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.clear(within(dialog).getByLabelText("Reply-To (optional)"));
+    await user.click(
+      within(dialog).getByRole("button", { name: /Save mailbox/i })
+    );
+
+    // "" and not an omitted key: the API reads a missing field as "unchanged".
+    await waitFor(() =>
+      expect(mockedApi.updateSMTPConnection).toHaveBeenCalledWith(
+        "s1",
+        expect.objectContaining({ replyTo: "" })
+      )
+    );
+  });
+
+  it("offers no mailbox editor for a row QQueue has no account for", async () => {
+    const user = userEvent.setup();
+    mockedApi.listMailboxes.mockResolvedValue([mailbox, unconnectedMailbox]);
+    renderWithProviders(<Mailboxes />);
+
+    await screen.findByText("hello@acme.test");
+    await screen.findByText("+1");
+    await openRowMenu(user, "hello@acme.test");
+
+    expect(
+      screen.queryByRole("menuitem", { name: "Edit mailbox" })
+    ).not.toBeInTheDocument();
   });
 
   it("resets a mailbox password and shows it exactly once", async () => {

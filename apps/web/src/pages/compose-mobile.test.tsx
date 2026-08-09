@@ -188,7 +188,7 @@ describe("Compose on a phone", () => {
       screen.queryByRole("button", { name: /Add files/i })
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Cc / Bcc" }));
+    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
     expect(screen.getByLabelText("Cc")).toBeInTheDocument();
   });
 });

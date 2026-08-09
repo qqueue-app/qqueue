@@ -386,6 +386,7 @@ export function EmailStudio() {
   const [toEmails, setToEmails] = useState<string[]>([]);
   const [ccEmails, setCcEmails] = useState<string[]>([]);
   const [bccEmails, setBccEmails] = useState<string[]>([]);
+  const [replyTo, setReplyTo] = useState("");
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -523,6 +524,19 @@ export function EmailStudio() {
     [smtpConnections]
   );
 
+  /*
+    What a blank Reply-To will actually do, so the field can say so instead of
+    sitting there empty and ambiguous. The account carries a default; failing
+    that, replies land on the From address, which is where mail clients send
+    them when the header is absent.
+  */
+  const sendingConnection =
+    smtpConnectionId === DEFAULT_SMTP
+      ? defaultConnection
+      : smtpConnections.find((connection) => connection.id === smtpConnectionId);
+  const inheritedReplyTo =
+    sendingConnection?.replyTo || sendingConnection?.fromEmail || "";
+
   // Contacts first so a saved name wins over a bare address from past sends.
   const recipientSuggestions = useMemo<RecipientSuggestion[]>(() => {
     const seen = new Set<string>();
@@ -604,6 +618,7 @@ export function EmailStudio() {
     setToEmails([]);
     setCcEmails([]);
     setBccEmails([]);
+    setReplyTo("");
     setSelectedListIds([]);
     setAttachments([]);
     setCopyRevealed(false);
@@ -734,6 +749,8 @@ export function EmailStudio() {
           to: toEmails,
           cc: ccEmails,
           bcc: bccEmails,
+          // Sent even when blank so clearing it survives the round trip.
+          replyTo,
           listIds: selectedListIds,
           smtpConnectionId:
             smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
@@ -879,6 +896,7 @@ export function EmailStudio() {
       setToEmails(latest.payload.to);
       setCcEmails(latest.payload.cc);
       setBccEmails(latest.payload.bcc);
+      setReplyTo(latest.payload.replyTo ?? "");
       setSelectedListIds(latest.payload.listIds);
       setSMTPConnectionId(latest.payload.smtpConnectionId ?? DEFAULT_SMTP);
       setTemplateId(latest.payload.templateId ?? NO_TEMPLATE);
@@ -922,6 +940,7 @@ export function EmailStudio() {
     setToEmails(draft.to ?? []);
     setCcEmails(draft.cc ?? []);
     setBccEmails(draft.bcc ?? []);
+    setReplyTo(draft.replyTo ?? "");
     setSelectedListIds(draft.listIds ?? []);
     setAttachments(draft.attachments ?? []);
     setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
@@ -1075,6 +1094,7 @@ export function EmailStudio() {
           to: toEmails,
           cc: ccEmails.length ? ccEmails : undefined,
           bcc: bccEmails.length ? bccEmails : undefined,
+          replyTo: replyTo.trim() || undefined,
           listIds: selectedListIds.length ? selectedListIds : undefined,
           smtpConnectionId:
             smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
@@ -1135,6 +1155,9 @@ export function EmailStudio() {
         to: toEmails,
         cc: ccEmails.length ? ccEmails : undefined,
         bcc: bccEmails.length ? bccEmails : undefined,
+        // Blank means "use the sending account's default", resolved by the
+        // worker — not "no Reply-To" — so an empty field sends nothing.
+        replyTo: replyTo.trim() || undefined,
         listIds: selectedListIds.length ? selectedListIds : undefined,
         smtpConnectionId:
           smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
@@ -1198,7 +1221,10 @@ export function EmailStudio() {
     half of each condition the content would exist with nowhere to render.
   */
   const copyVisible =
-    copyRevealed || ccEmails.length > 0 || bccEmails.length > 0;
+    copyRevealed ||
+    ccEmails.length > 0 ||
+    bccEmails.length > 0 ||
+    replyTo.length > 0;
   const attachmentsVisible = attachmentsRevealed || attachments.length > 0;
 
   return (
@@ -1382,7 +1408,7 @@ export function EmailStudio() {
                         aria-controls="cc"
                         onClick={() => setCopyRevealed(true)}
                       >
-                        Cc / Bcc
+                        Cc / Bcc / Reply-To
                       </Button>
                     )}
                   </div>
@@ -1403,6 +1429,22 @@ export function EmailStudio() {
                         onChange={setBccEmails}
                         suggestions={recipientSuggestions}
                       />
+                      <Field className={fieldWidths.long}>
+                        <Label htmlFor="reply-to">Reply-To</Label>
+                        <Input
+                          id="reply-to"
+                          type="email"
+                          width="long"
+                          value={replyTo}
+                          onChange={(event) => setReplyTo(event.target.value)}
+                          placeholder={inheritedReplyTo}
+                        />
+                        <p className="text-meta text-text-tertiary">
+                          {sendingConnection?.replyTo
+                            ? `Overrides this account's default of ${sendingConnection.replyTo}.`
+                            : "Where replies go. Leave empty to use the sending account's setting."}
+                        </p>
+                      </Field>
                     </>
                   ) : null}
 

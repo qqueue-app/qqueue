@@ -37,6 +37,8 @@ export type PendingDraftPayload = {
   cc: string[];
   bcc: string[];
   listIds: string[];
+  /** Optional: records written before the composer had the field lack it. */
+  replyTo?: string;
   smtpConnectionId?: string;
   templateId?: string;
 };

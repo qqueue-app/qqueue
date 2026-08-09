@@ -23,10 +23,57 @@ export const smtpConnectionSelect = {
   secure: true,
   fromEmail: true,
   fromName: true,
+  replyTo: true,
   isDefault: true,
   createdAt: true,
   updatedAt: true
 };
+
+/**
+ * `""` clears a stored Reply-To, `undefined` leaves it alone. Prisma reads
+ * `undefined` as "don't touch this column" and `null` as "set it to NULL", so
+ * the two map straight through once the empty string is folded into null.
+ */
+export function normalizeReplyTo(replyTo: string | undefined) {
+  if (replyTo === undefined) {
+    return undefined;
+  }
+  return replyTo.trim() || null;
+}
+
+/**
+ * Whether an update changes anything a live SMTP handshake could disprove.
+ *
+ * Renaming an account or pointing its Reply-To somewhere new says nothing about
+ * the credentials, so re-verifying costs a round trip and — worse — makes an
+ * edit fail for a reason unrelated to it: with the mail server down you could
+ * not fix a typo in a Reply-To. "Test connection" exists for checking creds on
+ * purpose.
+ */
+function assertSecretsReadable(connection: {
+  usernameEncrypted: string;
+  passwordEncrypted: string;
+}) {
+  try {
+    decryptSecret(connection.usernameEncrypted);
+    decryptSecret(connection.passwordEncrypted);
+  } catch (error) {
+    if (error instanceof SecretDecryptionError) {
+      throw new HttpError(400, SECRET_DECRYPTION_MESSAGE);
+    }
+    throw error;
+  }
+}
+
+function touchesTransport(input: SMTPConnectionUpdateInput) {
+  return (
+    input.host !== undefined ||
+    input.port !== undefined ||
+    input.secure !== undefined ||
+    input.username !== undefined ||
+    input.password !== undefined
+  );
+}
 
 // Exported for Mailcow provisioning, which creates connections inside its own
 // transaction — hence the injectable client.
@@ -160,6 +207,7 @@ export const smtpConnectionService = {
         passwordEncrypted,
         fromEmail: input.fromEmail,
         fromName: input.fromName,
+        replyTo: normalizeReplyTo(input.replyTo) ?? null,
         isDefault
       },
       select: smtpConnectionSelect
@@ -180,13 +228,22 @@ export const smtpConnectionService = {
       ? encryptSecret(input.password)
       : existing.passwordEncrypted;
 
-    await verifyConnection({
-      host: input.host ?? existing.host,
-      port: input.port ?? existing.port,
-      secure: input.secure ?? existing.secure,
-      usernameEncrypted,
-      passwordEncrypted
-    });
+    if (touchesTransport(input)) {
+      await verifyConnection({
+        host: input.host ?? existing.host,
+        port: input.port ?? existing.port,
+        secure: input.secure ?? existing.secure,
+        usernameEncrypted,
+        passwordEncrypted
+      });
+    } else {
+      // No handshake, but the stored secrets still have to be readable. An
+      // unreadable one (a rotated ENCRYPTION_KEY, say) means this account can
+      // no longer send at all, and quietly accepting a rename would bury that
+      // behind a success toast. The check is local, so it costs nothing and
+      // does not care whether the mail server is up.
+      assertSecretsReadable({ usernameEncrypted, passwordEncrypted });
+    }
 
     const isDefault =
       input.isDefault === undefined
@@ -204,6 +261,7 @@ export const smtpConnectionService = {
         passwordEncrypted,
         fromEmail: input.fromEmail,
         fromName: input.fromName,
+        replyTo: normalizeReplyTo(input.replyTo),
         isDefault
       },
       select: smtpConnectionSelect

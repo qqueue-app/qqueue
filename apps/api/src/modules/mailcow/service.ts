@@ -469,6 +469,7 @@ export const mailcowService = {
         port: true,
         fromEmail: true,
         fromName: true,
+        replyTo: true,
         isDefault: true,
       },
       orderBy: [{ fromEmail: "asc" }, { createdAt: "asc" }],
@@ -511,6 +512,7 @@ export const mailcowService = {
         quotaBytes: mailbox.quotaBytes,
         usedBytes: mailbox.usedBytes,
         smtpConnectionId: null,
+        replyTo: null,
         host: null,
         port: null,
         isDefault: false,
@@ -528,11 +530,16 @@ export const mailcowService = {
       if (server && server.smtpConnectionId === null) {
         server.origin = "MANAGED";
         server.smtpConnectionId = connection.id;
+        server.replyTo = connection.replyTo;
         server.host = connection.host;
         server.port = connection.port;
         server.isDefault = connection.isDefault;
+        // The sending account wins over the mail server's own label: it is the
+        // name recipients actually see (the worker builds From from this row),
+        // and it is the one this page's editor writes. Deferring to Mailcow's
+        // copy would make renaming a connected mailbox look like a no-op.
         server.name =
-          server.name || connection.fromName || connection.name || email;
+          connection.fromName || server.name || connection.name || email;
         continue;
       }
       // No server match. Either it lives somewhere else entirely (a hand-added
@@ -548,6 +555,7 @@ export const mailcowService = {
         quotaBytes: null,
         usedBytes: null,
         smtpConnectionId: connection.id,
+        replyTo: connection.replyTo,
         host: connection.host,
         port: connection.port,
         isDefault: connection.isDefault,

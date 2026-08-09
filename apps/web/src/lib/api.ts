@@ -640,6 +640,8 @@ export interface SMTPConnection {
   secure: boolean;
   fromEmail: string;
   fromName?: string | null;
+  /** Default Reply-To applied to every send on this account. */
+  replyTo?: string | null;
   isDefault: boolean;
 }
 
@@ -835,6 +837,8 @@ export interface MailboxSummary {
   quotaBytes: number | null;
   usedBytes: number | null;
   smtpConnectionId: string | null;
+  /** Default Reply-To on that sending account; null when there isn't one. */
+  replyTo: string | null;
   host: string | null;
   port: number | null;
   isDefault: boolean;

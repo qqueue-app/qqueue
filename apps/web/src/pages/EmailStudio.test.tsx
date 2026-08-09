@@ -74,6 +74,7 @@ const smtp = [
     port: 587,
     secure: false,
     fromEmail: "from@x.com",
+    replyTo: "support@x.com",
     isDefault: true
   }
 ];
@@ -402,15 +403,70 @@ describe("EmailStudio", () => {
     expect(screen.queryByLabelText("Bcc")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Reply-To")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Cc / Bcc" }));
+    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
 
     expect(screen.getByLabelText("Cc")).toBeInTheDocument();
     expect(screen.getByLabelText("Bcc")).toBeInTheDocument();
     // Once the fields are on screen the reveal is gone — a "hide" that refuses
     // to hide because you typed into it is worse than no button.
     expect(
-      screen.queryByRole("button", { name: "Cc / Bcc" })
+      screen.queryByRole("button", { name: "Cc / Bcc / Reply-To" })
     ).not.toBeInTheDocument();
+  });
+
+  /*
+    A blank Reply-To does not mean "no Reply-To" — the send inherits the
+    sending account's default. The field has to say which address that is, or
+    an empty box reads as "replies go nowhere in particular".
+  */
+  it("shows the account's default Reply-To as the field's placeholder", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
+
+    expect(screen.getByLabelText("Reply-To")).toHaveAttribute(
+      "placeholder",
+      "support@x.com"
+    );
+    expect(
+      screen.getByText(/Overrides this account's default of support@x.com/)
+    ).toBeInTheDocument();
+  });
+
+  it("omits Reply-To from the send when the field is left blank", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Hi");
+    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
+    await user.click(screen.getByRole("button", { name: /Send email/i }));
+
+    await waitFor(() => expect(mockedApi.sendManualEmail).toHaveBeenCalled());
+    // Undefined rather than "": the worker is what resolves the account
+    // default, and an empty string would be a Reply-To header of nothing.
+    expect(mockedApi.sendManualEmail.mock.calls[0][0].replyTo).toBeUndefined();
+  });
+
+  it("sends a one-off Reply-To that overrides the account default", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
+    await user.type(screen.getByLabelText("Reply-To"), "just-this-one@x.com");
+    await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Hi");
+    await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
+    await user.click(screen.getByRole("button", { name: /Send email/i }));
+
+    await waitFor(() => expect(mockedApi.sendManualEmail).toHaveBeenCalled());
+    expect(mockedApi.sendManualEmail.mock.calls[0][0].replyTo).toBe(
+      "just-this-one@x.com"
+    );
   });
 
   // A folded-away field must never swallow content that already exists.

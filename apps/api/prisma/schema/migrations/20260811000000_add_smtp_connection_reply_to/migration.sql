@@ -1,0 +1,14 @@
+-- A default Reply-To for a sending account.
+--
+-- The address a recipient's client answers to is not always the address the
+-- mail went out as: a mailbox that only sends (notifications@, billing@) wants
+-- replies to land somewhere a human reads. Storing it on SMTPConnection keeps
+-- the rule the rest of the pipeline already follows — every send resolves who
+-- it sends as from its connection — instead of asking each send surface to
+-- remember a header.
+--
+-- Resolution is `EmailJob.replyTo ?? SMTPConnection.replyTo`, applied in the
+-- send worker next to the From it already builds from this row. NULL therefore
+-- means exactly what it meant before this column existed: no Reply-To unless
+-- the individual send supplies one. No backfill for that reason.
+ALTER TABLE "SMTPConnection" ADD COLUMN "replyTo" TEXT;

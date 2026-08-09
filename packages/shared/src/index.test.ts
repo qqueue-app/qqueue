@@ -429,6 +429,23 @@ describe("smtpConnection schemas", () => {
     ).toBe(false);
   });
 
+  // "" is the only thing a cleared text input can send, and it has to mean
+  // "remove the Reply-To" — distinct from omitting the key, which means
+  // "leave whatever is stored".
+  it("takes an empty Reply-To as a clear, and rejects a malformed one", () => {
+    expect(
+      smtpConnectionUpdateSchema.safeParse({ replyTo: "" }).success
+    ).toBe(true);
+    expect(
+      smtpConnectionUpdateSchema.safeParse({ replyTo: "replies@example.com" })
+        .success
+    ).toBe(true);
+    expect(
+      smtpConnectionUpdateSchema.safeParse({ replyTo: "not-an-address" })
+        .success
+    ).toBe(false);
+  });
+
   it("allows partial updates", () => {
     expect(smtpConnectionUpdateSchema.safeParse({ port: 25 }).success).toBe(
       true
