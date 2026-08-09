@@ -1092,34 +1092,60 @@ function buildErrorMessage(status: number, body: ApiErrorBody | null) {
 
 const AUTH_PREFIX = "/api/v1/auth/";
 
-// Exchange the stored refresh token for a fresh pair. Returns true on success.
-async function performRefresh(): Promise<boolean> {
+/**
+ * Why this is three-valued rather than a boolean: a refresh token is good for
+ * 30 days, so the only thing that justifies throwing it away is the server
+ * saying it is no longer valid. Everything else — /auth/refresh is rate
+ * limited (60/15min, keyed by IP, so tabs and coworkers behind one NAT share
+ * the budget), the API is restarting behind a 502, wifi dropped on wake — is
+ * temporary. Treating those as "signed out" is what logs someone out of a page
+ * they left open; the next attempt would have succeeded.
+ */
+type RefreshOutcome =
+  /** New tokens are stored; retry the request. */
+  | "refreshed"
+  /** The server rejected the token itself. The session really is over. */
+  | "rejected"
+  /** Could not tell. Keep the session and let the caller fail this one request. */
+  | "unavailable";
+
+// Exchange the stored refresh token for a fresh pair.
+async function performRefresh(): Promise<RefreshOutcome> {
   const { refreshToken } = getSession();
   if (!refreshToken) {
-    return false;
+    return "rejected";
   }
 
+  let response: Response;
   try {
-    const response = await fetch(`${apiBaseUrl}/api/v1/auth/refresh`, {
+    response = await fetch(`${apiBaseUrl}/api/v1/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
     });
-    if (!response.ok) {
-      return false;
-    }
-    const body = (await response.json().catch(() => null)) as {
-      data?: { tokens?: { accessToken: string; refreshToken: string } };
-    } | null;
-    const tokens = body?.data?.tokens;
-    if (!tokens?.accessToken) {
-      return false;
-    }
-    updateTokens(tokens);
-    return true;
   } catch {
-    return false;
+    return "unavailable";
   }
+
+  if (response.status === 401 || response.status === 403) {
+    return "rejected";
+  }
+  if (!response.ok) {
+    return "unavailable";
+  }
+
+  const body = (await response.json().catch(() => null)) as {
+    data?: { tokens?: { accessToken: string; refreshToken: string } };
+  } | null;
+  const tokens = body?.data?.tokens;
+  if (!tokens?.accessToken) {
+    // A 2xx we cannot read is a bug, not a verdict on the token — do not sign
+    // the user out over it.
+    return "unavailable";
+  }
+
+  updateTokens(tokens);
+  return "refreshed";
 }
 
 // A dashboard screen has many queries in flight at once, so an expired access
@@ -1128,9 +1154,9 @@ async function performRefresh(): Promise<boolean> {
 // every call, and one failure anywhere in the burst clears the session and
 // bounces the user to /login. Collapse the burst into a single request that
 // every caller awaits.
-let inFlightRefresh: Promise<boolean> | null = null;
+let inFlightRefresh: Promise<RefreshOutcome> | null = null;
 
-function refreshTokens(): Promise<boolean> {
+function refreshTokens(): Promise<RefreshOutcome> {
   if (!inFlightRefresh) {
     inFlightRefresh = performRefresh().finally(() => {
       inFlightRefresh = null;
@@ -1181,10 +1207,15 @@ async function request<T>(
     retryOnUnauthorized &&
     !path.startsWith(AUTH_PREFIX)
   ) {
-    if (await refreshTokens()) {
+    const outcome = await refreshTokens();
+    if (outcome === "refreshed") {
       return request<T>(path, options, false);
     }
-    redirectToLogin();
+    if (outcome === "rejected") {
+      redirectToLogin();
+    }
+    // "unavailable": the session stays put and this one request fails. A poll
+    // tick or a retry will pick it up once the API is reachable again.
   }
 
   if (response.status === 204) {

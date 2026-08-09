@@ -213,6 +213,68 @@ describe("api lib", () => {
     expect(getSession().accessToken).toBe("new");
   });
 
+  // Regression: /auth/refresh is rate limited (60/15min per IP) and can 502
+  // during an API restart. Those say nothing about the refresh token, which is
+  // valid for 30 days — treating them as "signed out" is what logs someone out
+  // of a tab they left open. Only the server rejecting the token ends a session.
+  it.each([
+    ["a rate limit", 429],
+    ["a bad gateway", 502],
+    ["a conflict", 409]
+  ])("keeps the session when refresh hits %s", async (_label, status) => {
+    saveSession({
+      organizations: [],
+      accessToken: "old",
+      refreshToken: "refresh_1"
+    });
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce(jsonResponse(null, { status: 401 }));
+    fetchMock.mockResolvedValueOnce(jsonResponse(null, { status }));
+
+    const hrefSetter = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { pathname: "/dashboard", set href(v: string) { hrefSetter(v); } }
+    });
+
+    await expect(api.listOrganizations()).rejects.toBeInstanceOf(ApiError);
+    expect(hrefSetter).not.toHaveBeenCalled();
+    expect(getSession().refreshToken).toBe("refresh_1");
+
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original
+    });
+  });
+
+  it("keeps the session when the refresh request cannot reach the API", async () => {
+    saveSession({
+      organizations: [],
+      accessToken: "old",
+      refreshToken: "refresh_1"
+    });
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce(jsonResponse(null, { status: 401 }));
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+    const hrefSetter = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { pathname: "/dashboard", set href(v: string) { hrefSetter(v); } }
+    });
+
+    await expect(api.listOrganizations()).rejects.toBeInstanceOf(ApiError);
+    expect(hrefSetter).not.toHaveBeenCalled();
+    expect(getSession().refreshToken).toBe("refresh_1");
+
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original
+    });
+  });
+
   it("redirects to login when refresh fails", async () => {
     saveSession({
       organizations: [],
