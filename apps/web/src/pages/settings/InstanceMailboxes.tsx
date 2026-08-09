@@ -101,12 +101,21 @@ export function InstanceMailboxes() {
         ),
       },
       {
-        accessorKey: "organizationName",
-        header: "Organization",
-        meta: { title: "Organization" },
+        id: "organizations",
+        // Sorts and filters on the joined names, since the value is a list.
+        accessorFn: (row) =>
+          row.organizations.map((organization) => organization.name).join(", "),
+        header: "Organizations",
+        meta: { title: "Organizations" },
         cell: ({ row }) =>
-          row.original.organizationName ? (
-            <Badge variant="secondary">{row.original.organizationName}</Badge>
+          row.original.organizations.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {row.original.organizations.map((organization) => (
+                <Badge key={organization.id} variant="secondary">
+                  {organization.name}
+                </Badge>
+              ))}
+            </div>
           ) : (
             <Hint label="Its domain is assigned to no organization, so no org can manage this mailbox from QQueue.">
               <span className="cursor-help text-muted-foreground">
@@ -214,7 +223,12 @@ export function InstanceMailboxes() {
                 ) : null}
               </div>
               <div className="text-meta text-muted-foreground">
-                {row.organizationName ?? "Unassigned"} ·{" "}
+                {row.organizations.length > 0
+                  ? row.organizations
+                      .map((organization) => organization.name)
+                      .join(", ")
+                  : "Unassigned"}{" "}
+                ·{" "}
                 {row.quotaBytes
                   ? `${formatBytes(row.usedBytes)} of ${formatBytes(row.quotaBytes)}`
                   : formatBytes(row.usedBytes)}

@@ -80,7 +80,8 @@ beforeEach(() => {
   h.client.getDkim.mockResolvedValue(null);
 
   prismaMock.orgMailDomain.findMany.mockResolvedValue([] as never);
-  prismaMock.orgMailDomain.findUnique.mockResolvedValue(null);
+  prismaMock.orgMailDomain.findFirst.mockResolvedValue(null);
+  prismaMock.organization.findMany.mockResolvedValue([] as never);
   prismaMock.instanceAdminMute.findMany.mockResolvedValue([] as never);
   prismaMock.mailDomainGrant.findMany.mockResolvedValue([] as never);
   prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
@@ -96,8 +97,7 @@ describe("instanceAdminService.listDomains", () => {
       expect.objectContaining({
         domain: "acme.test",
         ownership: "UNCLAIMED",
-        organizationId: null,
-        organizationName: null,
+        organizations: [],
       }),
     ]);
   });
@@ -114,8 +114,34 @@ describe("instanceAdminService.listDomains", () => {
     await expect(instanceAdminService.listDomains(ADMIN)).resolves.toEqual([
       expect.objectContaining({
         ownership: "CLAIMED",
+        organizations: [{ id: "org_1", name: "Acme" }],
+      }),
+    ]);
+  });
+
+  // The point of the change: a domain may be shared, so the row carries every
+  // org that reaches it rather than a single owner.
+  it("names every organization a shared domain is assigned to", async () => {
+    prismaMock.orgMailDomain.findMany.mockResolvedValue([
+      {
+        domain: "acme.test",
         organizationId: "org_1",
-        organizationName: "Acme",
+        organization: { name: "Acme" },
+      },
+      {
+        domain: "acme.test",
+        organizationId: "org_2",
+        organization: { name: "Beta" },
+      },
+    ] as never);
+
+    await expect(instanceAdminService.listDomains(ADMIN)).resolves.toEqual([
+      expect.objectContaining({
+        ownership: "CLAIMED",
+        organizations: [
+          { id: "org_1", name: "Acme" },
+          { id: "org_2", name: "Beta" },
+        ],
       }),
     ]);
   });
@@ -133,7 +159,7 @@ describe("instanceAdminService.listDomains", () => {
 
     const rows = await instanceAdminService.listDomains(ADMIN);
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.organizationName).toBe("Other");
+    expect(rows[0]?.organizations).toEqual([{ id: "org_2", name: "Other" }]);
   });
 
   it("flags a muted domain without dropping it from the list", async () => {
@@ -157,61 +183,114 @@ describe("instanceAdminService.listDomains", () => {
 
 describe("instanceAdminService.assignDomain", () => {
   it("assigns an unassigned domain to an organization", async () => {
-    prismaMock.organization.findUnique.mockResolvedValue({
-      id: "org_1",
-      name: "Acme",
-    } as never);
+    prismaMock.organization.findMany.mockResolvedValue([
+      { id: "org_1", name: "Acme" },
+    ] as never);
 
     await instanceAdminService.assignDomain(
       "Acme.Test",
-      { organizationId: "org_1" },
+      { organizationIds: ["org_1"] },
       ADMIN
     );
 
-    expect(prismaMock.orgMailDomain.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { domain: "acme.test" },
-        create: { domain: "acme.test", organizationId: "org_1" },
-        update: { organizationId: "org_1" },
-      })
-    );
+    expect(prismaMock.orgMailDomain.createMany).toHaveBeenCalledWith({
+      data: [{ domain: "acme.test", organizationId: "org_1" }],
+    });
   });
 
-  // A grant is delegation *within* an assignment, so it cannot outlive one.
-  it("drops the losing org's grants when a domain is reassigned", async () => {
-    prismaMock.organization.findUnique.mockResolvedValue({
-      id: "org_2",
-      name: "Other",
-    } as never);
-    prismaMock.orgMailDomain.findUnique.mockResolvedValue({
-      organizationId: "org_1",
-    } as never);
+  it("hands one domain to several organizations at once", async () => {
+    prismaMock.organization.findMany.mockResolvedValue([
+      { id: "org_1", name: "Acme" },
+      { id: "org_2", name: "Beta" },
+    ] as never);
 
     await instanceAdminService.assignDomain(
       "acme.test",
-      { organizationId: "org_2" },
+      { organizationIds: ["org_1", "org_2"] },
+      ADMIN
+    );
+
+    expect(prismaMock.orgMailDomain.createMany).toHaveBeenCalledWith({
+      data: [
+        { domain: "acme.test", organizationId: "org_1" },
+        { domain: "acme.test", organizationId: "org_2" },
+      ],
+    });
+  });
+
+  // A grant is delegation *within* an assignment, so it cannot outlive one.
+  it("drops the grants of an org dropped from the set", async () => {
+    prismaMock.organization.findMany.mockResolvedValue([
+      { id: "org_2", name: "Other" },
+    ] as never);
+    prismaMock.orgMailDomain.findMany.mockResolvedValue([
+      {
+        domain: "acme.test",
+        organizationId: "org_1",
+        organization: { name: "Acme" },
+      },
+    ] as never);
+
+    await instanceAdminService.assignDomain(
+      "acme.test",
+      { organizationIds: ["org_2"] },
       ADMIN
     );
 
     expect(prismaMock.mailDomainGrant.deleteMany).toHaveBeenCalledWith({
-      where: { domain: "acme.test", organizationId: "org_1" },
+      where: { domain: "acme.test", organizationId: { in: ["org_1"] } },
     });
   });
 
-  it("unassigns a domain and clears its grants", async () => {
+  /*
+    The reason assignment diffs rather than clearing and rewriting: an org that
+    stays in the set keeps its delegations. Re-saving an unchanged set would
+    otherwise silently revoke every grant under the domain.
+  */
+  it("leaves the grants of an org that stays in the set alone", async () => {
+    prismaMock.organization.findMany.mockResolvedValue([
+      { id: "org_1", name: "Acme" },
+      { id: "org_2", name: "Beta" },
+    ] as never);
+    prismaMock.orgMailDomain.findMany.mockResolvedValue([
+      {
+        domain: "acme.test",
+        organizationId: "org_1",
+        organization: { name: "Acme" },
+      },
+    ] as never);
+
+    await instanceAdminService.assignDomain(
+      "acme.test",
+      { organizationIds: ["org_1", "org_2"] },
+      ADMIN
+    );
+
+    expect(prismaMock.mailDomainGrant.deleteMany).not.toHaveBeenCalled();
+    // org_1 already held it, so only the newcomer is written.
+    expect(prismaMock.orgMailDomain.createMany).toHaveBeenCalledWith({
+      data: [{ domain: "acme.test", organizationId: "org_2" }],
+    });
+  });
+
+  it("unassigns a domain and clears its grants when the set is empty", async () => {
+    prismaMock.orgMailDomain.findMany.mockResolvedValue([
+      { organizationId: "org_1" },
+    ] as never);
+
     await expect(
       instanceAdminService.assignDomain(
         "acme.test",
-        { organizationId: null },
+        { organizationIds: [] },
         ADMIN
       )
     ).resolves.toBeNull();
 
     expect(prismaMock.mailDomainGrant.deleteMany).toHaveBeenCalledWith({
-      where: { domain: "acme.test" },
+      where: { domain: "acme.test", organizationId: { in: ["org_1"] } },
     });
     expect(prismaMock.orgMailDomain.deleteMany).toHaveBeenCalledWith({
-      where: { domain: "acme.test" },
+      where: { domain: "acme.test", organizationId: { in: ["org_1"] } },
     });
   });
 
@@ -221,22 +300,27 @@ describe("instanceAdminService.assignDomain", () => {
     await expect(
       instanceAdminService.assignDomain(
         "ghost.test",
-        { organizationId: "org_1" },
+        { organizationIds: ["org_1"] },
         ADMIN
       )
     ).rejects.toMatchObject({ statusCode: 404, code: "not_found" });
   });
 
-  it("refuses to assign to an organization that does not exist", async () => {
-    prismaMock.organization.findUnique.mockResolvedValue(null);
+  // All-or-nothing: quietly dropping an id the administrator ticked would
+  // report success for an assignment that never happened.
+  it("refuses the whole call when one organization does not exist", async () => {
+    prismaMock.organization.findMany.mockResolvedValue([
+      { id: "org_1", name: "Acme" },
+    ] as never);
 
     await expect(
       instanceAdminService.assignDomain(
         "acme.test",
-        { organizationId: "nope" },
+        { organizationIds: ["org_1", "nope"] },
         ADMIN
       )
     ).rejects.toMatchObject({ statusCode: 400 });
+    expect(prismaMock.orgMailDomain.createMany).not.toHaveBeenCalled();
   });
 });
 
@@ -248,22 +332,24 @@ describe("instanceAdminService.createDomain", () => {
     active: true,
   };
 
-  it("creates the domain and records the assignment when one is given", async () => {
-    prismaMock.organization.findUnique.mockResolvedValue({
-      name: "Acme",
-    } as never);
+  it("creates the domain and records the assignments when any are given", async () => {
+    prismaMock.organization.findMany.mockResolvedValue([
+      { id: "org_1", name: "Acme" },
+    ] as never);
 
     const result = await instanceAdminService.createDomain({
       ...input,
-      organizationId: "org_1",
+      organizationIds: ["org_1"],
     });
 
     expect(h.client.createDomain).toHaveBeenCalled();
     expect(h.client.generateDkim).toHaveBeenCalledWith("new.test");
-    expect(prismaMock.orgMailDomain.create).toHaveBeenCalledWith({
-      data: { domain: "new.test", organizationId: "org_1" },
+    expect(prismaMock.orgMailDomain.createMany).toHaveBeenCalledWith({
+      data: [{ domain: "new.test", organizationId: "org_1" }],
     });
-    expect(result.domain.organizationName).toBe("Acme");
+    expect(result.domain.organizations).toEqual([
+      { id: "org_1", name: "Acme" },
+    ]);
   });
 
   // Safe now in a way it was not before: an unassigned domain reaches nobody,
@@ -271,9 +357,9 @@ describe("instanceAdminService.createDomain", () => {
   it("creates an unassigned domain when no organization is given", async () => {
     const result = await instanceAdminService.createDomain(input);
 
-    expect(prismaMock.orgMailDomain.create).not.toHaveBeenCalled();
+    expect(prismaMock.orgMailDomain.createMany).not.toHaveBeenCalled();
     expect(result.domain.ownership).toBe("UNCLAIMED");
-    expect(result.domain.organizationId).toBeNull();
+    expect(result.domain.organizations).toEqual([]);
   });
 
   it("refuses a domain the mail server already has", async () => {
@@ -346,8 +432,8 @@ describe("instanceAdminService.addDomainGrant", () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
       role: "ADMIN",
     } as never);
-    prismaMock.orgMailDomain.findUnique.mockResolvedValue({
-      organizationId: "org_1",
+    prismaMock.orgMailDomain.findFirst.mockResolvedValue({
+      id: "omd_1",
     } as never);
   });
 
@@ -368,9 +454,9 @@ describe("instanceAdminService.addDomainGrant", () => {
   // Without this an administrator could grant an org a domain it does not have,
   // which would read as working and silently do nothing.
   it("refuses a domain not assigned to that organization", async () => {
-    prismaMock.orgMailDomain.findUnique.mockResolvedValue({
-      organizationId: "org_2",
-    } as never);
+    // Scoped by org now that a domain may be held by several: the row exists
+    // for someone else, so this org's lookup finds nothing.
+    prismaMock.orgMailDomain.findFirst.mockResolvedValue(null);
 
     await expect(
       instanceAdminService.addDomainGrant({
@@ -382,7 +468,7 @@ describe("instanceAdminService.addDomainGrant", () => {
   });
 
   it("refuses a domain assigned to nobody", async () => {
-    prismaMock.orgMailDomain.findUnique.mockResolvedValue(null);
+    prismaMock.orgMailDomain.findFirst.mockResolvedValue(null);
 
     await expect(
       instanceAdminService.addDomainGrant({

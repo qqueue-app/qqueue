@@ -17,6 +17,7 @@ import { getMembership } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import {
   normalizeDefault,
+  normalizeReplyTo,
   smtpConnectionSelect,
   verifyConnection,
 } from "../smtp-connections/service.js";
@@ -121,18 +122,26 @@ async function assertDomainAccess(
   // Applies to every role, however senior inside their own org: a domain is
   // ours only if the instance administrator assigned it to us. Default deny —
   // an unassigned domain is instance infrastructure, not free real estate.
-  const owner = await prisma.orgMailDomain.findUnique({
+  // A domain may be assigned to several orgs, so this asks whether *we* hold
+  // it, not who owns it; the two error messages below keep "nobody has this"
+  // distinct from "someone else does", which are different problems for the
+  // administrator being asked to fix it.
+  const assignments = await prisma.orgMailDomain.findMany({
     where: { domain },
     select: { organizationId: true },
   });
-  if (!owner) {
+  if (assignments.length === 0) {
     throw new HttpError(
       403,
       `${domain} is not assigned to your organization`,
       "domain_not_granted"
     );
   }
-  if (owner.organizationId !== actor.organizationId) {
+  if (
+    !assignments.some(
+      (assignment) => assignment.organizationId === actor.organizationId
+    )
+  ) {
     throw new HttpError(
       403,
       `${domain} belongs to another organization on this instance`,
@@ -312,6 +321,7 @@ async function connectMailbox(
     email: string;
     mailHost: string;
     name?: string;
+    replyTo?: string;
     assignToUserId?: string;
   }
 ) {
@@ -340,6 +350,7 @@ async function connectMailbox(
         passwordEncrypted,
         fromEmail: email,
         fromName: input.name,
+        replyTo: normalizeReplyTo(input.replyTo) ?? null,
         isDefault,
       },
       select: smtpConnectionSelect,
@@ -637,6 +648,7 @@ export const mailcowService = {
         email,
         mailHost,
         name: input.name,
+        replyTo: input.replyTo,
         assignToUserId: input.assignToUserId,
       });
       return { ...connected, email, mailboxPassword };
@@ -704,6 +716,7 @@ export const mailcowService = {
       email,
       mailHost,
       name: input.name ?? mailbox.name ?? undefined,
+      replyTo: input.replyTo,
       assignToUserId: input.assignToUserId,
     });
 

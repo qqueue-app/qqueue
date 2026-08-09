@@ -10,6 +10,7 @@ import type {
   InstanceMuteScope,
   InstanceOrganizationDetail,
   InstanceOrganizationSummary,
+  MailDomainAssignee,
   MailDomainAssignInput,
   MailDomainDeleteResult,
   MailDomainDnsStatus,
@@ -69,9 +70,14 @@ async function loadMutes(userId: string): Promise<{
   };
 }
 
-/** Domain -> owning org, for the whole instance. */
+/**
+ * Domain -> every org assigned to it, for the whole instance.
+ *
+ * A list rather than a single owner: a domain may be handed to several orgs at
+ * once. Sorted by name so the UI's badges do not reshuffle between refetches.
+ */
 async function assignmentsByDomain(): Promise<
-  Map<string, { organizationId: string; organizationName: string }>
+  Map<string, MailDomainAssignee[]>
 > {
   const rows = await prisma.orgMailDomain.findMany({
     select: {
@@ -79,16 +85,43 @@ async function assignmentsByDomain(): Promise<
       organizationId: true,
       organization: { select: { name: true } },
     },
+    orderBy: { organization: { name: "asc" } },
   });
-  return new Map(
-    rows.map((row) => [
-      row.domain.toLowerCase(),
-      {
-        organizationId: row.organizationId,
-        organizationName: row.organization.name,
-      },
-    ])
-  );
+  const map = new Map<string, MailDomainAssignee[]>();
+  for (const row of rows) {
+    const key = row.domain.toLowerCase();
+    const list = map.get(key) ?? [];
+    list.push({ id: row.organizationId, name: row.organization.name });
+    map.set(key, list);
+  }
+  return map;
+}
+
+/**
+ * Turn requested org ids into real orgs, rejecting the whole call on the first
+ * unknown one. All-or-nothing on purpose: silently dropping an id an
+ * administrator ticked would report success for an assignment that never
+ * happened.
+ */
+async function resolveOrganizations(
+  organizationIds: string[]
+): Promise<MailDomainAssignee[]> {
+  if (organizationIds.length === 0) {
+    return [];
+  }
+  const rows = await prisma.organization.findMany({
+    where: { id: { in: organizationIds } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  if (rows.length !== organizationIds.length) {
+    throw new HttpError(
+      400,
+      "One of those organizations does not exist",
+      "validation_error"
+    );
+  }
+  return rows;
 }
 
 export const instanceAdminService = {
@@ -238,12 +271,11 @@ export const instanceAdminService = {
           // A failed read must not blank the list; the domain's own DNS panel
           // reports the real state.
           .catch(() => false);
-        const assignment = assignments.get(domain.domain_name.toLowerCase());
+        const assigned = assignments.get(domain.domain_name.toLowerCase()) ?? [];
         return {
           domain: domain.domain_name,
-          ownership: assignment ? "CLAIMED" : "UNCLAIMED",
-          organizationId: assignment?.organizationId ?? null,
-          organizationName: assignment?.organizationName ?? null,
+          ownership: assigned.length > 0 ? "CLAIMED" : "UNCLAIMED",
+          organizations: assigned,
           active: domain.active,
           description: domain.description,
           mailboxCount: domain.mailboxCount,
@@ -288,21 +320,8 @@ export const instanceAdminService = {
       );
     }
 
-    let organizationName: string | null = null;
-    if (input.organizationId) {
-      const organization = await prisma.organization.findUnique({
-        where: { id: input.organizationId },
-        select: { name: true },
-      });
-      if (!organization) {
-        throw new HttpError(
-          400,
-          "That organization does not exist",
-          "validation_error"
-        );
-      }
-      organizationName = organization.name;
-    }
+    const organizationIds = [...new Set(input.organizationIds ?? [])];
+    const organizations = await resolveOrganizations(organizationIds);
 
     await client.createDomain(domain, {
       description: input.description,
@@ -324,9 +343,12 @@ export const instanceAdminService = {
       });
     }
 
-    if (input.organizationId) {
-      await prisma.orgMailDomain.create({
-        data: { domain, organizationId: input.organizationId },
+    if (organizations.length > 0) {
+      await prisma.orgMailDomain.createMany({
+        data: organizations.map((organization) => ({
+          domain,
+          organizationId: organization.id,
+        })),
       });
     }
 
@@ -338,9 +360,8 @@ export const instanceAdminService = {
     return {
       domain: {
         domain,
-        ownership: input.organizationId ? "CLAIMED" : "UNCLAIMED",
-        organizationId: input.organizationId ?? null,
-        organizationName,
+        ownership: organizations.length > 0 ? "CLAIMED" : "UNCLAIMED",
+        organizations,
         active: input.active !== false,
         description: input.description ?? "",
         mailboxCount: 0,
@@ -387,11 +408,17 @@ export const instanceAdminService = {
   },
 
   /**
-   * Assign a domain to an organization, or hand it back to the instance.
+   * Set which organizations reach a domain.
    *
-   * Replaces the old self-serve claim. Reassigning moves the domain wholesale:
-   * the previous org's grants for it go too, because a grant is delegation
-   * *within* an assignment and cannot outlive it.
+   * Replaces the old self-serve claim, and takes the complete desired set
+   * rather than a delta — a checkbox list submits the whole set, so one call
+   * both adds and removes and re-submitting the same set changes nothing. An
+   * empty array hands the domain back to the instance, where it reaches nobody.
+   *
+   * Orgs dropped from the set lose their grants for the domain too: a grant is
+   * delegation *within* an assignment and cannot outlive it. Orgs that stay
+   * keep theirs, which is the whole reason this diffs rather than clearing and
+   * rewriting — a no-op re-submit must not quietly revoke delegations.
    */
   async assignDomain(
     domain: string,
@@ -403,49 +430,46 @@ export const instanceAdminService = {
 
     await assertDomainExists(client, normalized);
 
-    if (input.organizationId === null) {
-      await prisma.$transaction([
-        prisma.mailDomainGrant.deleteMany({ where: { domain: normalized } }),
-        prisma.orgMailDomain.deleteMany({ where: { domain: normalized } }),
-      ]);
-      return null;
-    }
+    const organizations = await resolveOrganizations([
+      ...new Set(input.organizationIds),
+    ]);
+    const wanted = new Set(organizations.map((organization) => organization.id));
 
-    const organization = await prisma.organization.findUnique({
-      where: { id: input.organizationId },
-      select: { id: true, name: true },
-    });
-    if (!organization) {
-      throw new HttpError(
-        400,
-        "That organization does not exist",
-        "validation_error"
-      );
-    }
-
-    const current = await prisma.orgMailDomain.findUnique({
+    const current = await prisma.orgMailDomain.findMany({
       where: { domain: normalized },
       select: { organizationId: true },
     });
+    const held = new Set(current.map((row) => row.organizationId));
+
+    const removed = [...held].filter((id) => !wanted.has(id));
+    const added = [...wanted].filter((id) => !held.has(id));
 
     await prisma.$transaction([
-      // Grants belonging to the org losing the domain are meaningless now.
-      ...(current && current.organizationId !== organization.id
+      ...(removed.length > 0
         ? [
             prisma.mailDomainGrant.deleteMany({
-              where: {
-                domain: normalized,
-                organizationId: current.organizationId,
-              },
+              where: { domain: normalized, organizationId: { in: removed } },
+            }),
+            prisma.orgMailDomain.deleteMany({
+              where: { domain: normalized, organizationId: { in: removed } },
             }),
           ]
         : []),
-      prisma.orgMailDomain.upsert({
-        where: { domain: normalized },
-        create: { domain: normalized, organizationId: organization.id },
-        update: { organizationId: organization.id },
-      }),
+      ...(added.length > 0
+        ? [
+            prisma.orgMailDomain.createMany({
+              data: added.map((organizationId) => ({
+                domain: normalized,
+                organizationId,
+              })),
+            }),
+          ]
+        : []),
     ]);
+
+    if (organizations.length === 0) {
+      return null;
+    }
 
     const rows = await instanceAdminService.listDomains(userId);
     return rows.find((row) => row.domain.toLowerCase() === normalized) ?? null;
@@ -581,7 +605,6 @@ export const instanceAdminService = {
     return mailboxes
       .map((mailbox): InstanceMailboxSummary => {
         const domain = domainOf(mailbox.email);
-        const assignment = assignments.get(domain);
         return {
           email: mailbox.email,
           domain,
@@ -589,8 +612,7 @@ export const instanceAdminService = {
           active: mailbox.active,
           quotaBytes: mailbox.quotaBytes,
           usedBytes: mailbox.usedBytes,
-          organizationId: assignment?.organizationId ?? null,
-          organizationName: assignment?.organizationName ?? null,
+          organizations: assignments.get(domain) ?? [],
           connected: connected.has(mailbox.email.toLowerCase()),
         };
       })
@@ -636,11 +658,11 @@ export const instanceAdminService = {
     // A grant is delegation *within* an assignment, so the org must hold the
     // domain first. Without this an administrator could grant an org access to
     // a domain it does not have, which would read as working and do nothing.
-    const assignment = await prisma.orgMailDomain.findUnique({
-      where: { domain },
-      select: { organizationId: true },
+    const assignment = await prisma.orgMailDomain.findFirst({
+      where: { domain, organizationId: input.organizationId },
+      select: { id: true },
     });
-    if (!assignment || assignment.organizationId !== input.organizationId) {
+    if (!assignment) {
       throw new HttpError(
         400,
         `${domain} is not assigned to that organization`,

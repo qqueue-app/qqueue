@@ -243,6 +243,27 @@ describe("Mailboxes", () => {
     ).toBeInTheDocument();
   });
 
+  // Answering it at creation saves an immediate follow-up edit on the very
+  // mailboxes most likely to want it — send-only addresses.
+  it("sends a Reply-To given while creating the mailbox", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+
+    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
+    await user.type(await screen.findByLabelText("Address"), "noreply");
+    await user.type(
+      screen.getByLabelText("Reply-To (optional)"),
+      "support@acme.test"
+    );
+    await user.click(screen.getByRole("button", { name: /Create mailbox/i }));
+
+    await waitFor(() =>
+      expect(mockedApi.provisionMailbox).toHaveBeenCalledWith(
+        expect.objectContaining({ replyTo: "support@acme.test" })
+      )
+    );
+  });
+
   it("provisions a mailbox and shows the one-time password", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
@@ -260,6 +281,7 @@ describe("Mailboxes", () => {
         // The first Mailcow domain is preselected.
         domain: "acme.test",
         name: undefined,
+        replyTo: undefined,
         assignToUserId: undefined,
       })
     );

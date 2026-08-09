@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -22,6 +22,7 @@ import type {
   InstanceMailDomainSummary,
 } from "../../lib/api.js";
 import { Badge } from "../ui/badge.js";
+import { Checkbox } from "../ui/checkbox.js";
 import { Button } from "../ui/button.js";
 import { Card, CardContent } from "../ui/card.js";
 import {
@@ -312,6 +313,104 @@ function DomainDnsSheet({
         </SheetBody>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Which organizations reach a domain.
+ *
+ * Checkboxes rather than a picker because the answer is a set, and the whole
+ * set is submitted at once: ticking two and unticking one is a single write,
+ * and re-saving an unchanged set does nothing. Co-assignment is real shared
+ * control, not just shared visibility, so the dialog says so rather than
+ * leaving an administrator to discover it from a deleted mailbox.
+ */
+function DomainAccessDialog({
+  domain,
+  organizations,
+  onOpenChange,
+  onSubmit,
+}: {
+  domain: InstanceMailDomainSummary | null;
+  organizations: { id: string; name: string }[];
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (organizationIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+
+  // Re-seed per domain, so one domain's edits never open on the next.
+  useEffect(() => {
+    if (domain) {
+      setSelected(domain.organizations.map((organization) => organization.id));
+    }
+  }, [domain]);
+
+  function toggle(id: string, checked: boolean) {
+    setSelected((current) =>
+      checked ? [...current, id] : current.filter((value) => value !== id)
+    );
+  }
+
+  return (
+    <Dialog open={domain !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Who reaches {domain?.domain}</DialogTitle>
+          <DialogDescription>
+            Every organization you tick can provision, edit and delete
+            mailboxes on this domain — including each other's. Tick none and the
+            domain stays instance-only, reaching nobody.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit(selected);
+          }}
+        >
+          {organizations.length === 0 ? (
+            <p className="text-meta text-muted-foreground">
+              There are no organizations on this instance yet.
+            </p>
+          ) : (
+            <div className="space-y-field">
+              {organizations.map((organization) => (
+                <label
+                  key={organization.id}
+                  htmlFor={`domain-access-${organization.id}`}
+                  className="flex items-center gap-2 text-body font-medium"
+                >
+                  <Checkbox
+                    id={`domain-access-${organization.id}`}
+                    checked={selected.includes(organization.id)}
+                    onCheckedChange={(checked) =>
+                      toggle(organization.id, checked === true)
+                    }
+                  />
+                  {organization.name}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">
+              <ShieldCheck className="h-4 w-4" />
+              Save access
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -608,10 +707,16 @@ export interface MailDomainsPanelProps {
   onGenerateDkim: (domain: string) => void;
   onCreate: (values: MailDomainFormValues) => void;
   onUpdate: (domain: string, values: MailDomainFormValues) => void;
-  /** Organizations a domain can be handed to, for the assignment menu. */
+  /** Organizations a domain can be handed to, for the assignment dialog. */
   organizations: { id: string; name: string }[];
-  /** Pass null to unassign — the domain goes back to being instance-only. */
-  onAssign: (domain: InstanceMailDomainSummary, organizationId: string | null) => void;
+  /**
+   * The complete set of orgs that should reach the domain, not a delta. An
+   * empty array hands it back to the instance.
+   */
+  onAssign: (
+    domain: InstanceMailDomainSummary,
+    organizationIds: string[]
+  ) => void;
   /** Mute/unmute this domain from the caller's own lists. Cosmetic only. */
   onToggleMute: (domain: InstanceMailDomainSummary) => void;
   onDelete: (domain: string, confirm: string) => void;
@@ -637,6 +742,9 @@ export function MailDomainsPanel({
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<InstanceMailDomainSummary | null>(null);
   const [deleting, setDeleting] = useState<InstanceMailDomainSummary | null>(null);
+  const [assigning, setAssigning] = useState<InstanceMailDomainSummary | null>(
+    null
+  );
 
   const columns = useMemo<DataGridColumn<InstanceMailDomainSummary>[]>(
     () => [
@@ -648,10 +756,12 @@ export function MailDomainsPanel({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate font-medium">{row.original.domain}</span>
-              {row.original.organizationName ? (
-                <Badge variant="secondary">
-                  {row.original.organizationName}
-                </Badge>
+              {row.original.organizations.length > 0 ? (
+                row.original.organizations.map((organization) => (
+                  <Badge key={organization.id} variant="secondary">
+                    {organization.name}
+                  </Badge>
+                ))
               ) : (
                 <Hint label="On the mail server but assigned to no organization, so it reaches none of them. Assign it to hand it over.">
                   <Badge variant="outline" className="cursor-help">
@@ -744,20 +854,14 @@ export function MailDomainsPanel({
                 primary: true,
                 onSelect: () => onOpenDns(row.original.domain),
               },
-              ...organizations.map((organization) => ({
-                label:
-                  row.original.organizationId === organization.id
-                    ? `Assigned to ${organization.name}`
-                    : `Assign to ${organization.name}`,
-                icon: ShieldCheck,
-                disabled: row.original.organizationId === organization.id,
-                onSelect: () => onAssign(row.original, organization.id),
-              })),
               {
-                label: "Unassign from organization",
+                // One dialog rather than an "Assign to X" item per org: a
+                // domain can reach several at once, and a menu of one-shot
+                // items cannot express "these two, not that one" in a single
+                // write.
+                label: "Manage access",
                 icon: ShieldCheck,
-                hidden: !row.original.organizationId,
-                onSelect: () => onAssign(row.original, null),
+                onSelect: () => setAssigning(row.original),
               },
               {
                 label: row.original.muted
@@ -785,7 +889,7 @@ export function MailDomainsPanel({
         ),
       },
     ],
-    [onAssign, onToggleMute, onOpenDns, organizations]
+    [onToggleMute, onOpenDns]
   );
 
   return (
@@ -866,6 +970,18 @@ export function MailDomainsPanel({
           }
           setFormOpen(false);
           setEditing(null);
+        }}
+      />
+
+      <DomainAccessDialog
+        domain={assigning}
+        organizations={organizations}
+        onOpenChange={(open) => {
+          if (!open) setAssigning(null);
+        }}
+        onSubmit={(organizationIds) => {
+          if (assigning) onAssign(assigning, organizationIds);
+          setAssigning(null);
         }}
       />
 

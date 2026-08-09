@@ -124,16 +124,18 @@ export function InstanceDomains() {
   );
 
   const assignDomain = useApiMutation(
-    (input: { domain: string; organizationId: string | null }) =>
-      api.assignInstanceMailDomain(input.domain, input.organizationId),
+    (input: { domain: string; organizationIds: string[] }) =>
+      api.assignInstanceMailDomain(input.domain, input.organizationIds),
     {
       successMessage: (_result, input) =>
-        input.organizationId
-          ? "Domain assigned. That organization can now provision mailboxes on it."
-          : "Domain unassigned. It now reaches no organization.",
+        input.organizationIds.length === 0
+          ? "Domain unassigned. It now reaches no organization."
+          : `Access saved. ${input.organizationIds.length} organization${
+              input.organizationIds.length === 1 ? "" : "s"
+            } can provision mailboxes on it.`,
       errorMessage: "Couldn't change that assignment.",
-      // Reassigning drops the losing org's grants, and the org list shows a
-      // domain count, so both go stale.
+      // Dropping an org drops its grants, and the org list shows a domain
+      // count, so both go stale.
       invalidates: [
         ...domainKeys,
         qk.instanceOrganizations(),
@@ -259,8 +261,8 @@ export function InstanceDomains() {
           onGenerateDkim={(domain) => generateDkim.mutate(domain)}
           onCreate={(values) => createDomain.mutate(values)}
           onUpdate={(domain, values) => updateDomain.mutate({ domain, values })}
-          onAssign={(domain, organizationId) =>
-            assignDomain.mutate({ domain: domain.domain, organizationId })
+          onAssign={(domain, organizationIds) =>
+            assignDomain.mutate({ domain: domain.domain, organizationIds })
           }
           onToggleMute={(domain) => toggleMute.mutate(domain)}
           onDelete={(domain, confirm) =>

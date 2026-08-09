@@ -592,6 +592,18 @@ export interface MailboxSummary {
   isDefault: boolean;
 }
 
+export const emailAddressSchema = z.string().email();
+
+/**
+ * A default Reply-To address, or `""` to clear one that is already set.
+ *
+ * The empty string is part of the contract rather than an accident: a cleared
+ * text input yields `""`, and with `.optional()` alone that would arrive as
+ * `undefined` — indistinguishable from "field untouched", so the address would
+ * survive the edit that meant to delete it. Services normalize `""` to NULL.
+ */
+export const replyToSchema = z.union([emailAddressSchema, z.literal("")]);
+
 const mailboxTargetSchema = z.object({
   organizationId: z.string().min(1),
   email: z.string().email(),
@@ -618,6 +630,8 @@ export type MailboxSetActiveInput = z.infer<typeof mailboxSetActiveSchema>;
 /** Connect an existing mail-server mailbox to QQueue for sending and sync. */
 export const mailboxAdoptSchema = mailboxTargetSchema.extend({
   name: z.string().max(120).optional(),
+  /** Default Reply-To for the sending account this creates. */
+  replyTo: replyToSchema.optional(),
   /** Member to grant send-as on the adopted mailbox immediately. */
   assignToUserId: z.string().min(1).optional(),
 });
@@ -695,15 +709,24 @@ export interface InstanceOrganizationDetail extends InstanceOrganizationSummary 
   };
 }
 
+/** One org a domain has been assigned to. */
+export interface MailDomainAssignee {
+  id: string;
+  name: string;
+}
+
 /** A domains-list row for the instance view: the server plus its assignment. */
 export interface InstanceMailDomainSummary extends MailDomainSummary {
-  /** The org this domain is assigned to, or null when it reaches none. */
-  organizationId: string | null;
-  organizationName: string | null;
+  /**
+   * Every org this domain is assigned to, by name. Empty means it reaches
+   * none — a domain is instance infrastructure until an administrator hands it
+   * to someone, and it may be handed to more than one org at a time.
+   */
+  organizations: MailDomainAssignee[];
   muted?: boolean;
 }
 
-/** Every mailbox on the server, with the org that holds its domain. */
+/** Every mailbox on the server, with the orgs that hold its domain. */
 export interface InstanceMailboxSummary {
   email: string;
   domain: string;
@@ -711,20 +734,19 @@ export interface InstanceMailboxSummary {
   active: boolean;
   quotaBytes: number;
   usedBytes: number;
-  organizationId: string | null;
-  organizationName: string | null;
+  organizations: MailDomainAssignee[];
   /** True when QQueue holds a sending account for it, not just the server. */
   connected: boolean;
 }
 
 /**
- * Create a domain on the mail server. `organizationId` is optional: an
+ * Create a domain on the mail server. `organizationIds` may be empty: an
  * administrator may stand a domain up before deciding who gets it, which is
  * safe now that an unassigned domain reaches nobody.
  */
 export const instanceMailDomainCreateSchema = z.object({
   domain: mailDomainNameSchema,
-  organizationId: z.string().min(1).nullish(),
+  organizationIds: z.array(z.string().min(1)).optional(),
   description: z.string().max(255).optional(),
   maxMailboxes: z.number().int().min(0).max(10_000).optional(),
   defaultQuotaMiB: quotaMiB.optional(),
@@ -770,8 +792,19 @@ export type InstanceMailDomainDeleteInput = z.infer<
  * able to take any unclaimed domain for itself, which is not an access control
  * when anyone can create an org.
  */
+/**
+ * Which orgs reach a domain, as the complete desired set rather than a delta.
+ *
+ * A checkbox list submits the whole set, and replace semantics make the write
+ * idempotent and let one call both add and remove — a delta API would need two
+ * round trips to express "these three, not those two", and could interleave
+ * badly with another administrator editing the same domain.
+ *
+ * An empty array hands the domain back to the instance: it then reaches no org
+ * at all, which is the state a freshly created domain starts in.
+ */
 export const mailDomainAssignSchema = z.object({
-  organizationId: z.string().min(1).nullable(),
+  organizationIds: z.array(z.string().min(1)),
 });
 
 export type MailDomainAssignInput = z.infer<typeof mailDomainAssignSchema>;
@@ -893,18 +926,6 @@ export interface WebhookDelivery {
   deliveredAt?: string | null;
   createdAt: string;
 }
-
-export const emailAddressSchema = z.string().email();
-
-/**
- * A default Reply-To address, or `""` to clear one that is already set.
- *
- * The empty string is part of the contract rather than an accident: a cleared
- * text input yields `""`, and with `.optional()` alone that would arrive as
- * `undefined` — indistinguishable from "field untouched", so the address would
- * survive the edit that meant to delete it. Services normalize `""` to NULL.
- */
-export const replyToSchema = z.union([emailAddressSchema, z.literal("")]);
 
 export const registerSchema = z.object({
   email: emailAddressSchema,
@@ -2399,6 +2420,8 @@ export const mailboxProvisionSchema = z.object({
     ),
   domain: z.string().min(1),
   name: z.string().max(120).optional(),
+  /** Default Reply-To for the sending account this creates. */
+  replyTo: replyToSchema.optional(),
   /** Member to grant send-as on the new mailbox immediately. */
   assignToUserId: z.string().min(1).optional(),
 });

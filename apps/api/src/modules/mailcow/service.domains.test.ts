@@ -67,7 +67,9 @@ const ACME = {
 };
 
 /** The domain is assigned to org_1 — the ordinary state after assignment. */
-const assignedToUs = [{ domain: "acme.test" }] as never;
+const assignedToUs = [
+  { domain: "acme.test", organizationId: "org_1" },
+] as never;
 const assignedToOther: never[] = [] as never;
 
 beforeEach(() => {
@@ -89,7 +91,6 @@ beforeEach(() => {
   // Default: nothing is assigned to anyone. Under the old model this was the
   // permissive case; it is now the closed one.
   prismaMock.orgMailDomain.findMany.mockResolvedValue([] as never);
-  prismaMock.orgMailDomain.findUnique.mockResolvedValue(null);
   prismaMock.mailDomainGrant.findMany.mockResolvedValue([] as never);
   prismaMock.mailDomainGrant.findUnique.mockResolvedValue(null);
 });
@@ -156,7 +157,7 @@ describe("domain ownership", () => {
   // The heart of it: default deny on a mutating action. Before this, an
   // unassigned domain was fair game for any OWNER on the instance.
   it("refuses a mutating action on an unassigned domain even for an OWNER", async () => {
-    prismaMock.orgMailDomain.findUnique.mockResolvedValue(null);
+    prismaMock.orgMailDomain.findMany.mockResolvedValue([] as never);
 
     await expect(
       mailcowService.resetPassword(
@@ -167,9 +168,9 @@ describe("domain ownership", () => {
   });
 
   it("refuses a mutating action on another org's domain even for an OWNER", async () => {
-    prismaMock.orgMailDomain.findUnique.mockResolvedValue({
-      organizationId: "org_2",
-    } as never);
+    prismaMock.orgMailDomain.findMany.mockResolvedValue([
+      { organizationId: "org_2" },
+    ] as never);
 
     await expect(
       mailcowService.resetPassword(
@@ -180,9 +181,9 @@ describe("domain ownership", () => {
   });
 
   it("allows a mutating action on a domain assigned to this org", async () => {
-    prismaMock.orgMailDomain.findUnique.mockResolvedValue({
-      organizationId: "org_1",
-    } as never);
+    prismaMock.orgMailDomain.findMany.mockResolvedValue([
+      { organizationId: "org_1" },
+    ] as never);
     h.client.listMailboxes.mockResolvedValue([
       { email: "hello@acme.test", name: "Hello", active: true },
     ]);

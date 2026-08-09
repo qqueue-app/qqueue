@@ -360,19 +360,25 @@ operational and abuse-control gaps from the original audit have been closed.
   bounce visibility.
 - [x] "Edit mailbox" (OWNER/ADMIN) sets the display name and an optional
   default Reply-To. Both live on the `SMTPConnection`, so the editor also
-  covers EXTERNAL rows and keeps working while Mailcow is unreachable.
+  covers EXTERNAL rows and keeps working while Mailcow is unreachable. Creating
+  or connecting a mailbox accepts the same Reply-To up front.
 - [x] Post-provision SMTP verification retries briefly (Mailcow needs a moment
   to activate a fresh app password); rollback is reserved for "we couldn't
   record what we created", never "the handshake didn't work yet".
 - [x] `MailDomainGrant` scopes which domains an admin may provision on —
   default deny, validated against Mailcow's active domains, stored lowercase.
   Grant management is **instance-admin-only**.
-- [x] `OrgMailDomain` records which org an instance administrator assigned each
+- [x] `OrgMailDomain` records which orgs an instance administrator assigned each
   server domain to. Mailcow domains are instance-global, so without it every
   org OWNER could see and provision on every other org's domains. A domain with
   no row reaches **no** org — it is not a pool orgs may claim from, because
   `POST /organizations` is ungated and "org OWNER" is therefore a role any user
   can award themselves.
+- [x] A domain may be assigned to **several** orgs (unique on
+  `(domain, organizationId)`). The assignment endpoint takes the complete set of
+  organizations, chosen from a checkbox dialog, so one write both adds and
+  removes; an empty set hands the domain back to the instance. Co-assignment is
+  co-administration — every holder can provision and delete on the domain.
 
 ### Instance Administration (`modules/instance-admin`, instance-admin-only)
 

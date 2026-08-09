@@ -760,6 +760,36 @@ organization reaches a domain only when an administrator assigned it; a domain
 with no assignment reaches nobody. Self-serve claiming is gone — "whichever org
 looks first wins" is not an access control.
 
+### A domain may be assigned to several orgs (2026-08-11)
+
+`OrgMailDomain.domain` was globally unique, so a domain reached exactly one
+organization. That was a side effect of closing the hole above, not the fix
+itself: what made the old model unsafe was *who* could claim a domain, not *how
+many* orgs could hold one. Assignment is an instance-admin act either way, and
+one company running several orgs on a single domain is ordinary.
+
+Uniqueness therefore moved to the `(domain, organizationId)` pair, and the
+assignment endpoint takes the complete desired set of organizations rather than
+a single id or a delta. A checkbox list submits the whole set, so one call both
+adds and removes, re-submitting an unchanged set is a no-op, and an empty array
+hands the domain back to the instance.
+
+Two consequences are deliberate:
+
+- **Co-assignment is co-administration, not shared visibility.** Every org
+  holding a domain can provision, edit and delete mailboxes on it — including
+  each other's. The assignment dialog says so, because discovering it from a
+  deleted mailbox is not acceptable.
+- **The write diffs rather than clearing and rewriting.** Orgs dropped from the
+  set lose their `MailDomainGrant` rows (a grant is delegation *within* an
+  assignment and cannot outlive one); orgs that stay keep theirs. Clearing and
+  rewriting would make a no-op re-save silently revoke every delegation under
+  the domain.
+
+`assertDomainAccess` asks whether the *caller's* org holds the domain rather
+than who owns it, and still separates "assigned to nobody" from "assigned to
+someone else" — different problems for whoever has to fix them.
+
 ### The org boundary was not given a superuser bypass
 
 The cheap version of this is five lines: have `getMembership` /

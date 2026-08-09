@@ -97,12 +97,9 @@ beforeEach(() => {
   // all, so leaving these empty would default-deny every case below; that
   // boundary is pinned in service.domains.test.ts instead.
   prismaMock.orgMailDomain.findMany.mockResolvedValue([
-    { domain: "acme.test" },
-    { domain: "inactive.test" },
+    { domain: "acme.test", organizationId: "org_1" },
+    { domain: "inactive.test", organizationId: "org_1" },
   ] as never);
-  prismaMock.orgMailDomain.findUnique.mockResolvedValue({
-    organizationId: "org_1",
-  } as never);
   prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
   // Org membership for the assignee; no pre-existing inbox; no default yet.
   prismaMock.organizationMember.findUnique.mockResolvedValue({
@@ -158,6 +155,33 @@ describe("mailcowService.status", () => {
 });
 
 describe("mailcowService.provision", () => {
+  /*
+    A send-only mailbox usually wants replies somewhere a human reads, and
+    making that a creation-time answer saves an immediate follow-up edit.
+    Absent, the column stays NULL and the send carries no Reply-To at all.
+  */
+  it("records a Reply-To given at creation on the sending account", async () => {
+    await mailcowService.provision(
+      { ...provisionInput, replyTo: "support@acme.test" },
+      { userId: "owner_1", role: "OWNER" }
+    );
+
+    expect(
+      prismaMock.sMTPConnection.create.mock.calls[0][0].data.replyTo
+    ).toBe("support@acme.test");
+  });
+
+  it("leaves Reply-To null when creation does not name one", async () => {
+    await mailcowService.provision(provisionInput, {
+      userId: "owner_1",
+      role: "OWNER",
+    });
+
+    expect(
+      prismaMock.sMTPConnection.create.mock.calls[0][0].data.replyTo
+    ).toBeNull();
+  });
+
   it("provisions mailbox + app password + connection + inbox + grant in one flow", async () => {
     const result = await mailcowService.provision(provisionInput, {
       userId: "owner_1",

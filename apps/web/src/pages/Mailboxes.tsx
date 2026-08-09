@@ -1016,6 +1016,7 @@ function AdoptMailboxDialog({
   onAdopted: () => void;
 }) {
   const [displayName, setDisplayName] = useState("");
+  const [replyTo, setReplyTo] = useState("");
   const [assignTo, setAssignTo] = useState(NO_ASSIGNEE);
 
   // Seed from whatever the mail server already calls this mailbox, and reset
@@ -1023,6 +1024,7 @@ function AdoptMailboxDialog({
   useEffect(() => {
     if (mailbox) {
       setDisplayName(mailbox.name);
+      setReplyTo("");
       setAssignTo(NO_ASSIGNEE);
     }
   }, [mailbox]);
@@ -1032,6 +1034,7 @@ function AdoptMailboxDialog({
       api.adoptMailbox(mailbox!.email, {
         organizationId,
         name: displayName.trim() || undefined,
+        replyTo: replyTo.trim() || undefined,
         assignToUserId: assignTo === NO_ASSIGNEE ? undefined : assignTo,
       }),
     {
@@ -1075,6 +1078,21 @@ function AdoptMailboxDialog({
             />
             <p className="text-meta text-muted-foreground">
               What recipients see in the From line. Optional.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="adopt-mailbox-reply-to">Reply-To (optional)</Label>
+            <Input
+              id="adopt-mailbox-reply-to"
+              type="email"
+              value={replyTo}
+              onChange={(event) => setReplyTo(event.target.value)}
+              placeholder={mailbox?.email ?? "replies@example.com"}
+            />
+            <p className="text-meta text-muted-foreground">
+              Where answers go. Leave empty and replies come back to this
+              mailbox.
             </p>
           </div>
 
@@ -1140,6 +1158,7 @@ function NewMailboxDialog({
   const [localPart, setLocalPart] = useState("");
   const [domain, setDomain] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [replyTo, setReplyTo] = useState("");
   const [assignTo, setAssignTo] = useState(NO_ASSIGNEE);
 
   // Open on whichever domain the page is filtered to, so "New mailbox" carries
@@ -1169,6 +1188,7 @@ function NewMailboxDialog({
         localPart: localPart.trim(),
         domain,
         name: displayName.trim() || undefined,
+        replyTo: replyTo.trim() || undefined,
         assignToUserId: assignTo === NO_ASSIGNEE ? undefined : assignTo,
       }) as Promise<MailboxProvisionResult>,
     {
@@ -1176,6 +1196,7 @@ function NewMailboxDialog({
       onSuccess: (result) => {
         setLocalPart("");
         setDisplayName("");
+        setReplyTo("");
         setAssignTo(NO_ASSIGNEE);
         onProvisioned(result);
       },
@@ -1258,6 +1279,21 @@ function NewMailboxDialog({
               />
               <p className="text-meta text-muted-foreground">
                 What recipients see in the From line. Optional.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mailbox-reply-to">Reply-To (optional)</Label>
+              <Input
+                id="mailbox-reply-to"
+                type="email"
+                value={replyTo}
+                onChange={(event) => setReplyTo(event.target.value)}
+                placeholder={address ?? "replies@example.com"}
+              />
+              <p className="text-meta text-muted-foreground">
+                Send-only addresses usually want answers somewhere a human
+                reads. Leave empty and replies come back to this mailbox.
               </p>
             </div>
 

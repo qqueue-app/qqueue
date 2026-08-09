@@ -328,21 +328,29 @@ model SMTPConnection {
 /// install. Assignment is therefore an instance-admin act, not a self-serve
 /// one; see the instance-admin module.
 ///
-/// `domain` is globally unique on purpose: a mail domain is one physical thing
-/// on one server, and letting two orgs hold it would reintroduce exactly the
-/// leak this model closes. A domain with no row here reaches **no** org — it is
-/// instance infrastructure, visible only to instance administrators. It is
-/// deliberately not an unclaimed pool orgs may take from: "whichever org looks
-/// first wins" is not an access control.
+/// A domain may be assigned to **several** orgs: one row per (domain, org)
+/// pair. That is not the hole the model closes — the leak was self-serve
+/// claiming, where any user could create an org, become its OWNER, and take a
+/// domain from an unclaimed pool. Assignment is an instance-admin act either
+/// way, and one company running several orgs on one domain is ordinary. A
+/// domain with no row here reaches **no** org — it is instance infrastructure,
+/// visible only to instance administrators, and never a pool orgs take from.
+///
+/// Co-assignment does mean co-administration: every org holding a domain can
+/// see, provision, and delete mailboxes on it, including each other's. It is a
+/// statement that those orgs trust one another with the domain, which is why
+/// only an instance administrator can make it.
 model OrgMailDomain {
   id             String       @id @default(cuid())
   /// Stored lowercase; matches a domain on the Mailcow server.
-  domain         String       @unique
+  domain         String
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
 
+  @@unique([domain, organizationId])
   @@index([organizationId])
+  @@index([domain])
 }
 
 /// Mailbox-provisioning domain access: an org OWNER may provision Mailcow

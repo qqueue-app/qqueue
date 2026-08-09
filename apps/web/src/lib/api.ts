@@ -781,9 +781,15 @@ export interface InstanceOrganizationDetail
   };
 }
 
+/** One org a domain has been assigned to. */
+export interface MailDomainAssignee {
+  id: string;
+  name: string;
+}
+
 export interface InstanceMailDomainSummary extends MailDomainSummary {
-  organizationId: string | null;
-  organizationName: string | null;
+  /** Every org this domain reaches. Empty means it reaches none. */
+  organizations: MailDomainAssignee[];
   muted?: boolean;
 }
 
@@ -794,8 +800,7 @@ export interface InstanceMailboxSummary {
   active: boolean;
   quotaBytes: number;
   usedBytes: number;
-  organizationId: string | null;
-  organizationName: string | null;
+  organizations: MailDomainAssignee[];
   connected: boolean;
 }
 
@@ -1443,7 +1448,12 @@ export const api = {
 
   adoptMailbox(
     email: string,
-    input: { organizationId: string; name?: string; assignToUserId?: string }
+    input: {
+      organizationId: string;
+      name?: string;
+      replyTo?: string;
+      assignToUserId?: string;
+    }
   ) {
     return request<MailboxAdoptResult>(
       `/api/v1/mailcow/mailboxes/${encodeURIComponent(email)}/adopt`,
@@ -1517,10 +1527,11 @@ export const api = {
   },
 
   /** Assign a domain to an org, or pass null to hand it back to the instance. */
-  assignInstanceMailDomain(domain: string, organizationId: string | null) {
+  /** The complete set of orgs that should reach the domain, not a delta. */
+  assignInstanceMailDomain(domain: string, organizationIds: string[]) {
     return request<InstanceMailDomainSummary | null>(
       `/api/v1/instance-admin/domains/${encodeURIComponent(domain)}/assignment`,
-      { method: "PUT", body: JSON.stringify({ organizationId }) }
+      { method: "PUT", body: JSON.stringify({ organizationIds }) }
     );
   },
 
