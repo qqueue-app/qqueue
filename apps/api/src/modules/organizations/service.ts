@@ -104,7 +104,8 @@ export const organizationService = {
         brandName: true,
         logoUrl: true,
         accentColor: true,
-        footerNote: true
+        footerNote: true,
+        brandingEnabled: true
       }
     });
 
@@ -128,7 +129,8 @@ export const organizationService = {
         brandName: true,
         logoUrl: true,
         accentColor: true,
-        footerNote: true
+        footerNote: true,
+        brandingEnabled: true
       }
     });
   },

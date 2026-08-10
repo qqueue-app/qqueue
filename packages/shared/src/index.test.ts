@@ -1266,7 +1266,8 @@ describe("organizationBrandingSchema", () => {
     brandName: "Acme",
     logoUrl: "https://cdn.example.com/logo.png",
     accentColor: "#2E7D63",
-    footerNote: "Acme Inc, 400 Market St"
+    footerNote: "Acme Inc, 400 Market St",
+    brandingEnabled: true
   };
 
   it("accepts a fully populated branding payload", () => {
@@ -1279,13 +1280,15 @@ describe("organizationBrandingSchema", () => {
         brandName: "",
         logoUrl: "   ",
         accentColor: "",
-        footerNote: ""
+        footerNote: "",
+        brandingEnabled: false
       })
     ).toEqual({
       brandName: null,
       logoUrl: null,
       accentColor: null,
-      footerNote: null
+      footerNote: null,
+      brandingEnabled: false
     });
   });
 

@@ -235,6 +235,12 @@ model Organization {
   // Small print under the footer — in practice a postal address, which
   // anti-spam law expects on bulk mail.
   footerNote        String?
+  // Whether branding is applied to outgoing mail automatically. Off leaves a
+  // template's own HTML exactly as authored, for senders who design a complete
+  // email themselves and want no frame added around it. The address and the
+  // unsubscribe link are NOT covered by this switch: both are compliance
+  // obligations on bulk mail rather than decoration.
+  brandingEnabled   Boolean              @default(true)
   members           OrganizationMember[]
   invites           OrganizationInvite[]
   smtpConnections   SMTPConnection[]

@@ -8,6 +8,8 @@ import { VariablesPanel } from "../components/editor/VariablesPanel.js";
 import { extractVariables } from "../components/editor/variables.js";
 import { STARTER_TEMPLATES } from "../components/editor/starters.js";
 import { api, type TemplateVariable } from "../lib/api.js";
+import { qk } from "../lib/query-client.js";
+import { useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
@@ -96,6 +98,17 @@ export function TemplateEditor() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentOrganizationId: organizationId } = useSession();
+
+  // The frame recipients will actually see. Readable by every member, so a
+  // MEMBER editing a template previews the same email an OWNER would.
+  const branding = useOrgQuery(
+    organizationId,
+    qk.organizationBranding(organizationId ?? ""),
+    (id) => api.getOrganizationBranding(id),
+    // A preview that is briefly missing its header beats a toast telling
+    // someone their template failed to load, which it didn't.
+    { meta: { silent: true } }
+  );
 
   const editing = Boolean(id);
   const [state, setState] = useState<EditorState>(emptyState);
@@ -412,6 +425,7 @@ export function TemplateEditor() {
             html={state.html}
             variables={variables}
             sampleData={previewData}
+            branding={branding.data}
           />
         </div>
       </div>

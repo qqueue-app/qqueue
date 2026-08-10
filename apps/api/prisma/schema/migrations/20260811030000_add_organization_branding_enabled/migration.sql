@@ -1,0 +1,23 @@
+-- Let an organization turn automatic branding off.
+--
+-- Branding is a frame drawn around the sender's content: a wordmark or logo
+-- above it, an accent colour through it. Some senders design a complete email
+-- themselves — a pasted Mailchimp or Brevo export, a hand-built template — and
+-- for them a frame is damage, not decoration. This switch is how they say so.
+--
+-- Defaults to TRUE, which is the honest default now that campaigns honour
+-- branding: an organization that fills in a logo expects to see it, and one
+-- that has filled in nothing sees no visual difference either way, since every
+-- branding field is independently opt-in and renders nothing when null.
+--
+-- Note for upgrades: with this ON, a campaign template authored as a *fragment*
+-- is now wrapped in the email-safe layout before sending, so its typography and
+-- spacing change even when no branding fields are set. A template that is a
+-- complete HTML document is passed through untouched exactly as before, so
+-- imported designs are unaffected. Turning this off restores the previous
+-- behaviour precisely.
+--
+-- NOT NULL with a default backfills every existing row in one statement, so no
+-- organization is left with an undefined branding state.
+ALTER TABLE "Organization"
+    ADD COLUMN "brandingEnabled" BOOLEAN NOT NULL DEFAULT true;

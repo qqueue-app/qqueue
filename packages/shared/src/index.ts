@@ -1009,7 +1009,13 @@ export const organizationBrandingSchema = z.object({
       .regex(/^#[0-9a-fA-F]{6}$/, "Use a six-digit hex colour, e.g. #2E7D63")
       .nullable()
   ),
-  footerNote: z.preprocess(emptyToNull, z.string().trim().max(500).nullable())
+  footerNote: z.preprocess(emptyToNull, z.string().trim().max(500).nullable()),
+  /**
+   * Whether the frame (header, accent, email-safe layout) is drawn around
+   * outgoing mail at all. The address and unsubscribe link ignore this: they are
+   * obligations on bulk mail, not styling.
+   */
+  brandingEnabled: z.boolean()
 });
 
 export type OrganizationBrandingInput = z.infer<

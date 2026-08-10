@@ -551,3 +551,84 @@ describe("campaign-processing worker", () => {
     expect(emailSendingQueue.addBulk).not.toHaveBeenCalled();
   });
 });
+
+describe("campaign branding", () => {
+  function sendingCampaign() {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      id: "c1",
+      status: "SENDING",
+      cronExpression: null,
+      scheduledAt: null,
+      organizationId: "org1",
+      templateId: "t1",
+      template: { ...baseTemplate, id: "t1" },
+      contactList: {
+        members: [
+          { contact: { email: "a@b.com", firstName: "Ann", lastName: "Bee" } }
+        ]
+      }
+    } as never);
+    prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
+    prismaMock.emailJob.findMany
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "new1" }] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp1"
+    } as never);
+    prismaMock.emailJob.createMany.mockResolvedValue({ count: 1 } as never);
+  }
+
+  it("wraps the template in the org's branding and still substitutes variables", async () => {
+    sendingCampaign();
+    prismaMock.organization.findUnique.mockResolvedValue({
+      brandName: "Acme",
+      logoUrl: null,
+      accentColor: "#123456",
+      brandingEnabled: true
+    } as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
+    // Branded...
+    expect(html).toContain("Acme");
+    expect(html).toContain("#123456");
+    // ...and the merge tokens still resolved, which is the whole point of
+    // compiling once and substituting afterwards.
+    expect(html).toContain("Hello Ann Bee");
+    expect(html).not.toContain("{{");
+  });
+
+  it("leaves the template untouched when branding is switched off", async () => {
+    sendingCampaign();
+    prismaMock.organization.findUnique.mockResolvedValue({
+      brandName: "Acme",
+      logoUrl: null,
+      accentColor: "#123456",
+      brandingEnabled: false
+    } as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
+    expect(html).toBe("<p>Hello Ann Bee </p>");
+    expect(html).not.toContain("Acme");
+  });
+
+  it("never puts the address in the body — the send worker owns it for bulk", async () => {
+    sendingCampaign();
+    prismaMock.organization.findUnique.mockResolvedValue({
+      brandName: "Acme",
+      logoUrl: null,
+      accentColor: null,
+      brandingEnabled: true
+    } as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    // footerNote is not even selected, so it cannot reach the wrap and be
+    // printed a second time beside the unsubscribe link.
+    const select = prismaMock.organization.findUnique.mock.calls[0][0].select;
+    expect(select).not.toHaveProperty("footerNote");
+  });
+});

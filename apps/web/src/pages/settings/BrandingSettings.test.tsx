@@ -1,4 +1,9 @@
-import { renderWithProviders, screen, waitFor } from "../../test/render.js";
+import {
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,6 +50,7 @@ const EMPTY = {
   logoUrl: null,
   accentColor: null,
   footerNote: null,
+  brandingEnabled: true,
 };
 
 beforeEach(() => {
@@ -174,5 +180,41 @@ describe("BrandingSettings", () => {
       screen.queryByRole("button", { name: "Save changes" })
     ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Brand name")).toBeDisabled();
+  });
+
+  it("saves the branding switch when it is turned off", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<BrandingSettings />);
+
+    await waitFor(() => screen.getByRole("switch"));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(mockedApi.updateOrganizationBranding).toHaveBeenCalledWith("o1", {
+        ...EMPTY,
+        brandingEnabled: false,
+      })
+    );
+  });
+
+  it("keeps the address and unsubscribe link in the preview when branding is off", async () => {
+    mockedApi.getOrganizationBranding.mockResolvedValue({
+      ...EMPTY,
+      brandName: "Acme",
+      footerNote: "Acme Inc, 400 Market St",
+      brandingEnabled: false,
+    });
+
+    renderWithProviders(<BrandingSettings />);
+
+    // Scoped to the preview: the address also appears in the form field it
+    // came from, so an unscoped query matches twice.
+    await waitFor(() => screen.getByRole("complementary"));
+    const preview = within(screen.getByRole("complementary"));
+    expect(preview.getByText("Acme Inc, 400 Market St")).toBeInTheDocument();
+    expect(preview.getByText("Unsubscribe")).toBeInTheDocument();
+    // The wordmark and copyright are the frame, so they go.
+    expect(preview.queryByText("© Acme")).not.toBeInTheDocument();
   });
 });

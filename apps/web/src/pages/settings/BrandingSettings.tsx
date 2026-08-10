@@ -12,6 +12,7 @@ import { IconButton } from "../../components/ui/icon-button.js";
 import { Input } from "../../components/ui/input.js";
 import { FieldHint, Label } from "../../components/ui/label.js";
 import { Spinner } from "../../components/ui/spinner.js";
+import { SettingsRow, Switch } from "../../components/ui/switch.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { api, type OrganizationBranding } from "../../lib/api.js";
 import { qk } from "../../lib/query-client.js";
@@ -35,6 +36,7 @@ const EMPTY: OrganizationBranding = {
   logoUrl: null,
   accentColor: null,
   footerNote: null,
+  brandingEnabled: true,
 };
 
 /** Form state keeps strings; the API takes nulls. Empty means "add nothing". */
@@ -43,6 +45,7 @@ interface BrandingForm {
   logoUrl: string;
   accentColor: string;
   footerNote: string;
+  brandingEnabled: boolean;
 }
 
 function toForm(branding: OrganizationBranding): BrandingForm {
@@ -51,6 +54,7 @@ function toForm(branding: OrganizationBranding): BrandingForm {
     logoUrl: branding.logoUrl ?? "",
     accentColor: branding.accentColor ?? "",
     footerNote: branding.footerNote ?? "",
+    brandingEnabled: branding.brandingEnabled,
   };
 }
 
@@ -61,6 +65,7 @@ function toPayload(form: BrandingForm): OrganizationBranding {
     logoUrl: trim(form.logoUrl),
     accentColor: trim(form.accentColor),
     footerNote: trim(form.footerNote),
+    brandingEnabled: form.brandingEnabled,
   };
 }
 
@@ -172,6 +177,26 @@ export function BrandingSettings() {
             <form id="branding-form" onSubmit={submit}>
               <fieldset disabled={!canEdit} className="min-w-0 border-0 p-0">
                 <FormSections>
+                  <FormSection
+                    title="Apply branding"
+                    description="Whether QQueue frames your content with the styling below."
+                  >
+                    <SettingsRow
+                      label="Brand outgoing emails"
+                      htmlFor="brandingEnabled"
+                      description="Off sends each template's HTML exactly as you wrote it, with no header, colours, or layout added. Your address and the unsubscribe link are still included — those are required on bulk mail."
+                    >
+                      <Switch
+                        id="brandingEnabled"
+                        checked={form.brandingEnabled}
+                        disabled={!canEdit}
+                        onCheckedChange={(checked) =>
+                          setForm({ ...form, brandingEnabled: checked })
+                        }
+                      />
+                    </SettingsRow>
+                  </FormSection>
+
                   <FormSection
                     title="Identity"
                     description="Shown at the top of your emails. Leave both empty and no header is added — nothing is ever stamped on your mail that you didn't choose."
@@ -326,19 +351,24 @@ export function BrandingSettings() {
                 about the email.
               */}
               <div className="rounded-card border border-border bg-email-paper p-5 shadow-card">
-                {form.logoUrl ? (
-                  <img
-                    src={form.logoUrl}
-                    alt=""
-                    className="mx-auto max-h-10 object-contain"
-                  />
-                ) : form.brandName.trim() ? (
-                  <p
-                    className="text-center text-title font-semibold tracking-tight"
-                    style={{ color: accent }}
-                  >
-                    {form.brandName}
-                  </p>
+                {/* Header, accent, and copyright are the frame — the switch
+                    governs all three. The address and unsubscribe link below
+                    are obligations, so they stay either way. */}
+                {form.brandingEnabled ? (
+                  form.logoUrl ? (
+                    <img
+                      src={form.logoUrl}
+                      alt=""
+                      className="mx-auto max-h-10 object-contain"
+                    />
+                  ) : form.brandName.trim() ? (
+                    <p
+                      className="text-center text-title font-semibold tracking-tight"
+                      style={{ color: accent }}
+                    >
+                      {form.brandName}
+                    </p>
+                  ) : null
                 ) : null}
 
                 <div className="mt-4 text-body text-[#1f2933]">
@@ -349,13 +379,19 @@ export function BrandingSettings() {
                     Hi Dana, we shipped three things you asked for.
                   </p>
                   <p>
-                    <span style={{ color: accent }}>See what's new</span>
+                    <span
+                      style={
+                        form.brandingEnabled ? { color: accent } : undefined
+                      }
+                    >
+                      See what&rsquo;s new
+                    </span>
                   </p>
                 </div>
 
                 <div className="mt-5 border-t border-[#eef2f6] pt-3 text-center text-meta text-[#9aa5b1]">
-                  {form.brandName.trim() ? (
-                    <span className="block">© {form.brandName}</span>
+                  {form.brandingEnabled && form.brandName.trim() ? (
+                    <span className="block">&copy; {form.brandName}</span>
                   ) : null}
                   {form.footerNote.trim() ? (
                     <span className="block whitespace-pre-line">
@@ -366,8 +402,9 @@ export function BrandingSettings() {
                 </div>
               </div>
               <p className="mt-2 text-meta text-text-tertiary">
-                Campaigns keep their own template body; the header and footer are
-                what change here.
+                {form.brandingEnabled
+                  ? "Applied to campaigns, recurring sends, and anything you compose."
+                  : "Templates send exactly as authored. Only the address and unsubscribe link are added."}
               </p>
             </aside>
           </div>

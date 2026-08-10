@@ -489,6 +489,7 @@ export interface OrganizationBranding {
   logoUrl: string | null;
   accentColor: string | null;
   footerNote: string | null;
+  brandingEnabled: boolean;
 }
 
 export interface ImageAsset {
