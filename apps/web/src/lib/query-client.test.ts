@@ -40,7 +40,11 @@ describe("qk query key factory", () => {
     "instanceMailboxes",
     "instanceMailDomainGrants",
     "instanceMutes",
-    "pushPublicKey"
+    "pushPublicKey",
+    // A push registration belongs to a browser install, not to an org: the same
+    // device carries alerts for every org its owner belongs to. Keying it per
+    // org is what previously bound one device to one organization.
+    "pushDevices"
   ]);
 
   const orgScoped = Object.entries(qk).filter(

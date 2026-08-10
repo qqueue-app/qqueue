@@ -61,6 +61,12 @@ vi.mock("../../lib/use-push-notifications.js", () => ({
     enable: vi.fn(),
     disable: vi.fn(),
   }),
+  useInboxNotifyPreference: () => ({
+    level: "ALL",
+    isPending: false,
+    saving: false,
+    setLevel: vi.fn(),
+  }),
 }));
 
 vi.mock("../../components/InstallAppCard.js", () => ({

@@ -972,6 +972,14 @@ export interface PushDevice {
   createdAt: string;
 }
 
+/** How much of one org's mail may notify you, on every device you own. */
+export type InboxNotifyLevel = "ALL" | "ADDRESSED_TO_ME" | "NONE";
+
+export interface InboxNotifyPreference {
+  organizationId: string;
+  notifyLevel: InboxNotifyLevel;
+}
+
 export interface Campaign {
   id: string;
   organizationId: string;
@@ -2478,7 +2486,6 @@ export const api = {
   },
 
   subscribeToPush(input: {
-    organizationId: string;
     endpoint: string;
     keys: { p256dh: string; auth: string };
     userAgent?: string;
@@ -2493,6 +2500,22 @@ export const api = {
     return request<void>("/api/v1/push/subscriptions", {
       method: "DELETE",
       body: JSON.stringify({ endpoint }),
+    });
+  },
+
+  inboxNotifyPreference(organizationId: string) {
+    return request<InboxNotifyPreference>(
+      `/api/v1/push/preferences?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  updateInboxNotifyPreference(input: {
+    organizationId: string;
+    notifyLevel: InboxNotifyLevel;
+  }) {
+    return request<InboxNotifyPreference>("/api/v1/push/preferences", {
+      method: "PUT",
+      body: JSON.stringify(input),
     });
   },
 };

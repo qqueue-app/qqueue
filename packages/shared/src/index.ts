@@ -2493,7 +2493,6 @@ export type SmtpConnectionGrantCreateInput = z.infer<
  * ours and are useless without the private key held on the device.
  */
 export const pushSubscriptionSchema = z.object({
-  organizationId: z.string().min(1),
   endpoint: z.string().url(),
   keys: z.object({
     p256dh: z.string().min(1),
@@ -2510,6 +2509,46 @@ export const pushUnsubscribeSchema = z.object({
 });
 
 export type PushUnsubscribeInput = z.infer<typeof pushUnsubscribeSchema>;
+
+/**
+ * A browser rotating a subscription out from under us, replayed by the service
+ * worker. `oldEndpoint` is the authorization: it is an unguessable URL the push
+ * service issued to this client alone, which is the only credential a service
+ * worker has — it cannot read the bearer token, since that lives in
+ * localStorage and workers have no access to it.
+ */
+export const pushRotateSchema = z.object({
+  oldEndpoint: z.string().url(),
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+  userAgent: z.string().max(512).optional(),
+});
+
+export type PushRotateInput = z.infer<typeof pushRotateSchema>;
+
+/**
+ * How much of one organization's incoming mail may notify a member's devices.
+ * Mirrors the `InboxNotifyLevel` enum in the Prisma schema.
+ */
+export const inboxNotifyLevelSchema = z.enum([
+  "ALL",
+  "ADDRESSED_TO_ME",
+  "NONE",
+]);
+
+export type InboxNotifyLevel = z.infer<typeof inboxNotifyLevelSchema>;
+
+export const inboxNotifyPreferenceUpdateSchema = z.object({
+  organizationId: z.string().min(1),
+  notifyLevel: inboxNotifyLevelSchema,
+});
+
+export type InboxNotifyPreferenceUpdateInput = z.infer<
+  typeof inboxNotifyPreferenceUpdateSchema
+>;
 
 /**
  * The payload a service worker receives. Kept deliberately small: push

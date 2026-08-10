@@ -9,11 +9,16 @@
  * our row survives. Everything here exists to reconcile those three.
  */
 
-/** Push services want the VAPID key as a Uint8Array, not the base64url string. */
+/**
+ * Push services want the VAPID key as a Uint8Array, not the base64url string.
+ * Deliberately uses the bare `atob` rather than `window.atob`: the service
+ * worker calls this too when it re-subscribes after a rotation, and there is no
+ * `window` in worker scope.
+ */
 export function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
   const normalized = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = window.atob(normalized);
+  const raw = atob(normalized);
   // Backed by a plain ArrayBuffer rather than the default ArrayBufferLike, so
   // it satisfies BufferSource where `pushManager.subscribe` expects it.
   const output = new Uint8Array(new ArrayBuffer(raw.length));

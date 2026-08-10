@@ -22,7 +22,7 @@ import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { recurringSendRouter } from "../modules/recurring-sends/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
 import { outboxRouter } from "../modules/outbox/routes.js";
-import { pushRouter } from "../modules/push/routes.js";
+import { pushPublicRouter, pushRouter } from "../modules/push/routes.js";
 import { queueOperationsRouter } from "../modules/queue-operations/routes.js";
 import { segmentRouter } from "../modules/segments/routes.js";
 import { sentRouter } from "../modules/sent/routes.js";
@@ -63,6 +63,11 @@ v1Router.use(invitationPublicRouter);
 // HTML with no session. Authorized by the unguessable publicId in the URL.
 // Uploading is authenticated and lives on the `/images` router mounted below.
 v1Router.use(imagePublicRouter);
+
+// Public push-subscription rotation. Authorized by the endpoint the push
+// service rotated away from, not a session: service workers cannot read the
+// access token, and a rotation almost always happens with no tab open.
+v1Router.use(pushPublicRouter);
 
 // Transactional sends support either dashboard JWT auth or public API keys.
 v1Router.use("/transactional-email", transactionalEmailRouter);

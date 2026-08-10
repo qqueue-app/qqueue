@@ -149,4 +149,9 @@ export const qk = {
   instanceMutes: () => ["instance-mutes"] as const,
 
   pushPublicKey: () => ["push-public-key"] as const,
+  // Devices are keyed by user, not org: a push registration belongs to the
+  // browser install, and follows you across every org you belong to.
+  pushDevices: () => ["push-devices"] as const,
+  inboxNotifyPreference: (orgId: string) =>
+    ["inbox-notify-preference", orgId] as const,
 } as const;

@@ -21,6 +21,19 @@ enum UserRole {
   MEMBER
 }
 
+/// How much of an organization's incoming mail should reach a member's devices.
+///
+/// `ALL` is the default because the inbox is a *shared* one: mail addressed to
+/// support@ is addressed to the mailbox, never to Ama personally, so
+/// `ADDRESSED_TO_ME` would notify nobody on the very inbox that needs it most.
+/// That tier is for orgs whose members add their own addresses as separate
+/// InboxAccounts, where "was I actually written to" is a real question.
+enum InboxNotifyLevel {
+  ALL
+  ADDRESSED_TO_ME
+  NONE
+}
+
 enum InviteStatus {
   PENDING
   ACCEPTED
@@ -163,23 +176,26 @@ model User {
 /// Rows are disposable. A push service returning 404/410 means the client
 /// unsubscribed or was uninstalled, and the sender deletes the row — never
 /// treat delivery failure here as an error worth retrying.
+///
+/// Deliberately **not** scoped to an organization. A device belongs to a
+/// person, not to an org: which org's mail may notify someone is a preference
+/// on their membership (`OrganizationMember.notifyLevel`), not a property of
+/// the registration. Storing an org here made one device serve exactly one org
+/// and silently reassigned it whenever the toggle was flipped in another.
 model PushSubscription {
-  id             String       @id @default(cuid())
-  userId         String
-  organizationId String
-  endpoint       String       @unique
-  p256dh         String
-  auth           String
+  id         String    @id @default(cuid())
+  userId     String
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
   /// Best-effort label for the device list in settings ("Chrome on macOS").
-  userAgent      String?
-  lastUsedAt     DateTime?
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  userAgent  String?
+  lastUsedAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@index([userId])
-  @@index([organizationId])
 }
 
 // Instance-wide runtime settings (install scope, not per-org). Sparse
@@ -267,7 +283,6 @@ model Organization {
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
-  pushSubscriptions PushSubscription[]
   // Cloud (Phase 7) back-references — defined in cloud.prisma. Relation metadata
   // only; no AGPL obligation attaches to these fields.
   subscription      Subscription?
@@ -281,6 +296,10 @@ model OrganizationMember {
   organizationId String
   userId         String
   role           UserRole     @default(MEMBER)
+  /// Which of this org's incoming mail may notify this person's devices. Lives
+  /// on the membership rather than on PushSubscription so the answer is the
+  /// same on every device they own, and survives adding or losing one.
+  notifyLevel    InboxNotifyLevel @default(ALL)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())

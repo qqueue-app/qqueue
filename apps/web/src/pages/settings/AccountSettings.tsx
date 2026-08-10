@@ -7,11 +7,21 @@ import {
   FormSections,
 } from "../../components/settings/FormLayout.js";
 import { Button } from "../../components/ui/button.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { SettingsRow, Switch } from "../../components/ui/switch.js";
-import { apiBaseUrl } from "../../lib/api.js";
+import { apiBaseUrl, type InboxNotifyLevel } from "../../lib/api.js";
 import { useSession } from "../../lib/session-context.js";
-import { usePushNotifications } from "../../lib/use-push-notifications.js";
+import {
+  useInboxNotifyPreference,
+  usePushNotifications,
+} from "../../lib/use-push-notifications.js";
 
 /**
  * Everything scoped to *you* rather than to the organization: who you are
@@ -24,8 +34,9 @@ import { usePushNotifications } from "../../lib/use-push-notifications.js";
  * make somebody hesitate before clicking.
  */
 export function AccountSettings() {
-  const { user, signOut: clearSessionState } = useSession();
+  const { user, currentOrganization, signOut: clearSessionState } = useSession();
   const push = usePushNotifications();
+  const notify = useInboxNotifyPreference();
 
   function signOut() {
     clearSessionState();
@@ -37,6 +48,12 @@ export function AccountSettings() {
 
   const pushActionable = push.status === "on" || push.status === "off";
   const pushOn = push.status === "on";
+
+  // The instance has push and this browser can do it. The preference below is
+  // worth showing whenever that holds — including when permission is blocked
+  // *here*, because it governs every other device the person owns too.
+  const pushConfigured =
+    push.status === "on" || push.status === "off" || push.status === "blocked";
 
   return (
     <>
@@ -108,6 +125,40 @@ export function AccountSettings() {
                     </span>
                   )}
                 </SettingsRow>
+
+                {/*
+                  Which mail, as opposed to which device. This one is server
+                  state and follows the person onto every device they own, so it
+                  reads as a sibling of the toggle rather than something nested
+                  under it — the toggle answers "here?", this answers "about
+                  what?".
+                */}
+                {pushConfigured && currentOrganization && !notify.isPending && (
+                  <SettingsRow
+                    label={`Mail from ${currentOrganization.name}`}
+                    description="Applies to every device you've turned alerts on for, not just this one."
+                    htmlFor="inbox-notify-level"
+                  >
+                    <Select
+                      value={notify.level}
+                      onValueChange={(value) =>
+                        void notify.setLevel(value as InboxNotifyLevel)
+                      }
+                      disabled={notify.saving}
+                    >
+                      <SelectTrigger id="inbox-notify-level" width="choice">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All new mail</SelectItem>
+                        <SelectItem value="ADDRESSED_TO_ME">
+                          Only mail addressed to me
+                        </SelectItem>
+                        <SelectItem value="NONE">Nothing</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </SettingsRow>
+                )}
               </div>
             )}
           </FormSection>

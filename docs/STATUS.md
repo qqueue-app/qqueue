@@ -67,7 +67,14 @@ learning a new vocabulary. What changed:
 - **Web Push for new mail.** `PushSubscription` + `modules/push` on the API,
   `lib/push.ts` in the worker, fired from inbox sync on a genuinely new,
   non-DSN, unseen message. Off unless VAPID keys are configured. Deep-links
-  through `/inbox?message=<id>`.
+  through `/inbox?org=<id>&message=<id>`.
+  A subscription is a **device**, not an org: one install receives alerts for
+  every org its owner has turned them on for, and how much of each org's mail
+  reaches them is `OrganizationMember.notifyLevel`
+  (`ALL` / `ADDRESSED_TO_ME` / `NONE`, set on Settings → Account). The service
+  worker re-registers itself through the public
+  `POST /push/subscriptions/rotate` when the browser rotates a subscription,
+  authorized by the old endpoint since a worker has no session.
 - **The sidebar is unchanged.** A tooltipped rail and a mobile bottom tab bar
   were built and then reverted on 2026-08-07 — the existing sidebar (grouped
   sections, collapsible Settings, mobile drawer) was preferred. It keeps its

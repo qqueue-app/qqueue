@@ -163,7 +163,11 @@ function buildConversationThreads(messages: InboundMessage[]) {
  * conversation, so arriving at the inbox never marks a message read.
  */
 export function Inbox() {
-  const { currentOrganizationId: organizationId } = useSession();
+  const {
+    currentOrganizationId: organizationId,
+    organizations,
+    setCurrentOrganizationId,
+  } = useSession();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -315,6 +319,37 @@ export function Inbox() {
       .filter((message) => !message.readAt)
       .forEach((message) => markRead.mutate({ id: message.id, read: true }));
   }
+
+  // A notification can be about an org other than the one on screen — one
+  // device now serves every org its owner belongs to — so the link names its
+  // own. Switch first and let the message lookup below re-run against the right
+  // inbox once it reloads; the parameter is only dropped once we are there, or
+  // if the person is no longer a member of that org at all.
+  useEffect(() => {
+    const targetOrg = searchParams.get("org");
+    if (!targetOrg) return;
+    if (
+      targetOrg !== organizationId &&
+      organizations.some((candidate) => candidate.id === targetOrg)
+    ) {
+      setCurrentOrganizationId(targetOrg);
+      return;
+    }
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("org");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [
+    searchParams,
+    organizationId,
+    organizations,
+    setCurrentOrganizationId,
+    setSearchParams,
+  ]);
 
   // Deep link from a push notification: /inbox?message=<id>. Open the thread
   // that message belongs to, then drop the parameter so a later refresh doesn't

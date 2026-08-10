@@ -736,18 +736,86 @@ A push service answering 404 or 410 means that client unsubscribed or was
 uninstalled, so the row is deleted rather than retried; anything else is left
 alone and tried again next time.
 
-Two constraints worth stating because they surprise people:
-
-- **On iPhone and iPad, notifications require installing to the Home Screen.**
-  Safari exposes push only to installed PWAs. The app says so in place of the
-  toggle instead of failing quietly.
-- **Push is per device, not per account.** Turning it on at a desk does nothing
-  for the phone in someone's pocket, and the copy says "this device" for
-  exactly that reason.
+**On iPhone and iPad, notifications require installing to the Home Screen.**
+Safari exposes push only to installed PWAs. The app says so in place of the
+toggle instead of failing quietly.
 
 The payload carries only a sender, a subject, and a link. The body of an email
 must not travel through a third-party push service, and the ~4 KB encrypted
 payload limit would not hold one anyway.
+
+### A subscription is a device; which mail reaches it is a preference
+
+`PushSubscription` originally carried an `organizationId`, which bound one
+installed client to one organization. Three failures fell out of that, none of
+them visible in the UI: switching orgs did not re-register, so the toggle read
+"on" while the device was still bound to the org you left; the upsert keys on
+endpoint, so turning notifications off and on again while in another org
+silently *moved* the device there and ended the first org's alerts; and somebody
+in two orgs could never be notified about both on one phone.
+
+A device belongs to a person. Which organization's mail may reach them is
+`OrganizationMember.notifyLevel` — one answer per (user, org) that holds on every
+device they own and survives adding or losing one. Delivery inverts accordingly:
+the worker resolves *who* should hear about a message, then sends to all of their
+devices, building a payload per recipient rather than one for the whole org.
+
+The levels are `ALL`, `ADDRESSED_TO_ME`, and `NONE`. `ALL` is the default because
+this inbox is a **shared** one — every member can read every message, and read
+state is org-wide — so mail to support@ is addressed to the mailbox and never to
+Ama personally. `ADDRESSED_TO_ME` would therefore notify nobody on the very inbox
+that needs it most; it is there for orgs whose members add their own addresses as
+separate inbox accounts, where "was I actually written to" is a real question.
+
+Because one device now serves several orgs, a notification has to say which one
+it is about, and its deep link carries `?org=` so clicking opens the message in
+the right organization rather than whichever was last selected. The org name is
+added only for recipients who belong to more than one — for everyone else it is
+noise.
+
+The migration that made this change backfills rather than accepting the new
+default. Defaulting every existing membership to `ALL` would have handed people
+alerts for every org they belong to, which is an upgrade quietly making their
+phones louder. It sets `NONE` everywhere, then restores `ALL` only for the
+(user, org) pairs that had a device registered for that org — reproducing each
+person's existing reach exactly. New memberships take the `ALL` default.
+
+### Rotation has to repair itself, with no session to do it with
+
+Browsers replace a push subscription on their own schedule, and almost always
+with no tab open. Merely posting a message to open clients, as this once did,
+therefore reached nobody — and the damage was silent: the next time the app
+opened it saw a valid *local* subscription, reported notifications as on, and the
+server still held the endpoint that had been rotated away. The device was mute
+and the settings page said it was fine.
+
+The repair has to run in the service worker, which has no credentials: the access
+token lives in `localStorage`, and workers cannot read it. So
+`POST /api/v1/push/subscriptions/rotate` is mounted above `requireAuth` and
+authorizes on possession of the **old endpoint** — an unguessable URL the push
+service issued to exactly one client. That is the same reasoning that authorizes
+one-click unsubscribe links and public image reads. Ownership is carried over
+from the row being replaced and never read from the request, so a replayed
+rotation cannot move somebody else's device to a new account.
+
+The worker also needs the VAPID public key and the API base URL to re-subscribe,
+and can reach neither (`import.meta.env` is baked into the app bundle). The app
+writes both to a Cache API record when notifications are switched on — the one
+storage a window and a worker can share, and far less machinery than IndexedDB
+for a single record.
+
+### The notifications toggle reconciles all three states
+
+Three things must agree before a notification can arrive: the browser's
+permission, a `PushSubscription` on the service-worker registration, and a row on
+our server. Any one can change without the others knowing. The toggle originally
+consulted only the browser, which made it lie in exactly the case above — a
+perfectly valid local registration whose endpoint the server has never heard of.
+
+It now confirms the server holds *this* endpoint before reading "on". A failed
+check leaves the last known answer rather than reporting a device switched off
+that probably isn't: the request failing says something about the network, not
+about the subscription.
 
 ### Errors surface once, where they matter
 

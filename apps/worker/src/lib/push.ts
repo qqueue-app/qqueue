@@ -86,38 +86,47 @@ async function deliver(
   }
 }
 
-export interface SendPushOptions {
-  organizationId: string;
+export interface PushRecipient {
+  userId: string;
   payload: PushNotificationPayload;
-  /** Restrict delivery to specific users; omit to notify the whole org. */
-  userIds?: string[];
 }
 
 /**
- * Notify an organization's registered devices. Returns how many pushes the
- * push services accepted — "accepted" is as far as we can ever know, since
- * actual display is the device's decision.
+ * Send to every device belonging to each named user.
+ *
+ * The payload is per-recipient rather than shared, because two people can need
+ * different words for the same event: someone who belongs to several orgs needs
+ * to be told which one this is, and someone who belongs to one would only find
+ * that noise.
+ *
+ * Returns how many pushes the push services accepted — "accepted" is as far as
+ * we can ever know, since actual display is the device's decision.
  */
-export async function sendPushToOrganization({
-  organizationId,
-  payload,
-  userIds,
-}: SendPushOptions): Promise<number> {
+export async function sendPushToUsers(
+  recipients: PushRecipient[]
+): Promise<number> {
   if (!ensureConfigured()) return 0;
+  if (recipients.length === 0) return 0;
+
+  const payloadByUser = new Map(
+    recipients.map((recipient) => [recipient.userId, recipient.payload])
+  );
 
   const subscriptions = await prisma.pushSubscription.findMany({
-    where: {
-      organizationId,
-      ...(userIds?.length ? { userId: { in: userIds } } : {}),
-    },
-    select: { id: true, endpoint: true, p256dh: true, auth: true },
+    where: { userId: { in: [...payloadByUser.keys()] } },
+    select: { id: true, endpoint: true, p256dh: true, auth: true, userId: true },
   });
 
   if (subscriptions.length === 0) return 0;
 
-  const body = JSON.stringify(payload);
   const results = await Promise.all(
-    subscriptions.map((subscription) => deliver(subscription, body))
+    subscriptions.map((subscription) => {
+      const payload = payloadByUser.get(subscription.userId);
+      // Can't happen — the query filtered on these ids — but a missing payload
+      // must never become a `JSON.stringify(undefined)` sent to a device.
+      if (!payload) return Promise.resolve(false);
+      return deliver(subscription, JSON.stringify(payload));
+    })
   );
   const delivered = results.filter(Boolean).length;
 
@@ -131,6 +140,105 @@ export async function sendPushToOrganization({
   }
 
   return delivered;
+}
+
+export interface InboundMessageNotification {
+  organizationId: string;
+  /** Stored message id, used for the deep link. */
+  messageId: string;
+  /** Sender, already formatted for display. */
+  sender: string;
+  subject: string;
+  /** Collapses replies on one conversation into a single banner. */
+  threadKey: string;
+  /** Everyone the message was addressed to, for `ADDRESSED_TO_ME`. */
+  recipientEmails: string[];
+}
+
+/**
+ * Notify the members of an org who asked to hear about new mail.
+ *
+ * Who hears about it is a per-member preference, not a property of anyone's
+ * device: `NONE` is silence, `ALL` is every message, and `ADDRESSED_TO_ME`
+ * limits it to mail with that person in To/Cc — useful when members add their
+ * own addresses as separate inbox accounts, useless on a shared support@ box,
+ * which is why it is not the default.
+ */
+export async function notifyNewInboundMessage(
+  notification: InboundMessageNotification
+): Promise<number> {
+  if (!ensureConfigured()) return 0;
+
+  const members = await prisma.organizationMember.findMany({
+    where: {
+      organizationId: notification.organizationId,
+      notifyLevel: { not: "NONE" },
+    },
+    select: {
+      userId: true,
+      notifyLevel: true,
+      user: { select: { email: true } },
+    },
+  });
+
+  const addressed = new Set(
+    notification.recipientEmails.map((email) => email.trim().toLowerCase())
+  );
+  const interested = members.filter(
+    (member) =>
+      member.notifyLevel === "ALL" ||
+      addressed.has(member.user.email.trim().toLowerCase())
+  );
+
+  if (interested.length === 0) return 0;
+
+  const userIds = interested.map((member) => member.userId);
+
+  // Which of them belong to more than one org, and so need to be told which org
+  // this banner is about. One query for the whole set rather than one each.
+  const [organization, memberships] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { id: notification.organizationId },
+      select: { name: true },
+    }),
+    prisma.organizationMember.findMany({
+      where: { userId: { in: userIds } },
+      select: { userId: true },
+    }),
+  ]);
+
+  const orgCount = new Map<string, number>();
+  for (const membership of memberships) {
+    orgCount.set(membership.userId, (orgCount.get(membership.userId) ?? 0) + 1);
+  }
+
+  const subject = truncateForNotification(
+    notification.subject || "(no subject)"
+  );
+  // The org has to travel in the link as well as the banner: a device serving
+  // two orgs would otherwise open the message in whichever org the app happened
+  // to have selected, and find nothing.
+  const url = `/inbox?org=${encodeURIComponent(
+    notification.organizationId
+  )}&message=${encodeURIComponent(notification.messageId)}`;
+
+  return sendPushToUsers(
+    interested.map((member) => {
+      const multiOrg = (orgCount.get(member.userId) ?? 1) > 1;
+      return {
+        userId: member.userId,
+        payload: {
+          title: notification.sender,
+          body:
+            multiOrg && organization?.name
+              ? `${subject} · ${organization.name}`
+              : subject,
+          url,
+          tag: `inbox:${notification.threadKey}`,
+        },
+      };
+    })
+  );
 }
 
 /** Trim a subject or preview to something a notification banner can show. */

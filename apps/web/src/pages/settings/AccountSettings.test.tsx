@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const sessionValue = vi.hoisted(() => ({
   current: {
     user: { id: "u1", email: "me@x.com" },
+    currentOrganization: { id: "org_1", name: "Acme" },
     signOut: vi.fn(),
   },
 }));
@@ -21,8 +22,17 @@ const push = vi.hoisted(() => ({
     disable: vi.fn(),
   },
 }));
+const notify = vi.hoisted(() => ({
+  current: {
+    level: "ALL" as string,
+    isPending: false,
+    saving: false,
+    setLevel: vi.fn(),
+  },
+}));
 vi.mock("../../lib/use-push-notifications.js", () => ({
   usePushNotifications: () => push.current,
+  useInboxNotifyPreference: () => notify.current,
 }));
 
 // The install prompt is platform-detected and irrelevant to this page's own
@@ -44,6 +54,12 @@ beforeEach(() => {
     busy: false,
     enable: vi.fn(),
     disable: vi.fn(),
+  };
+  notify.current = {
+    level: "ALL",
+    isPending: false,
+    saving: false,
+    setLevel: vi.fn(),
   };
   originalLocation = window.location;
 });
@@ -126,5 +142,39 @@ describe("AccountSettings", () => {
     expect(
       screen.queryByText("New mail alerts on this device")
     ).not.toBeInTheDocument();
+  });
+
+  describe("which mail notifies you", () => {
+    it("names the organization the preference applies to", () => {
+      renderWithProviders(<AccountSettings />);
+      expect(screen.getByText("Mail from Acme")).toBeInTheDocument();
+    });
+
+    it("still offers the choice when this browser has push blocked", () => {
+      // The preference governs every device the person owns, so a permission
+      // refused *here* is no reason to hide it.
+      push.current = { ...push.current, status: "blocked" };
+      renderWithProviders(<AccountSettings />);
+      expect(screen.getByText("Mail from Acme")).toBeInTheDocument();
+    });
+
+    it("hides itself when the instance has no push at all", () => {
+      push.current = { ...push.current, status: "unavailable" };
+      renderWithProviders(<AccountSettings />);
+      expect(screen.queryByText("Mail from Acme")).not.toBeInTheDocument();
+    });
+
+    it("saves a new level", async () => {
+      renderWithProviders(<AccountSettings />);
+
+      await userEvent.click(screen.getByRole("combobox"));
+      await userEvent.click(
+        await screen.findByRole("option", { name: "Nothing" })
+      );
+
+      await waitFor(() =>
+        expect(notify.current.setLevel).toHaveBeenCalledWith("NONE")
+      );
+    });
   });
 });

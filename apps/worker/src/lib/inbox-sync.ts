@@ -7,7 +7,7 @@ import { decryptSecret } from "./crypto.js";
 import { applyDsnBounce, parseDsn } from "./dsn.js";
 import { logger } from "./logger.js";
 import { prisma } from "./prisma.js";
-import { sendPushToOrganization, truncateForNotification } from "./push.js";
+import { notifyNewInboundMessage } from "./push.js";
 import { storage } from "./storage.js";
 
 type InboxAccount = Awaited<ReturnType<typeof getActiveInboxAccounts>>[number];
@@ -265,18 +265,17 @@ async function storeParsedMessage(input: {
   // alerts. Push is best-effort: a failure here must never fail the sync.
   if (!existing && !dsn && !seen) {
     try {
-      await sendPushToOrganization({
+      await notifyNewInboundMessage({
         organizationId: account.organizationId,
-        payload: {
-          title: from.name
-            ? `${from.name} <${from.email}>`
-            : from.email,
-          body: truncateForNotification(mail.subject || "(no subject)"),
-          url: `/inbox?message=${stored.id}`,
-          // One notification per conversation: a burst of replies to the same
-          // thread collapses instead of stacking.
-          tag: `inbox:${outbound?.id ?? stored.id}`,
-        },
+        messageId: stored.id,
+        sender: from.name ? `${from.name} <${from.email}>` : from.email,
+        subject: mail.subject ?? "",
+        // One notification per conversation: a burst of replies to the same
+        // thread collapses instead of stacking.
+        threadKey: outbound?.id ?? stored.id,
+        // Who the mail was actually written to, so members on
+        // ADDRESSED_TO_ME are only woken for their own.
+        recipientEmails: [...addressList(mail.to), ...addressList(mail.cc)],
       });
     } catch (error) {
       logger.warn(
