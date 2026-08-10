@@ -1,5 +1,9 @@
 import type { Request, Response } from "express";
-import { memberRoleUpdateSchema, organizationSchema } from "@qqueue/shared";
+import {
+  memberRoleUpdateSchema,
+  organizationBrandingSchema,
+  organizationSchema
+} from "@qqueue/shared";
 import { organizationService } from "./service.js";
 
 export const organizationController = {
@@ -34,6 +38,24 @@ export const organizationController = {
     const input = organizationSchema.parse(req.body);
     const organization = await organizationService.create(input, req.userId!);
     res.status(201).json({ data: organization });
+  },
+
+  async getBranding(req: Request, res: Response) {
+    const branding = await organizationService.getBranding(
+      String(req.params.id),
+      req.userId!
+    );
+    res.json({ data: branding });
+  },
+
+  async updateBranding(req: Request, res: Response) {
+    const input = organizationBrandingSchema.parse(req.body);
+    const branding = await organizationService.updateBranding(
+      String(req.params.id),
+      req.userId!,
+      input
+    );
+    res.json({ data: branding });
   },
 
   async update(req: Request, res: Response) {

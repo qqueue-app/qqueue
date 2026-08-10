@@ -8,6 +8,7 @@ import {
   campaignUpdateSchema,
   contactActivityQuerySchema,
   contactListSchema,
+  organizationBrandingSchema,
   deriveReputationAlerts,
   type DeliverabilityOverview,
   resolveSuppressionPolicy,
@@ -1257,5 +1258,59 @@ describe("deriveReputationAlerts", () => {
     expect(
       deriveReputationAlerts(overview(1000, { bounce: null, complaint: null })),
     ).toEqual([]);
+  });
+});
+
+describe("organizationBrandingSchema", () => {
+  const base = {
+    brandName: "Acme",
+    logoUrl: "https://cdn.example.com/logo.png",
+    accentColor: "#2E7D63",
+    footerNote: "Acme Inc, 400 Market St"
+  };
+
+  it("accepts a fully populated branding payload", () => {
+    expect(organizationBrandingSchema.parse(base)).toEqual(base);
+  });
+
+  it("normalises empty strings to null, so clearing a field means 'add nothing'", () => {
+    expect(
+      organizationBrandingSchema.parse({
+        brandName: "",
+        logoUrl: "   ",
+        accentColor: "",
+        footerNote: ""
+      })
+    ).toEqual({
+      brandName: null,
+      logoUrl: null,
+      accentColor: null,
+      footerNote: null
+    });
+  });
+
+  it("rejects a relative logo URL — a mail client has nothing to resolve it against", () => {
+    expect(() =>
+      organizationBrandingSchema.parse({ ...base, logoUrl: "/images/logo.png" })
+    ).toThrow();
+  });
+
+  it("rejects a colour that is not six-digit hex", () => {
+    expect(() =>
+      organizationBrandingSchema.parse({ ...base, accentColor: "green" })
+    ).toThrow();
+    expect(() =>
+      organizationBrandingSchema.parse({ ...base, accentColor: "#2E7" })
+    ).toThrow();
+  });
+
+  it("trims a brand name and caps its length", () => {
+    expect(
+      organizationBrandingSchema.parse({ ...base, brandName: "  Acme  " })
+        .brandName
+    ).toBe("Acme");
+    expect(() =>
+      organizationBrandingSchema.parse({ ...base, brandName: "a".repeat(101) })
+    ).toThrow();
   });
 });

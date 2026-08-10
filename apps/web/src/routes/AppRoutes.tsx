@@ -64,6 +64,12 @@ const OrganizationSettings = lazy(() =>
     default: module.OrganizationSettings,
   }))
 );
+const BrandingSettings = lazy(() =>
+  import("../pages/settings/BrandingSettings.js").then((module) => ({
+    default: module.BrandingSettings,
+  }))
+);
+
 const TeamSettings = lazy(() =>
   import("../pages/settings/TeamSettings.js").then((module) => ({
     default: module.TeamSettings,
@@ -258,6 +264,7 @@ export function AppRoutes() {
             path="/settings/organization"
             element={<OrganizationSettings />}
           />
+          <Route path="/settings/branding" element={<BrandingSettings />} />
           <Route path="/settings/team" element={<TeamSettings />} />
           <Route path="/settings/sending" element={<SMTPConnections />} />
           <Route path="/settings/sending/health" element={<Deliverability />} />

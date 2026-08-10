@@ -118,6 +118,8 @@ export const qk = {
   members: (orgId: string) => ["members", orgId] as const,
   invites: (orgId: string) => ["invites", orgId] as const,
   organizations: () => ["organizations"] as const,
+  organizationBranding: (orgId: string) =>
+    ["organization-branding", orgId] as const,
 
   apiKeys: (orgId: string) => ["api-keys", orgId] as const,
   webhookEndpoints: (orgId: string) => ["webhook-endpoints", orgId] as const,

@@ -972,6 +972,50 @@ export const organizationSchema = z.object({
 
 export type OrganizationInput = z.infer<typeof organizationSchema>;
 
+/**
+ * How an organization's outbound mail looks.
+ *
+ * Every field is nullable and every one is opt-in: null means "add nothing",
+ * not "not configured yet". The render layer draws no header without a brand
+ * name or logo and no small print without a note, so a self-hosted install
+ * never stamps a vendor name onto mail its owner did not ask for. Empty strings
+ * are normalised to null so clearing a field in the UI reaches that same state.
+ */
+const emptyToNull = (value: unknown) =>
+  typeof value === "string" && value.trim() === "" ? null : value;
+
+export const organizationBrandingSchema = z.object({
+  brandName: z.preprocess(emptyToNull, z.string().trim().max(100).nullable()),
+  /**
+   * Absolute http(s) only. A mail client has no session and no page to resolve
+   * a relative path against, so a relative URL is a broken image by the time it
+   * matters. In practice this is an /api/v1/images/:publicId URL.
+   */
+  logoUrl: z.preprocess(
+    emptyToNull,
+    z
+      .string()
+      .url()
+      .refine((value) => /^https?:\/\//i.test(value), {
+        message: "Logo URL must be absolute (http or https)"
+      })
+      .nullable()
+  ),
+  /** A six-digit hex colour; anything looser reaches the email as broken CSS. */
+  accentColor: z.preprocess(
+    emptyToNull,
+    z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, "Use a six-digit hex colour, e.g. #2E7D63")
+      .nullable()
+  ),
+  footerNote: z.preprocess(emptyToNull, z.string().trim().max(500).nullable())
+});
+
+export type OrganizationBrandingInput = z.infer<
+  typeof organizationBrandingSchema
+>;
+
 // Org membership roles. Mirrors the Prisma `UserRole` enum and the `UserRole`
 // union above; kept as a Zod enum so request bodies validate against it.
 export const userRoleSchema = z.enum(["OWNER", "ADMIN", "MEMBER"]);

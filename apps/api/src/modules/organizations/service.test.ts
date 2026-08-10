@@ -178,4 +178,57 @@ describe("organizationService", () => {
       ).rejects.toThrow("at least one owner");
     });
   });
+
+  describe("branding", () => {
+    const branding = {
+      brandName: "Acme",
+      logoUrl: "https://cdn.example.com/logo.png",
+      accentColor: "#2E7D63",
+      footerNote: "Acme Inc, 400 Market St"
+    };
+
+    it("lets any member read it, so a MEMBER still gets an accurate preview", async () => {
+      prismaMock.organizationMember.findUnique.mockResolvedValue({
+        role: "MEMBER"
+      } as never);
+      prismaMock.organization.findUnique.mockResolvedValue(branding as never);
+
+      await expect(
+        organizationService.getBranding("org_1", "user_1")
+      ).resolves.toEqual(branding);
+    });
+
+    it("throws 404 when the organization is gone", async () => {
+      prismaMock.organizationMember.findUnique.mockResolvedValue({
+        role: "OWNER"
+      } as never);
+      prismaMock.organization.findUnique.mockResolvedValue(null as never);
+
+      await expect(
+        organizationService.getBranding("org_1", "user_1")
+      ).rejects.toThrow("Organization not found");
+    });
+
+    it("lets an ADMIN write it", async () => {
+      prismaMock.organizationMember.findUnique.mockResolvedValue({
+        role: "ADMIN"
+      } as never);
+      prismaMock.organization.update.mockResolvedValue(branding as never);
+
+      await expect(
+        organizationService.updateBranding("org_1", "user_1", branding)
+      ).resolves.toEqual(branding);
+    });
+
+    it("forbids a MEMBER from writing it — it changes what every recipient sees", async () => {
+      prismaMock.organizationMember.findUnique.mockResolvedValue({
+        role: "MEMBER"
+      } as never);
+
+      await expect(
+        organizationService.updateBranding("org_1", "user_1", branding)
+      ).rejects.toThrow("You do not have permission to do this");
+      expect(prismaMock.organization.update).not.toHaveBeenCalled();
+    });
+  });
 });

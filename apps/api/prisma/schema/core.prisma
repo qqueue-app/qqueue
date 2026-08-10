@@ -224,6 +224,17 @@ model PasswordResetToken {
 model Organization {
   id                String               @id @default(cuid())
   name              String
+  // Email branding, applied to outbound mail (see EmailBranding in
+  // @qqueue/email-engine). Every field is nullable and every one is opt-in:
+  // null renders no header, no copyright line, and no address block, so mail
+  // from a self-hosted install is never stamped with a name its owner did not
+  // choose. `accentColor` defaults to the engine's own accent when unset.
+  brandName         String?
+  logoUrl           String?
+  accentColor       String?
+  // Small print under the footer — in practice a postal address, which
+  // anti-spam law expects on bulk mail.
+  footerNote        String?
   members           OrganizationMember[]
   invites           OrganizationInvite[]
   smtpConnections   SMTPConnection[]

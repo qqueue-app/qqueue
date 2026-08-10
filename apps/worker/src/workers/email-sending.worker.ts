@@ -40,7 +40,13 @@ export function startEmailSendingWorker() {
     async (job, token) => {
       const emailJob = await prisma.emailJob.findUnique({
         where: { id: job.data.emailJobId },
-        include: { smtpConnection: true, campaign: { select: { status: true } } }
+        include: {
+          smtpConnection: true,
+          campaign: { select: { status: true } },
+          // Only the footer note: the rest of the org's branding is applied
+          // when the body is rendered, not when it is sent.
+          organization: { select: { footerNote: true } }
+        }
       });
 
       if (!emailJob || emailJob.status === "CANCELLED") {
@@ -177,11 +183,18 @@ export function startEmailSendingWorker() {
         // the only one in the message that isn't rewritten through the click
         // redirect. Both helpers no-op when the body already links to the
         // endpoint (a template using {{unsubscribe_url}}) — hence no duplicate.
+        const footerOptions = {
+          note: emailJob.organization?.footerNote ?? null
+        };
         const html = unsubscribeUrl
-          ? appendUnsubscribeFooter(trackedHtml, unsubscribeUrl)
+          ? appendUnsubscribeFooter(trackedHtml, unsubscribeUrl, footerOptions)
           : trackedHtml;
         const text = unsubscribeUrl
-          ? appendUnsubscribeFooterText(emailJob.text, unsubscribeUrl)
+          ? appendUnsubscribeFooterText(
+              emailJob.text,
+              unsubscribeUrl,
+              footerOptions
+            )
           : (emailJob.text ?? undefined);
 
         const result = await provider.send({

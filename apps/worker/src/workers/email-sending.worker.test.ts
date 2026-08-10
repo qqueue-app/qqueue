@@ -564,7 +564,8 @@ describe("email-sending worker", () => {
     // is the one link in the message the click redirect never rewrites.
     expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
       "tracked:<p>Body</p>",
-      "https://app/api/v1/unsubscribe?token=tok"
+      "https://app/api/v1/unsubscribe?token=tok",
+      { note: null }
     );
     const sendArgs = send.mock.calls[0][0];
     expect(sendArgs.html).toBe("tracked:<p>Body</p>+unsub-footer");
@@ -592,6 +593,37 @@ describe("email-sending worker", () => {
     const sendArgs = send.mock.calls[0][0];
     expect(sendArgs.html).toBe("tracked:<p>Body</p>");
     expect(sendArgs.text).toBe("Body");
+  });
+
+  it("carries the organization's footer note into the bulk footer", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "CAMPAIGN",
+      isBulk: true,
+      organization: { footerNote: "Acme Inc, 400 Market St" }
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    // The address rides beside the unsubscribe link rather than through the
+    // MJML wrap, which campaign fan-out never calls.
+    const options = { note: "Acme Inc, 400 Market St" };
+    expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      options
+    );
+    expect(h.appendUnsubscribeFooterText).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      options
+    );
   });
 
   it("strips suppressed CC/BCC addresses and records what was stripped", async () => {

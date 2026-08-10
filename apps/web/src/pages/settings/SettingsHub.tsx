@@ -58,6 +58,12 @@ const groups: { heading: string; links: HubLink[] }[] = [
           "Bounces, complaints, and how each recipient domain treats you.",
       },
       {
+        to: "/settings/branding",
+        title: "Branding",
+        description: "Your logo, colours, and the footer on every campaign.",
+        orgAdminOnly: true,
+      },
+      {
         to: "/settings/mailboxes",
         title: "Mailboxes",
         description: "Inboxes QQueue syncs, so replies come back here.",

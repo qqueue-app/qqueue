@@ -129,3 +129,36 @@ describe("appendUnsubscribeFooterText", () => {
     expect(appendUnsubscribeFooterText(existing, url)).toBe(existing);
   });
 });
+
+describe("unsubscribe footer note", () => {
+  const url = buildUnsubscribeUrl("https://app.example.com", "org_1", "u@x.com", SECRET);
+
+  it("renders the note above the link, escaped", () => {
+    const html = appendUnsubscribeFooter("<p>Hi</p>", url, {
+      note: 'Acme <b>Inc</b> & Co'
+    })!;
+    expect(html).toContain("Acme &lt;b&gt;Inc&lt;/b&gt; &amp; Co");
+    expect(html).not.toContain("<b>Inc</b>");
+    // Note precedes the link.
+    expect(html.indexOf("Acme")).toBeLessThan(html.indexOf("Unsubscribe</a>"));
+  });
+
+  it("turns newlines in the note into line breaks", () => {
+    const html = appendUnsubscribeFooter("<p>Hi</p>", url, {
+      note: "Acme Inc\n400 Market St"
+    })!;
+    expect(html).toContain("Acme Inc<br />400 Market St");
+  });
+
+  it("omits the note block when there is no note", () => {
+    const html = appendUnsubscribeFooter("<p>Hi</p>", url, { note: null })!;
+    expect(html).toContain("Unsubscribe</a>");
+    expect(html).not.toContain("margin:0 0 8px");
+  });
+
+  it("puts the note in the plaintext footer too", () => {
+    expect(
+      appendUnsubscribeFooterText("Hello", url, { note: "Acme Inc" })
+    ).toBe(`Hello\n\n--\nAcme Inc\n\nUnsubscribe: ${url}\n`);
+  });
+});

@@ -483,6 +483,14 @@ export interface EmailAttachment {
 }
 
 /** An image embedded in email HTML. `url` is public, absolute, and permanent. */
+/** How an organization's outbound mail looks. Null means "add nothing". */
+export interface OrganizationBranding {
+  brandName: string | null;
+  logoUrl: string | null;
+  accentColor: string | null;
+  footerNote: string | null;
+}
+
 export interface ImageAsset {
   id: string;
   url: string;
@@ -1382,6 +1390,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+
+  getOrganizationBranding(id: string) {
+    return request<OrganizationBranding>(
+      `/api/v1/organizations/${encodeURIComponent(id)}/branding`
+    );
+  },
+
+  updateOrganizationBranding(id: string, input: OrganizationBranding) {
+    return request<OrganizationBranding>(
+      `/api/v1/organizations/${encodeURIComponent(id)}/branding`,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }
+    );
   },
 
   updateOrganization(id: string, input: { name: string }) {

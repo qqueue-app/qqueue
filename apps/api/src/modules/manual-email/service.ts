@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { injectTracking, renderHtmlAsEmailSafe } from "@qqueue/email-engine";
+import {
+  type EmailBranding,
+  injectTracking,
+  renderHtmlAsEmailSafe
+} from "@qqueue/email-engine";
 import type {
   EmailPreviewInput,
   EmailPreviewResult,
@@ -101,15 +105,47 @@ export async function resolveRecipients(
 }
 
 /**
- * Render the composer body through the canonical MJML email-safe layer. This is
- * the exact transformation applied to manual sends, so the preview can reuse it
- * to match the delivered email.
+ * The organization's branding, shaped for the render layer. Nulls become
+ * `undefined` because that is how `EmailBranding` spells "add nothing": a header
+ * is drawn only when a brand name or logo exists, so an unbranded org keeps
+ * shipping exactly its own content.
+ *
+ * `footerNote` is included here because a manual send is not bulk and so never
+ * receives the send-time unsubscribe footer. Bulk paths must NOT pass it — the
+ * footer beside the unsubscribe link already carries it, and passing it in both
+ * places prints the address twice.
  */
-async function renderBody(html: string | undefined) {
+async function orgBranding(organizationId: string): Promise<EmailBranding> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      brandName: true,
+      logoUrl: true,
+      accentColor: true,
+      footerNote: true
+    }
+  });
+
+  return {
+    brandName: organization?.brandName ?? undefined,
+    logoUrl: organization?.logoUrl ?? undefined,
+    accentColor: organization?.accentColor ?? undefined,
+    footerNote: organization?.footerNote ?? undefined
+  };
+}
+
+/**
+ * Render the composer body through the canonical MJML email-safe layer, wearing
+ * the organization's branding. This is the exact transformation applied to
+ * manual sends, so the preview can reuse it to match the delivered email.
+ */
+async function renderBody(html: string | undefined, organizationId: string) {
   if (!html) {
     return undefined;
   }
-  const result = await renderHtmlAsEmailSafe(html);
+  const result = await renderHtmlAsEmailSafe(html, {
+    branding: await orgBranding(organizationId)
+  });
 
   // renderHtmlAsEmailSafe never throws: a compile failure silently degrades to
   // the raw body HTML. Surface that, or the send just quietly stops being
@@ -240,7 +276,7 @@ export const manualEmailService = {
       );
     }
 
-    const html = await renderBody(input.html);
+    const html = await renderBody(input.html, input.organizationId);
 
     // The carrier must be a recipient that will actually send, or the CC/BCC
     // copies would silently die with a suppressed To. (Recipients suppressed
@@ -300,7 +336,7 @@ export const manualEmailService = {
    */
   async preview(input: EmailPreviewInput): Promise<EmailPreviewResult> {
     const recipients = await resolveRecipients(input);
-    const rendered = await renderBody(input.html);
+    const rendered = await renderBody(input.html, input.organizationId);
     const html =
       injectTracking(rendered, {
         emailJobId: "preview",

@@ -148,9 +148,19 @@ const BODY_CLOSE = /<\/body\s*>/i;
  * unsubscribe endpoint — which is what makes the `{{unsubscribe_url}}` merge tag
  * an override rather than a way to get two links.
  */
+export interface UnsubscribeFooterOptions {
+  /**
+   * Small print above the link — in practice the organization's postal address,
+   * which anti-spam law expects on bulk mail. Plain text: it is escaped, and
+   * newlines become line breaks.
+   */
+  note?: string | null;
+}
+
 export function appendUnsubscribeFooter(
   html: string | null | undefined,
-  url: string
+  url: string,
+  options: UnsubscribeFooterOptions = {}
 ): string | undefined {
   if (!html) {
     return html ?? undefined;
@@ -160,9 +170,15 @@ export function appendUnsubscribeFooter(
     return html;
   }
 
+  const note = options.note?.trim();
+  const noteBlock = note
+    ? `<div style="margin:0 0 8px;">${escapeHtml(note).replace(/\r?\n/g, "<br />")}</div>`
+    : "";
+
   const footer =
     `<div style="margin:0;padding:16px 0 24px;text-align:center;` +
     `font-family:${FOOTER_FONT};font-size:12px;line-height:1.5;color:#9aa5b1;">` +
+    noteBlock +
     `<a href="${escapeHtml(url)}" style="color:#9aa5b1;text-decoration:underline;">Unsubscribe</a>` +
     `</div>`;
 
@@ -188,7 +204,8 @@ export function appendUnsubscribeFooter(
  */
 export function appendUnsubscribeFooterText(
   text: string | null | undefined,
-  url: string
+  url: string,
+  options: UnsubscribeFooterOptions = {}
 ): string | undefined {
   if (!text) {
     return text ?? undefined;
@@ -198,5 +215,7 @@ export function appendUnsubscribeFooterText(
     return text;
   }
 
-  return `${text.replace(/\s+$/, "")}\n\n--\nUnsubscribe: ${url}\n`;
+  const note = options.note?.trim();
+  const notePart = note ? `${note}\n\n` : "";
+  return `${text.replace(/\s+$/, "")}\n\n--\n${notePart}Unsubscribe: ${url}\n`;
 }

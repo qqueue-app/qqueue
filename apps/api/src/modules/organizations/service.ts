@@ -1,4 +1,8 @@
-import type { OrganizationInput, UserRole } from "@qqueue/shared";
+import type {
+  OrganizationBrandingInput,
+  OrganizationInput,
+  UserRole
+} from "@qqueue/shared";
 import {
   assertOrgAccess,
   assertOrgRole,
@@ -83,6 +87,49 @@ export const organizationService = {
     return prisma.organization.update({
       where: { id },
       data: input
+    });
+  },
+
+  /**
+   * How this organization's outbound mail looks. Readable by any member — a
+   * MEMBER composing a message still gets an accurate preview — but writable
+   * only by OWNER/ADMIN, since it changes what every recipient of the org's
+   * mail sees.
+   */
+  async getBranding(id: string, userId: string) {
+    await assertOrgAccess(userId, id);
+    const organization = await prisma.organization.findUnique({
+      where: { id },
+      select: {
+        brandName: true,
+        logoUrl: true,
+        accentColor: true,
+        footerNote: true
+      }
+    });
+
+    if (!organization) {
+      throw new HttpError(404, "Organization not found");
+    }
+
+    return organization;
+  },
+
+  async updateBranding(
+    id: string,
+    userId: string,
+    input: OrganizationBrandingInput
+  ) {
+    await assertOrgRole(userId, id, ["OWNER", "ADMIN"]);
+    return prisma.organization.update({
+      where: { id },
+      data: input,
+      select: {
+        brandName: true,
+        logoUrl: true,
+        accentColor: true,
+        footerNote: true
+      }
     });
   },
 
