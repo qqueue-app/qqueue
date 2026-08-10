@@ -47,9 +47,12 @@ describe("campaignController.list", () => {
     vi.mocked(campaignService.list).mockResolvedValue(rows as never);
     const res = mockRes();
 
-    await campaignController.list({ organizationId: "org_1" } as Request, res);
+    await campaignController.list(
+      { organizationId: "org_1", userId: "usr_1" } as Request,
+      res
+    );
 
-    expect(campaignService.list).toHaveBeenCalledWith("org_1");
+    expect(campaignService.list).toHaveBeenCalledWith("org_1", "usr_1");
     expect(res.json).toHaveBeenCalledWith({ data: rows });
   });
 });
@@ -114,17 +117,21 @@ describe("campaignController.create", () => {
           name: "Launch",
           templateId: "tpl_1",
           contactListId: "lst_1"
-        }
+        },
+        userId: "usr_1"
       } as Request,
       res
     );
 
-    expect(campaignService.create).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      name: "Launch",
-      templateId: "tpl_1",
-      contactListId: "lst_1"
-    });
+    expect(campaignService.create).toHaveBeenCalledWith(
+      {
+        organizationId: "org_1",
+        name: "Launch",
+        templateId: "tpl_1",
+        contactListId: "lst_1"
+      },
+      "usr_1"
+    );
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith({ data: created });
   });
@@ -134,13 +141,15 @@ describe("campaignController.create", () => {
 
     await campaignController.create(
       {
-        body: { organizationId: "org_1", name: "Dynamic", segmentId: "seg_1" }
+        body: { organizationId: "org_1", name: "Dynamic", segmentId: "seg_1" },
+        userId: "usr_1"
       } as Request,
       mockRes()
     );
 
     expect(campaignService.create).toHaveBeenCalledWith(
-      expect.objectContaining({ segmentId: "seg_1" })
+      expect.objectContaining({ segmentId: "seg_1" }),
+      "usr_1"
     );
   });
 

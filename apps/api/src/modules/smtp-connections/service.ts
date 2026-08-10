@@ -10,6 +10,7 @@ import {
   encryptSecret
 } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
+import { findPairedInboxAccountId } from "../../lib/mailbox-access.js";
 import { assertOrgRole, getMembership } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { describeSmtpVerifyError } from "./verify-error.js";
@@ -316,7 +317,16 @@ export const smtpConnectionService = {
     });
   },
 
-  // Grant management is OWNER/ADMIN, like every other connection write.
+  /*
+    Grant management is OWNER/ADMIN, like every other connection write.
+
+    One grant means one mailbox: access to send as an address and access to read
+    what arrives at it are granted and revoked together, because that is the
+    single "has access to this mailbox" toggle the product exposes. The two
+    halves live in separate tables (SmtpConnectionGrant, InboxAccountGrant)
+    because a connection and an inbox account are independent rows, so both
+    writes happen here, in one transaction, paired by address.
+  */
 
   async listGrants(id: string, userId: string) {
     const connection = await findOwned(id, userId);
@@ -344,29 +354,73 @@ export const smtpConnectionService = {
       );
     }
 
+    // A mailbox that only sends (no IMAP account for the same address) grants
+    // send alone; there is simply nothing to read.
+    const inboxAccountId = await findPairedInboxAccountId(
+      connection.organizationId,
+      connection.fromEmail
+    );
+
     // Idempotent: re-granting is a no-op rather than an error.
-    return prisma.smtpConnectionGrant.upsert({
-      where: {
-        smtpConnectionId_userId: {
+    const [grant] = await prisma.$transaction([
+      prisma.smtpConnectionGrant.upsert({
+        where: {
+          smtpConnectionId_userId: {
+            smtpConnectionId: id,
+            userId: granteeUserId
+          }
+        },
+        create: {
+          organizationId: connection.organizationId,
           smtpConnectionId: id,
           userId: granteeUserId
-        }
-      },
-      create: {
-        organizationId: connection.organizationId,
-        smtpConnectionId: id,
-        userId: granteeUserId
-      },
-      update: {},
-      include: { user: { select: { id: true, email: true, name: true } } }
-    });
+        },
+        update: {},
+        include: { user: { select: { id: true, email: true, name: true } } }
+      }),
+      ...(inboxAccountId
+        ? [
+            prisma.inboxAccountGrant.upsert({
+              where: {
+                inboxAccountId_userId: {
+                  inboxAccountId,
+                  userId: granteeUserId
+                }
+              },
+              create: {
+                organizationId: connection.organizationId,
+                inboxAccountId,
+                userId: granteeUserId
+              },
+              update: {}
+            })
+          ]
+        : [])
+    ]);
+
+    return grant;
   },
 
   async removeGrant(id: string, userId: string, granteeUserId: string) {
     const connection = await findOwned(id, userId);
     await assertOrgRole(userId, connection.organizationId, ["OWNER", "ADMIN"]);
-    await prisma.smtpConnectionGrant.deleteMany({
-      where: { smtpConnectionId: id, userId: granteeUserId }
-    });
+
+    const inboxAccountId = await findPairedInboxAccountId(
+      connection.organizationId,
+      connection.fromEmail
+    );
+
+    await prisma.$transaction([
+      prisma.smtpConnectionGrant.deleteMany({
+        where: { smtpConnectionId: id, userId: granteeUserId }
+      }),
+      ...(inboxAccountId
+        ? [
+            prisma.inboxAccountGrant.deleteMany({
+              where: { inboxAccountId, userId: granteeUserId }
+            })
+          ]
+        : [])
+    ]);
   }
 };

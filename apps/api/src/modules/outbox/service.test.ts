@@ -10,6 +10,10 @@ vi.mock("../../queues/email-sending.queue.js", () => ({
 const { outboxService } = await import("./service.js");
 
 beforeEach(() => {
+  // OWNER: the outbox is unscoped, which is what most of these cases assert.
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER"
+  } as never);
   queue.remove.mockReset();
   queue.remove.mockResolvedValue(1);
 });
@@ -18,7 +22,7 @@ describe("outboxService.list", () => {
   it("returns only mail that is still on its way, soonest first", async () => {
     prismaMock.emailJob.findMany.mockResolvedValue([] as never);
 
-    await outboxService.list("org_1");
+    await outboxService.list("org_1", "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where).toEqual({
@@ -53,7 +57,7 @@ describe("outboxService.list", () => {
       }
     ] as never);
 
-    const [email] = await outboxService.list("org_1");
+    const [email] = await outboxService.list("org_1", "user_1");
 
     expect(email.to).toEqual(["a@x.com", "b@x.com"]);
     expect(email.ccCount).toBe(1);
@@ -83,10 +87,57 @@ describe("outboxService.list", () => {
       }
     ] as never);
 
-    const [email] = await outboxService.list("org_1");
+    const [email] = await outboxService.list("org_1", "user_1");
 
     expect(email.campaignName).toBe("July newsletter");
     expect(email.sendingAccount).toBeNull();
+  });
+});
+
+describe("outboxService mailbox scope", () => {
+  beforeEach(() => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_1" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+  });
+
+  it("lists a MEMBER only their mailboxes and their own sends", async () => {
+    prismaMock.emailJob.findMany.mockResolvedValue([] as never);
+
+    await outboxService.list("org_1", "user_1");
+
+    const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
+    expect(args.where).toEqual({
+      organizationId: "org_1",
+      status: { in: ["PENDING", "QUEUED", "PROCESSING"] },
+      OR: [
+        { smtpConnectionId: { in: ["smtp_1"] } },
+        { createdByUserId: "user_1" }
+      ]
+    });
+  });
+
+  it("refuses to cancel a job a MEMBER cannot see", async () => {
+    // Cancelling is scoped exactly like listing. Before per-mailbox access, any
+    // member could pull back any queued mail in the organization.
+    prismaMock.emailJob.findFirst.mockResolvedValue(null as never);
+
+    await expect(
+      outboxService.cancel("job_1", "org_1", "user_1")
+    ).rejects.toThrow("Email not found");
+
+    const args = prismaMock.emailJob.findFirst.mock.calls[0][0]!;
+    expect(args.where).toMatchObject({
+      OR: [
+        { smtpConnectionId: { in: ["smtp_1"] } },
+        { createdByUserId: "user_1" }
+      ]
+    });
+    expect(prismaMock.emailJob.update).not.toHaveBeenCalled();
   });
 });
 
@@ -101,7 +152,7 @@ describe("outboxService.cancel", () => {
       status: "CANCELLED"
     } as never);
 
-    const result = await outboxService.cancel("job_1", "org_1");
+    const result = await outboxService.cancel("job_1", "org_1", "user_1");
 
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
       where: { id: "job_1", organizationId: "org_1" },
@@ -129,7 +180,7 @@ describe("outboxService.cancel", () => {
 
     // Postgres is the source of truth: the send worker re-reads the row and
     // skips CANCELLED jobs, so a failed removal is not an error.
-    await expect(outboxService.cancel("job_1", "org_1")).resolves.toEqual({
+    await expect(outboxService.cancel("job_1", "org_1", "user_1")).resolves.toEqual({
       id: "job_1",
       status: "CANCELLED"
     });
@@ -138,7 +189,7 @@ describe("outboxService.cancel", () => {
   it("404s for an email in another organization", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue(null as never);
 
-    await expect(outboxService.cancel("job_1", "org_1")).rejects.toThrow(
+    await expect(outboxService.cancel("job_1", "org_1", "user_1")).rejects.toThrow(
       new HttpError(404, "Email not found", "not_found")
     );
     expect(prismaMock.emailJob.update).not.toHaveBeenCalled();
@@ -153,7 +204,7 @@ describe("outboxService.cancel", () => {
       status
     } as never);
 
-    await expect(outboxService.cancel("job_1", "org_1")).rejects.toThrow(
+    await expect(outboxService.cancel("job_1", "org_1", "user_1")).rejects.toThrow(
       new HttpError(409, message, "conflict")
     );
     expect(queue.remove).not.toHaveBeenCalled();

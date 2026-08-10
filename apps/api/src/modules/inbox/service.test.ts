@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../../test/prisma-mock.js";
 import { inboxService } from "./service.js";
 
@@ -28,11 +28,20 @@ vi.mock("../manual-email/service.js", () => ({
   manualEmailService: manualEmailServiceMock,
 }));
 
+// OWNER unless a case says otherwise: an owner reads every mailbox in the org,
+// so the scope drops out and these cases keep asserting the query they always
+// asserted. The MEMBER path has its own describe block below.
+beforeEach(() => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER",
+  } as never);
+});
+
 describe("inboxService", () => {
   it("lists inbox accounts without returning encrypted secrets", async () => {
     prismaMock.inboxAccount.findMany.mockResolvedValue([] as never);
 
-    await inboxService.listAccounts("org_1");
+    await inboxService.listAccounts("org_1", "user_1");
 
     expect(prismaMock.inboxAccount.findMany).toHaveBeenCalledWith({
       where: { organizationId: "org_1" },
@@ -138,12 +147,15 @@ describe("inboxService", () => {
   it("lists messages with search and unread filters", async () => {
     prismaMock.inboundMessage.findMany.mockResolvedValue([] as never);
 
-    await inboxService.listMessages({
-      organizationId: "org_1",
-      q: "invoice",
-      read: "unread",
-      limit: 25,
-    });
+    await inboxService.listMessages(
+      {
+        organizationId: "org_1",
+        q: "invoice",
+        read: "unread",
+        limit: 25,
+      },
+      "user_1"
+    );
 
     const call = prismaMock.inboundMessage.findMany.mock.calls[0][0];
     expect(call.where).toMatchObject({
@@ -201,7 +213,7 @@ describe("inboxService", () => {
     );
   });
 
-  it("marks a message read scoped by organization membership", async () => {
+  it("marks a message read scoped to the reader's mailboxes", async () => {
     prismaMock.inboundMessage.updateMany.mockResolvedValue({
       count: 1,
     } as never);
@@ -209,20 +221,17 @@ describe("inboxService", () => {
       id: "msg_1",
     } as never);
 
-    await inboxService.markRead("msg_1", "user_1", true);
+    await inboxService.markRead("msg_1", "user_1", "org_1", true);
 
     expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "msg_1",
-        organization: { members: { some: { userId: "user_1" } } },
-      },
+      where: { id: "msg_1", organizationId: "org_1" },
       data: { readAt: expect.any(Date) },
     });
   });
 });
 
 describe("inboxService.downloadAttachment", () => {
-  it("scopes the lookup to the caller's organization membership", async () => {
+  it("scopes the lookup to the mailboxes the caller can read", async () => {
     prismaMock.inboundAttachment.findFirst.mockResolvedValue({
       id: "att_1",
       filename: "report.pdf",
@@ -231,14 +240,21 @@ describe("inboxService.downloadAttachment", () => {
     } as never);
     storageMock.getObject.mockResolvedValue(Buffer.from("pdf-bytes"));
 
-    const result = await inboxService.downloadAttachment("att_1", "user_1");
+    const result = await inboxService.downloadAttachment(
+      "att_1",
+      "user_1",
+      "org_1"
+    );
 
-    // Scoped by membership, not by an uploading user: nobody here authored the
-    // file, it arrived in the org's shared mailbox.
+    // Scoped through the parent message, not by an uploading user: nobody here
+    // authored the file, it arrived in a mailbox — so it is exactly as private
+    // as the mail it came on. An owner reads every mailbox, hence the empty
+    // relation filter.
     expect(prismaMock.inboundAttachment.findFirst).toHaveBeenCalledWith({
       where: {
         id: "att_1",
-        organization: { members: { some: { userId: "user_1" } } },
+        organizationId: "org_1",
+        inboundMessage: {},
       },
     });
     expect(storageMock.getObject).toHaveBeenCalledWith(
@@ -253,9 +269,97 @@ describe("inboxService.downloadAttachment", () => {
     prismaMock.inboundAttachment.findFirst.mockResolvedValue(null as never);
 
     await expect(
-      inboxService.downloadAttachment("att_1", "user_1")
+      inboxService.downloadAttachment("att_1", "user_1", "org_1")
     ).rejects.toThrow("Attachment not found");
     // The blob is never fetched for an attachment the caller can't see.
     expect(storageMock.getObject).not.toHaveBeenCalled();
+  });
+});
+
+describe("inboxService mailbox scope", () => {
+  beforeEach(() => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER",
+    } as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([
+      { inboxAccountId: "inbox_1" },
+    ] as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([] as never);
+    manualEmailServiceMock.send.mockClear();
+  });
+
+  it("lists a MEMBER only the mailboxes they were given", async () => {
+    prismaMock.inboxAccount.findMany.mockResolvedValue([] as never);
+
+    await inboxService.listAccounts("org_1", "user_1");
+
+    const call = prismaMock.inboxAccount.findMany.mock.calls[0][0];
+    expect(call.where).toEqual({
+      organizationId: "org_1",
+      id: { in: ["inbox_1"] },
+    });
+  });
+
+  it("lists a MEMBER only messages from those mailboxes", async () => {
+    prismaMock.inboundMessage.findMany.mockResolvedValue([] as never);
+
+    await inboxService.listMessages(
+      { organizationId: "org_1", read: "all", limit: 25 },
+      "user_1"
+    );
+
+    const call = prismaMock.inboundMessage.findMany.mock.calls[0][0];
+    expect(call.where).toMatchObject({
+      organizationId: "org_1",
+      inboxAccountId: { in: ["inbox_1"] },
+    });
+  });
+
+  it("counts unread against the same mailboxes it lists", async () => {
+    // A badge counting mail the reader cannot open is one they can never clear.
+    prismaMock.inboundMessage.count.mockResolvedValue(3 as never);
+
+    await inboxService.unreadCount("org_1", "user_1");
+
+    const call = prismaMock.inboundMessage.count.mock.calls[0][0];
+    expect(call.where).toMatchObject({
+      organizationId: "org_1",
+      readAt: null,
+      isDsn: false,
+      inboxAccountId: { in: ["inbox_1"] },
+    });
+  });
+
+  it("gives a member with no mailboxes an empty inbox, not the org's", async () => {
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.inboundMessage.findMany.mockResolvedValue([] as never);
+
+    await inboxService.listMessages(
+      { organizationId: "org_1", read: "all", limit: 25 },
+      "user_1"
+    );
+
+    // `{ in: [] }` matches nothing, which is the point: an unscoped `where`
+    // would hand them every message in the organization.
+    const call = prismaMock.inboundMessage.findMany.mock.calls[0][0];
+    expect(call.where).toMatchObject({ inboxAccountId: { in: [] } });
+  });
+
+  it("refuses to reply from a mailbox the member does not hold", async () => {
+    prismaMock.inboundMessage.findFirst.mockResolvedValue(null as never);
+
+    await expect(
+      inboxService.replyToMessage("msg_1", "user_1", {
+        organizationId: "org_1",
+        subject: "Question",
+        text: "Thanks.",
+      })
+    ).rejects.toThrow("Inbound message not found");
+
+    const call = prismaMock.inboundMessage.findFirst.mock.calls[0][0];
+    expect(call.where).toMatchObject({
+      inboxAccountId: { in: ["inbox_1"] },
+    });
+    expect(manualEmailServiceMock.send).not.toHaveBeenCalled();
   });
 });

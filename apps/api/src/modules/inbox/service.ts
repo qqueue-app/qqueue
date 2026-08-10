@@ -9,6 +9,10 @@ import type {
 import { ImapFlow } from "imapflow";
 import { encryptSecret } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
+import {
+  inboundMessageScope,
+  resolveMailboxAccess,
+} from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { storage } from "../../lib/storage.js";
 import { manualEmailService } from "../manual-email/service.js";
@@ -66,9 +70,20 @@ function replyReferences(message: {
 }
 
 export const inboxService = {
-  listAccounts(organizationId: string) {
+  /**
+   * The mailboxes this person may read. Backs both the settings list and the
+   * inbox's mailbox filter, so a member is never offered a mailbox whose
+   * messages the list would then refuse to show.
+   */
+  async listAccounts(organizationId: string, userId: string) {
+    const access = await resolveMailboxAccess(userId, organizationId);
     return prisma.inboxAccount.findMany({
-      where: { organizationId },
+      where: {
+        organizationId,
+        ...(access.unrestricted
+          ? {}
+          : { id: { in: access.inboxAccountIds } }),
+      },
       select: {
         id: true,
         organizationId: true,
@@ -269,18 +284,28 @@ export const inboxService = {
    * Capped so a neglected mailbox reports "99+" instead of making the database
    * count a hundred thousand rows every time the badge refreshes.
    */
-  async unreadCount(organizationId: string) {
+  async unreadCount(organizationId: string, userId: string) {
     const CAP = 99;
+    const access = await resolveMailboxAccess(userId, organizationId);
     const count = await prisma.inboundMessage.count({
-      where: { organizationId, readAt: null, isDsn: false },
+      // Scoped like the list itself: a badge counting mail the reader cannot
+      // open is one they can never clear.
+      where: {
+        organizationId,
+        readAt: null,
+        isDsn: false,
+        ...inboundMessageScope(access),
+      },
       take: CAP + 1,
     });
     return { count: Math.min(count, CAP), hasMore: count > CAP };
   },
 
-  async listMessages(query: InboundMessageQueryInput) {
+  async listMessages(query: InboundMessageQueryInput, userId: string) {
+    const access = await resolveMailboxAccess(userId, query.organizationId);
     const where: Prisma.InboundMessageWhereInput = {
       organizationId: query.organizationId,
+      ...inboundMessageScope(access),
       ...(query.read === "read" ? { readAt: { not: null } } : {}),
       ...(query.read === "unread" ? { readAt: null } : {}),
     };
@@ -316,11 +341,12 @@ export const inboxService = {
     userId: string,
     input: InboundMessageReplyInput
   ) {
+    const access = await resolveMailboxAccess(userId, input.organizationId);
     const message = await prisma.inboundMessage.findFirst({
       where: {
         id: messageId,
         organizationId: input.organizationId,
-        organization: { members: { some: { userId } } },
+        ...inboundMessageScope(access),
       },
       include: {
         inboxAccount: {
@@ -355,11 +381,18 @@ export const inboxService = {
     return result;
   },
 
-  async markRead(id: string, userId: string, read: boolean) {
+  async markRead(
+    id: string,
+    userId: string,
+    organizationId: string,
+    read: boolean
+  ) {
+    const access = await resolveMailboxAccess(userId, organizationId);
     const { count } = await prisma.inboundMessage.updateMany({
       where: {
         id,
-        organization: { members: { some: { userId } } },
+        organizationId,
+        ...inboundMessageScope(access),
       },
       data: { readAt: read ? new Date() : null },
     });
@@ -375,20 +408,24 @@ export const inboxService = {
   /**
    * Fetch an inbound attachment (metadata + blob) for download.
    *
-   * Scoped to organization membership rather than to an uploading user — unlike
-   * outbound attachments, nobody here authored the file; it arrived in the org's
-   * shared mailbox, so anyone who can read the message can read its parts.
+   * Scoped to the mailbox rather than to an uploading user — unlike outbound
+   * attachments, nobody here authored the file; it arrived in a mailbox, so
+   * whoever may read the message may read its parts, and whoever may not, may
+   * not. The scope goes through the parent message: an attachment is only ever
+   * as private as the mail it came on.
    *
    * This route is authenticated on purpose. It is the inverse of the public
    * /images/:publicId endpoint: that one is public because a *recipient's* mail
    * client must fetch it with no session, whereas these are private files sent
    * to us and must never be reachable without auth.
    */
-  async downloadAttachment(id: string, userId: string) {
+  async downloadAttachment(id: string, userId: string, organizationId: string) {
+    const access = await resolveMailboxAccess(userId, organizationId);
     const attachment = await prisma.inboundAttachment.findFirst({
       where: {
         id,
-        organization: { members: { some: { userId } } },
+        organizationId,
+        inboundMessage: inboundMessageScope(access),
       },
     });
     if (!attachment) {

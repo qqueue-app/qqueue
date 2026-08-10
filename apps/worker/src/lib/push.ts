@@ -1,5 +1,9 @@
 import webpush from "web-push";
-import type { PushNotificationPayload } from "@qqueue/shared";
+import {
+  mailboxDomain,
+  resolveInboxNotify,
+  type PushNotificationPayload,
+} from "@qqueue/shared";
 import { env } from "../config/env.js";
 import { prisma } from "./prisma.js";
 import { logger } from "./logger.js";
@@ -144,6 +148,10 @@ export async function sendPushToUsers(
 
 export interface InboundMessageNotification {
   organizationId: string;
+  /** The mailbox it arrived at — only people granted it are told. */
+  inboxAccountId: string;
+  /** That mailbox's address, for matching per-domain notification rules. */
+  inboxAccountEmail: string;
   /** Stored message id, used for the deep link. */
   messageId: string;
   /** Sender, already formatted for display. */
@@ -158,11 +166,21 @@ export interface InboundMessageNotification {
 /**
  * Notify the members of an org who asked to hear about new mail.
  *
- * Who hears about it is a per-member preference, not a property of anyone's
- * device: `NONE` is silence, `ALL` is every message, and `ADDRESSED_TO_ME`
- * limits it to mail with that person in To/Cc — useful when members add their
- * own addresses as separate inbox accounts, useless on a shared support@ box,
- * which is why it is not the default.
+ * Three filters, applied in this order, and the order is the safety property:
+ *
+ * 1. **Access.** A member is told about mail in a mailbox they hold; an
+ *    OWNER/ADMIN about any of them. Without this, a banner carrying sender and
+ *    subject would be the one way to read a mailbox you were never given — and
+ *    it would reach the device of someone the inbox itself refuses.
+ * 2. **Which mailbox** (`InboxNotifyRule`). Per-mailbox and per-domain mutes
+ *    the member set for themselves. Because access ran first, a rule covering a
+ *    whole domain still only ever silences the mailboxes they could already
+ *    read; nothing here can widen the audience.
+ * 3. **Which mail within it** (`notifyLevel`). `NONE` is silence, `ALL` is
+ *    every message, and `ADDRESSED_TO_ME` limits it to mail with that person in
+ *    To/Cc — useful when members add their own addresses as separate inbox
+ *    accounts, useless on a shared support@ box, which is why it is not the
+ *    default.
  */
 export async function notifyNewInboundMessage(
   notification: InboundMessageNotification
@@ -173,6 +191,16 @@ export async function notifyNewInboundMessage(
     where: {
       organizationId: notification.organizationId,
       notifyLevel: { not: "NONE" },
+      OR: [
+        { role: { in: ["OWNER", "ADMIN"] } },
+        {
+          user: {
+            inboxGrants: {
+              some: { inboxAccountId: notification.inboxAccountId },
+            },
+          },
+        },
+      ],
     },
     select: {
       userId: true,
@@ -181,14 +209,53 @@ export async function notifyNewInboundMessage(
     },
   });
 
+  if (members.length === 0) return 0;
+
+  // Only the rules that could bear on *this* mailbox, for the people already
+  // through the access filter. One query for the whole audience.
+  const domain = mailboxDomain(notification.inboxAccountEmail);
+  const rules = await prisma.inboxNotifyRule.findMany({
+    where: {
+      organizationId: notification.organizationId,
+      userId: { in: members.map((member) => member.userId) },
+      OR: [
+        { scope: "MAILBOX", inboxAccountId: notification.inboxAccountId },
+        { scope: "DOMAIN", domain },
+      ],
+    },
+    select: {
+      userId: true,
+      scope: true,
+      domain: true,
+      inboxAccountId: true,
+      enabled: true,
+    },
+  });
+
+  const rulesByUser = new Map<string, typeof rules>();
+  for (const rule of rules) {
+    const existing = rulesByUser.get(rule.userId);
+    if (existing) existing.push(rule);
+    else rulesByUser.set(rule.userId, [rule]);
+  }
+
   const addressed = new Set(
     notification.recipientEmails.map((email) => email.trim().toLowerCase())
   );
-  const interested = members.filter(
-    (member) =>
+  const interested = members.filter((member) => {
+    // Absent rules resolve to on: someone who never opened the settings page,
+    // or was granted this mailbox after they last did, still hears about it.
+    const { enabled } = resolveInboxNotify(rulesByUser.get(member.userId) ?? [], {
+      inboxAccountId: notification.inboxAccountId,
+      domain,
+    });
+    if (!enabled) return false;
+
+    return (
       member.notifyLevel === "ALL" ||
       addressed.has(member.user.email.trim().toLowerCase())
-  );
+    );
+  });
 
   if (interested.length === 0) return 0;
 

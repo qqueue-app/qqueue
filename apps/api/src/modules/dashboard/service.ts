@@ -1,3 +1,7 @@
+import {
+  emailJobScope,
+  resolveMailboxAccess
+} from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 
 const recentEmailJobSelect = {
@@ -33,8 +37,20 @@ function startOfToday() {
 }
 
 export const dashboardService = {
-  async summary(organizationId: string) {
+  /**
+   * The two "recent" lists carry subjects and recipients — the same content the
+   * sent archive shows — so they answer to the same per-mailbox rule. Without
+   * that, scoping the archive would be cosmetic: the whole organization's mail
+   * would still be readable one page over.
+   *
+   * The counts above them stay organization-wide on purpose. They are
+   * aggregates, not mail, and a member watching "12 failed today" learns
+   * nothing about who was written to.
+   */
+  async summary(organizationId: string, userId: string) {
     const today = startOfToday();
+    const access = await resolveMailboxAccess(userId, organizationId);
+    const visibleJobs = emailJobScope(access);
 
     const [
       smtpConnections,
@@ -74,13 +90,15 @@ export const dashboardService = {
         }
       }),
       prisma.emailJob.findMany({
-        where: { organizationId },
+        where: { organizationId, ...visibleJobs },
         select: recentEmailJobSelect,
         orderBy: { createdAt: "desc" },
         take: 8
       }),
       prisma.emailEvent.findMany({
-        where: { organizationId },
+        // Scoped through the job the event belongs to: an event names the
+        // recipient and subject of the mail it happened to.
+        where: { organizationId, emailJob: visibleJobs },
         select: recentEventSelect,
         orderBy: { occurredAt: "desc" },
         take: 8

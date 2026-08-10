@@ -836,11 +836,16 @@ and an unclaimed domain was visible to *every* org as a pool to claim from — t
 mechanism that kept a single-org instance working unchanged when `OrgMailDomain`
 was introduced.
 
-That gate was never real. `POST /organizations` is ungated and creating an
-organization makes you its OWNER, so "org OWNER" is a role any user on the
-instance can award themselves. Anyone invited to a workspace could create their
-own, and from there list the unclaimed pool, claim from it, create domains on
-the shared mail server, and delete them.
+That gate was never real. Creating an organization makes you its OWNER, so "org
+OWNER" is a role a user on the instance can award themselves. Anyone invited to
+a workspace could create their own, and from there list the unclaimed pool,
+claim from it, create domains on the shared mail server, and delete them.
+
+`POST /organizations` was later restricted to owners and admins (see "Only
+owners and admins may create organizations" below), which narrows *who* can do
+this but does not restore the gate: registration still creates an organization
+with the registrant as OWNER, so anyone who signs up is an owner somewhere and
+can create more from there. Anything install-wide stays on `isInstanceAdmin`.
 
 So the axis moved. Domain management, domain assignment and domain grants now
 live under `/api/v1/instance-admin`, behind `User.isInstanceAdmin`. An
@@ -919,3 +924,128 @@ onto an unclaimed domain since then works today with no ownership record.
 synced inboxes, existing grants), idempotently. Domains with none of that
 evidence stay unassigned: nothing is sending or receiving on them, so no access
 is being taken away.
+
+## A mailbox is the unit of access, not the organization (2026-08-13)
+
+Until now, membership was the whole of read access: `listMessages` filtered on
+`organizationId` and nothing else, so every member read every message the
+organization received. Grants existed, but only for sending
+(`SmtpConnectionGrant`), and nothing consulted them on a read path.
+
+That is the wrong default for an email platform. An organization is not a
+trust boundary the way a mailbox is — "Ama handles support@, Kofi handles
+billing@" is the normal shape of a team, and the product had no way to express
+it. The Mailboxes access grid made this worse by being titled "mailbox access"
+while granting only the ability to send: an admin reading that screen would
+reasonably conclude they had restricted who could read a mailbox, and they had
+not.
+
+So `InboxAccountGrant` is the read-side counterpart, and
+`lib/mailbox-access.ts` resolves both halves once per request. OWNER/ADMIN are
+unrestricted; a MEMBER sees the mailboxes they hold.
+
+**One toggle, two tables.** The product asks one question per person per
+mailbox — do they have it — and grants read and send together. "Can read
+support@ but must not answer from it" is not a distinction teams draw, and
+offering it would double the width of the grid to express it. The tables stay
+separate anyway, because an `InboxAccount` and an `SMTPConnection` are
+independent rows with no foreign key between them: a mailbox can be
+receive-only (IMAP with no matching connection) or send-only. Both are
+therefore grantable on their own, and the two halves are paired by address,
+case-insensitively, in one place.
+
+**Scoping had to reach past the message list.** A gate on the list alone leaks
+through every neighbour: an unread badge counting mail you cannot open, an
+attachment route keyed only on the org, a reply endpoint that loads the message
+it is replying to, a mailbox picker offering mailboxes whose messages then
+never appear. Push notifications are the sharpest case — they carry sender and
+subject to a device, so an unscoped push is a way to read a mailbox you were
+never given, on the one surface the inbox's own filter never touches.
+
+**Sent, outbox and campaigns follow, each in the way it can.** Sent and outbox
+scope by granted `smtpConnectionId`, unioned with `createdByUserId` so that
+revoking a mailbox — or deleting one, which nulls the job's connection — never
+makes someone's own outgoing mail look lost. That union leaks nothing: they
+composed it. Campaigns have no mailbox at all, since fan-out always sends as
+the org default, so the question "which campaigns may this member see" reduces
+to "may they use the default connection" — the check that already guarded
+starting one. Creation is gated with reading, because letting someone create a
+campaign that then never appears in their list is worse than refusing.
+
+**The backfill mirrors send grants, and neither extreme would do.** Locking
+every member out on upgrade would make an admin re-tick every box before the
+inbox worked again; carrying "everyone reads everything" forward would preserve
+exactly the behaviour the change exists to end. Mirroring
+`SmtpConnectionGrant` lands between them and holds the one-toggle invariant for
+rows that predate it. It also lands correctly on both kinds of instance: one
+upgraded through `20260806210000` gave every then-existing MEMBER a grant on
+every then-existing connection, so those members keep reading what they read;
+grants an admin has since chosen deliberately are mirrored just as
+deliberately. A receive-only mailbox pairs with nothing and starts admin-only,
+which is the safe direction.
+
+## Only owners and admins may create organizations (2026-08-13)
+
+`POST /organizations` was open to any authenticated user. Someone invited into
+one workspace as a MEMBER could mint unlimited organizations of their own,
+becoming OWNER of each.
+
+The check cannot be a role check on the organization being created — it does
+not exist yet, and the caller has no role in it. So it is asked of the account:
+you may create an organization if you already own or administer one. A member
+is someone other people invited, and inviting them is not a decision to let
+them start workspaces.
+
+This deliberately does **not** restore "org OWNER" as a trustworthy
+instance-wide role, and nothing should be moved back behind it on the strength
+of this change. Registration still creates an organization with the registrant
+as OWNER, so anyone who can sign up is an owner somewhere and can create more
+from there. The bootstrap path is untouched for the same reason it has to be:
+`authService.register` creates that first organization directly, so the
+zero-user wizard never meets this gate.
+
+## Notification preferences are an exception list, defaulting to on (2026-08-14)
+
+Once a mailbox became the unit of access, "notify me about this organization"
+became the wrong grain. A single `OrganizationMember.notifyLevel` column
+offered everything or silence, and somebody who reads a busy support@ and a
+quiet alias wants one of them to buzz.
+
+`InboxNotifyRule` answers *which mailbox*; `notifyLevel` survives unchanged and
+answers *which mail within it*. The two are orthogonal, and keeping both is why
+this migration needs no data change at all.
+
+**The default is on, and the table stores only the exceptions.** An allow-list
+would have been the obvious shape and is the wrong one: it makes "I was granted
+a mailbox and heard nothing" the default outcome for every mailbox created
+after somebody last opened this page, and it would have forced a backfill row
+for every user × mailbox pair on upgrade or silenced the entire install. With
+an exception list, a fresh grant notifies, an upgrade changes nobody's
+experience, and the rows that exist are exactly the decisions somebody made.
+
+Rows are written only where they disagree with the level above them, and
+deleted the moment they agree again. Re-ticking a mailbox therefore means
+"follow the default again" rather than "pin true forever" — otherwise today's
+default is frozen into a row nobody remembers setting, and a later change to
+the mailbox's domain would mysteriously not apply to it.
+
+**A DOMAIN rule is a filter, never a grant.** It exists so "nothing from
+acme.test" keeps meaning that after an eleventh address is added — a choice
+that had to be re-made every time the org grew would not be worth storing. It
+can only ever narrow: the worker resolves access first (a grant, or
+OWNER/ADMIN) and applies rules to the survivors, and the API scopes the page
+and every write through `resolveMailboxAccess`. Hold one of a domain's ten
+addresses and "everything on acme.test" means that one. There is no path here
+to hearing about a mailbox you were never given, which matters because a banner
+carries the sender and subject and would otherwise be a way to read one.
+
+The precedence rule itself (MAILBOX → DOMAIN → on) lives in `resolveInboxNotify`
+in `@qqueue/shared`, imported by both the API that renders the page and the
+worker that decides a live push. Two copies is how a settings screen ends up
+confidently describing behaviour the worker does not have.
+
+On the page, a domain's state is **derived from the ticks under it**, not read
+off its rule: a domain switched on with one mailbox muted is honestly "some",
+and drawing it as on or off is the small lie that makes people stop believing
+the screen. That is also why the domain control is a tri-state tick rather than
+a switch — a switch has two positions and this has three.

@@ -20,7 +20,10 @@ const markReadSchema = z.object({
 
 export const inboxController = {
   async listAccounts(req: Request, res: Response) {
-    const accounts = await inboxService.listAccounts(req.organizationId!);
+    const accounts = await inboxService.listAccounts(
+      req.organizationId!,
+      req.userId!
+    );
     res.json({ data: accounts });
   },
 
@@ -46,13 +49,21 @@ export const inboxController = {
   },
 
   async listMessages(req: Request, res: Response) {
-    const query = inboundMessageQuerySchema.parse(req.query);
-    const messages = await inboxService.listMessages(query);
+    const query = inboundMessageQuerySchema.parse({
+      ...req.query,
+      // requireOrgMembership already verified this one; take it from there
+      // rather than trusting the query string a second time.
+      organizationId: req.organizationId!,
+    });
+    const messages = await inboxService.listMessages(query, req.userId!);
     res.json({ data: messages });
   },
 
   async unreadCount(req: Request, res: Response) {
-    const result = await inboxService.unreadCount(req.organizationId!);
+    const result = await inboxService.unreadCount(
+      req.organizationId!,
+      req.userId!
+    );
     res.json({ data: result });
   },
 
@@ -69,6 +80,7 @@ export const inboxController = {
     const message = await inboxService.markRead(
       String(req.params.id),
       req.userId!,
+      req.organizationId!,
       input.read
     );
     res.json({ data: message });
@@ -77,7 +89,8 @@ export const inboxController = {
   async downloadAttachment(req: Request, res: Response) {
     const { attachment, body } = await inboxService.downloadAttachment(
       String(req.params.attachmentId),
-      req.userId!
+      req.userId!,
+      req.organizationId!
     );
 
     res.setHeader("Content-Type", attachment.contentType);

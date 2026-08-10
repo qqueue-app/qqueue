@@ -10,7 +10,7 @@ export const sentController = {
       // rather than trusting the query string a second time.
       organizationId: req.organizationId!
     });
-    const page = await sentService.list(query);
+    const page = await sentService.list(query, req.userId!);
     res.json({ data: page });
   }
 };

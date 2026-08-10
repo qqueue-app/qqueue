@@ -34,6 +34,13 @@ enum InboxNotifyLevel {
   NONE
 }
 
+/// What one InboxNotifyRule is about. Rules resolve most-specific-first:
+/// a MAILBOX rule beats a DOMAIN rule, and either beats the default.
+enum InboxNotifyScope {
+  DOMAIN
+  MAILBOX
+}
+
 enum InviteStatus {
   PENDING
   ACCEPTED
@@ -157,9 +164,11 @@ model User {
   refreshTokens       RefreshToken[]
   invitesSent         OrganizationInvite[] @relation("InvitesSent")
   smtpGrants          SmtpConnectionGrant[]
+  inboxGrants         InboxAccountGrant[]
   mailDomainGrants    MailDomainGrant[]
   instanceAdminMutes  InstanceAdminMute[]
   pushSubscriptions   PushSubscription[]
+  inboxNotifyRules    InboxNotifyRule[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 }
@@ -261,6 +270,7 @@ model Organization {
   invites           OrganizationInvite[]
   smtpConnections   SMTPConnection[]
   smtpConnectionGrants SmtpConnectionGrant[]
+  inboxAccountGrants InboxAccountGrant[]
   mailDomainGrants  MailDomainGrant[]
   orgMailDomains    OrgMailDomain[]
   contacts          Contact[]
@@ -276,6 +286,7 @@ model Organization {
   emailAttachments  EmailAttachment[]
   imageAssets       ImageAsset[]
   inboxAccounts     InboxAccount[]
+  inboxNotifyRules  InboxNotifyRule[]
   inboundMessages   InboundMessage[]
   inboundAttachments InboundAttachment[]
   recurringSends    RecurringSend[]
@@ -923,13 +934,87 @@ model InboxAccount {
   status            InboxAccountStatus @default(ACTIVE)
   lastSyncedAt      DateTime?
   lastSeenUid       Int?
-  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboundMessages   InboundMessage[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  grants            InboxAccountGrant[]
+  notifyRules       InboxNotifyRule[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   @@unique([organizationId, email])
   @@index([organizationId])
+}
+
+/// Who may *read* a mailbox. The read-side counterpart to SmtpConnectionGrant,
+/// which governs who may send as one.
+///
+/// It is a separate table rather than a column on SmtpConnectionGrant because
+/// InboxAccount and SMTPConnection are independent rows with no foreign key
+/// between them — a mailbox can be receive-only (an IMAP account with no
+/// matching connection) or send-only. The two are paired by address, in
+/// lib/mailbox-access.ts.
+///
+/// The product exposes one "has access to this mailbox" toggle that writes both
+/// tables together; they are modelled separately so a mailbox that only exists
+/// on one side is still grantable.
+model InboxAccountGrant {
+  id             String       @id @default(cuid())
+  organizationId String
+  inboxAccountId String
+  userId         String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboxAccount   InboxAccount @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([inboxAccountId, userId])
+  @@index([organizationId, userId])
+}
+
+/// Which of the mailboxes someone can read are allowed to buzz their devices.
+///
+/// The table is an *exception list*, not an allow-list: with no rows, every
+/// mailbox you have access to notifies you. That default is the point — being
+/// handed a new mailbox must never mean silently missing its mail, and the one
+/// action people actually take here is muting something noisy.
+///
+/// A rule only ever narrows. Access decides the audience first (a grant, or
+/// OWNER/ADMIN), and these rows filter what is left, so a DOMAIN rule covering
+/// ten addresses still only reaches the one the holder can read. There is no
+/// path here to hearing about a mailbox you were never given.
+///
+/// Two scopes, resolved most-specific-first — MAILBOX, then DOMAIN, then the
+/// default. DOMAIN exists so "nothing from acme.test" keeps meaning that after
+/// an eleventh address is added to it; a choice that had to be re-made every
+/// time the org grew would not be a choice worth storing.
+///
+/// Rows are written only where they disagree with the level above: re-ticking
+/// something deletes its row rather than storing `enabled = true`, so the table
+/// stays sparse and a mailbox with no opinion attached follows the default
+/// forever after.
+model InboxNotifyRule {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  scope          InboxNotifyScope
+  /// Set on DOMAIN rules, lowercased; null on MAILBOX rules.
+  domain         String?
+  /// Set on MAILBOX rules; null on DOMAIN rules.
+  inboxAccountId String?
+  /// Whether mail here may notify. Almost always false — see the header.
+  enabled        Boolean
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inboxAccount   InboxAccount?    @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  // One rule per target. Each index constrains only its own scope, since the
+  // other scope leaves its key column null and Postgres treats nulls as
+  // distinct — which is exactly the behaviour wanted here.
+  @@unique([userId, inboxAccountId])
+  @@unique([userId, organizationId, domain])
+  @@index([organizationId, userId])
 }
 
 // Received mail synced from IMAP. This stays separate from EmailJob: EmailJob is

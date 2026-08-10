@@ -29,18 +29,21 @@ describe("sentController.list", () => {
     const res = mockRes();
 
     await sentController.list(
-      { query: {}, organizationId: "org_1" } as unknown as Request,
+      { query: {}, organizationId: "org_1", userId: "usr_1" } as unknown as Request,
       res
     );
 
-    expect(sentService.list).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      origin: "all",
-      outcome: "all",
-      days: 0,
-      page: 1,
-      pageSize: 25
-    });
+    expect(sentService.list).toHaveBeenCalledWith(
+      {
+        organizationId: "org_1",
+        origin: "all",
+        outcome: "all",
+        days: 0,
+        page: 1,
+        pageSize: 25
+      },
+      "usr_1"
+    );
     expect(res.json).toHaveBeenCalledWith({ data: emptyPage });
   });
 
@@ -58,21 +61,25 @@ describe("sentController.list", () => {
           page: "2",
           pageSize: "50"
         },
-        organizationId: "org_1"
+        organizationId: "org_1",
+        userId: "usr_1"
       } as unknown as Request,
       res
     );
 
-    expect(sentService.list).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      q: "launch",
-      origin: "CAMPAIGN",
-      outcome: "opened",
-      smtpConnectionId: "smtp_1",
-      days: 30,
-      page: 2,
-      pageSize: 50
-    });
+    expect(sentService.list).toHaveBeenCalledWith(
+      {
+        organizationId: "org_1",
+        q: "launch",
+        origin: "CAMPAIGN",
+        outcome: "opened",
+        smtpConnectionId: "smtp_1",
+        days: 30,
+        page: 2,
+        pageSize: 50
+      },
+      "usr_1"
+    );
   });
 
   it("reads the org from the membership middleware, not the query string", async () => {
@@ -81,13 +88,15 @@ describe("sentController.list", () => {
     await sentController.list(
       {
         query: { organizationId: "org_someone_else" },
-        organizationId: "org_1"
+        organizationId: "org_1",
+        userId: "usr_1"
       } as unknown as Request,
       res
     );
 
     expect(sentService.list).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org_1" })
+      expect.objectContaining({ organizationId: "org_1" }),
+      "usr_1"
     );
   });
 

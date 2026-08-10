@@ -60,17 +60,23 @@ export interface SendAccessEditorProps {
 }
 
 /**
- * Who can send as what — as a person-first, two-pane editor.
+ * Who has which mailboxes — as a person-first, two-pane editor.
+ *
+ * One tick per person per mailbox, meaning both halves of it: they can read the
+ * mail that arrives there and send as the address. The two are stored
+ * separately (an inbox account and a sending account are different rows) but
+ * they are never granted separately, because "can read support@ but not answer
+ * from it" is not a distinction teams actually make.
  *
  * This replaced a people × mailboxes checkbox matrix. The matrix answered the
  * question in one glance, but only while both axes stayed small: a column per
- * sending account means an org with a dozen mailboxes scrolls sideways through
- * truncated addresses, and the header is the only thing telling you which
- * column you are ticking. Access is also read and edited one person at a time —
- * "what can this new hire send as" — which is a row, not a plane.
+ * mailbox means an org with a dozen of them scrolls sideways through truncated
+ * addresses, and the header is the only thing telling you which column you are
+ * ticking. Access is also read and edited one person at a time — "what should
+ * this new hire have" — which is a row, not a plane.
  *
  * So: pick a person on the left (searchable, because a member list is the one
- * axis that grows without bound), and their whole sending surface opens on the
+ * axis that grows without bound), and their whole mailbox surface opens on the
  * right, grouped by domain. Domains are the grouping because that is how people
  * describe these addresses to each other — "everything on acme.test" — and it
  * turns a flat list of thirty addresses into four groups you can skim.
@@ -265,7 +271,7 @@ export function SendAccessEditor({
           <div className="flex h-full flex-col items-center justify-center gap-2 p-10 text-center">
             <Users className="h-6 w-6 text-text-tertiary" />
             <p className="text-body text-text-secondary">
-              Pick someone to see what they can send as.
+              Pick someone to see which mailboxes they have.
             </p>
           </div>
         )}
@@ -287,8 +293,8 @@ interface PersonAccessProps {
 }
 
 /**
- * One person's sending surface: every mailbox they could send as, grouped by
- * domain, with the ones they hold ticked.
+ * One person's mailbox surface: every mailbox in the org, grouped by domain,
+ * with the ones they hold ticked.
  *
  * Mounted with `key={person.id}` so switching people resets the search and the
  * filter — carrying "only what they can use" from one person to the next would
@@ -354,14 +360,14 @@ function PersonAccess({
             <>
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
               {person.alwaysAllowedReason ??
-                `${person.name} can send as every mailbox.`}
+                `${person.name} has every mailbox.`}
             </>
           ) : (
             <>
               <Mail className="mt-0.5 h-4 w-4 shrink-0" />
               {grantCount === 0
-                ? `${person.name} can't send as any mailbox yet — tick the ones they should have.`
-                : `${person.name} can send as ${grantCount} of ${totalMailboxes} mailboxes.`}
+                ? `${person.name} has no mailboxes yet — tick the ones they should have.`
+                : `${person.name} has ${grantCount} of ${totalMailboxes} mailboxes.`}
             </>
           )}
         </p>
@@ -409,7 +415,7 @@ function PersonAccess({
           {visibleGroups.length === 0 ? (
             <p className="p-6 text-center text-body text-text-secondary">
               {grantedOnly && !needle
-                ? `${person.name} can't send as anything yet.`
+                ? `${person.name} has no mailboxes yet.`
                 : "No mailboxes match that search."}
             </p>
           ) : (
@@ -492,7 +498,7 @@ function PersonAccess({
                             type="button"
                             role="checkbox"
                             aria-checked={granted}
-                            aria-label={`${person.name} can send as ${mailbox.address}`}
+                            aria-label={`${person.name} can read and send as ${mailbox.address}`}
                             disabled={disabled || busy}
                             onClick={() =>
                               onToggle(person.id, mailbox.id, !granted)

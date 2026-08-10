@@ -8,7 +8,9 @@ import {
   campaignUpdateSchema,
   contactActivityQuerySchema,
   contactListSchema,
+  mailboxDomain,
   organizationBrandingSchema,
+  resolveInboxNotify,
   deriveReputationAlerts,
   type DeliverabilityOverview,
   resolveSuppressionPolicy,
@@ -1315,5 +1317,109 @@ describe("organizationBrandingSchema", () => {
     expect(() =>
       organizationBrandingSchema.parse({ ...base, brandName: "a".repeat(101) })
     ).toThrow();
+  });
+});
+
+describe("resolveInboxNotify", () => {
+  const mailbox = { inboxAccountId: "inbox_1", domain: "acme.test" };
+
+  it("notifies when nothing has been said about the mailbox", () => {
+    // The default is on, and both the API and the worker depend on it: a
+    // mailbox somebody was granted this morning has no rules yet and must not
+    // be silently unreachable.
+    expect(resolveInboxNotify([], mailbox)).toEqual({
+      enabled: true,
+      explicit: false,
+    });
+  });
+
+  it("honours a rule naming the mailbox", () => {
+    expect(
+      resolveInboxNotify(
+        [
+          {
+            scope: "MAILBOX",
+            domain: null,
+            inboxAccountId: "inbox_1",
+            enabled: false,
+          },
+        ],
+        mailbox
+      )
+    ).toEqual({ enabled: false, explicit: true });
+  });
+
+  it("falls back to the domain rule, marking it inherited", () => {
+    expect(
+      resolveInboxNotify(
+        [
+          {
+            scope: "DOMAIN",
+            domain: "acme.test",
+            inboxAccountId: null,
+            enabled: false,
+          },
+        ],
+        mailbox
+      )
+    ).toEqual({ enabled: false, explicit: false });
+  });
+
+  it("lets the mailbox rule beat the domain rule above it", () => {
+    // "Nothing from acme.test except support@". Most specific wins, which is
+    // what makes a switched-off domain still carveable.
+    expect(
+      resolveInboxNotify(
+        [
+          {
+            scope: "DOMAIN",
+            domain: "acme.test",
+            inboxAccountId: null,
+            enabled: false,
+          },
+          {
+            scope: "MAILBOX",
+            domain: null,
+            inboxAccountId: "inbox_1",
+            enabled: true,
+          },
+        ],
+        mailbox
+      )
+    ).toEqual({ enabled: true, explicit: true });
+  });
+
+  it("ignores rules about other mailboxes and other domains", () => {
+    expect(
+      resolveInboxNotify(
+        [
+          {
+            scope: "MAILBOX",
+            domain: null,
+            inboxAccountId: "inbox_9",
+            enabled: false,
+          },
+          {
+            scope: "DOMAIN",
+            domain: "elsewhere.test",
+            inboxAccountId: null,
+            enabled: false,
+          },
+        ],
+        mailbox
+      ).enabled
+    ).toBe(true);
+  });
+});
+
+describe("mailboxDomain", () => {
+  it("lowercases the domain half, which is the key rules are stored under", () => {
+    expect(mailboxDomain("Support@ACME.test")).toBe("acme.test");
+  });
+
+  it("returns an empty string for an address with no domain", () => {
+    // A malformed mailbox should group oddly on a settings page, not take the
+    // page down.
+    expect(mailboxDomain("not-an-address")).toBe("");
   });
 });

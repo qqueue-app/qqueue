@@ -34,13 +34,75 @@ const job = {
 };
 
 beforeEach(() => {
+  // OWNER: the archive is unscoped, which is what most of these cases assert.
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER"
+  } as never);
   prismaMock.emailJob.findMany.mockResolvedValue([] as never);
   prismaMock.emailJob.count.mockResolvedValue(0 as never);
 });
 
+describe("sentService.list mailbox scope", () => {
+  beforeEach(() => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_1" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+  });
+
+  it("shows a MEMBER their mailboxes and their own sends, nothing else", async () => {
+    await sentService.list(query(), "user_1");
+
+    const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
+    expect(args.where).toMatchObject({
+      organizationId: "org_1",
+      AND: [
+        {
+          OR: [
+            { smtpConnectionId: { in: ["smtp_1"] } },
+            { createdByUserId: "user_1" }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("keeps the scope out of reach of the search term's OR", async () => {
+    // Both clauses want `OR`. If the scope were spread into the same object the
+    // search would overwrite it and a member could read the whole archive by
+    // typing in the search box.
+    await sentService.list(query({ q: "launch" }), "user_1");
+
+    const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
+    expect(args.where.AND).toEqual([
+      {
+        OR: [
+          { smtpConnectionId: { in: ["smtp_1"] } },
+          { createdByUserId: "user_1" }
+        ]
+      }
+    ]);
+    expect(args.where.OR).toHaveLength(3);
+  });
+
+  it("shows a member with no mailboxes only their own sends", async () => {
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([] as never);
+
+    await sentService.list(query(), "user_1");
+
+    const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
+    expect(args.where.AND).toEqual([
+      { OR: [{ smtpConnectionId: { in: [] } }, { createdByUserId: "user_1" }] }
+    ]);
+  });
+});
+
 describe("sentService.list", () => {
   it("returns only terminal outcomes, newest sent first", async () => {
-    await sentService.list(query());
+    await sentService.list(query(), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where).toEqual({
@@ -58,7 +120,7 @@ describe("sentService.list", () => {
   it("pages in Postgres rather than in the browser", async () => {
     prismaMock.emailJob.count.mockResolvedValue(310 as never);
 
-    const page = await sentService.list(query({ page: 3, pageSize: 25 }));
+    const page = await sentService.list(query({ page: 3, pageSize: 25 }), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.skip).toBe(50);
@@ -67,7 +129,7 @@ describe("sentService.list", () => {
   });
 
   it("counts with the same filters it lists with", async () => {
-    await sentService.list(query({ origin: "CAMPAIGN" }));
+    await sentService.list(query({ origin: "CAMPAIGN" }), "user_1");
 
     const listArgs = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     const countArgs = prismaMock.emailJob.count.mock.calls[0][0]!;
@@ -76,7 +138,7 @@ describe("sentService.list", () => {
   });
 
   it("searches subject, recipient, and campaign name", async () => {
-    await sentService.list(query({ q: "launch" }));
+    await sentService.list(query({ q: "launch" }), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where?.OR).toEqual([
@@ -93,7 +155,7 @@ describe("sentService.list", () => {
     ["bounced", "BOUNCED"],
     ["complained", "COMPLAINED"]
   ])("filters %s against the event the pipeline wrote", async (outcome, type) => {
-    await sentService.list(query({ outcome }));
+    await sentService.list(query({ outcome }), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where?.events).toEqual({ some: { type } });
@@ -101,7 +163,7 @@ describe("sentService.list", () => {
   });
 
   it("filters failures on the job's own status, not an event", async () => {
-    await sentService.list(query({ outcome: "failed" }));
+    await sentService.list(query({ outcome: "failed" }), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where?.status).toBe("FAILED");
@@ -110,7 +172,8 @@ describe("sentService.list", () => {
 
   it("narrows to one sending account and origin", async () => {
     await sentService.list(
-      query({ origin: "TRANSACTIONAL", smtpConnectionId: "smtp_1" })
+      query({ origin: "TRANSACTIONAL", smtpConnectionId: "smtp_1" }),
+      "user_1"
     );
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
@@ -121,7 +184,7 @@ describe("sentService.list", () => {
   });
 
   it("windows on createdAt so failures stay inside the range", async () => {
-    await sentService.list(query({ days: 7 }));
+    await sentService.list(query({ days: 7 }), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     const gte = (args.where?.createdAt as { gte: Date }).gte;
@@ -130,7 +193,7 @@ describe("sentService.list", () => {
   });
 
   it("applies no date bound for the all-time window", async () => {
-    await sentService.list(query({ days: 0 }));
+    await sentService.list(query({ days: 0 }), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where?.createdAt).toBeUndefined();
@@ -139,7 +202,7 @@ describe("sentService.list", () => {
   it("splits the joined To set and surfaces the sending account", async () => {
     prismaMock.emailJob.findMany.mockResolvedValue([job] as never);
 
-    const { rows } = await sentService.list(query());
+    const { rows } = await sentService.list(query(), "user_1");
 
     expect(rows[0].to).toEqual(["a@x.com", "b@x.com"]);
     expect(rows[0].ccCount).toBe(1);
@@ -166,7 +229,7 @@ describe("sentService.list", () => {
       }
     ] as never);
 
-    const { rows } = await sentService.list(query());
+    const { rows } = await sentService.list(query(), "user_1");
 
     // Repeat opens are a count, not five rows the browser has to reduce.
     expect(rows[0]).toMatchObject({
@@ -188,7 +251,7 @@ describe("sentService.list", () => {
       }
     ] as never);
 
-    const { rows } = await sentService.list(query());
+    const { rows } = await sentService.list(query(), "user_1");
 
     expect(rows[0].campaignId).toBe("camp_1");
     expect(rows[0].campaignName).toBe("July newsletter");

@@ -84,7 +84,7 @@ const otherConnection = {
 };
 
 // The grid is fed by the merged mailbox list; the connection fixtures below
-// still matter, because the "Who can send" matrix is built from them.
+// still matter, because the "Who has access" matrix is built from them.
 const mailbox = {
   email: "support@acme.test",
   domain: "acme.test",
@@ -323,7 +323,7 @@ describe("Mailboxes", () => {
     user: ReturnType<typeof userEvent.setup>,
     email: string
   ) {
-    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
+    await user.click(screen.getByRole("tab", { name: /Who has access/ }));
     const people = await screen.findByRole("list", { name: "People" });
     await user.click(
       within(people).getByRole("button", { name: new RegExp(email, "i") })
@@ -339,7 +339,7 @@ describe("Mailboxes", () => {
 
     // Ama is a MEMBER holding a grant, so her row is ticked.
     const cell = await screen.findByRole("checkbox", {
-      name: "Ama can send as support@acme.test",
+      name: "Ama can read and send as support@acme.test",
     });
     expect(cell).toHaveAttribute("aria-checked", "true");
 
@@ -352,19 +352,19 @@ describe("Mailboxes", () => {
     );
   });
 
-  it("locks the rows for people who can always send as any mailbox", async () => {
+  it("locks the rows for people who can always use any mailbox", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
     await openAccessFor(user, "owner@acme.test");
 
     expect(
-      await screen.findByText(/is an owner and can send as every mailbox/i)
+      await screen.findByText(/is an owner and has every mailbox/i)
     ).toBeInTheDocument();
     // The owner needs no grant, so there is no checkbox to toggle for them.
     expect(
       screen.queryByRole("checkbox", {
-        name: "Owner can send as support@acme.test",
+        name: "Owner can read and send as support@acme.test",
       })
     ).not.toBeInTheDocument();
   });
@@ -373,7 +373,7 @@ describe("Mailboxes", () => {
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: /Who can send/ }));
+    await user.click(screen.getByRole("tab", { name: /Who has access/ }));
 
     const people = await screen.findByRole("list", { name: "People" });
     expect(within(people).getByText("owner@acme.test")).toBeInTheDocument();

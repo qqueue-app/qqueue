@@ -4,6 +4,11 @@ import type {
   SentEmailPage,
   SentEmailQueryInput
 } from "@qqueue/shared";
+import {
+  emailJobScope,
+  resolveMailboxAccess,
+  type MailboxAccess
+} from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 
 /*
@@ -29,13 +34,26 @@ const OUTCOME_EVENT = {
   complained: "COMPLAINED"
 } as const;
 
-function buildWhere(query: SentEmailQueryInput): Prisma.EmailJobWhereInput {
+function buildWhere(
+  query: SentEmailQueryInput,
+  access: MailboxAccess
+): Prisma.EmailJobWhereInput {
   const where: Prisma.EmailJobWhereInput = {
     organizationId: query.organizationId,
     status:
       query.outcome === "failed"
         ? "FAILED"
-        : { in: [...ARCHIVED_STATUSES] }
+        : { in: [...ARCHIVED_STATUSES] },
+    /*
+      Mailbox scope goes in `AND`, not spread into this object: it is itself an
+      OR, and the free-text search below sets `OR` too. A single object would
+      let one overwrite the other, and a search term would quietly widen what a
+      member can see.
+
+      Omitted entirely for OWNER/ADMIN rather than added as an empty clause, so
+      the unrestricted query stays exactly the query it was.
+    */
+    ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] })
   };
 
   if (query.origin !== "all") {
@@ -150,9 +168,14 @@ export const sentService = {
    * grid filter it. This one cannot: it is the only view whose row count grows
    * with everything the organization has ever sent, so search, filters, sort
    * and paging all happen in Postgres and the client only ever holds one page.
+   *
+   * Scoped to the reader's mailboxes: for an OWNER/ADMIN the archive is still
+   * the whole organization's mail log, but a MEMBER sees only what went out
+   * from a mailbox they hold, plus their own sends.
    */
-  async list(query: SentEmailQueryInput): Promise<SentEmailPage> {
-    const where = buildWhere(query);
+  async list(query: SentEmailQueryInput, userId: string): Promise<SentEmailPage> {
+    const access = await resolveMailboxAccess(userId, query.organizationId);
+    const where = buildWhere(query, access);
 
     const [jobs, total] = await Promise.all([
       prisma.emailJob.findMany({

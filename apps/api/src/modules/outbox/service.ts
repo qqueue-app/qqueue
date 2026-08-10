@@ -1,5 +1,9 @@
 import type { OutboxEmail } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
+import {
+  emailJobScope,
+  resolveMailboxAccess
+} from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
 
@@ -16,9 +20,14 @@ export const outboxService = {
    * Covers every origin (campaign fan-out, transactional API, manual sends)
    * because they all land in the same EmailJob table.
    */
-  async list(organizationId: string): Promise<OutboxEmail[]> {
+  async list(organizationId: string, userId: string): Promise<OutboxEmail[]> {
+    const access = await resolveMailboxAccess(userId, organizationId);
     const jobs = await prisma.emailJob.findMany({
-      where: { organizationId, status: { in: [...PENDING_STATUSES] } },
+      where: {
+        organizationId,
+        status: { in: [...PENDING_STATUSES] },
+        ...emailJobScope(access)
+      },
       orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
       take: OUTBOX_LIMIT,
       select: {
@@ -69,10 +78,15 @@ export const outboxService = {
    * best-effort basis: if the worker has already picked the job up, removal
    * fails harmlessly because the send worker re-reads the row and skips
    * CANCELLED jobs before touching SMTP.
+   *
+   * Cancelling is scoped exactly like listing, so a member can only pull back
+   * mail they can see. Before per-mailbox access existed, any member could
+   * cancel any queued job in the organization.
    */
-  async cancel(id: string, organizationId: string) {
+  async cancel(id: string, organizationId: string, userId: string) {
+    const access = await resolveMailboxAccess(userId, organizationId);
     const job = await prisma.emailJob.findFirst({
-      where: { id, organizationId },
+      where: { id, organizationId, ...emailJobScope(access) },
       select: { id: true, status: true }
     });
 

@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { prismaMock } from "../../test/prisma-mock.js";
 import { dashboardService } from "./service.js";
 
 describe("dashboardService.summary", () => {
+  // OWNER: the recent lists are unscoped, which is what these cases assert.
+  beforeEach(() => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "OWNER"
+    } as never);
+  });
+
   it("aggregates counts, setup flags and recent activity", async () => {
     prismaMock.sMTPConnection.count.mockResolvedValue(1 as never);
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
@@ -37,7 +44,7 @@ describe("dashboardService.summary", () => {
       }
     ] as never);
 
-    const result = await dashboardService.summary("org_1");
+    const result = await dashboardService.summary("org_1", "user_1");
 
     expect(result.counts).toEqual({
       smtpConnections: 1,
@@ -80,11 +87,55 @@ describe("dashboardService.summary", () => {
     ] as never);
     prismaMock.emailEvent.findMany.mockResolvedValue([] as never);
 
-    const result = await dashboardService.summary("org_1");
+    const result = await dashboardService.summary("org_1", "user_1");
     expect(result.setup.hasDefaultSmtp).toBe(false);
     expect(result.setup.hasSmtpConnection).toBe(false);
     expect(result.defaultSmtpConnection).toBeNull();
     expect(result.recentEmailJobs[0].smtpConnectionName).toBeNull();
     expect(result.recentEmailJobs[0].sentAt).toBeNull();
+  });
+
+  it("scopes a MEMBER's recent activity but not the counts", async () => {
+    // The lists carry subjects and recipients, so they follow the same rule as
+    // the sent archive. The counts are aggregates and stay org-wide.
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_1" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.sMTPConnection.count.mockResolvedValue(2 as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
+    prismaMock.contact.count.mockResolvedValue(0 as never);
+    prismaMock.template.count.mockResolvedValue(0 as never);
+    prismaMock.emailJob.count.mockResolvedValue(0 as never);
+    prismaMock.emailJob.findMany.mockResolvedValue([] as never);
+    prismaMock.emailEvent.findMany.mockResolvedValue([] as never);
+
+    await dashboardService.summary("org_1", "user_1");
+
+    const scope = {
+      OR: [
+        { smtpConnectionId: { in: ["smtp_1"] } },
+        { createdByUserId: "user_1" }
+      ]
+    };
+    expect(prismaMock.emailJob.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: "org_1", ...scope }
+      })
+    );
+    expect(prismaMock.emailEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: "org_1", emailJob: scope }
+      })
+    );
+    // Counts are untouched by the scope.
+    expect(prismaMock.emailJob.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ OR: expect.anything() })
+      })
+    );
   });
 });

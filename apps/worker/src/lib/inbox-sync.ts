@@ -267,6 +267,8 @@ async function storeParsedMessage(input: {
     try {
       await notifyNewInboundMessage({
         organizationId: account.organizationId,
+        inboxAccountId: account.id,
+        inboxAccountEmail: account.email,
         messageId: stored.id,
         sender: from.name ? `${from.name} <${from.email}>` : from.email,
         subject: mail.subject ?? "",

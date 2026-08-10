@@ -12,8 +12,24 @@ const prisma = vi.hoisted(() => ({
     findUnique: vi.fn(),
     update: vi.fn(),
   },
+  inboxAccount: {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+  },
+  inboxNotifyRule: {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    upsert: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  // The domain path runs its writes in one transaction; the callback form gets
+  // the same mock client, so assertions read off the calls above unchanged.
+  $transaction: vi.fn(),
 }));
 vi.mock("../../lib/prisma.js", () => ({ prisma }));
+
+const access = vi.hoisted(() => ({ resolveMailboxAccess: vi.fn() }));
+vi.mock("../../lib/mailbox-access.js", () => access);
 
 const env = vi.hoisted(() => ({
   current: {
@@ -36,6 +52,16 @@ describe("pushService", () => {
       VAPID_PUBLIC_KEY: "public-key",
       VAPID_PRIVATE_KEY: "private-key",
     };
+    prisma.$transaction.mockImplementation(
+      (run: (tx: typeof prisma) => Promise<unknown>) => run(prisma)
+    );
+    access.resolveMailboxAccess.mockResolvedValue({
+      userId: "user_1",
+      organizationId: "org_1",
+      unrestricted: false,
+      inboxAccountIds: ["inbox_1", "inbox_2"],
+      smtpConnectionIds: [],
+    });
   });
 
   describe("publicKey", () => {
@@ -292,6 +318,265 @@ describe("pushService", () => {
         expect.objectContaining({
           where: { userId: "user_1" },
           orderBy: { createdAt: "desc" },
+        })
+      );
+    });
+  });
+
+  describe("getNotifySettings", () => {
+    beforeEach(() => {
+      prisma.organizationMember.findUnique.mockResolvedValue({
+        notifyLevel: "ALL",
+      });
+      prisma.inboxAccount.findMany.mockResolvedValue([
+        { id: "inbox_2", name: "Sales", email: "sales@acme.test" },
+        { id: "inbox_1", name: "Support", email: "support@acme.test" },
+      ]);
+      prisma.inboxNotifyRule.findMany.mockResolvedValue([]);
+    });
+
+    it("offers only the mailboxes the caller can read", async () => {
+      await pushService.getNotifySettings("user_1", "org_1");
+
+      // The settings page must not be a directory of mailboxes somebody was
+      // never given — it offers exactly what their inbox already shows them.
+      expect(prisma.inboxAccount.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { organizationId: "org_1", id: { in: ["inbox_1", "inbox_2"] } },
+        })
+      );
+    });
+
+    it("shows every mailbox in the org to an owner, who holds no grants", async () => {
+      access.resolveMailboxAccess.mockResolvedValue({
+        userId: "user_1",
+        organizationId: "org_1",
+        unrestricted: true,
+        inboxAccountIds: [],
+        smtpConnectionIds: [],
+      });
+
+      await pushService.getNotifySettings("user_1", "org_1");
+
+      // `unrestricted` means no grant rows exist; filtering on the empty list
+      // would hand an owner an empty page.
+      expect(prisma.inboxAccount.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { organizationId: "org_1" } })
+      );
+    });
+
+    it("defaults every mailbox to notifying when no rules exist", async () => {
+      const settings = await pushService.getNotifySettings("user_1", "org_1");
+
+      expect(settings.domains).toHaveLength(1);
+      expect(settings.domains[0]).toMatchObject({
+        domain: "acme.test",
+        state: "ALL",
+      });
+      // Sorted by address, not by whatever order the rows arrived in.
+      expect(settings.domains[0].mailboxes.map((m) => m.email)).toEqual([
+        "sales@acme.test",
+        "support@acme.test",
+      ]);
+      expect(settings.domains[0].mailboxes.every((m) => m.enabled)).toBe(true);
+    });
+
+    it("reports a domain as SOME when its mailboxes disagree", async () => {
+      prisma.inboxNotifyRule.findMany.mockResolvedValue([
+        {
+          scope: "MAILBOX",
+          domain: null,
+          inboxAccountId: "inbox_1",
+          enabled: false,
+        },
+      ]);
+
+      const settings = await pushService.getNotifySettings("user_1", "org_1");
+
+      // Derived from the ticks rather than read off a domain rule: a switch
+      // claiming "all" over an unticked row is the kind of small lie that
+      // makes people stop trusting the page.
+      expect(settings.domains[0].state).toBe("SOME");
+      const support = settings.domains[0].mailboxes.find(
+        (mailbox) => mailbox.inboxAccountId === "inbox_1"
+      );
+      expect(support).toMatchObject({ enabled: false, explicit: true });
+    });
+
+    it("applies a domain rule to every mailbox under it", async () => {
+      prisma.inboxNotifyRule.findMany.mockResolvedValue([
+        {
+          scope: "DOMAIN",
+          domain: "acme.test",
+          inboxAccountId: null,
+          enabled: false,
+        },
+      ]);
+
+      const settings = await pushService.getNotifySettings("user_1", "org_1");
+
+      expect(settings.domains[0].state).toBe("NONE");
+      // Inherited, not explicit: nobody ticked these individually.
+      expect(settings.domains[0].mailboxes.every((m) => !m.explicit)).toBe(true);
+    });
+  });
+
+  describe("setNotifyRule", () => {
+    beforeEach(() => {
+      prisma.organizationMember.findUnique.mockResolvedValue({
+        notifyLevel: "ALL",
+      });
+      prisma.inboxAccount.findMany.mockResolvedValue([
+        { id: "inbox_1", name: "Support", email: "support@acme.test" },
+        { id: "inbox_2", name: "Sales", email: "sales@acme.test" },
+      ]);
+      prisma.inboxNotifyRule.findMany.mockResolvedValue([]);
+      prisma.inboxNotifyRule.findFirst.mockResolvedValue(null);
+      prisma.inboxNotifyRule.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.inboxNotifyRule.upsert.mockResolvedValue({});
+      prisma.inboxAccount.findFirst.mockResolvedValue({
+        id: "inbox_1",
+        email: "support@acme.test",
+      });
+    });
+
+    it("refuses a mailbox the caller has no access to", async () => {
+      prisma.inboxAccount.findFirst.mockResolvedValue(null);
+
+      await expect(
+        pushService.setNotifyRule("user_1", {
+          organizationId: "org_1",
+          enabled: false,
+          target: { scope: "MAILBOX", inboxAccountId: "inbox_9" },
+        })
+      ).rejects.toMatchObject({ statusCode: 404 });
+
+      expect(prisma.inboxNotifyRule.upsert).not.toHaveBeenCalled();
+    });
+
+    it("stores a mute as a row, since it disagrees with the default", async () => {
+      await pushService.setNotifyRule("user_1", {
+        organizationId: "org_1",
+        enabled: false,
+        target: { scope: "MAILBOX", inboxAccountId: "inbox_1" },
+      });
+
+      expect(prisma.inboxNotifyRule.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId_inboxAccountId: { userId: "user_1", inboxAccountId: "inbox_1" },
+          },
+          create: expect.objectContaining({
+            scope: "MAILBOX",
+            inboxAccountId: "inbox_1",
+            enabled: false,
+          }),
+        })
+      );
+    });
+
+    it("deletes the row instead of storing one that agrees with the default", async () => {
+      await pushService.setNotifyRule("user_1", {
+        organizationId: "org_1",
+        enabled: true,
+        target: { scope: "MAILBOX", inboxAccountId: "inbox_1" },
+      });
+
+      // Re-ticking means "follow the default again", not "pin true forever" —
+      // storing it would freeze today's default into a row nobody remembers.
+      expect(prisma.inboxNotifyRule.deleteMany).toHaveBeenCalledWith({
+        where: { userId: "user_1", inboxAccountId: "inbox_1" },
+      });
+      expect(prisma.inboxNotifyRule.upsert).not.toHaveBeenCalled();
+    });
+
+    it("stores an exception inside a muted domain", async () => {
+      prisma.inboxNotifyRule.findFirst.mockResolvedValue({ enabled: false });
+
+      await pushService.setNotifyRule("user_1", {
+        organizationId: "org_1",
+        enabled: true,
+        target: { scope: "MAILBOX", inboxAccountId: "inbox_1" },
+      });
+
+      // "Nothing from acme.test except support@" — here `true` genuinely
+      // disagrees with what the mailbox would otherwise inherit.
+      expect(prisma.inboxNotifyRule.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ enabled: true }),
+        })
+      );
+    });
+
+    it("refuses a domain the caller holds no mailboxes on", async () => {
+      await expect(
+        pushService.setNotifyRule("user_1", {
+          organizationId: "org_1",
+          enabled: false,
+          target: { scope: "DOMAIN", domain: "elsewhere.test" },
+        })
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("mutes a domain and clears the ticks beneath it", async () => {
+      await pushService.setNotifyRule("user_1", {
+        organizationId: "org_1",
+        enabled: false,
+        target: { scope: "DOMAIN", domain: "ACME.test" },
+      });
+
+      // Only the mailboxes this person holds — a domain rule is a filter over
+      // their access, never a claim on the domain's other addresses.
+      expect(prisma.inboxNotifyRule.deleteMany).toHaveBeenCalledWith({
+        where: { userId: "user_1", inboxAccountId: { in: ["inbox_1", "inbox_2"] } },
+      });
+      expect(prisma.inboxNotifyRule.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId_organizationId_domain: {
+              userId: "user_1",
+              organizationId: "org_1",
+              // Lowercased, so it matches what the worker looks up.
+              domain: "acme.test",
+            },
+          },
+        })
+      );
+    });
+
+    it("switching a domain on leaves no rule at all", async () => {
+      await pushService.setNotifyRule("user_1", {
+        organizationId: "org_1",
+        enabled: true,
+        target: { scope: "DOMAIN", domain: "acme.test" },
+      });
+
+      // On is the default, and having no row is what lets a mailbox added to
+      // this domain next month notify without anyone revisiting the page.
+      expect(prisma.inboxNotifyRule.upsert).not.toHaveBeenCalled();
+      expect(prisma.inboxNotifyRule.deleteMany).toHaveBeenCalledWith({
+        where: {
+          organizationId: "org_1",
+          userId: "user_1",
+          scope: "DOMAIN",
+          domain: "acme.test",
+        },
+      });
+    });
+
+    it("only ever considers mailboxes the caller can read", async () => {
+      await pushService.setNotifyRule("user_1", {
+        organizationId: "org_1",
+        enabled: false,
+        target: { scope: "DOMAIN", domain: "acme.test" },
+      });
+
+      // The whole safety property of the domain switch: it is scoped by access
+      // first, so "everything on acme.test" can never reach further than the
+      // mailboxes this person was granted.
+      expect(prisma.inboxAccount.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { organizationId: "org_1", id: { in: ["inbox_1", "inbox_2"] } },
         })
       );
     });

@@ -10,7 +10,10 @@ import { campaignService } from "./service.js";
 
 export const campaignController = {
   async list(req: Request, res: Response) {
-    const campaigns = await campaignService.list(req.organizationId!);
+    const campaigns = await campaignService.list(
+      req.organizationId!,
+      req.userId!
+    );
     res.json({ data: campaigns });
   },
 
@@ -38,7 +41,7 @@ export const campaignController = {
 
   async create(req: Request, res: Response) {
     const input = campaignSchema.parse(req.body);
-    const campaign = await campaignService.create(input);
+    const campaign = await campaignService.create(input, req.userId!);
     res.status(201).json({ data: campaign });
   },
 

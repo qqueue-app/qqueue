@@ -111,14 +111,18 @@ type PendingConfirm =
 
 /**
  * Mailboxes — where an owner or admin creates team mailboxes and decides who
- * may send as each one.
+ * may use each one.
  *
- * Two questions, two tabs: what mailboxes exist, and who can send as them. The
- * access question is answered person-first — pick a teammate, see every address
- * they could send as grouped by domain — because that is the shape the question
- * arrives in ("what can this new hire send as"), and because a grid of every
- * person against every mailbox stops fitting the moment an org has more than a
- * handful of either.
+ * Access is one thing, not two: giving someone a mailbox lets them read what
+ * arrives at it and send as it. Splitting those would mean two ticks per person
+ * per mailbox to express a distinction almost nobody draws about a shared
+ * address.
+ *
+ * Two questions, two tabs: what mailboxes exist, and who can use them. The
+ * access question is answered person-first — pick a teammate, see every mailbox
+ * grouped by domain — because that is the shape the question arrives in ("what
+ * should this new hire have"), and because a grid of every person against every
+ * mailbox stops fitting the moment an org has more than a handful of either.
  *
  * Which *domains* this org can build on is not decided here. A Mailcow domain
  * is instance-global, so both domain management and the per-admin domain grants
@@ -151,7 +155,7 @@ export function Mailboxes() {
     (id) => api.getMailcowStatus(id)
   );
   // The merged list backs the Mailboxes tab. The raw connection list is still
-  // needed on its own for the "Who can send" tab, which offers sending accounts
+  // needed on its own for the "Who has access" tab, which offers sending accounts
   // — a mailbox with no account in QQueue cannot be sent as at all.
   const mailboxesQuery = useOrgQuery(
     canManage ? organizationId : null,
@@ -323,7 +327,7 @@ export function Mailboxes() {
 
   // Every mailbox mutation refetches the merged list; the ones that add or
   // remove a sending account refetch the connection list too, because the
-  // "Who can send" tab is built from it.
+  // "Who has access" tab is built from it.
   const mailboxKeys = [qk.mailboxes(organizationId ?? "")];
   const mailboxAndConnectionKeys = [
     qk.mailboxes(organizationId ?? ""),
@@ -472,8 +476,8 @@ export function Mailboxes() {
       },
       {
         id: "access",
-        header: "Who can send",
-        meta: { title: "Who can send", align: "center" },
+        header: "Who has access",
+        meta: { title: "Who has access", align: "center" },
         // Sorts by how many people hold a grant, so "nobody has access to this
         // mailbox" surfaces at one end of the sort. Mailboxes QQueue can't send
         // from at all sort below that, at -1.
@@ -485,7 +489,7 @@ export function Mailboxes() {
           const connectionId = row.original.smtpConnectionId;
           if (!connectionId) {
             return (
-              <Hint label="QQueue has no credentials for this mailbox yet, so nobody can send as it">
+              <Hint label="QQueue has no credentials for this mailbox yet, so nobody can use it">
                 <span className="cursor-help text-body text-muted-foreground">
                   —
                 </span>
@@ -500,7 +504,7 @@ export function Mailboxes() {
             <Hint
               label={
                 grants.length === 0
-                  ? "Only owners and admins, who can always send as any account"
+                  ? "Only owners and admins, who can always use any mailbox"
                   : `Owners and admins, plus ${names}`
               }
             >
@@ -615,7 +619,7 @@ export function Mailboxes() {
       <>
         <PageHeader
           title="Mailboxes"
-          description="Create team mailboxes and choose who can send as them."
+          description="Create team mailboxes and choose who can use them."
           breadcrumb={{ label: "Settings", to: "/settings" }}
         />
         <PageContainer>
@@ -623,7 +627,7 @@ export function Mailboxes() {
             <EmptyState
               icon={Mail}
               title="Owners and admins only"
-              description="Ask an owner or admin to create a mailbox for you, or to let you send as an existing one."
+              description="Ask an owner or admin to create a mailbox for you, or to give you access to an existing one."
             />
           </Card>
         </PageContainer>
@@ -635,7 +639,7 @@ export function Mailboxes() {
     <>
       <PageHeader
         title="Mailboxes"
-        description="Create team mailboxes on your mail server and choose who can send as each one."
+        description="Create team mailboxes on your mail server and choose who can read and send as each one."
         breadcrumb={{ label: "Settings", to: "/settings" }}
         actions={
           status?.configured && status.reachable ? (
@@ -680,7 +684,7 @@ export function Mailboxes() {
             </TabsTrigger>
             <TabsTrigger value="access">
               <Users className="h-4 w-4" />
-              Who can send
+              Who has access
             </TabsTrigger>
           </TabsList>
 
@@ -761,10 +765,10 @@ export function Mailboxes() {
                       </p>
                       <p className="mt-1 text-meta text-muted-foreground">
                         {grants === null
-                          ? "QQueue can't send as this yet"
+                          ? "QQueue can't use this yet"
                           : grants.length === 0
                             ? "Admins only"
-                            : `${grants.length} member(s) can send as this`}
+                            : `${grants.length} member(s) have access`}
                       </p>
                     </div>
                   </div>
@@ -776,9 +780,10 @@ export function Mailboxes() {
           <TabsContent value="access">
             <div className="space-y-3">
               <p className="text-body text-muted-foreground">
-                Pick a teammate to see every address they could send as, grouped
-                by domain, and tick the ones they should have. Owners and admins
-                can always send as any of them.
+                Pick a teammate to see every mailbox, grouped by domain, and
+                tick the ones they should have. A ticked mailbox lets them read
+                the mail that arrives at it and send as it. Owners and admins
+                always have every mailbox.
               </p>
               <SendAccessEditor
                 people={members.map((member) => ({
@@ -788,7 +793,7 @@ export function Mailboxes() {
                   roleLabel:
                     member.role.charAt(0) + member.role.slice(1).toLowerCase(),
                   alwaysAllowed: member.role !== "MEMBER",
-                  alwaysAllowedReason: `${memberName(member)} is an ${member.role.toLowerCase()} and can send as every mailbox.`,
+                  alwaysAllowedReason: `${memberName(member)} is an ${member.role.toLowerCase()} and has every mailbox.`,
                 }))}
                 mailboxes={accessMailboxes}
                 noPeopleMessage="Invite teammates from Settings, then come back to give them access."
@@ -1126,9 +1131,9 @@ function AdoptMailboxDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Let someone send as this</Label>
+            <Label>Give someone access</Label>
             <Select value={assignTo} onValueChange={setAssignTo}>
-              <SelectTrigger aria-label="Let someone send as this">
+              <SelectTrigger aria-label="Give someone access">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1141,7 +1146,7 @@ function AdoptMailboxDialog({
               </SelectContent>
             </Select>
             <p className="text-meta text-muted-foreground">
-              You can change this any time on the "Who can send" tab.
+              You can change this any time on the "Who has access" tab.
             </p>
           </div>
 
@@ -1327,9 +1332,9 @@ function NewMailboxDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>Let someone send as this</Label>
+              <Label>Give someone access</Label>
               <Select value={assignTo} onValueChange={setAssignTo}>
-                <SelectTrigger aria-label="Let someone send as this">
+                <SelectTrigger aria-label="Give someone access">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1342,7 +1347,7 @@ function NewMailboxDialog({
                 </SelectContent>
               </Select>
               <p className="text-meta text-muted-foreground">
-                You can change this any time on the "Who can send" tab.
+                You can change this any time on the "Who has access" tab.
               </p>
             </div>
             </>

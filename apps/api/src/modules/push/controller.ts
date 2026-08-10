@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import {
   inboxNotifyPreferenceUpdateSchema,
+  inboxNotifyRuleUpdateSchema,
   pushRotateSchema,
   pushSubscriptionSchema,
   pushUnsubscribeSchema,
@@ -61,5 +62,25 @@ export const pushController = {
       input.notifyLevel
     );
     res.json({ data: { organizationId: req.organizationId!, notifyLevel } });
+  },
+
+  async getSettings(req: Request, res: Response) {
+    const settings = await pushService.getNotifySettings(
+      req.userId!,
+      req.organizationId!
+    );
+    res.json({ data: settings });
+  },
+
+  /**
+   * Answers with the whole settings tree rather than the one rule that changed.
+   * Switching a domain rewrites the ticks beneath it, so a response describing
+   * only the switch would leave the page showing rows the server has already
+   * discarded.
+   */
+  async updateRule(req: Request, res: Response) {
+    const input = inboxNotifyRuleUpdateSchema.parse(req.body);
+    const settings = await pushService.setNotifyRule(req.userId!, input);
+    res.json({ data: settings });
   },
 };

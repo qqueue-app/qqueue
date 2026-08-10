@@ -32,6 +32,14 @@ export function OrgSwitcher({ className }: { className?: string }) {
     return null;
   }
 
+  // Mirrors the API rule: owning or administering any one organization is what
+  // lets you start another. Someone who was only ever invited into other
+  // people's organizations gets the switcher without the create item.
+  const canCreateOrganization = organizations.some(
+    (organization) =>
+      organization.role === "OWNER" || organization.role === "ADMIN"
+  );
+
   function switchOrganization(organizationId: string, name: string) {
     if (organizationId === currentOrganizationId) {
       return;
@@ -83,11 +91,15 @@ export function OrgSwitcher({ className }: { className?: string }) {
             </MenuItem>
           ))
         )}
-        <MenuSeparator />
-        <MenuItem onSelect={() => navigate("/settings")}>
-          <Plus className="h-4 w-4" />
-          New organization
-        </MenuItem>
+        {canCreateOrganization ? (
+          <>
+            <MenuSeparator />
+            <MenuItem onSelect={() => navigate("/settings/organization")}>
+              <Plus className="h-4 w-4" />
+              New organization
+            </MenuItem>
+          </>
+        ) : null}
       </MenuContent>
     </Menu>
   );

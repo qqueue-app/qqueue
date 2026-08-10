@@ -36,3 +36,18 @@ pushRouter.put(
   requireOrgMembership,
   pushController.updatePreference
 );
+
+// Which mailboxes may notify, as opposed to how much of their mail does.
+// Membership is the only gate: the service scopes every read and write to the
+// caller's own mailbox access, so a MEMBER sees and edits exactly the mailboxes
+// their inbox already shows them.
+pushRouter.get(
+  "/notification-settings",
+  requireOrgMembership,
+  pushController.getSettings
+);
+pushRouter.put(
+  "/notification-settings",
+  requireOrgMembership,
+  pushController.updateRule
+);

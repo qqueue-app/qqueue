@@ -41,16 +41,70 @@ const draft = {
 };
 
 describe("campaignService.list / get", () => {
-  it("lists campaigns", () => {
+  it("lists campaigns", async () => {
     prismaMock.campaign.findMany.mockResolvedValue([] as never);
-    campaignService.list("org_1");
+    await campaignService.list("org_1", "user_1");
     expect(prismaMock.campaign.findMany).toHaveBeenCalled();
   });
 
-  it("gets a campaign scoped by membership", () => {
+  it("gets a campaign scoped by membership", async () => {
     prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
-    campaignService.get("c1", "user_1");
+    await campaignService.get("c1", "user_1");
     expect(prismaMock.campaign.findFirst).toHaveBeenCalled();
+  });
+
+  // A campaign has no mailbox of its own — the fan-out always sends as the org
+  // default — so holding that connection is the whole of "may I see campaigns".
+  it("hides every campaign from a MEMBER who cannot use the default connection", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+
+    await expect(campaignService.list("org_1", "user_1")).resolves.toEqual([]);
+    expect(prismaMock.campaign.findMany).not.toHaveBeenCalled();
+  });
+
+  it("lists campaigns for a MEMBER who holds the default connection", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp-default" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+    prismaMock.campaign.findMany.mockResolvedValue([] as never);
+
+    await campaignService.list("org_1", "user_1");
+    expect(prismaMock.campaign.findMany).toHaveBeenCalled();
+  });
+
+  it("refuses creation by a MEMBER who cannot use the default connection", async () => {
+    // Letting them create a campaign they would then never see in the list is
+    // worse than refusing outright.
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+
+    await expect(
+      campaignService.create(
+        { organizationId: "org_1", name: "Launch" },
+        "user_1"
+      )
+    ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
+    expect(prismaMock.campaign.create).not.toHaveBeenCalled();
   });
 });
 
@@ -252,7 +306,9 @@ describe("campaignService.sendNow", () => {
   });
 
   // Phase 4: campaigns send as the org default connection, so starting one
-  // requires the actor to be allowed to use it.
+  // requires the actor to be allowed to use it. Per-mailbox access now stops
+  // the same person one step earlier — the campaign is not visible to them at
+  // all, so this is a 404 rather than the old send_as_denied 403.
   it("blocks a MEMBER without a grant on the default connection", async () => {
     prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
@@ -261,12 +317,35 @@ describe("campaignService.sendNow", () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       id: "smtp-default"
     } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
     prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
 
     await expect(campaignService.sendNow("c1", "user_1")).rejects.toMatchObject(
-      { statusCode: 403, code: "send_as_denied" }
+      { statusCode: 404 }
     );
     expect(add).not.toHaveBeenCalled();
+  });
+
+  it("still starts for a MEMBER who holds the default connection", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp-default" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
+      id: "grant_1"
+    } as never);
+    prismaMock.campaign.update.mockResolvedValue(draft as never);
+
+    await campaignService.sendNow("c1", "user_1");
+    expect(add).toHaveBeenCalledOnce();
   });
 
   it("throws 400 from a non-sendable status", async () => {

@@ -45,6 +45,14 @@ export function OrganizationSettings() {
     (org) => org.id === currentOrganizationId
   );
 
+  // Mirrors the API rule: owning or administering any one organization is what
+  // lets you start another. Asked of every membership, not just the active one,
+  // so an admin of one org can still create from inside an org they only belong
+  // to.
+  const canCreateOrganization = organizations.some(
+    (org) => org.role === "OWNER" || org.role === "ADMIN"
+  );
+
   function selectOrganization(organizationId: string) {
     setCurrentOrganizationId(organizationId);
     const selected = organizations.find((org) => org.id === organizationId);
@@ -170,6 +178,7 @@ export function OrganizationSettings() {
             </form>
           </FormSection>
 
+          {canCreateOrganization ? (
           <FormSection
             title="New organization"
             description="A separate workspace with its own contacts, sending accounts, and team. You become its owner."
@@ -194,6 +203,7 @@ export function OrganizationSettings() {
               </Button>
             </form>
           </FormSection>
+          ) : null}
         </FormSections>
       </PageContainer>
     </>

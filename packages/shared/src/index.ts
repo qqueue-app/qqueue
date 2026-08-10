@@ -89,6 +89,10 @@ export type ApiErrorCode =
   | "not_found"
   | "conflict"
   | "send_as_denied"
+  // Reading a mailbox the caller holds no grant for. Distinct from
+  // send_as_denied, which is about sending as one.
+  | "mailbox_access_denied"
+  | "org_create_denied"
   | "domain_not_granted"
   | "mailcow_not_configured"
   | "mailcow_unreachable"
@@ -2549,6 +2553,129 @@ export const inboxNotifyPreferenceUpdateSchema = z.object({
 export type InboxNotifyPreferenceUpdateInput = z.infer<
   typeof inboxNotifyPreferenceUpdateSchema
 >;
+
+/**
+ * What a notification rule is about. Rules resolve most-specific-first:
+ * `MAILBOX` beats `DOMAIN`, and either beats the default.
+ */
+export const inboxNotifyScopeSchema = z.enum(["DOMAIN", "MAILBOX"]);
+
+export type InboxNotifyScope = z.infer<typeof inboxNotifyScopeSchema>;
+
+/**
+ * Turn notifications on or off for one mailbox, or for a whole domain at once.
+ *
+ * A domain is only ever a *filter* over the mailboxes the caller already holds.
+ * Switching acme.test on covers the one address they were granted, not the ten
+ * the domain has — this can never widen what somebody hears about.
+ */
+export const inboxNotifyRuleUpdateSchema = z.object({
+  organizationId: z.string().min(1),
+  enabled: z.boolean(),
+  target: z.discriminatedUnion("scope", [
+    z.object({
+      scope: z.literal("MAILBOX"),
+      inboxAccountId: z.string().min(1),
+    }),
+    z.object({
+      scope: z.literal("DOMAIN"),
+      domain: z.string().min(1).max(253),
+    }),
+  ]),
+});
+
+export type InboxNotifyRuleUpdateInput = z.infer<
+  typeof inboxNotifyRuleUpdateSchema
+>;
+
+/** One mailbox on the notification settings page. */
+export interface InboxNotifyMailbox {
+  inboxAccountId: string;
+  email: string;
+  /** The mailbox's display name, e.g. "Support". */
+  name: string;
+  /** Whether mail arriving here may notify, after rules are resolved. */
+  enabled: boolean;
+  /**
+   * True when `enabled` comes from a rule of its own rather than being
+   * inherited. The UI uses it to say "this one is a deliberate exception".
+   */
+  explicit: boolean;
+}
+
+/**
+ * The mailboxes on one domain that this person can read — never the domain's
+ * full address list.
+ */
+export interface InboxNotifyDomainGroup {
+  domain: string;
+  /**
+   * `ALL` / `NONE` when every mailbox below agrees, `SOME` when they don't.
+   * Derived, so the switch on screen always matches the ticks under it.
+   */
+  state: "ALL" | "NONE" | "SOME";
+  mailboxes: InboxNotifyMailbox[];
+}
+
+/** Everything the notification settings page renders, in one response. */
+export interface InboxNotifySettings {
+  organizationId: string;
+  /** Which mail within a notifying mailbox — the second, orthogonal axis. */
+  notifyLevel: InboxNotifyLevel;
+  domains: InboxNotifyDomainGroup[];
+}
+
+/** A stored rule, in the only shape the resolver needs to see. */
+export interface InboxNotifyRuleLike {
+  scope: InboxNotifyScope;
+  domain: string | null;
+  inboxAccountId: string | null;
+  enabled: boolean;
+}
+
+/**
+ * The domain half of an address, lowercased — the key domain rules are stored
+ * under. An address with no `@` yields an empty string rather than throwing:
+ * a malformed mailbox should group oddly on a settings page, not take the page
+ * down.
+ */
+export function mailboxDomain(email: string): string {
+  return email.split("@")[1]?.trim().toLowerCase() ?? "";
+}
+
+/**
+ * Whether mail arriving at one mailbox may notify one person.
+ *
+ * The single home of the precedence rule, imported by both the API (to render
+ * the settings page) and the worker (to decide a live push). Splitting it in
+ * two is how a settings screen ends up confidently describing behaviour the
+ * worker does not have.
+ *
+ * Most specific wins: a rule naming this mailbox, else one naming its domain,
+ * else on. On is the default because a mailbox you were given and never had an
+ * opinion about is one you presumably want to hear from — see the
+ * `InboxNotifyRule` model comment.
+ *
+ * `rules` is expected to be small (one person's exceptions in one org), so a
+ * linear scan is cheaper than the map that would replace it.
+ */
+export function resolveInboxNotify(
+  rules: InboxNotifyRuleLike[],
+  mailbox: { inboxAccountId: string; domain: string }
+): { enabled: boolean; explicit: boolean } {
+  const mailboxRule = rules.find(
+    (rule) =>
+      rule.scope === "MAILBOX" && rule.inboxAccountId === mailbox.inboxAccountId
+  );
+  if (mailboxRule) return { enabled: mailboxRule.enabled, explicit: true };
+
+  const domainRule = rules.find(
+    (rule) => rule.scope === "DOMAIN" && rule.domain === mailbox.domain
+  );
+  if (domainRule) return { enabled: domainRule.enabled, explicit: false };
+
+  return { enabled: true, explicit: false };
+}
 
 /**
  * The payload a service worker receives. Kept deliberately small: push

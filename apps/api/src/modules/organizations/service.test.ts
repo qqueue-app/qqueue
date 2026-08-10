@@ -35,12 +35,29 @@ describe("organizationService", () => {
   });
 
   it("creates an organization owned by the creator", async () => {
+    // Owner or admin somewhere already — the account-level check that replaces
+    // the role check an organization that does not exist yet cannot answer.
+    prismaMock.organizationMember.findFirst.mockResolvedValue({
+      id: "member_1"
+    } as never);
     prismaMock.organization.create.mockResolvedValue({
       id: "org_1",
       name: "Acme"
     } as never);
     const result = await organizationService.create({ name: "Acme" }, "user_1");
     expect(result).toEqual({ id: "org_1", name: "Acme", role: "OWNER" });
+  });
+
+  it("throws 403 creating an organization as a plain member", async () => {
+    // Someone who was only ever invited into other people's organizations
+    // cannot mint one of their own.
+    prismaMock.organizationMember.findFirst.mockResolvedValue(null);
+    await expect(
+      organizationService.create({ name: "Acme" }, "user_1")
+    ).rejects.toThrow(
+      "Only organization owners and admins can create organizations"
+    );
+    expect(prismaMock.organization.create).not.toHaveBeenCalled();
   });
 
   it("updates an organization when the user is OWNER/ADMIN", async () => {

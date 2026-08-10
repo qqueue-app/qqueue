@@ -69,12 +69,27 @@ learning a new vocabulary. What changed:
   non-DSN, unseen message. Off unless VAPID keys are configured. Deep-links
   through `/inbox?org=<id>&message=<id>`.
   A subscription is a **device**, not an org: one install receives alerts for
-  every org its owner has turned them on for, and how much of each org's mail
-  reaches them is `OrganizationMember.notifyLevel`
-  (`ALL` / `ADDRESSED_TO_ME` / `NONE`, set on Settings → Account). The service
-  worker re-registers itself through the public
-  `POST /push/subscriptions/rotate` when the browser rotates a subscription,
-  authorized by the old endpoint since a worker has no session.
+  every org its owner has turned them on for. The service worker re-registers
+  itself through the public `POST /push/subscriptions/rotate` when the browser
+  rotates a subscription, authorized by the old endpoint since a worker has no
+  session.
+- **Notifications are their own settings page** (`/settings/notifications`),
+  answering three narrowing questions: should this device ring (browser
+  permission, per install), which mailboxes may ring it (`InboxNotifyRule`),
+  and which mail within them (`OrganizationMember.notifyLevel` —
+  `ALL` / `ADDRESSED_TO_ME` / `NONE`).
+  Mailboxes are listed **grouped by domain, collapsed**, with a tri-state tick
+  per domain and a tick per mailbox underneath. `InboxNotifyRule` is an
+  *exception list*: no rows means every mailbox you can read notifies you, so
+  being granted a mailbox never means quietly missing its mail. Rules resolve
+  most-specific-first (MAILBOX → DOMAIN → on) and are only written where they
+  disagree with the level above, so re-ticking something deletes its row rather
+  than pinning today's default. A domain rule is a **filter over your own
+  access**, never a claim on the domain: hold 1 of its 10 addresses and
+  "everything on acme.test" means that one.
+  `GET`/`PUT /push/notification-settings` serve the page;
+  `lib/mailbox-access.ts` scopes both. Settings → Account keeps only sign-in
+  and sign-out, plus a link here.
 - **The sidebar is unchanged.** A tooltipped rail and a mobile bottom tab bar
   were built and then reverted on 2026-08-07 — the existing sidebar (grouped
   sections, collapsible Settings, mobile drawer) was preferred. It keeps its
@@ -350,6 +365,36 @@ operational and abuse-control gaps from the original audit have been closed.
 > on the request, else the org's default. Don't resurrect them without a fresh
 > decision.
 
+### Mailbox Access (read)
+
+- [x] `InboxAccountGrant` + `apps/api/src/lib/mailbox-access.ts`: OWNER/ADMIN
+  read every mailbox in the org; a MEMBER reads only mailboxes they hold a
+  grant for. Before this, every member read every message in the organization.
+- [x] Scoped on every read surface, not just the list: inbox messages, the
+  mailbox picker, the unread badge, mark-read, inbound attachments (through the
+  parent message) and reply.
+- [x] The **sent archive** and **outbox** are scoped the same way, by granted
+  `smtpConnectionId` — plus anything the person sent themselves, so revoking a
+  mailbox or deleting one never makes someone's own mail look lost. Cancelling
+  from the outbox is scoped like listing; any member could previously cancel
+  any queued job in the org.
+- [x] **Campaigns** are gated on the org *default* connection: fan-out always
+  sends as it, so a campaign has no mailbox of its own to scope by and holding
+  that connection is the whole question. Applies to list, get, create and every
+  operation through `findOwned`.
+- [x] **Push notifications** carry sender and subject, so they answer to the
+  same rule — only grant holders and OWNER/ADMIN are notified. Otherwise a
+  banner would be a way to read a mailbox you were never given.
+- [x] One product-level toggle grants **read and send together**
+  (`SendAccessEditor`, and mailbox provisioning's "give someone access"). The
+  two tables stay separate because an `InboxAccount` and an `SMTPConnection`
+  are independent rows with no FK between them — a mailbox can be receive-only
+  or send-only. They are paired by address, case-insensitively.
+- [x] Migration `20260813000000_add_inbox_account_grants` backfills read access
+  from each member's existing send grants. Neither extreme works on upgrade:
+  "nobody reads anything" makes an admin re-tick every box, and "everyone keeps
+  reading everything" is the behaviour the change exists to end.
+
 ### Send-As Grants
 
 - [x] `SmtpConnectionGrant` + `apps/api/src/lib/send-as.ts`: OWNER/ADMIN may
@@ -384,8 +429,9 @@ operational and abuse-control gaps from the original audit have been closed.
   server domain to. Mailcow domains are instance-global, so without it every
   org OWNER could see and provision on every other org's domains. A domain with
   no row reaches **no** org — it is not a pool orgs may claim from, because
-  `POST /organizations` is ungated and "org OWNER" is therefore a role any user
-  can award themselves.
+  "org OWNER" is still a role a user can award themselves: registration creates
+  an organization with the registrant as its OWNER, and `POST /organizations`
+  lets any owner or admin create more.
 - [x] A domain may be assigned to **several** orgs (unique on
   `(domain, organizationId)`). The assignment endpoint takes the complete set of
   organizations, chosen from a checkbox dialog, so one write both adds and

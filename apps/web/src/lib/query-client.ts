@@ -154,4 +154,8 @@ export const qk = {
   pushDevices: () => ["push-devices"] as const,
   inboxNotifyPreference: (orgId: string) =>
     ["inbox-notify-preference", orgId] as const,
+  // Which mailboxes may notify. Org-keyed like the level above it, since the
+  // mailboxes on the page are the ones this org granted.
+  inboxNotifySettings: (orgId: string) =>
+    ["inbox-notify-settings", orgId] as const,
 } as const;

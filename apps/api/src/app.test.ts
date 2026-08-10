@@ -151,6 +151,10 @@ describe("organizations controller", () => {
   });
 
   it("creates an organization (201)", async () => {
+    // Owning or administering one organization is what lets you start another.
+    prismaMock.organizationMember.findFirst.mockResolvedValue({
+      id: "member_1"
+    } as never);
     prismaMock.organization.create.mockResolvedValue({
       id: "org_1",
       name: "Acme"
@@ -161,6 +165,16 @@ describe("organizations controller", () => {
       .send({ name: "Acme" });
     expect(res.status).toBe(201);
     expect(res.body.data.role).toBe("OWNER");
+  });
+
+  it("refuses to create an organization for a plain member (403)", async () => {
+    prismaMock.organizationMember.findFirst.mockResolvedValue(null);
+    const res = await request(app)
+      .post("/api/v1/organizations")
+      .set("Authorization", auth)
+      .send({ name: "Acme" });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("org_create_denied");
   });
 
   it("deletes an organization (204)", async () => {

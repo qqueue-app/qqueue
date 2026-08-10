@@ -65,8 +65,36 @@ export const organizationService = {
     });
   },
 
-  // Creating an org makes the creator its OWNER, so it's immediately accessible.
+  /**
+   * Creating an org makes the creator its OWNER, so it's immediately accessible.
+   *
+   * Restricted to people who already own or administer an organization. There is
+   * no role to check inside an org that does not exist yet, so the question is
+   * asked of the whole account: a MEMBER — someone who was invited into someone
+   * else's organization — cannot mint one of their own.
+   *
+   * This does not make "org OWNER" a trustworthy instance-wide role: anyone who
+   * registers still becomes the OWNER of their own organization and can create
+   * more from there. Anything that reaches across the install (Mailcow domains,
+   * instance settings) stays behind User.isInstanceAdmin — see
+   * docs/DECISIONS.md and the instance-admin module.
+   *
+   * Registration creates its first organization directly in authService, so the
+   * zero-user bootstrap is unaffected by this gate.
+   */
   async create(input: OrganizationInput, userId: string) {
+    const elsewhere = await prisma.organizationMember.findFirst({
+      where: { userId, role: { in: ["OWNER", "ADMIN"] } },
+      select: { id: true }
+    });
+    if (!elsewhere) {
+      throw new HttpError(
+        403,
+        "Only organization owners and admins can create organizations",
+        "org_create_denied"
+      );
+    }
+
     const organization = await prisma.organization.create({
       data: {
         name: input.name,

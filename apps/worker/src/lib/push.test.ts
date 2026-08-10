@@ -18,6 +18,9 @@ const prisma = vi.hoisted(() => ({
   organization: {
     findUnique: vi.fn(),
   },
+  inboxNotifyRule: {
+    findMany: vi.fn(),
+  },
 }));
 vi.mock("./prisma.js", () => ({ prisma }));
 
@@ -49,6 +52,8 @@ const subscription = {
 function message(overrides: Record<string, unknown> = {}) {
   return {
     organizationId: "org_1",
+    inboxAccountId: "inbox_1",
+    inboxAccountEmail: "support@acme.test",
     messageId: "msg_1",
     sender: "Kofi <kofi@example.com>",
     subject: "Re: invoice",
@@ -83,6 +88,10 @@ describe("worker push", () => {
       },
     ]);
     prisma.organization.findUnique.mockResolvedValue({ name: "Acme" });
+    // No rules is the common case and the default-on one: somebody who has
+    // never opened the notification settings hears about every mailbox they
+    // hold.
+    prisma.inboxNotifyRule.findMany.mockResolvedValue([]);
     webpush.sendNotification.mockResolvedValue(undefined);
   });
 
@@ -127,11 +136,147 @@ describe("worker push", () => {
 
     await notifyNewInboundMessage(message());
 
-    expect(prisma.organizationMember.findMany).toHaveBeenCalledWith(
+    expect(prisma.organizationMember.findMany).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
-        where: { organizationId: "org_1", notifyLevel: { not: "NONE" } },
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          notifyLevel: { not: "NONE" },
+        }),
       })
     );
+  });
+
+  it("only asks for members who hold the mailbox, or run the org", async () => {
+    const { notifyNewInboundMessage } = await loadModule();
+
+    await notifyNewInboundMessage(message());
+
+    // A banner carries the sender and subject, so it has to answer to the same
+    // access rule as the inbox: without this, push would be a way to read a
+    // mailbox you were never given.
+    const [call] = prisma.organizationMember.findMany.mock.calls[0];
+    expect(call.where.OR).toEqual([
+      { role: { in: ["OWNER", "ADMIN"] } },
+      { user: { inboxGrants: { some: { inboxAccountId: "inbox_1" } } } },
+    ]);
+  });
+
+  it("notifies a member who has set no rules at all", async () => {
+    const { notifyNewInboundMessage } = await loadModule();
+
+    // The default is on, and it has to be: a member handed a mailbox this
+    // morning has no rows for it, and must not be silently unreachable on it.
+    const sent = await notifyNewInboundMessage(message());
+
+    expect(sent).toBe(1);
+  });
+
+  it("skips a member who muted this mailbox", async () => {
+    prisma.inboxNotifyRule.findMany.mockResolvedValue([
+      {
+        userId: "user_1",
+        scope: "MAILBOX",
+        domain: null,
+        inboxAccountId: "inbox_1",
+        enabled: false,
+      },
+    ]);
+    const { notifyNewInboundMessage } = await loadModule();
+
+    const sent = await notifyNewInboundMessage(message());
+
+    expect(sent).toBe(0);
+    expect(prisma.pushSubscription.findMany).not.toHaveBeenCalled();
+  });
+
+  it("skips a member who muted the mailbox's whole domain", async () => {
+    prisma.inboxNotifyRule.findMany.mockResolvedValue([
+      {
+        userId: "user_1",
+        scope: "DOMAIN",
+        domain: "acme.test",
+        inboxAccountId: null,
+        enabled: false,
+      },
+    ]);
+    const { notifyNewInboundMessage } = await loadModule();
+
+    const sent = await notifyNewInboundMessage(message());
+
+    expect(sent).toBe(0);
+  });
+
+  it("lets a mailbox rule override the domain rule above it", async () => {
+    prisma.inboxNotifyRule.findMany.mockResolvedValue([
+      {
+        userId: "user_1",
+        scope: "DOMAIN",
+        domain: "acme.test",
+        inboxAccountId: null,
+        enabled: false,
+      },
+      {
+        userId: "user_1",
+        scope: "MAILBOX",
+        domain: null,
+        inboxAccountId: "inbox_1",
+        enabled: true,
+      },
+    ]);
+    const { notifyNewInboundMessage } = await loadModule();
+
+    // "Nothing from acme.test except support@" — the more specific rule wins.
+    const sent = await notifyNewInboundMessage(message());
+
+    expect(sent).toBe(1);
+  });
+
+  it("applies one member's mute without silencing another's device", async () => {
+    prisma.organizationMember.findMany
+      .mockResolvedValueOnce([
+        { userId: "user_1", notifyLevel: "ALL", user: { email: "a@x.test" } },
+        { userId: "user_2", notifyLevel: "ALL", user: { email: "b@x.test" } },
+      ])
+      .mockResolvedValueOnce([{ userId: "user_2" }]);
+    prisma.inboxNotifyRule.findMany.mockResolvedValue([
+      {
+        userId: "user_1",
+        scope: "MAILBOX",
+        domain: null,
+        inboxAccountId: "inbox_1",
+        enabled: false,
+      },
+    ]);
+    prisma.pushSubscription.findMany.mockResolvedValue([
+      { ...subscription, id: "sub_2", userId: "user_2" },
+    ]);
+    const { notifyNewInboundMessage } = await loadModule();
+
+    const sent = await notifyNewInboundMessage(message());
+
+    expect(sent).toBe(1);
+    // Only the member who kept the mailbox is even looked up.
+    const [call] = prisma.pushSubscription.findMany.mock.calls[0];
+    expect(call.where.userId.in).toEqual(["user_2"]);
+  });
+
+  it("only reads rules that could bear on this mailbox", async () => {
+    const { notifyNewInboundMessage } = await loadModule();
+
+    await notifyNewInboundMessage(message());
+
+    // Scoped to the audience access already approved, so a rule can only ever
+    // narrow it — there is no path here to widening who hears about a mailbox.
+    const [call] = prisma.inboxNotifyRule.findMany.mock.calls[0];
+    expect(call.where).toMatchObject({
+      organizationId: "org_1",
+      userId: { in: ["user_1"] },
+      OR: [
+        { scope: "MAILBOX", inboxAccountId: "inbox_1" },
+        { scope: "DOMAIN", domain: "acme.test" },
+      ],
+    });
   });
 
   it("skips an ADDRESSED_TO_ME member when the mail went elsewhere", async () => {

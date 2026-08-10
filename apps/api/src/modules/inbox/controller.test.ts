@@ -51,9 +51,12 @@ describe("inboxController.listAccounts", () => {
     vi.mocked(inboxService.listAccounts).mockResolvedValue(rows as never);
     const res = mockRes();
 
-    await inboxController.listAccounts({ organizationId: "org_1" } as Request, res);
+    await inboxController.listAccounts(
+      { organizationId: "org_1", userId: "usr_1" } as Request,
+      res
+    );
 
-    expect(inboxService.listAccounts).toHaveBeenCalledWith("org_1");
+    expect(inboxService.listAccounts).toHaveBeenCalledWith("org_1", "usr_1");
     expect(res.json).toHaveBeenCalledWith({ data: rows });
   });
 });
@@ -177,26 +180,47 @@ describe("inboxController.listMessages", () => {
 
     await inboxController.listMessages(
       {
+        organizationId: "org_1",
+        userId: "usr_1",
         query: { organizationId: "org_1", read: "unread", q: "invoice", limit: "10" }
       } as unknown as Request,
       res
     );
 
     // limit arrives as a string on req.query and is coerced by the schema.
-    expect(inboxService.listMessages).toHaveBeenCalledWith({
-      organizationId: "org_1",
-      read: "unread",
-      q: "invoice",
-      limit: 10
-    });
+    expect(inboxService.listMessages).toHaveBeenCalledWith(
+      {
+        organizationId: "org_1",
+        read: "unread",
+        q: "invoice",
+        limit: 10
+      },
+      "usr_1"
+    );
     expect(res.json).toHaveBeenCalledWith({ data: result });
   });
 
-  it("rejects a query missing organizationId", async () => {
-    await expect(
-      inboxController.listMessages({ query: {} } as unknown as Request, mockRes())
-    ).rejects.toThrow();
-    expect(inboxService.listMessages).not.toHaveBeenCalled();
+  it("takes the org from the middleware, not the query string", async () => {
+    // The scope is resolved from this id, so trusting the caller's copy would
+    // let a member ask for another org's mail by editing the URL.
+    vi.mocked(inboxService.listMessages).mockResolvedValue({
+      data: [],
+      nextCursor: undefined
+    } as never);
+
+    await inboxController.listMessages(
+      {
+        organizationId: "org_1",
+        userId: "usr_1",
+        query: { organizationId: "org_someone_else" }
+      } as unknown as Request,
+      mockRes()
+    );
+
+    expect(inboxService.listMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org_1" }),
+      "usr_1"
+    );
   });
 });
 
@@ -262,11 +286,11 @@ describe("inboxController.markRead", () => {
     const res = mockRes();
 
     await inboxController.markRead(
-      { params: { id: "ibm_1" }, userId: "usr_1", body: {} } as unknown as Request,
+      { params: { id: "ibm_1" }, userId: "usr_1", organizationId: "org_1", body: {} } as unknown as Request,
       res
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", true);
+    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", true);
     expect(res.json).toHaveBeenCalledWith({ data: message });
   });
 
@@ -274,11 +298,11 @@ describe("inboxController.markRead", () => {
     vi.mocked(inboxService.markRead).mockResolvedValue({ id: "ibm_1" } as never);
 
     await inboxController.markRead(
-      { params: { id: "ibm_1" }, userId: "usr_1", body: { read: false } } as unknown as Request,
+      { params: { id: "ibm_1" }, userId: "usr_1", organizationId: "org_1", body: { read: false } } as unknown as Request,
       mockRes()
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", false);
+    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", false);
   });
 
   it('coerces the string "false" to a boolean', async () => {
@@ -288,12 +312,13 @@ describe("inboxController.markRead", () => {
       {
         params: { id: "ibm_1" },
         userId: "usr_1",
+        organizationId: "org_1",
         body: { read: "false" }
       } as unknown as Request,
       mockRes()
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", false);
+    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", false);
   });
 
   it('coerces the string "true" to a boolean', async () => {
@@ -303,12 +328,13 @@ describe("inboxController.markRead", () => {
       {
         params: { id: "ibm_1" },
         userId: "usr_1",
+        organizationId: "org_1",
         body: { read: "true" }
       } as unknown as Request,
       mockRes()
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", true);
+    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", true);
   });
 
   it("rejects a read value that is neither boolean nor a known string", async () => {

@@ -105,6 +105,11 @@ const AccountSettings = lazy(() =>
     default: module.AccountSettings,
   }))
 );
+const NotificationSettings = lazy(() =>
+  import("../pages/settings/NotificationSettings.js").then((module) => ({
+    default: module.NotificationSettings,
+  }))
+);
 const QueueOperations = lazy(() =>
   import("../pages/QueueOperations.js").then((module) => ({
     default: module.QueueOperations,
@@ -287,6 +292,10 @@ export function AppRoutes() {
             element={<InstanceMailboxes />}
           />
           <Route path="/settings/account" element={<AccountSettings />} />
+          <Route
+            path="/settings/notifications"
+            element={<NotificationSettings />}
+          />
 
           {/*
             The paths these pages used to answer on. Bookmarks, the docs, and

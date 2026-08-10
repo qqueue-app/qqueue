@@ -27,9 +27,12 @@ describe("outboxController", () => {
     vi.mocked(outboxService.list).mockResolvedValue(rows as never);
     const res = mockRes();
 
-    await outboxController.list({ organizationId: "org_1" } as Request, res);
+    await outboxController.list(
+      { organizationId: "org_1", userId: "usr_1" } as Request,
+      res
+    );
 
-    expect(outboxService.list).toHaveBeenCalledWith("org_1");
+    expect(outboxService.list).toHaveBeenCalledWith("org_1", "usr_1");
     expect(res.json).toHaveBeenCalledWith({ data: rows });
   });
 
@@ -41,12 +44,16 @@ describe("outboxController", () => {
     const res = mockRes();
 
     await outboxController.cancel(
-      { params: { id: "job_1" }, organizationId: "org_1" } as unknown as Request,
+      {
+        params: { id: "job_1" },
+        organizationId: "org_1",
+        userId: "usr_1"
+      } as unknown as Request,
       res
     );
 
     // The org id comes from the verified middleware, never from the caller's body.
-    expect(outboxService.cancel).toHaveBeenCalledWith("job_1", "org_1");
+    expect(outboxService.cancel).toHaveBeenCalledWith("job_1", "org_1", "usr_1");
     expect(res.json).toHaveBeenCalledWith({
       data: { id: "job_1", status: "CANCELLED" }
     });

@@ -370,10 +370,19 @@ async function connectMailbox(
       select: { id: true },
     });
     if (input.assignToUserId) {
+      // Both halves of the mailbox, together: assigning it means the person can
+      // send as this address and read what arrives at it.
       await tx.smtpConnectionGrant.create({
         data: {
           organizationId,
           smtpConnectionId: connection.id,
+          userId: input.assignToUserId,
+        },
+      });
+      await tx.inboxAccountGrant.create({
+        data: {
+          organizationId,
+          inboxAccountId: inbox.id,
           userId: input.assignToUserId,
         },
       });

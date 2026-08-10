@@ -1,11 +1,17 @@
-import type {
-  InboxNotifyLevel,
-  PushRotateInput,
-  PushSubscriptionInput,
+import {
+  mailboxDomain,
+  resolveInboxNotify,
+  type InboxNotifyDomainGroup,
+  type InboxNotifyLevel,
+  type InboxNotifyRuleUpdateInput,
+  type InboxNotifySettings,
+  type PushRotateInput,
+  type PushSubscriptionInput,
 } from "@qqueue/shared";
 import { prisma } from "../../lib/prisma.js";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
+import { resolveMailboxAccess } from "../../lib/mailbox-access.js";
 
 /**
  * Web Push registration. The API only stores and removes subscriptions — the
@@ -154,5 +160,217 @@ export const pushService = {
       select: { notifyLevel: true },
     });
     return updated.notifyLevel as InboxNotifyLevel;
+  },
+
+  /**
+   * The notification settings page, in one response: the org-wide level, then
+   * every mailbox the caller can read, grouped by domain.
+   *
+   * The mailbox list comes from their *access*, so the page can only ever offer
+   * what the inbox itself would show them. A domain with ten addresses on it
+   * appears here holding the one they hold — which is why the domain switch is
+   * safe to describe as "everything on acme.test" without it meaning more than
+   * they were given.
+   */
+  async getNotifySettings(
+    userId: string,
+    organizationId: string
+  ): Promise<InboxNotifySettings> {
+    const access = await resolveMailboxAccess(userId, organizationId);
+
+    const [notifyLevel, accounts, rules] = await Promise.all([
+      this.getNotifyLevel(userId, organizationId),
+      prisma.inboxAccount.findMany({
+        where: {
+          organizationId,
+          ...(access.unrestricted
+            ? {}
+            : { id: { in: access.inboxAccountIds } }),
+        },
+        select: { id: true, name: true, email: true },
+      }),
+      prisma.inboxNotifyRule.findMany({
+        where: { organizationId, userId },
+        select: {
+          scope: true,
+          domain: true,
+          inboxAccountId: true,
+          enabled: true,
+        },
+      }),
+    ]);
+
+    const byDomain = new Map<string, InboxNotifyDomainGroup>();
+    for (const account of accounts) {
+      const domain = mailboxDomain(account.email);
+      const { enabled, explicit } = resolveInboxNotify(rules, {
+        inboxAccountId: account.id,
+        domain,
+      });
+
+      const group = byDomain.get(domain) ?? {
+        domain,
+        state: "ALL" as const,
+        mailboxes: [],
+      };
+      group.mailboxes.push({
+        inboxAccountId: account.id,
+        email: account.email,
+        name: account.name,
+        enabled,
+        explicit,
+      });
+      byDomain.set(domain, group);
+    }
+
+    const domains = [...byDomain.values()]
+      .map((group) => ({
+        ...group,
+        // Derived rather than read off the domain rule: a domain switched on
+        // with one mailbox muted underneath is honestly "some", and a switch
+        // reading "all" over an unticked row is the kind of small lie that
+        // makes people stop trusting the page.
+        state: group.mailboxes.every((mailbox) => mailbox.enabled)
+          ? ("ALL" as const)
+          : group.mailboxes.some((mailbox) => mailbox.enabled)
+            ? ("SOME" as const)
+            : ("NONE" as const),
+        mailboxes: group.mailboxes.sort((a, b) =>
+          a.email.localeCompare(b.email)
+        ),
+      }))
+      .sort((a, b) => a.domain.localeCompare(b.domain));
+
+    return { organizationId, notifyLevel, domains };
+  },
+
+  /**
+   * Turn one mailbox — or one domain's worth of them — on or off.
+   *
+   * Rows are written only where they disagree with the level above them, and
+   * deleted the moment they agree again. So re-ticking a mailbox inside an
+   * otherwise-default domain removes its row rather than storing `true`, and
+   * the mailbox goes back to following the default forever, including through
+   * a later change to its domain. Storing every answer would instead freeze
+   * today's default into a row nobody remembers setting.
+   *
+   * Switching a domain clears the per-mailbox exceptions beneath it: the person
+   * has just answered the broader question, and leaving contradicting ticks
+   * behind would make the switch appear not to have worked.
+   */
+  async setNotifyRule(
+    userId: string,
+    input: InboxNotifyRuleUpdateInput
+  ): Promise<InboxNotifySettings> {
+    const { organizationId, enabled, target } = input;
+    const access = await resolveMailboxAccess(userId, organizationId);
+
+    if (target.scope === "MAILBOX") {
+      // Verified against access, not just against the org: a rule naming a
+      // mailbox somebody cannot read is at best dead weight, and writing it
+      // would let the settings page imply an access it does not have.
+      const account = await prisma.inboxAccount.findFirst({
+        where: {
+          id: target.inboxAccountId,
+          organizationId,
+          ...(access.unrestricted
+            ? {}
+            : { id: { in: access.inboxAccountIds } }),
+        },
+        select: { id: true, email: true },
+      });
+      if (!account) {
+        throw new HttpError(
+          404,
+          "That mailbox isn't one you have access to",
+          "not_found"
+        );
+      }
+
+      // What this mailbox would do with no rule of its own — its domain rule,
+      // or the default. Matching it means the row has nothing to say.
+      const domain = mailboxDomain(account.email);
+      const domainRule = await prisma.inboxNotifyRule.findFirst({
+        where: { organizationId, userId, scope: "DOMAIN", domain },
+        select: { enabled: true },
+      });
+      const inherited = domainRule?.enabled ?? true;
+
+      if (inherited === enabled) {
+        await prisma.inboxNotifyRule.deleteMany({
+          where: { userId, inboxAccountId: account.id },
+        });
+      } else {
+        await prisma.inboxNotifyRule.upsert({
+          where: {
+            userId_inboxAccountId: { userId, inboxAccountId: account.id },
+          },
+          create: {
+            organizationId,
+            userId,
+            scope: "MAILBOX",
+            inboxAccountId: account.id,
+            enabled,
+          },
+          update: { enabled },
+        });
+      }
+
+      return this.getNotifySettings(userId, organizationId);
+    }
+
+    const domain = target.domain.trim().toLowerCase();
+    const accounts = await prisma.inboxAccount.findMany({
+      where: {
+        organizationId,
+        ...(access.unrestricted ? {} : { id: { in: access.inboxAccountIds } }),
+      },
+      select: { id: true, email: true },
+    });
+    const onDomain = accounts.filter(
+      (account) => mailboxDomain(account.email) === domain
+    );
+    if (onDomain.length === 0) {
+      throw new HttpError(
+        404,
+        "You have no mailboxes on that domain",
+        "not_found"
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // The broader answer supersedes the narrower ones.
+      await tx.inboxNotifyRule.deleteMany({
+        where: {
+          userId,
+          inboxAccountId: { in: onDomain.map((account) => account.id) },
+        },
+      });
+
+      if (enabled) {
+        // On *is* the default, so the domain needs no row — and having none is
+        // what lets a mailbox added to this domain next month notify.
+        await tx.inboxNotifyRule.deleteMany({
+          where: { organizationId, userId, scope: "DOMAIN", domain },
+        });
+        return;
+      }
+
+      await tx.inboxNotifyRule.upsert({
+        where: {
+          userId_organizationId_domain: { userId, organizationId, domain },
+        },
+        create: {
+          organizationId,
+          userId,
+          scope: "DOMAIN",
+          domain,
+          enabled: false,
+        },
+        update: { enabled: false },
+      });
+    });
+
+    return this.getNotifySettings(userId, organizationId);
   },
 };

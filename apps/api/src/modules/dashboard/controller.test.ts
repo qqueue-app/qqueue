@@ -30,9 +30,9 @@ describe("dashboardController.summary", () => {
     vi.mocked(dashboardService.summary).mockResolvedValue(summary as never);
     const res = mockRes();
 
-    await dashboardController.summary({ organizationId: "org_1" } as Request, res);
+    await dashboardController.summary({ organizationId: "org_1", userId: "usr_1" } as Request, res);
 
-    expect(dashboardService.summary).toHaveBeenCalledWith("org_1");
+    expect(dashboardService.summary).toHaveBeenCalledWith("org_1", "usr_1");
     expect(res.json).toHaveBeenCalledWith({ data: summary });
   });
 
@@ -41,7 +41,7 @@ describe("dashboardController.summary", () => {
     const res = mockRes();
 
     await expect(
-      dashboardController.summary({ organizationId: "org_1" } as Request, res)
+      dashboardController.summary({ organizationId: "org_1", userId: "usr_1" } as Request, res)
     ).rejects.toThrow("db down");
     expect(res.json).not.toHaveBeenCalled();
   });

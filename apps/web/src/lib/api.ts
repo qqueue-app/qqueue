@@ -980,6 +980,36 @@ export interface InboxNotifyPreference {
   notifyLevel: InboxNotifyLevel;
 }
 
+/**
+ * One mailbox on the notification settings page.
+ *
+ * `explicit` distinguishes a deliberate exception from an inherited answer, so
+ * the page can mark the one row somebody changed inside a switched-off domain.
+ */
+export interface InboxNotifyMailbox {
+  inboxAccountId: string;
+  email: string;
+  name: string;
+  enabled: boolean;
+  explicit: boolean;
+}
+
+/**
+ * The mailboxes on one domain that *you* can read — never the domain's full
+ * address list. Turning a domain on covers what you were granted, nothing more.
+ */
+export interface InboxNotifyDomainGroup {
+  domain: string;
+  state: "ALL" | "NONE" | "SOME";
+  mailboxes: InboxNotifyMailbox[];
+}
+
+export interface InboxNotifySettings {
+  organizationId: string;
+  notifyLevel: InboxNotifyLevel;
+  domains: InboxNotifyDomainGroup[];
+}
+
 export interface Campaign {
   id: string;
   organizationId: string;
@@ -2514,6 +2544,30 @@ export const api = {
     notifyLevel: InboxNotifyLevel;
   }) {
     return request<InboxNotifyPreference>("/api/v1/push/preferences", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
+
+  inboxNotifySettings(organizationId: string) {
+    return request<InboxNotifySettings>(
+      `/api/v1/push/notification-settings?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
+  /**
+   * Toggle one mailbox, or a whole domain's worth at once. Answers with the
+   * whole tree: a domain switch rewrites the ticks underneath it, so the reply
+   * has to describe more than the row that was clicked.
+   */
+  updateInboxNotifyRule(input: {
+    organizationId: string;
+    enabled: boolean;
+    target:
+      | { scope: "MAILBOX"; inboxAccountId: string }
+      | { scope: "DOMAIN"; domain: string };
+  }) {
+    return request<InboxNotifySettings>("/api/v1/push/notification-settings", {
       method: "PUT",
       body: JSON.stringify(input),
     });

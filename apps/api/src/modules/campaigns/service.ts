@@ -7,6 +7,10 @@ import type {
 } from "@qqueue/shared";
 import { nextCronRun } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
+import {
+  mayUseDefaultConnection,
+  resolveMailboxAccess
+} from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { assertMayUseConnection } from "../../lib/send-as.js";
 import { campaignProcessingQueue } from "../../queues/campaign-processing.queue.js";
@@ -23,6 +27,20 @@ function recurringSchedulerId(campaignId: string) {
  */
 async function assertMayStartCampaign(userId: string, organizationId: string) {
   await assertMayUseConnection({ userId, organizationId });
+}
+
+/**
+ * Whether campaigns exist at all for this person.
+ *
+ * A campaign has no mailbox of its own — the fan-out always sends as the org's
+ * default connection — so "which campaigns may a member see" has the same
+ * answer as "may they use the default connection", the check that already
+ * guards starting one. Someone who could never start a campaign has no reason
+ * to read the audience, copy and results of everyone else's.
+ */
+async function campaignsVisibleTo(userId: string, organizationId: string) {
+  const access = await resolveMailboxAccess(userId, organizationId);
+  return mayUseDefaultConnection(access);
 }
 
 const campaignInclude = {
@@ -85,6 +103,13 @@ async function findOwned(id: string, userId: string) {
   if (!campaign) {
     throw new HttpError(404, "Campaign not found");
   }
+  // Every campaign operation but list/get/create funnels through here, so this
+  // is the one place the visibility rule has to hold. 404 rather than 403: the
+  // campaign is not in this member's world at all, which is also what the empty
+  // list tells them.
+  if (!(await campaignsVisibleTo(userId, campaign.organizationId))) {
+    throw new HttpError(404, "Campaign not found");
+  }
   return campaign;
 }
 
@@ -110,7 +135,10 @@ async function enqueueCampaign(
 }
 
 export const campaignService = {
-  list(organizationId: string) {
+  async list(organizationId: string, userId: string) {
+    if (!(await campaignsVisibleTo(userId, organizationId))) {
+      return [];
+    }
     return prisma.campaign.findMany({
       where: { organizationId },
       include: campaignInclude,
@@ -118,14 +146,28 @@ export const campaignService = {
     });
   },
 
-  get(id: string, userId: string) {
-    return prisma.campaign.findFirst({
+  async get(id: string, userId: string) {
+    const campaign = await prisma.campaign.findFirst({
       where: { id, organization: { members: { some: { userId } } } },
       include: campaignInclude
     });
+    if (!campaign) return null;
+    if (!(await campaignsVisibleTo(userId, campaign.organizationId))) {
+      return null;
+    }
+    return campaign;
   },
 
-  async create(input: CampaignInput) {
+  async create(input: CampaignInput, userId: string) {
+    // Creation is gated with the rest: letting a member create a campaign they
+    // would then never see in the list is worse than refusing outright.
+    if (!(await campaignsVisibleTo(userId, input.organizationId))) {
+      throw new HttpError(
+        403,
+        "You are not allowed to send campaigns for this organization",
+        "send_as_denied"
+      );
+    }
     await assertCampaignRelations(input);
 
     return prisma.campaign.create({
