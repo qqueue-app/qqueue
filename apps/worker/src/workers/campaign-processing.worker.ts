@@ -1,6 +1,8 @@
 import { Worker } from "bullmq";
 import { type SegmentRule, compileSegmentRules } from "@qqueue/shared";
+import { buildUnsubscribeUrl } from "@qqueue/email-engine";
 import type { Prisma } from "@prisma/client";
+import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
 import { emailSendingQueue } from "../queues/email-sending.queue.js";
 import {
@@ -254,6 +256,22 @@ export function startCampaignProcessingWorker() {
         status: "QUEUED" | "PENDING"
       ) => {
         const variables = contactVariables(contact);
+        const toEmail = contact.email.toLowerCase();
+        // `{{unsubscribe_url}}` lets an author place the opt-out link inside the
+        // template instead of taking the footer the send worker appends. Kept
+        // out of `variables` deliberately: that column is persisted (and replayed
+        // for the A/B winner's subject), and a signed token has no business
+        // sitting in it. If the tag goes unused this costs one HMAC and nothing
+        // reaches the database.
+        const renderVars = {
+          ...variables,
+          unsubscribe_url: buildUnsubscribeUrl(
+            env.APP_URL,
+            campaign.organizationId,
+            toEmail,
+            env.TRACKING_SECRET
+          )
+        };
         return {
           organizationId: campaign.organizationId,
           smtpConnectionId: smtpConnection.id,
@@ -263,10 +281,10 @@ export function startCampaignProcessingWorker() {
           origin: "CAMPAIGN" as const,
           // Campaign fan-out is bulk mail: every job carries List-Unsubscribe.
           isBulk: true,
-          toEmail: contact.email.toLowerCase(),
+          toEmail,
           subject: renderVariables(subjectSource, variables) ?? subjectSource,
-          html: renderVariables(template.html, variables),
-          text: renderVariables(template.text, variables),
+          html: renderVariables(template.html, renderVars),
+          text: renderVariables(template.text, renderVars),
           variables,
           variantId,
           status

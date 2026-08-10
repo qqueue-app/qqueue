@@ -30,10 +30,19 @@ const h = vi.hoisted(() => {
     SMTPProvider: vi.fn(() => ({ send })),
     classifyBounce: vi.fn(() => "HARD" as "HARD" | "SOFT" | "BLOCK"),
     injectTracking: vi.fn((html: string | null) => `tracked:${html}`),
-    buildListUnsubscribeHeaders: vi.fn(() => ({
-      "List-Unsubscribe": "<https://app/api/v1/unsubscribe?token=tok>",
+    buildUnsubscribeUrl: vi.fn(
+      () => "https://app/api/v1/unsubscribe?token=tok"
+    ),
+    listUnsubscribeHeadersForUrl: vi.fn((url: string) => ({
+      "List-Unsubscribe": `<${url}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
     })),
+    appendUnsubscribeFooter: vi.fn(
+      (html: string | null) => `${html}+unsub-footer`
+    ),
+    appendUnsubscribeFooterText: vi.fn((text: string | null) =>
+      text ? `${text}+unsub-text` : text
+    ),
     decryptSecret: vi.fn((v: string) => `dec:${v}`),
     settleRunIfComplete: vi.fn(),
     loadAttachmentsForJob: vi.fn(),
@@ -67,7 +76,10 @@ vi.mock("@qqueue/email-engine", () => ({
   SMTPProvider: h.SMTPProvider,
   classifyBounce: h.classifyBounce,
   injectTracking: h.injectTracking,
-  buildListUnsubscribeHeaders: h.buildListUnsubscribeHeaders
+  buildUnsubscribeUrl: h.buildUnsubscribeUrl,
+  listUnsubscribeHeadersForUrl: h.listUnsubscribeHeadersForUrl,
+  appendUnsubscribeFooter: h.appendUnsubscribeFooter,
+  appendUnsubscribeFooterText: h.appendUnsubscribeFooterText
 }));
 
 vi.mock("../lib/crypto.js", () => ({ decryptSecret: h.decryptSecret }));
@@ -144,7 +156,10 @@ beforeEach(() => {
   send.mockReset();
   SMTPProvider.mockClear();
   injectTracking.mockClear();
-  h.buildListUnsubscribeHeaders.mockClear();
+  h.buildUnsubscribeUrl.mockClear();
+  h.listUnsubscribeHeadersForUrl.mockClear();
+  h.appendUnsubscribeFooter.mockClear();
+  h.appendUnsubscribeFooterText.mockClear();
   decryptSecret.mockClear();
   settleRunIfComplete.mockReset().mockResolvedValue(undefined);
   // Default: no attachments. Tests override this to assert forwarding.
@@ -499,7 +514,7 @@ describe("email-sending worker", () => {
 
     await run(makeJob());
 
-    expect(h.buildListUnsubscribeHeaders).toHaveBeenCalledWith(
+    expect(h.buildUnsubscribeUrl).toHaveBeenCalledWith(
       expect.any(String),
       "org1",
       "to@example.com",
@@ -526,8 +541,57 @@ describe("email-sending worker", () => {
 
     await run(makeJob());
 
-    expect(h.buildListUnsubscribeHeaders).not.toHaveBeenCalled();
+    expect(h.buildUnsubscribeUrl).not.toHaveBeenCalled();
     expect(send.mock.calls[0][0].headers).toBeUndefined();
+  });
+
+  it("appends the unsubscribe footer to bulk mail, after tracking injection", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "CAMPAIGN",
+      isBulk: true
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    // Order matters: the footer wraps the *tracked* HTML, so the opt-out link
+    // is the one link in the message the click redirect never rewrites.
+    expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
+      "tracked:<p>Body</p>",
+      "https://app/api/v1/unsubscribe?token=tok"
+    );
+    const sendArgs = send.mock.calls[0][0];
+    expect(sendArgs.html).toBe("tracked:<p>Body</p>+unsub-footer");
+    // The plaintext half carries the same opt-out.
+    expect(sendArgs.text).toBe("Body+unsub-text");
+  });
+
+  it("leaves non-bulk mail without any footer", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "TRANSACTIONAL",
+      isBulk: false
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(h.appendUnsubscribeFooter).not.toHaveBeenCalled();
+    expect(h.appendUnsubscribeFooterText).not.toHaveBeenCalled();
+    const sendArgs = send.mock.calls[0][0];
+    expect(sendArgs.html).toBe("tracked:<p>Body</p>");
+    expect(sendArgs.text).toBe("Body");
   });
 
   it("strips suppressed CC/BCC addresses and records what was stripped", async () => {

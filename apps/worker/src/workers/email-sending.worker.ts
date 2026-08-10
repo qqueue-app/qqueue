@@ -1,9 +1,12 @@
 import { DelayedError, Worker } from "bullmq";
 import {
   SMTPProvider,
-  buildListUnsubscribeHeaders,
+  appendUnsubscribeFooter,
+  appendUnsubscribeFooterText,
+  buildUnsubscribeUrl,
   classifyBounce,
-  injectTracking
+  injectTracking,
+  listUnsubscribeHeadersForUrl
 } from "@qqueue/email-engine";
 import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
@@ -142,7 +145,7 @@ export function startEmailSendingWorker() {
         // SYSTEM mail keeps its links untouched: rewriting a password-reset or
         // invite URL through the tracking redirect would make account mail look
         // like (and depend on) marketing infrastructure.
-        const html =
+        const trackedHtml =
           emailJob.origin === "SYSTEM"
             ? (emailJob.html ?? undefined)
             : injectTracking(emailJob.html, {
@@ -154,16 +157,32 @@ export function startEmailSendingWorker() {
         const attachments = await loadAttachmentsForJob(emailJob.id);
 
         // Bulk mail (campaign fan-out, recurring sends — flagged at job
-        // creation) carries RFC 8058 one-click unsubscribe headers;
-        // transactional, one-off manual, and SYSTEM sends do not.
-        const headers = emailJob.isBulk
-          ? buildListUnsubscribeHeaders(
+        // creation) offers a one-click unsubscribe; transactional, one-off
+        // manual, and SYSTEM sends do not. One URL serves both the RFC 8058
+        // headers and the visible footer, so they cannot drift apart.
+        const unsubscribeUrl = emailJob.isBulk
+          ? buildUnsubscribeUrl(
               env.APP_URL,
               emailJob.organizationId,
               emailJob.toEmail,
               env.TRACKING_SECRET
             )
           : undefined;
+
+        const headers = unsubscribeUrl
+          ? listUnsubscribeHeadersForUrl(unsubscribeUrl)
+          : undefined;
+
+        // The footer goes on *after* tracking injection, so the opt-out link is
+        // the only one in the message that isn't rewritten through the click
+        // redirect. Both helpers no-op when the body already links to the
+        // endpoint (a template using {{unsubscribe_url}}) — hence no duplicate.
+        const html = unsubscribeUrl
+          ? appendUnsubscribeFooter(trackedHtml, unsubscribeUrl)
+          : trackedHtml;
+        const text = unsubscribeUrl
+          ? appendUnsubscribeFooterText(emailJob.text, unsubscribeUrl)
+          : (emailJob.text ?? undefined);
 
         const result = await provider.send({
           from: formatFrom(emailJob.smtpConnection),
@@ -180,8 +199,8 @@ export function startEmailSendingWorker() {
           inReplyTo: emailJob.inReplyTo ?? undefined,
           references: emailJob.references.length ? emailJob.references : undefined,
           subject: emailJob.subject,
-          html, // tracking already injected above
-          text: emailJob.text ?? undefined,
+          html, // tracking injected and unsubscribe footer appended above
+          text, // same footer, plaintext half
           headers,
           attachments
         });

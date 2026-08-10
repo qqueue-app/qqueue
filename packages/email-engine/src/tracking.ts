@@ -106,9 +106,21 @@ export function injectTracking(
 
   const $ = cheerio.load(html);
 
+  // An unsubscribe link is never click-tracked. Two reasons, both load-bearing:
+  // routing an opt-out through the marketing redirect logs a CLICK for someone
+  // leaving and makes unsubscribing depend on tracking being up; and rewriting
+  // the href would hide the unsubscribe URL from `appendUnsubscribeFooter`'s
+  // duplicate check, so a template using {{unsubscribe_url}} would be given a
+  // second, automatic footer.
+  const unsubscribePrefix = `${trimTrailingSlash(ctx.baseUrl)}/api/v1/unsubscribe`;
+
   $("a[href]").each((_, element) => {
     const href = $(element).attr("href");
-    if (href && /^https?:\/\//i.test(href)) {
+    if (
+      href &&
+      /^https?:\/\//i.test(href) &&
+      !href.startsWith(unsubscribePrefix)
+    ) {
       $(element).attr(
         "href",
         buildClickUrl(ctx.baseUrl, ctx.emailJobId, href, ctx.secret)

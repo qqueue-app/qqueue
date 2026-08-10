@@ -152,6 +152,21 @@ describe("injectTracking", () => {
     expect(result).toMatch(/<img[^>]*track\/open[^>]*>\s*<\/body>/);
   });
 
+  it("never click-tracks an unsubscribe link", () => {
+    // Two things depend on this: an opt-out must not need the tracking endpoint
+    // to be up, and appendUnsubscribeFooter recognises an already-present link
+    // by its URL — which a rewrite would hide, producing a second footer.
+    const unsubscribe = `${ctx.baseUrl}/api/v1/unsubscribe?token=abc.def`;
+    const result = injectTracking(
+      `<a href="${unsubscribe}">Unsubscribe</a><a href="https://example.com">Shop</a>`,
+      ctx
+    ) as string;
+    expect(result).toContain(`href="${unsubscribe}"`);
+    expect(result).not.toMatch(/track\/click[^"]*unsubscribe/);
+    // The ordinary link is still rewritten.
+    expect(result).toContain("/api/v1/track/click/");
+  });
+
   it("wraps a body-less fragment and still appends the open pixel", () => {
     // cheerio.load always synthesises a <body>, so a fragment is wrapped and
     // the pixel lands inside that generated body element.
