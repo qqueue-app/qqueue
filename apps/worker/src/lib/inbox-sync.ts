@@ -270,7 +270,12 @@ async function storeParsedMessage(input: {
         inboxAccountId: account.id,
         inboxAccountEmail: account.email,
         messageId: stored.id,
-        sender: from.name ? `${from.name} <${from.email}>` : from.email,
+        // Display name alone — the banner reads like a message from a person,
+        // the way every mail client shows it. The address is one tap away in
+        // the message itself, and `Name <addr@host>` on a narrow banner spends
+        // the title on a string nobody reads and truncates the name that
+        // matters. Senders with no display name fall back to the address.
+        sender: from.name || from.email,
         subject: mail.subject ?? "",
         // One notification per conversation: a burst of replies to the same
         // thread collapses instead of stacking.
