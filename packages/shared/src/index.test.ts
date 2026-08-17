@@ -353,6 +353,38 @@ describe("sendEmailSchema", () => {
     ).toBe(false);
   });
 
+  it("accepts a from address as a sender selector", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        from: "support@acme.com",
+        subject: "Hi",
+        text: "Body"
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects a from that is not an address", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        from: "Acme Support"
+      }).success
+    ).toBe(false);
+  });
+
+  it("treats from as optional, so sends without one still parse", () => {
+    const parsed = sendEmailSchema.parse({
+      organizationId: "org_1",
+      to: "a@b.com",
+      subject: "Hi",
+      text: "Body"
+    });
+    expect(parsed.from).toBeUndefined();
+  });
+
   it("accepts optional attachment ids", () => {
     expect(
       sendEmailSchema.safeParse({

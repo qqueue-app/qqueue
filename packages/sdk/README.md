@@ -48,6 +48,28 @@ await qqueue.sendEmail({
 The API key determines the QQueue organization, so SDK calls do not include an
 `organizationId`.
 
+## Choosing who it sends as
+
+The From header comes from a sending account configured in QQueue, so you never
+set it on the request. Name the account by the address it sends as:
+
+```ts
+await qqueue.sendEmail({
+  from: "support@acme.com",
+  to: "user@example.com",
+  replyTo: "help@acme.com",
+  subject: "Welcome",
+  text: "Hello."
+});
+```
+
+Omit `from` and the organization's default sending account is used. Pass
+`smtpConnectionId` instead to name an account by id (it wins if you send both).
+An address no sending account uses is a `404`, not a fall back to the default.
+
+`replyTo` is optional twice over: leave it out and the send inherits whatever
+default Reply-To the sending account has, if any.
+
 ## Errors
 
 ```ts

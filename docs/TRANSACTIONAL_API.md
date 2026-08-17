@@ -46,15 +46,24 @@ with `scheduledAt`).
 
 ### Choosing who the email sends as
 
-Two optional fields select the sending identity:
+The From header always comes from a sending account (an SMTP connection), never
+from the request — so you never build a From header yourself. Two optional
+fields choose *which* account:
 
-- `senderIdentityId` — send as a configured sender identity (its From name/email
-  and the SMTP connection that transports it). This is the preferred option.
-- `smtpConnectionId` — send through a specific SMTP connection.
+- `from` — the address the account sends as, e.g. `"support@acme.com"`. The
+  readable option: you configure the account once in the dashboard and name it
+  by its address from then on.
+- `smtpConnectionId` — the account's id, when you want to name one exactly.
+  Wins if you send both.
 
-If you provide neither, QQueue resolves the sender automatically: it uses the
-organization's default sender identity, then falls back to the organization's
-default SMTP connection.
+Provide neither and the send goes out through the organization's default
+sending account.
+
+`from` must match an account on the API key's organization. An address no
+account sends as is a `404 missing_smtp_connection`, not a fall back to the
+default — a typo should fail loudly rather than send under the wrong identity.
+If two accounts share the address (the same mailbox configured against two SMTP
+hosts), the default wins, then the oldest.
 
 ### Other body fields
 
@@ -126,9 +135,9 @@ const email = await qqueue.sendEmail({
 console.log(email.id, email.status);
 ```
 
-`sendEmail` accepts the same sender selection as the REST endpoint —
-`senderIdentityId` or `smtpConnectionId` — and otherwise falls back to the
-organization's defaults.
+`sendEmail` accepts the same body as the REST endpoint, sender selection
+included — `from` or `smtpConnectionId`, or neither for the organization's
+default sending account.
 
 For local development, omit `baseUrl` to use
 `http://localhost:4000/api/v1`.
@@ -151,7 +160,7 @@ Transactional API codes:
 | Code | Meaning |
 | --- | --- |
 | `invalid_api_key` | The bearer token looks like an API key but is missing, revoked, or unknown. |
-| `missing_smtp_connection` | No matching SMTP connection exists, or no default SMTP connection is configured. |
+| `missing_smtp_connection` | No sending account matched `from` or `smtpConnectionId`, or no default sending account is configured. |
 | `invalid_template` | The provided template id does not exist in the API key's organization. |
 | `smtp_failure` | The SMTP provider rejected or failed the send attempt. |
 | `invalid_schedule` | `scheduledAt` is malformed or not in the future. |

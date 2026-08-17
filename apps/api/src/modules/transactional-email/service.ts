@@ -141,18 +141,36 @@ export const transactionalEmailService = {
       }
     }
 
+    // Who this sends as. Three ways in, one answer: an explicit connection id,
+    // an explicit `from` address resolved to the connection that owns it, or
+    // the org default. A `from` that matches nothing is a 404 rather than a
+    // fall back to the default — a typo must not quietly send as the wrong
+    // identity. The id wins over `from` because it is the more specific
+    // selector; a caller who sends both has already named the connection.
+    const from = input.from ? normalizeEmail(input.from) : null;
+
     const smtpConnection = await prisma.sMTPConnection.findFirst({
       where: {
         organizationId: input.organizationId,
-        id: input.smtpConnectionId,
-        ...(input.smtpConnectionId ? {} : { isDefault: true })
-      }
+        ...(input.smtpConnectionId
+          ? { id: input.smtpConnectionId }
+          : from
+            ? { fromEmail: { equals: from, mode: "insensitive" } }
+            : { isDefault: true })
+      },
+      // `fromEmail` is not unique within an org — the same mailbox can be
+      // configured twice against different SMTP hosts — so an address lookup
+      // can match more than one row. Prefer the default, then the oldest, so
+      // the same `from` always resolves to the same account.
+      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }]
     });
 
     if (!smtpConnection) {
       throw new HttpError(
         404,
-        "SMTP connection not found",
+        from
+          ? `No sending account sends as ${from}`
+          : "SMTP connection not found",
         "missing_smtp_connection"
       );
     }

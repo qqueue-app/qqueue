@@ -54,6 +54,111 @@ describe("transactionalEmailService.send", () => {
     ).rejects.toThrow("SMTP connection not found");
   });
 
+  it("resolves the sending account by from address", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      from: "Support@Acme.com ",
+      subject: "Hi",
+      html: "<p>Hi</p>"
+    });
+
+    const where = prismaMock.sMTPConnection.findFirst.mock.calls[0][0].where;
+    // Normalized like every other address at this door, and matched
+    // case-insensitively so a differently-cased stored value still resolves.
+    expect(where.fromEmail).toEqual({
+      equals: "support@acme.com",
+      mode: "insensitive"
+    });
+    expect(where.isDefault).toBeUndefined();
+    expect(where.id).toBeUndefined();
+  });
+
+  it("prefers the default account when a from address matches several", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      from: "support@acme.com",
+      subject: "Hi",
+      html: "<p>Hi</p>"
+    });
+
+    // fromEmail is not unique within an org, so the tiebreak has to be
+    // deterministic or the same send could go out as a different account.
+    expect(prismaMock.sMTPConnection.findFirst.mock.calls[0][0].orderBy).toEqual([
+      { isDefault: "desc" },
+      { createdAt: "asc" }
+    ]);
+  });
+
+  it("lets an explicit smtpConnectionId win over from", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      from: "support@acme.com",
+      smtpConnectionId: "smtp_9",
+      subject: "Hi",
+      html: "<p>Hi</p>"
+    });
+
+    const where = prismaMock.sMTPConnection.findFirst.mock.calls[0][0].where;
+    expect(where.id).toBe("smtp_9");
+    expect(where.fromEmail).toBeUndefined();
+  });
+
+  it("throws 404 rather than falling back when from matches no account", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
+
+    // A typo must not quietly send as the org default.
+    await expect(
+      transactionalEmailService.send({
+        organizationId: "org_1",
+        to: "x@y.com",
+        from: "typo@acme.com",
+        subject: "Hi",
+        html: "<p>Hi</p>"
+      })
+    ).rejects.toThrow("No sending account sends as typo@acme.com");
+    expect(prismaMock.emailJob.create).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the org default when neither selector is given", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>"
+    });
+
+    const where = prismaMock.sMTPConnection.findFirst.mock.calls[0][0].where;
+    expect(where.isDefault).toBe(true);
+    expect(where.fromEmail).toBeUndefined();
+  });
+
   it("throws 404 when the referenced template is missing", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
     prismaMock.template.findFirst.mockResolvedValue(null);
@@ -321,6 +426,30 @@ describe("transactionalEmailService.send", () => {
       transactionalEmailService.send({
         organizationId: "org_1",
         to: "x@y.com",
+        subject: "Hi",
+        html: "<p>Hi</p>",
+        origin: "MANUAL",
+        createdByUserId: "user_1"
+      })
+    ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
+    expect(prismaMock.emailJob.create).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  // `from` resolves to a connection before the grant check, so naming an
+  // account by address is not a way around one a MEMBER was never granted.
+  it("blocks an ungranted MEMBER who names the account by from address", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
+
+    await expect(
+      transactionalEmailService.send({
+        organizationId: "org_1",
+        to: "x@y.com",
+        from: "from@b.com",
         subject: "Hi",
         html: "<p>Hi</p>",
         origin: "MANUAL",

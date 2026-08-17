@@ -2068,6 +2068,13 @@ export const sendEmailSchema = z.object({
   cc: z.array(emailAddressSchema).optional(),
   bcc: z.array(emailAddressSchema).optional(),
   replyTo: emailAddressSchema.optional(),
+  // Sender selectors. Both are optional and resolve to the same thing: an
+  // SMTPConnection, which is where the From header is built from. Pass
+  // `smtpConnectionId` to name one exactly, or `from` to name one by the
+  // address it sends as; the id wins if a caller supplies both. Neither means
+  // the org default. `from` is a lookup key, not a header value — an address
+  // no sending account uses is a 404, never a hand-built From.
+  from: emailAddressSchema.optional(),
   smtpConnectionId: z.string().min(1).optional(),
   templateId: z.string().min(1).optional(),
   subject: z.string().min(1).optional(),

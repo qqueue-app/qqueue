@@ -5,13 +5,32 @@ export interface QQueueClientOptions {
 
 export interface PublicSendEmailInput {
   to: string;
+  cc?: string[];
+  bcc?: string[];
+  replyTo?: string;
+  /**
+   * Which sending account to send as, named by the address it sends as. Must
+   * match a sending account on the organization the API key belongs to —
+   * QQueue resolves the account and builds the From header from it, so an
+   * address it does not recognize is a 404, not a send.
+   *
+   * Omit both this and `smtpConnectionId` to use the organization default.
+   */
+  from?: string;
+  /** The same choice as `from`, made by account id. Wins if both are set. */
   smtpConnectionId?: string;
   templateId?: string;
   subject?: string;
   html?: string;
   text?: string;
   variables?: Record<string, unknown>;
+  /** Message-ID this replies to, for threading in the recipient's client. */
+  inReplyTo?: string;
+  references?: string[];
+  /** ISO-8601. The job is queued now and delivered then. */
   scheduledAt?: string;
+  /** Ids from POST /attachments, uploaded before the send. */
+  attachmentIds?: string[];
 }
 
 export class QQueueError extends Error {
