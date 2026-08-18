@@ -2062,6 +2062,57 @@ export const campaignRecurrenceSchema = z.object({
 
 export type CampaignRecurrenceInput = z.infer<typeof campaignRecurrenceSchema>;
 
+/**
+ * Caps for inline attachments carried on the send body itself. Inline
+ * attachments exist for small per-message assets built at send time — a
+ * ticket QR, a barcode, a tiny logo — where a separate upload round-trip
+ * (POST /attachments needs a dashboard session, not an API key) would be
+ * disproportionate. Anything bigger belongs in `attachmentIds`, whose blobs
+ * are uploaded ahead of time and capped by ATTACHMENT_MAX_BYTES instead.
+ *
+ * 256 KB × 10 decodes to 2.5 MB — ~3.4 MB as base64 — which the API's 4 MB
+ * JSON body limit accommodates with room for the HTML; the limits move
+ * together.
+ */
+export const INLINE_ATTACHMENT_MAX_BYTES = 262_144;
+export const MAX_INLINE_ATTACHMENTS = 10;
+
+// Strict base64: no whitespace or URL-safe alphabet, correct padding. Being
+// strict makes the decoded size below exact, so the byte cap is enforceable
+// here in the browser-safe schema without Buffer.
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** Exact decoded byte length of a strict, padded base64 string. */
+export function base64DecodedBytes(value: string): number {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return (value.length / 4) * 3 - padding;
+}
+
+export const inlineAttachmentSchema = z.object({
+  filename: z.string().min(1).max(200),
+  contentBase64: z
+    .string()
+    .min(1)
+    .refine((v) => v.length % 4 === 0 && BASE64_PATTERN.test(v), {
+      message: "contentBase64 must be strict, padded base64"
+    })
+    .refine((v) => base64DecodedBytes(v) <= INLINE_ATTACHMENT_MAX_BYTES, {
+      message: `Inline attachments are capped at ${INLINE_ATTACHMENT_MAX_BYTES} bytes; upload larger files via POST /attachments`
+    }),
+  contentType: z.string().min(1).max(200).optional(),
+  // Content-ID for inline display: HTML referencing `cid:<cid>` renders the
+  // attachment in place (and mail clients show it even with remote images
+  // blocked). Omit it for a regular downloadable attachment.
+  cid: z
+    .string()
+    .regex(/^[^\s<>]{1,200}$/, {
+      message: "cid must contain no whitespace or angle brackets"
+    })
+    .optional()
+});
+
+export type InlineAttachmentInput = z.infer<typeof inlineAttachmentSchema>;
+
 export const sendEmailSchema = z.object({
   organizationId: z.string().min(1),
   to: emailAddressSchema,
@@ -2088,6 +2139,13 @@ export const sendEmailSchema = z.object({
   // live in object storage; the send pipeline links them to the EmailJob and the
   // worker streams them to SMTP.
   attachmentIds: z.array(z.string().min(1)).optional(),
+  // Small attachments carried on the send body itself (base64), optionally
+  // inline via `cid`. Stored to the same object storage and delivered through
+  // the same worker path as uploaded attachments — only the way in differs.
+  attachments: z
+    .array(inlineAttachmentSchema)
+    .max(MAX_INLINE_ATTACHMENTS)
+    .optional(),
 });
 
 export type SendEmailInput = z.infer<typeof sendEmailSchema>;

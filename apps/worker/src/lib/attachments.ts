@@ -23,7 +23,8 @@ export async function loadAttachmentsForJob(
     attachments.push({
       filename: row.filename,
       content,
-      contentType: row.contentType
+      contentType: row.contentType,
+      cid: row.cid ?? undefined
     });
   }
   return attachments;

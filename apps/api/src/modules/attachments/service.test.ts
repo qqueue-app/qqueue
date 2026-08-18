@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { INLINE_ATTACHMENT_MAX_BYTES } from "@qqueue/shared";
 import { prismaMock } from "../../test/prisma-mock.js";
 import { HttpError } from "../../lib/http-error.js";
 
@@ -277,6 +278,7 @@ describe("attachmentService.copyToJob", () => {
         contentType: "application/pdf",
         size: 3,
         storageKey: "org/org_1/k-report.pdf",
+        cid: "qr",
         createdByUserId: "user_1"
       }
     ] as never);
@@ -295,6 +297,7 @@ describe("attachmentService.copyToJob", () => {
           contentType: "application/pdf",
           size: 3,
           storageKey: "org/org_1/k-report.pdf",
+          cid: "qr",
           createdByUserId: "user_1"
         }
       ]
@@ -308,5 +311,91 @@ describe("attachmentService.copyToJob", () => {
       attachmentService.copyToJob(["a1"], "org_1", "job_2")
     ).rejects.toThrow(HttpError);
     expect(prismaMock.emailAttachment.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("attachmentService.createInlineForJob", () => {
+  beforeEach(() => {
+    storageMock.putObject.mockReset().mockResolvedValue(undefined);
+    prismaMock.emailAttachment.create.mockReset();
+  });
+
+  it("does nothing when there are no inline attachments", async () => {
+    await attachmentService.createInlineForJob(undefined, "org_1", "job_1");
+    await attachmentService.createInlineForJob([], "org_1", "job_1");
+
+    expect(storageMock.putObject).not.toHaveBeenCalled();
+    expect(prismaMock.emailAttachment.create).not.toHaveBeenCalled();
+  });
+
+  it("stores the decoded blob and a row carrying the cid, linked to the job", async () => {
+    prismaMock.emailAttachment.create.mockResolvedValue({ id: "att_1" } as never);
+
+    await attachmentService.createInlineForJob(
+      [
+        {
+          filename: "qr.png",
+          contentBase64: Buffer.from("png-bytes").toString("base64"),
+          contentType: "image/png",
+          cid: "ticket-qr"
+        }
+      ],
+      "org_1",
+      "job_1",
+      null
+    );
+
+    const putArg = storageMock.putObject.mock.calls[0][0];
+    expect(putArg.key).toMatch(/^org\/org_1\/.+-qr\.png$/);
+    expect(putArg.body).toEqual(Buffer.from("png-bytes"));
+    expect(putArg.contentType).toBe("image/png");
+
+    const data = prismaMock.emailAttachment.create.mock.calls[0][0].data;
+    expect(data.emailJobId).toBe("job_1");
+    expect(data.cid).toBe("ticket-qr");
+    expect(data.size).toBe(Buffer.from("png-bytes").length);
+    expect(data.storageKey).toBe(putArg.key);
+    // API-key sends have no acting user; the column must stay unset, not "null".
+    expect(data.createdByUserId).toBeUndefined();
+  });
+
+  it("defaults the content type and leaves cid unset when omitted", async () => {
+    prismaMock.emailAttachment.create.mockResolvedValue({ id: "att_1" } as never);
+
+    await attachmentService.createInlineForJob(
+      [
+        {
+          filename: "notes.txt",
+          contentBase64: Buffer.from("hello").toString("base64")
+        }
+      ],
+      "org_1",
+      "job_1",
+      "user_1"
+    );
+
+    expect(storageMock.putObject.mock.calls[0][0].contentType).toBe(
+      "application/octet-stream"
+    );
+    const data = prismaMock.emailAttachment.create.mock.calls[0][0].data;
+    expect(data.contentType).toBe("application/octet-stream");
+    expect(data.cid).toBeUndefined();
+    expect(data.createdByUserId).toBe("user_1");
+  });
+
+  it("rejects an oversized attachment before touching storage", async () => {
+    const oversized = Buffer.alloc(INLINE_ATTACHMENT_MAX_BYTES + 1).toString(
+      "base64"
+    );
+
+    await expect(
+      attachmentService.createInlineForJob(
+        [{ filename: "big.bin", contentBase64: oversized }],
+        "org_1",
+        "job_1"
+      )
+    ).rejects.toThrow(HttpError);
+    expect(storageMock.putObject).not.toHaveBeenCalled();
+    expect(prismaMock.emailAttachment.create).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,16 @@
+-- Inline attachments for transactional sends.
+--
+-- Until now the attachment/image boundary had no room for a third case: an
+-- asset that is generated per message at send time (a ticket QR code, a
+-- barcode) and belongs *inside* the message, rendered in place. Uploaded
+-- EmailAttachments need a dashboard session to create (API keys can't reach
+-- POST /attachments) and always ride as regular downloadable parts; ImageAssets
+-- are public URLs, which mail clients hide whenever remote images are blocked —
+-- exactly when a door QR must still show.
+--
+-- So the transactional send body now accepts small base64 attachments with an
+-- optional Content-ID. They are stored to the same object storage and the same
+-- EmailAttachment rows as uploads — one delivery pipeline, unchanged — and the
+-- only new fact a row needs is the cid the HTML references. Nullable, no
+-- backfill: every existing row is a regular attachment and stays one.
+ALTER TABLE "EmailAttachment" ADD COLUMN "cid" TEXT;

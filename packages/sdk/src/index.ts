@@ -3,6 +3,24 @@ export interface QQueueClientOptions {
   baseUrl?: string;
 }
 
+export interface InlineAttachment {
+  filename: string;
+  /**
+   * Strict, padded base64. Inline attachments are for small per-message
+   * assets (QR codes, barcodes, small logos) and are capped at 256 KB decoded,
+   * 10 per send; upload larger files ahead of time via POST /attachments and
+   * pass their ids in `attachmentIds` instead.
+   */
+  contentBase64: string;
+  contentType?: string;
+  /**
+   * Content-ID for inline display: HTML referencing `cid:<cid>` renders the
+   * attachment in place, and mail clients show it even when remote images are
+   * blocked. Omit for a regular downloadable attachment.
+   */
+  cid?: string;
+}
+
 export interface PublicSendEmailInput {
   to: string;
   cc?: string[];
@@ -31,6 +49,8 @@ export interface PublicSendEmailInput {
   scheduledAt?: string;
   /** Ids from POST /attachments, uploaded before the send. */
   attachmentIds?: string[];
+  /** Small base64 attachments carried on the send itself, optionally inline. */
+  attachments?: InlineAttachment[];
 }
 
 export class QQueueError extends Error {
@@ -58,14 +78,27 @@ export class QQueueClient {
   }
 
   async sendEmail(
-    payload: PublicSendEmailInput
+    payload: PublicSendEmailInput,
+    options?: {
+      /**
+       * Retry key (sent as the `Idempotency-Key` header, max 255 chars). A
+       * repeat send with the same key returns the original job instead of
+       * sending a second copy — pass one when your caller retries on failure.
+       */
+      idempotencyKey?: string;
+    }
   ): Promise<{ id: string; status: string }> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json"
+    };
+    if (options?.idempotencyKey) {
+      headers["Idempotency-Key"] = options.idempotencyKey;
+    }
+
     const response = await fetch(`${this.baseUrl}/transactional-email/send`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify(payload)
     });
 

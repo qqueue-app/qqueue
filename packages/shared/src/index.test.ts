@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   abTestConfigSchema,
   applyVariables,
+  base64DecodedBytes,
   campaignRecurrenceSchema,
   campaignSchema,
   campaignScheduleSchema,
@@ -34,6 +35,8 @@ import {
   emailDraftUpdateSchema,
   emailPreviewSchema,
   extractVariables,
+  INLINE_ATTACHMENT_MAX_BYTES,
+  inlineAttachmentSchema,
   isValidCron,
   isValidTimezone,
   loginSchema,
@@ -395,6 +398,96 @@ describe("sendEmailSchema", () => {
         attachmentIds: ["att_1"]
       }).success
     ).toBe(true);
+  });
+
+  it("accepts inline attachments with a cid", () => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        subject: "Hi",
+        html: '<img src="cid:qr" />',
+        attachments: [
+          {
+            filename: "qr.png",
+            contentBase64: Buffer.from("png-bytes").toString("base64"),
+            contentType: "image/png",
+            cid: "qr"
+          }
+        ]
+      }).success
+    ).toBe(true);
+  });
+
+  it("rejects more than the inline attachment cap", () => {
+    const one = {
+      filename: "a.png",
+      contentBase64: Buffer.from("x").toString("base64")
+    };
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        subject: "Hi",
+        html: "<p>Hi</p>",
+        attachments: Array.from({ length: 11 }, () => one)
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("base64DecodedBytes", () => {
+  it("computes the exact decoded size for each padding case", () => {
+    // "a" → 1 byte ("=="), "ab" → 2 bytes ("="), "abc" → 3 bytes (none).
+    expect(base64DecodedBytes(Buffer.from("a").toString("base64"))).toBe(1);
+    expect(base64DecodedBytes(Buffer.from("ab").toString("base64"))).toBe(2);
+    expect(base64DecodedBytes(Buffer.from("abc").toString("base64"))).toBe(3);
+  });
+});
+
+describe("inlineAttachmentSchema", () => {
+  const valid = {
+    filename: "qr.png",
+    contentBase64: Buffer.from("png-bytes").toString("base64")
+  };
+
+  it("accepts a minimal attachment without cid or contentType", () => {
+    expect(inlineAttachmentSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects unpadded or non-base64 content", () => {
+    expect(
+      inlineAttachmentSchema.safeParse({ ...valid, contentBase64: "abc" })
+        .success
+    ).toBe(false);
+    expect(
+      inlineAttachmentSchema.safeParse({ ...valid, contentBase64: "ab cd" })
+        .success
+    ).toBe(false);
+  });
+
+  it("enforces the decoded size cap, not the base64 length", () => {
+    const atCap = Buffer.alloc(INLINE_ATTACHMENT_MAX_BYTES).toString("base64");
+    const overCap = Buffer.alloc(INLINE_ATTACHMENT_MAX_BYTES + 1).toString(
+      "base64"
+    );
+    expect(
+      inlineAttachmentSchema.safeParse({ ...valid, contentBase64: atCap })
+        .success
+    ).toBe(true);
+    expect(
+      inlineAttachmentSchema.safeParse({ ...valid, contentBase64: overCap })
+        .success
+    ).toBe(false);
+  });
+
+  it("rejects a cid with whitespace or angle brackets", () => {
+    expect(
+      inlineAttachmentSchema.safeParse({ ...valid, cid: "qr code" }).success
+    ).toBe(false);
+    expect(
+      inlineAttachmentSchema.safeParse({ ...valid, cid: "<qr>" }).success
+    ).toBe(false);
   });
 });
 

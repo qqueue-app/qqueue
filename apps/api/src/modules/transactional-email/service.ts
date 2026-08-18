@@ -311,6 +311,16 @@ export const transactionalEmailService = {
       );
     }
 
+    // Inline attachments (base64 on the send body, optional cid) become
+    // ordinary EmailAttachment rows on this job — created here, like the
+    // link/copy above, before the enqueue so the worker never races them.
+    await attachmentService.createInlineForJob(
+      input.attachments,
+      input.organizationId,
+      queuedJob.id,
+      input.createdByUserId
+    );
+
     await emailSendingQueue.add(
       "send-email",
       { emailJobId: queuedJob.id },

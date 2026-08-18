@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import type { EmailAttachment } from "@qqueue/email-engine";
+import {
+  base64DecodedBytes,
+  INLINE_ATTACHMENT_MAX_BYTES,
+  type InlineAttachmentInput
+} from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -199,9 +204,63 @@ export const attachmentService = {
         contentType: row.contentType,
         size: row.size,
         storageKey: row.storageKey,
+        cid: row.cid,
         createdByUserId: row.createdByUserId
       }))
     });
+  },
+
+  /**
+   * Persist inline attachments carried on a transactional send body: blob to
+   * object storage, metadata row (with the cid) linked to the job directly —
+   * unlike uploads there is no unlinked intermediate state to claim. Runs
+   * before the job is enqueued, so the worker never races these writes. The
+   * schema already enforced strict base64 and the size cap; the decode here
+   * re-measures as defense in depth against a caller that bypassed it.
+   */
+  async createInlineForJob(
+    attachments: InlineAttachmentInput[] | undefined,
+    organizationId: string,
+    emailJobId: string,
+    createdByUserId?: string | null
+  ): Promise<void> {
+    if (!attachments?.length) {
+      return;
+    }
+
+    for (const inline of attachments) {
+      const size = base64DecodedBytes(inline.contentBase64);
+      if (size <= 0 || size > INLINE_ATTACHMENT_MAX_BYTES) {
+        throw new HttpError(
+          400,
+          `Inline attachments must be 1–${INLINE_ATTACHMENT_MAX_BYTES} bytes`,
+          "attachment_too_large"
+        );
+      }
+
+      const filename = sanitizeFilename(inline.filename);
+      const storageKey = `org/${organizationId}/${randomUUID()}-${filename}`;
+      const contentType = inline.contentType ?? "application/octet-stream";
+
+      await storage.putObject({
+        key: storageKey,
+        body: Buffer.from(inline.contentBase64, "base64"),
+        contentType
+      });
+
+      await prisma.emailAttachment.create({
+        data: {
+          organizationId,
+          emailJobId,
+          filename,
+          contentType,
+          size,
+          storageKey,
+          cid: inline.cid,
+          createdByUserId: createdByUserId ?? undefined
+        }
+      });
+    }
   },
 
   /**
@@ -223,7 +282,8 @@ export const attachmentService = {
       attachments.push({
         filename: row.filename,
         content,
-        contentType: row.contentType
+        contentType: row.contentType,
+        cid: row.cid ?? undefined
       });
     }
     return attachments;

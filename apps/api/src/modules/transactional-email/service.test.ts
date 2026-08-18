@@ -510,6 +510,44 @@ describe("transactionalEmailService.send", () => {
     expect(storageGetObject).not.toHaveBeenCalled();
   });
 
+  it("stores inline attachments on the job, cid included, before enqueuing", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+    const createOrder: string[] = [];
+    prismaMock.emailAttachment.create.mockImplementation((() => {
+      createOrder.push("attachment");
+      return Promise.resolve({ id: "att_inline" });
+    }) as never);
+    queueAdd.mockImplementation(() => {
+      createOrder.push("enqueue");
+      return Promise.resolve(undefined);
+    });
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Ticket",
+      html: '<img src="cid:ticket-qr" />',
+      attachments: [
+        {
+          filename: "qr.png",
+          contentBase64: Buffer.from("png-bytes").toString("base64"),
+          contentType: "image/png",
+          cid: "ticket-qr"
+        }
+      ]
+    });
+
+    const data = prismaMock.emailAttachment.create.mock.calls[0][0].data;
+    expect(data.emailJobId).toBe("job_1");
+    expect(data.cid).toBe("ticket-qr");
+    // The worker must never race the attachment write: row first, queue after.
+    expect(createOrder).toEqual(["attachment", "enqueue"]);
+  });
+
   it("replays a prior job for a repeated idempotency key without enqueuing again", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       id: "job_existing",

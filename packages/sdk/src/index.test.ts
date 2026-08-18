@@ -69,6 +69,61 @@ describe("QQueueClient", () => {
     );
   });
 
+  it("forwards inline attachments in the request body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: vi.fn().mockResolvedValue({
+        data: { id: "job_1", status: "QUEUED" }
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new QQueueClient({ apiKey: "key_3" });
+    const attachments = [
+      {
+        filename: "qr.png",
+        contentBase64: "cGluZy1ieXRlcw==",
+        contentType: "image/png",
+        cid: "ticket-qr"
+      }
+    ];
+    await client.sendEmail({
+      to: "a@b.com",
+      subject: "Ticket",
+      html: '<img src="cid:ticket-qr" />',
+      attachments
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.attachments).toEqual(attachments);
+  });
+
+  it("sends the Idempotency-Key header only when a key is given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: vi.fn().mockResolvedValue({
+        data: { id: "job_1", status: "QUEUED" }
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new QQueueClient({ apiKey: "key_3" });
+    await client.sendEmail(
+      { to: "a@b.com", subject: "Hi", text: "Body" },
+      { idempotencyKey: "otp-42" }
+    );
+    await client.sendEmail({ to: "a@b.com", subject: "Hi", text: "Body" });
+
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      "Idempotency-Key": "otp-42"
+    });
+    expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty(
+      "Idempotency-Key"
+    );
+  });
+
   it("accepts the legacy nested send response while self-hosted APIs upgrade", async () => {
     vi.stubGlobal(
       "fetch",

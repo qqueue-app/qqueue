@@ -1049,3 +1049,23 @@ off its rule: a domain switched on with one mailbox muted is honestly "some",
 and drawing it as on or off is the small lie that makes people stop believing
 the screen. That is also why the domain control is a tri-state tick rather than
 a switch — a switch has two positions and this has three.
+
+## Inline Attachments Ride the Send Body, Not a New Storage Path
+
+The attachment/image boundary (private auth-scoped `EmailAttachment` vs public
+`ImageAsset`) left no room for a third case: an asset generated per message at
+send time — a ticket QR code, a barcode — that belongs *inside* the message.
+Uploaded attachments need a dashboard session to create (API keys cannot reach
+`POST /attachments`) and always ride as regular downloadable parts; `ImageAsset`
+URLs are hidden whenever a mail client blocks remote images, which is exactly
+when a door QR must still render.
+
+So the transactional send body accepts small base64 attachments with an
+optional Content-ID (`attachments` alongside `attachmentIds`). They are stored
+to the same object storage and the same `EmailAttachment` rows as uploads, and
+the worker delivers them through the unchanged pipeline — only the way in
+differs. The caps (256 KB decoded each, 10 per send, enforced in the shared
+schema so the exact decoded size is computable without Buffer) exist because
+the JSON body is the wrong vehicle for big files; those still belong in
+`attachmentIds`. The API's JSON body limit (4 MB) is sized to the caps and the
+three move together.

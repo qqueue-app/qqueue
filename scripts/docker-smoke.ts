@@ -18,7 +18,9 @@ process.env.WEBHOOK_SECRET ??= "smoke-webhook-secret";
 function run(command: string, args: string[]) {
   const result = spawnSync(command, args, {
     stdio: "inherit",
-    env: process.env
+    env: process.env,
+    // pnpm is a .cmd shim on Windows, which Node refuses to spawn shell-less.
+    shell: process.platform === "win32"
   });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed`);

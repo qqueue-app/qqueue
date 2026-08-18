@@ -868,6 +868,10 @@ model EmailAttachment {
   contentType     String
   size            Int
   storageKey      String
+  /// Content-ID for inline display (`cid:` references in the HTML). Set only
+  /// by inline attachments on the transactional send body; uploaded
+  /// attachments stay regular parts.
+  cid             String?
   createdByUserId String?
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   emailJob        EmailJob?    @relation(fields: [emailJobId], references: [id], onDelete: SetNull)

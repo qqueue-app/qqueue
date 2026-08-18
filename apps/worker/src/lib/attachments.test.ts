@@ -27,12 +27,14 @@ describe("loadAttachmentsForJob", () => {
       {
         filename: "a.pdf",
         contentType: "application/pdf",
-        storageKey: "k1"
+        storageKey: "k1",
+        cid: null
       },
       {
         filename: "b.png",
         contentType: "image/png",
-        storageKey: "k2"
+        storageKey: "k2",
+        cid: "qr"
       }
     ] as never);
     getObject.mockImplementation((key: string) =>
@@ -53,8 +55,12 @@ describe("loadAttachmentsForJob", () => {
       {
         filename: "b.png",
         content: Buffer.from("blob:k2"),
-        contentType: "image/png"
+        contentType: "image/png",
+        cid: "qr"
       }
     ]);
+    // The regular attachment must not grow a Content-ID: a null column maps
+    // to undefined, never cid: null, which Nodemailer would treat as set.
+    expect(result?.[0].cid).toBeUndefined();
   });
 });

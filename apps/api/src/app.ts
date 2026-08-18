@@ -34,7 +34,11 @@ export function createApp() {
           : DEV_ALLOWED_ORIGINS,
     })
   );
-  app.use(express.json());
+  // 4 MB, up from the 100 KB default: a transactional send may carry up to
+  // MAX_INLINE_ATTACHMENTS × INLINE_ATTACHMENT_MAX_BYTES = 2.5 MB of inline
+  // attachments, which is ~3.4 MB once base64-encoded, plus the HTML body.
+  // The three limits move together.
+  app.use(express.json({ limit: "4mb" }));
   app.use(requestLogger);
 
   app.use(healthRouter);

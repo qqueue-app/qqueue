@@ -68,12 +68,42 @@ hosts), the default wins, then the oldest.
 ### Other body fields
 
 Beyond `to`, `subject`, and content, the body also accepts `cc`, `bcc`,
-`replyTo`, `attachmentIds`, and `inReplyTo` / `references` (for threading
-replies).
+`replyTo`, `attachmentIds`, `attachments`, and `inReplyTo` / `references` (for
+threading replies).
 
 `replyTo` is optional in a second sense: omit it and the send inherits the
 default Reply-To configured on the sending account it goes out through, if that
 account has one. Passing `replyTo` overrides that default for the one send.
+
+### Inline attachments
+
+`attachments` carries small files on the send body itself — no upload
+round-trip, so it works with a plain API key. Each entry is
+`{ filename, contentBase64, contentType?, cid? }` with `contentBase64` as
+strict, padded base64. Set `cid` and HTML referencing `cid:<value>` renders the
+attachment in place, and mail clients show it even when remote images are
+blocked — built for per-message assets like QR codes and barcodes. Omit `cid`
+for a regular downloadable attachment.
+
+```json
+{
+  "to": "guest@example.com",
+  "subject": "Your ticket",
+  "html": "<p>Show this at the door:</p><img src=\"cid:ticket-qr\" />",
+  "attachments": [
+    {
+      "filename": "ticket-qr.png",
+      "contentBase64": "iVBORw0KGgo...",
+      "contentType": "image/png",
+      "cid": "ticket-qr"
+    }
+  ]
+}
+```
+
+Inline attachments are capped at 256 KB decoded each and 10 per send. Larger
+files belong in `attachmentIds`: upload ahead of time via `POST /attachments`
+(dashboard session required) and reference the returned ids.
 
 ## Idempotency
 

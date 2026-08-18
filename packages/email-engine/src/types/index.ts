@@ -3,6 +3,11 @@ export interface EmailAttachment {
   /** base64 string or Buffer (Nodemailer-compatible). */
   content: string | Buffer;
   contentType?: string;
+  /**
+   * Content-ID for inline display. When set, Nodemailer marks the part
+   * inline and HTML referencing `cid:<cid>` renders it in place.
+   */
+  cid?: string;
 }
 
 export interface SendEmailPayload {
