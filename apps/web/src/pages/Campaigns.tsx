@@ -33,6 +33,7 @@ import {
   api,
   type Campaign,
   type ContactList,
+  type SMTPConnection,
   type Template
 } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
@@ -60,11 +61,28 @@ import { DataGrid } from "../components/ui/data-grid.js";
 import { RowActions, type RowAction } from "../components/ui/row-actions.js";
 import { Hint } from "../components/ui/tooltip.js";
 
+/*
+  "Use the organization's default" is a real choice, not the absence of one —
+  it means "follow the default wherever it goes", which is different from
+  naming today's default outright. Radix Select has no concept of an empty
+  value, so it needs a token of its own; it maps to `null` on the way to the
+  API, which is what the column stores.
+*/
+const DEFAULT_ACCOUNT = "__default__";
+
 const emptyCampaignForm = {
   name: "",
   templateId: "",
+  smtpConnectionId: DEFAULT_ACCOUNT,
   contactListId: ""
 };
+
+/** "Acme Support <hi@acme.com>", or just the address when it has no name. */
+function describeAccount(connection: SMTPConnection) {
+  return connection.fromName
+    ? `${connection.fromName} <${connection.fromEmail}>`
+    : connection.fromEmail;
+}
 
 /** What each status means, for the badge tooltip. */
 function statusHint(status: string) {
@@ -130,6 +148,7 @@ export function Campaigns() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
+  const [accounts, setAccounts] = useState<SMTPConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [campaignDialogOpen, setCampaignDialogOpen] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
@@ -226,6 +245,20 @@ export function Campaigns() {
             <div className="truncate text-ui text-text-secondary">
               {row.original.template?.subject ?? "No template"}
             </div>
+            {/*
+              Only when the campaign names one. A line saying "the default" on
+              every row of an org that has one sending account is 25 repetitions
+              of a fact nobody asked about; a row that departs from the default
+              is exactly the row worth flagging.
+            */}
+            {row.original.smtpConnection ? (
+              <div className="mt-1 flex items-center gap-field text-meta text-text-tertiary">
+                <Send className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {row.original.smtpConnection.fromEmail}
+                </span>
+              </div>
+            ) : null}
             {row.original.cronExpression ? (
               <div className="mt-1 flex items-center gap-field text-meta text-text-tertiary">
                 <Repeat className="h-3 w-3 shrink-0" />
@@ -304,14 +337,18 @@ export function Campaigns() {
     }
     setLoading(true);
     try {
-      const [nextCampaigns, nextTemplates, nextLists] = await Promise.all([
-        api.listCampaigns(organizationId),
-        api.listTemplates(organizationId),
-        api.listContactLists(organizationId)
-      ]);
+      const [nextCampaigns, nextTemplates, nextLists, nextAccounts] =
+        await Promise.all([
+          api.listCampaigns(organizationId),
+          api.listTemplates(organizationId),
+          api.listContactLists(organizationId),
+          // The UI says sending accounts; the API says SMTP connections.
+          api.listSMTPConnections(organizationId)
+        ]);
       setCampaigns(nextCampaigns);
       setTemplates(nextTemplates);
       setContactLists(nextLists);
+      setAccounts(nextAccounts);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to load campaigns"
@@ -342,6 +379,10 @@ export function Campaigns() {
     return () => window.clearInterval(intervalId);
   }, [campaigns, organizationId]);
 
+  // Names the "Default" option after the account it actually resolves to, so
+  // the choice reads as an address rather than as a policy.
+  const defaultAccount = accounts.find((account) => account.isDefault);
+
   function openCreateCampaign() {
     setEditingCampaign(null);
     setCampaignForm(emptyCampaignForm);
@@ -353,6 +394,7 @@ export function Campaigns() {
     setCampaignForm({
       name: campaign.name,
       templateId: campaign.templateId ?? "",
+      smtpConnectionId: campaign.smtpConnectionId ?? DEFAULT_ACCOUNT,
       contactListId: campaign.contactListId ?? ""
     });
     setCampaignDialogOpen(true);
@@ -372,13 +414,24 @@ export function Campaigns() {
 
     setSaving(true);
     try {
+      // Sent as an explicit null rather than omitted: on an update, omitting
+      // the field means "leave the account alone", so switching a campaign back
+      // to the default has to say so.
+      const payload = {
+        ...campaignForm,
+        smtpConnectionId:
+          campaignForm.smtpConnectionId === DEFAULT_ACCOUNT
+            ? null
+            : campaignForm.smtpConnectionId
+      };
+
       if (editingCampaign) {
-        await api.updateCampaign(editingCampaign.id, campaignForm);
+        await api.updateCampaign(editingCampaign.id, payload);
         toast.success("Campaign updated.");
       } else {
         await api.createCampaign({
           organizationId,
-          ...campaignForm
+          ...payload
         });
         toast.success("Campaign draft created.");
       }
@@ -633,7 +686,8 @@ export function Campaigns() {
               {editingCampaign ? "Edit campaign" : "New campaign"}
             </DialogTitle>
             <DialogDescription>
-              Choose the template and audience for this campaign draft.
+              Choose the template, audience, and the account this campaign sends
+              as.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={saveCampaign} className="space-y-4">
@@ -647,6 +701,48 @@ export function Campaigns() {
                 }
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="campaignAccount">Send from</Label>
+              <Select
+                value={campaignForm.smtpConnectionId}
+                onValueChange={(value) =>
+                  setCampaignForm({
+                    ...campaignForm,
+                    smtpConnectionId: value
+                  })
+                }
+              >
+                <SelectTrigger id="campaignAccount">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* Names the account the send will actually use rather than
+                      the word "default" on its own — the same wording the
+                      composer's From picker uses. */}
+                  <SelectItem value={DEFAULT_ACCOUNT}>
+                    {defaultAccount
+                      ? `Default · ${describeAccount(defaultAccount)}`
+                      : "Organization default"}
+                  </SelectItem>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {/* The default account appears twice in this list — once
+                          as "Default · …" and once as itself — and the two rows
+                          are otherwise identical. The badge is what says which
+                          is which, as it does in the composer's From picker. */}
+                      <span className="flex items-center gap-2">
+                        {describeAccount(account)}
+                        {account.isDefault ? (
+                          <Badge variant="secondary" className="font-normal">
+                            Default
+                          </Badge>
+                        ) : null}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">

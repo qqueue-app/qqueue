@@ -64,6 +64,20 @@ if (!Range.prototype.getBoundingClientRect) {
   );
 }
 
+/*
+  jsdom implements neither half of the object-URL pair, so anything that hands
+  the browser bytes to render — an attachment preview, a `cid:` image resolved
+  out of a sent message — throws on the first call. Polyfilled with a counter
+  rather than a mock: the code under test only ever passes these URLs to an
+  `src`, and what matters is that a distinct string comes back and revoking one
+  is harmless.
+*/
+if (!URL.createObjectURL) {
+  let objectUrlCount = 0;
+  URL.createObjectURL = () => `blob:qqueue-test/${(objectUrlCount += 1)}`;
+  URL.revokeObjectURL = () => {};
+}
+
 // Unmount React trees and clear web storage between tests so component,
 // session, and setup-draft tests stay isolated.
 afterEach(() => {

@@ -12,5 +12,15 @@ export const sentController = {
     });
     const page = await sentService.list(query, req.userId!);
     res.json({ data: page });
+  },
+
+  async get(req: Request, res: Response) {
+    const email = await sentService.get(
+      String(req.params.id),
+      // Verified by requireOrgMembership, like the list above.
+      req.organizationId!,
+      req.userId!
+    );
+    res.json({ data: email });
   }
 };

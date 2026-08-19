@@ -26,6 +26,7 @@ vi.mock("../lib/api.js", () => ({
     listCampaigns: vi.fn(),
     listTemplates: vi.fn(),
     listContactLists: vi.fn(),
+    listSMTPConnections: vi.fn(),
     createCampaign: vi.fn(),
     updateCampaign: vi.fn(),
     duplicateCampaign: vi.fn(),
@@ -49,6 +50,25 @@ const templates = [
 const lists = [
   { id: "l1", organizationId: "org_1", name: "VIPs", _count: { contacts: 5 } }
 ];
+// The UI calls these sending accounts; the API calls them SMTP connections.
+const accounts = [
+  {
+    id: "smtp1",
+    organizationId: "org_1",
+    name: "Primary",
+    fromEmail: "hi@acme.com",
+    fromName: "Acme",
+    isDefault: true
+  },
+  {
+    id: "smtp2",
+    organizationId: "org_1",
+    name: "Product",
+    fromEmail: "product@acme.com",
+    fromName: null,
+    isDefault: false
+  }
+];
 
 function campaign(overrides: Record<string, unknown> = {}) {
   return {
@@ -69,6 +89,7 @@ function setup(campaigns: Record<string, unknown>[]) {
   mockedApi.listCampaigns.mockResolvedValue(campaigns);
   mockedApi.listTemplates.mockResolvedValue(templates);
   mockedApi.listContactLists.mockResolvedValue(lists);
+  mockedApi.listSMTPConnections.mockResolvedValue(accounts);
 }
 
 function renderCampaigns() {
@@ -128,17 +149,109 @@ describe("Campaigns", () => {
     await user.click(screen.getByRole("button", { name: /New campaign/i }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Name"), "Launch");
-    // pick template + list via the comboboxes
+    // Addressed by label rather than by index: the dialog now has three
+    // selects, and a positional lookup silently picks the wrong one when a
+    // field is added above.
     const selects = within(dialog).getAllByRole("combobox");
-    await user.click(selects[0]);
+    const [accountSelect, templateSelect, listSelect] = selects;
+    // Defaults to the org's default account, named after the address it uses.
+    expect(accountSelect).toHaveTextContent("Default · Acme <hi@acme.com>");
+    await user.click(templateSelect);
     await user.click(await screen.findByRole("option", { name: "Welcome" }));
-    await user.click(selects[1]);
+    await user.click(listSelect);
     await user.click(await screen.findByRole("option", { name: "VIPs" }));
     await user.click(
       within(dialog).getByRole("button", { name: "Create draft" })
     );
     await waitFor(() => expect(mockedApi.createCampaign).toHaveBeenCalled());
+    // The default travels as an explicit null, not as an omitted field.
+    expect(mockedApi.createCampaign).toHaveBeenCalledWith(
+      expect.objectContaining({ smtpConnectionId: null })
+    );
     expect(toast.success).toHaveBeenCalledWith("Campaign draft created.");
+  });
+
+  it("sends a campaign as an account other than the default", async () => {
+    const user = userEvent.setup();
+    setup([]);
+    mockedApi.createCampaign.mockResolvedValue({ id: "cmpx" });
+    renderCampaigns();
+    await screen.findByText("No campaigns yet");
+    await user.click(screen.getByRole("button", { name: /New campaign/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "Launch");
+
+    const [accountSelect, templateSelect, listSelect] =
+      within(dialog).getAllByRole("combobox");
+    await user.click(accountSelect);
+    await user.click(
+      await screen.findByRole("option", { name: "product@acme.com" })
+    );
+    await user.click(templateSelect);
+    await user.click(await screen.findByRole("option", { name: "Welcome" }));
+    await user.click(listSelect);
+    await user.click(await screen.findByRole("option", { name: "VIPs" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create draft" })
+    );
+
+    await waitFor(() =>
+      expect(mockedApi.createCampaign).toHaveBeenCalledWith(
+        expect.objectContaining({ smtpConnectionId: "smtp2" })
+      )
+    );
+  });
+
+  it("shows the account on a campaign that does not use the default", async () => {
+    setup([
+      campaign({
+        smtpConnectionId: "smtp2",
+        smtpConnection: {
+          id: "smtp2",
+          name: "Product",
+          fromEmail: "product@acme.com",
+          fromName: null
+        }
+      })
+    ]);
+    renderCampaigns();
+
+    await screen.findByText("Spring");
+    expect(screen.getAllByText("product@acme.com").length).toBeGreaterThan(0);
+  });
+
+  it("says nothing about the account on a campaign that uses the default", async () => {
+    // 25 rows all saying "the default" is 25 repetitions of a fact nobody
+    // asked about.
+    setup([campaign()]);
+    renderCampaigns();
+
+    await screen.findByText("Spring");
+    expect(screen.queryByText("hi@acme.com")).not.toBeInTheDocument();
+  });
+
+  it("reopens an edited campaign on the account it already uses", async () => {
+    const user = userEvent.setup();
+    setup([
+      campaign({
+        smtpConnectionId: "smtp2",
+        smtpConnection: {
+          id: "smtp2",
+          name: "Product",
+          fromEmail: "product@acme.com",
+          fromName: null
+        }
+      })
+    ]);
+    renderCampaigns();
+    await screen.findByText("Spring");
+
+    await openRowMenu(user, "Spring");
+    await user.click(await screen.findByRole("menuitem", { name: /Edit/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    const [accountSelect] = within(dialog).getAllByRole("combobox");
+    expect(accountSelect).toHaveTextContent("product@acme.com");
   });
 
   it("sends a campaign now", async () => {

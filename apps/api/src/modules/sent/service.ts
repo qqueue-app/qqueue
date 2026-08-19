@@ -1,9 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import type {
   SentEmail,
+  SentEmailAttachment,
+  SentEmailDetail,
+  SentEmailEvent,
   SentEmailPage,
   SentEmailQueryInput
 } from "@qqueue/shared";
+import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
   resolveMailboxAccess,
@@ -160,7 +164,175 @@ function toSentEmail(job: ArchivedJob): SentEmail {
   };
 }
 
+
+/*
+  The readable half of an event's metadata.
+
+  Each event type writes its own shape (a bounce records `reason`, a failure
+  `message`, a click the `url` it rewrote), so the reader would otherwise have
+  to know all three to show one line. Read defensively: metadata is a Json
+  column written by several code paths over several releases, and a shape that
+  has since changed must degrade to "no detail", never throw while rendering
+  someone's archive.
+*/
+const EVENT_DETAIL_KEYS = ["reason", "message", "url", "error"] as const;
+
+function eventDetail(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const record = metadata as Record<string, unknown>;
+  for (const key of EVENT_DETAIL_KEYS) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+interface ArchivedEvent {
+  id: string;
+  type: string;
+  occurredAt: Date;
+  metadata: unknown;
+}
+
+function toSentEmailEvent(event: ArchivedEvent): SentEmailEvent {
+  return {
+    id: event.id,
+    type: event.type as SentEmailEvent["type"],
+    occurredAt: event.occurredAt.toISOString(),
+    detail: eventDetail(event.metadata)
+  };
+}
+
+/**
+ * Why this send failed, in one line.
+ *
+ * FAILED is the pipeline giving up; BOUNCED with a FAILED job status is the
+ * SMTP server refusing the recipient outright. Both are "it did not arrive and
+ * here is what we were told", and the reader shows one sentence, so the newest
+ * of either wins. Null for anything that did not fail — a delivered message
+ * with an old soft bounce on record has not failed.
+ */
+function failureReasonOf(
+  status: string,
+  events: SentEmailEvent[]
+): string | null {
+  if (status !== "FAILED") return null;
+  const explained = events
+    .filter((event) => event.type === "FAILED" || event.type === "BOUNCED")
+    .reverse();
+  return explained.find((event) => event.detail)?.detail ?? null;
+}
+
 export const sentService = {
+
+  /**
+   * One archived message in full, body included.
+   *
+   * Deliberately a second request rather than more columns on the list: the
+   * body is the widest column in the schema, and a page of 25 subjects has no
+   * use for 25 rendered emails. Scoped exactly like the list — same mailbox
+   * rule, applied to one row instead of a where clause — and 404 rather than
+   * 403 for a message outside that scope, because it is not in this reader's
+   * archive at all, which is what the list already tells them.
+   */
+  async get(
+    id: string,
+    organizationId: string,
+    userId: string
+  ): Promise<SentEmailDetail> {
+    const access = await resolveMailboxAccess(userId, organizationId);
+
+    const job = await prisma.emailJob.findFirst({
+      where: {
+        id,
+        organizationId,
+        status: { in: [...ARCHIVED_STATUSES] },
+        ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] })
+      },
+      select: {
+        id: true,
+        subject: true,
+        toEmail: true,
+        cc: true,
+        bcc: true,
+        replyTo: true,
+        status: true,
+        origin: true,
+        sentAt: true,
+        createdAt: true,
+        messageId: true,
+        campaignId: true,
+        campaign: { select: { name: true } },
+        smtpConnection: {
+          select: { name: true, fromEmail: true, fromName: true }
+        },
+        html: true,
+        text: true,
+        attachments: {
+          select: {
+            id: true,
+            filename: true,
+            contentType: true,
+            size: true,
+            cid: true
+          },
+          orderBy: { createdAt: "asc" }
+        },
+        // Oldest first: this is read top-to-bottom as the message's history.
+        events: {
+          select: {
+            id: true,
+            type: true,
+            occurredAt: true,
+            metadata: true
+          },
+          orderBy: { occurredAt: "asc" }
+        }
+      }
+    });
+
+    if (!job) {
+      throw new HttpError(404, "Email not found", "not_found");
+    }
+
+    // toSentEmail folds the events into counts and flags, and only reads
+    // `type` — so the same rows serve both the summary and the timeline below.
+    const summary = toSentEmail(job as unknown as ArchivedJob);
+    const events = (job.events as unknown as ArchivedEvent[]).map(
+      toSentEmailEvent
+    );
+
+    const attachments: SentEmailAttachment[] = job.attachments.map(
+      (attachment) => ({
+        id: attachment.id,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        // A Content-ID is what makes a part inline: the body references it with
+        // `cid:` and renders it in place instead of offering a download.
+        isInline: Boolean(attachment.cid),
+        contentId: attachment.cid
+      })
+    );
+
+    return {
+      ...summary,
+      html: job.html,
+      text: job.text,
+      cc: job.cc,
+      bcc: job.bcc,
+      replyTo: job.replyTo,
+      messageId: job.messageId,
+      attachments,
+      events,
+      failureReason: failureReasonOf(job.status, events)
+    };
+  },
+
   /**
    * A page of the sent archive, newest first, filtered on the server.
    *

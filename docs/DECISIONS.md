@@ -1069,3 +1069,74 @@ schema so the exact decoded size is computable without Buffer) exist because
 the JSON body is the wrong vehicle for big files; those still belong in
 `attachmentIds`. The API's JSON body limit (4 MB) is sized to the caps and the
 three move together.
+
+## A Campaign Names Its Own Sending Account (2026-08-19)
+
+Campaign fan-out resolved `isDefault: true` in the worker and threw when there
+was no default, so every campaign an organization ever sent went out as one
+address. An org running a newsletter from `hello@` and a product announcement
+from `product@` had no way to say so; the only workaround was flipping the org
+default before each send, which changes every other send path at the same time.
+
+`Campaign.smtpConnectionId` is **nullable and not backfilled**. NULL keeps
+meaning exactly what it meant before the column existed — send as whatever the
+organization's default is at fire time. Backfilling today's default onto
+existing campaigns would freeze them against today's answer and silently change
+what a recurring campaign does when the default moves. `ON DELETE SET NULL` for
+the same reason: removing a sending account returns the campaigns that named it
+to the default rather than orphaning them.
+
+This changed what "may I see this campaign" means. It used to be one question
+for the whole list — do you hold the org default — because a campaign had no
+mailbox of its own. Now it is per campaign, and the campaign list is scoped with
+a where clause (`campaignScope`) rather than a post-filter, so the two grant
+facts are resolved once instead of once per row. `mayUseDefaultConnection`
+generalised into `mayUseConnection(access, id | null)`, the non-throwing twin of
+`assertMayUseConnection`.
+
+Send-as is still enforced **once**, when the campaign is started, and the worker
+still does not re-verify. Moving a draft onto a different account is itself a
+send-as decision and is gated like one — otherwise a member could create a
+campaign on an account they hold and then edit it onto one they do not. The
+worker re-resolves the named account against the organization at fire time (a
+connection can move or be removed between writing the campaign and firing it)
+but asks no permission question: re-asking would break a recurring campaign the
+moment its author's grants changed.
+
+## The Sent Archive Shows the Untracked Body (2026-08-19)
+
+The sent archive could say what happened to an email but not what it said. The
+row's detail dialog held recipients, outcome and the sending account; the body
+was in `EmailJob.html` and unreachable. `GET /sent/:id` and `/sent/:id` now open
+one message in full — body, parts, recipient lists, and the `EmailEvent` history
+as a dated timeline.
+
+**The body shown is the body as stored, which is deliberately not what left the
+building.** The send worker injects the open pixel and rewrites links through
+the click redirect on its way out (`email-sending.worker.ts`), so rendering the
+tracked copy would fire this message's own tracking every time somebody read
+their own archive: every open would create an open, and the numbers on the same
+page would be measuring the reader instead of the recipient. The stored copy is
+also the honest one for a failed send, which never reached the worker's tracking
+step at all.
+
+A route rather than a dialog because a message is a document — long enough to
+scroll, worth linking to, worth a back button. That made the archive's filters
+navigation-visible state, so they moved into the query string: React Router
+restores no component state on the way back, and coming out of a message used to
+drop you on page 1 of an unfiltered archive having lost the search that found it.
+
+The archive opens on `origin = MANUAL` rather than every type. One campaign to a
+10,000-address list puts 10,000 rows in front of someone looking for the message
+they sent a customer on Tuesday, and no amount of paging gets them past it;
+campaign sends are already answerable as a cohort from the campaign's own
+analytics. Its empty state says what is missing rather than "nothing sent yet",
+which would be a lie to an org whose mail is all campaigns or all API sends.
+
+Attachment download widened as a consequence. It was scoped to the uploading
+user alone, which made every attachment in the archive undownloadable by anyone
+but the person who attached it — including the owner of the mailbox it was sent
+from. It now also accepts anyone who may read the attachment's `EmailJob`, using
+the same `emailJobScope` the archive and the outbox already use. Unsent rows (a
+draft's files) keep the uploader-only rule: they have no message to inherit
+access from, and that is what keeps drafts private.

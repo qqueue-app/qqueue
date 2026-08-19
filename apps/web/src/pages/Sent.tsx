@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
-  BarChart3,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
@@ -18,19 +17,17 @@ import { EmptyState } from "../components/EmptyState.js";
 import { api, type SentEmail, type SentEmailOutcome } from "../lib/api.js";
 import { formatFullDate, formatTimestamp } from "../lib/format.js";
 import { qk } from "../lib/query-client.js";
+import {
+  ORIGIN_LABEL,
+  engagementLabel,
+  outcomeOf,
+} from "../lib/sent-email.js";
 import { useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { cn } from "../lib/utils.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
 import { DataGrid } from "../components/ui/data-grid.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog.js";
 import { IconButton } from "../components/ui/icon-button.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
@@ -56,12 +53,21 @@ const ALL = "all";
 
 type OriginFilter = "all" | "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
 
-const ORIGIN_LABEL: Record<SentEmail["origin"], string> = {
-  MANUAL: "Written by you",
-  CAMPAIGN: "Campaign",
-  TRANSACTIONAL: "App or API",
-  SYSTEM: "Account email",
-};
+/*
+  The archive opens on the mail you wrote yourself.
+
+  "All types" is the honest default and the wrong one: one campaign to a
+  10,000-address list puts 10,000 rows in front of someone looking for the
+  message they sent a customer on Tuesday, and no amount of paging gets them
+  past it. Campaign sends are already answerable as a cohort, from the
+  campaign's own analytics — this list is the one place a single message is
+  findable, so it leads with the ones a person actually wrote.
+
+  Switching to "All types" is one select away and, like every other filter here,
+  it goes in the URL — so the wider view is bookmarkable for anyone who wants it
+  as their normal.
+*/
+const DEFAULT_ORIGIN: OriginFilter = "MANUAL";
 
 const ORIGIN_OPTIONS: { value: OriginFilter; label: string }[] = [
   { value: ALL, label: "All types" },
@@ -89,54 +95,12 @@ const WINDOW_OPTIONS: { value: string; label: string }[] = [
   { value: "90", label: "Last 90 days" },
 ];
 
-/**
- * What happened to one email, as a single badge.
- *
- * The pipeline records events rather than a state machine, so a message can be
- * delivered *and* opened *and* clicked at once. This picks the furthest thing
- * that happened — the worst news first, then the strongest engagement — because
- * a row has one line to say it and "Bounced" matters more than "Delivered".
- */
-function outcomeOf(email: SentEmail): {
-  label: string;
-  variant: "ok" | "err" | "warn" | "neutral" | "accent";
-} {
-  if (email.status === "FAILED") return { label: "Failed", variant: "err" };
-  if (email.complained) return { label: "Marked as spam", variant: "err" };
-  if (email.bounced) return { label: "Bounced", variant: "err" };
-  if (email.clicks > 0) return { label: "Clicked", variant: "ok" };
-  if (email.opens > 0) return { label: "Opened", variant: "ok" };
-  if (email.delivered) return { label: "Delivered", variant: "ok" };
-  // Handed to the mail server, with no delivery confirmation back yet. Not a
-  // problem — most SMTP paths never send one.
-  return { label: "Sent", variant: "neutral" };
-}
-
-function engagementLabel(email: SentEmail) {
-  if (email.opens === 0 && email.clicks === 0) return null;
-  const parts = [];
-  if (email.opens > 0) {
-    parts.push(`${email.opens} ${email.opens === 1 ? "open" : "opens"}`);
-  }
-  if (email.clicks > 0) {
-    parts.push(`${email.clicks} ${email.clicks === 1 ? "click" : "clicks"}`);
-  }
-  return parts.join(" · ");
-}
-
 function describeRecipients(email: SentEmail) {
   const extra = email.ccCount + email.bccCount;
   const shown = email.to.slice(0, 2).join(", ") || "—";
   const hidden = Math.max(email.to.length - 2, 0);
   const more = hidden + extra;
   return more > 0 ? `${shown} +${more} more` : shown;
-}
-
-function sendingAccountLabel(email: SentEmail) {
-  if (!email.sendingAccount) return "Account removed";
-  return email.sendingAccount.fromName
-    ? `${email.sendingAccount.fromName} <${email.sendingAccount.fromEmail}>`
-    : email.sendingAccount.fromEmail;
 }
 
 /**
@@ -151,28 +115,69 @@ function sendingAccountLabel(email: SentEmail) {
  */
 export function Sent() {
   const { currentOrganizationId: organizationId } = useSession();
+  const navigate = useNavigate();
 
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [outcome, setOutcome] = useState<SentEmailOutcome>(ALL);
-  const [origin, setOrigin] = useState<OriginFilter>(ALL);
-  const [accountId, setAccountId] = useState(ALL);
-  const [days, setDays] = useState("0");
-  const [page, setPage] = useState(1);
+  /*
+    The filters live in the query string, not in component state.
+
+    Opening a message is a navigation now, and React Router restores no state on
+    the way back — so with the filters held in `useState`, coming out of a
+    message dropped you on page 1 of the unfiltered archive, having lost the
+    search that found it. In the URL they survive the round trip for free, and
+    the page someone found something on becomes a link they can send.
+  */
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q")?.trim() ?? "";
+  const outcome = (params.get("outcome") as SentEmailOutcome) ?? ALL;
+  const origin = (params.get("origin") as OriginFilter) ?? DEFAULT_ORIGIN;
+  const accountId = params.get("account") ?? ALL;
+  const days = params.get("days") ?? "0";
+  const page = Math.max(1, Number(params.get("page") ?? "1") || 1);
+
+  // The search box is typed into, so it keeps local state and syncs to the URL
+  // on a debounce; the selects write straight through.
+  const [searchInput, setSearchInput] = useState(search);
   // The selects are always on screen from `sm` up; on a phone they fold behind
   // this so the list itself isn't pushed off the bottom of the viewport.
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [detail, setDetail] = useState<SentEmail | null>(null);
+
+  /**
+   * Write one filter into the URL.
+   *
+   * Takes the updater form of `setParams` rather than reading `params`, so it
+   * closes over nothing that changes and stays stable across renders — the
+   * debounce below depends on it and would otherwise re-arm on every unrelated
+   * filter change. `replace` so a filter change doesn't stack a history entry
+   * per keystroke: back should leave the archive, not walk backwards through
+   * everything you tried in it.
+   */
+  const setParam = useCallback(
+    (next: Record<string, string | null>) => {
+      setParams(
+        (current) => {
+          const updated = new URLSearchParams(current);
+          for (const [key, value] of Object.entries(next)) {
+            if (value === null || value === "") updated.delete(key);
+            else updated.set(key, value);
+          }
+          return updated;
+        },
+        { replace: true }
+      );
+    },
+    [setParams]
+  );
 
   // Every keystroke would otherwise be a query against the biggest table the
   // org has. 300ms is below the threshold where typing feels laggy.
   useEffect(() => {
+    const trimmed = searchInput.trim();
+    if (trimmed === search) return;
     const timer = window.setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(1);
+      setParam({ q: trimmed || null, page: null });
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [searchInput]);
+  }, [searchInput, search, setParam]);
 
   const filters = useMemo(
     () => ({
@@ -219,26 +224,29 @@ export function Sent() {
   const activeFilters =
     (search ? 1 : 0) +
     (outcome === ALL ? 0 : 1) +
-    (origin === ALL ? 0 : 1) +
+    // Counted against the default, which is MANUAL — the type select is never
+    // "off", so what makes it *active* is departing from where it starts.
+    (origin === DEFAULT_ORIGIN ? 0 : 1) +
     (accountId === ALL ? 0 : 1) +
     (days === "0" ? 0 : 1);
 
   function clearFilters() {
     setSearchInput("");
-    setSearch("");
-    setOutcome(ALL);
-    setOrigin(ALL);
-    setAccountId(ALL);
-    setDays("0");
-    setPage(1);
+    setParams(new URLSearchParams(), { replace: true });
   }
 
   /** Every filter change resets to page 1 — page 7 of the old result set is a
       different set of emails, and landing on an empty page reads as a bug. */
-  function onFilterChange<T>(set: (value: T) => void) {
-    return (value: T) => {
-      set(value);
-      setPage(1);
+  function onFilterChange(key: string) {
+    return (value: string) => {
+      // Clear the parameter when the choice *is* the default, rather than
+      // writing a redundant one. For `origin` the default is MANUAL, not "all",
+      // so "All types" is a value the URL has to carry explicitly.
+      const cleared =
+        key === "origin"
+          ? value === DEFAULT_ORIGIN
+          : value === ALL || (key === "days" && value === "0");
+      setParam({ [key]: cleared ? null : value, page: null });
     };
   }
 
@@ -379,10 +387,25 @@ export function Sent() {
         description="Widen the date range or clear a filter to see more of the archive."
       />
     ) : (
+      /*
+        The unfiltered-looking view is still filtered — it is the MANUAL default
+        — so "Nothing sent yet" would be a lie to an org whose mail is all
+        campaigns or all API sends. It says what is missing and points at the
+        select that widens it.
+      */
       <EmptyState
         icon={Send}
-        title="Nothing sent yet"
-        description="Every email that leaves QQueue — one you wrote, a campaign batch, or a send from the API — is kept here with what happened to it."
+        title="Nothing written by you yet"
+        description="This shows the emails you composed. Campaign batches and sends from the API are here too — switch Type to see them."
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onFilterChange("origin")(ALL)}
+          >
+            Show every type
+          </Button>
+        }
       />
     );
 
@@ -423,7 +446,7 @@ export function Sent() {
           loading={sentQuery.isPending}
           searchable={false}
           paginated={false}
-          onRowClick={setDetail}
+          onRowClick={(email) => navigate(`/sent/${email.id}`)}
           getRowLabel={(row) => `Open ${row.subject || "(no subject)"}`}
           empty={emptyState}
           toolbar={
@@ -502,10 +525,7 @@ export function Sent() {
               >
                 <div className="flex flex-col gap-field">
                   <Label htmlFor="sent-outcome">Outcome</Label>
-                  <Select
-                    value={outcome}
-                    onValueChange={onFilterChange<SentEmailOutcome>(setOutcome)}
-                  >
+                  <Select value={outcome} onValueChange={onFilterChange("outcome")}>
                     <SelectTrigger id="sent-outcome" width="choice">
                       <SelectValue />
                     </SelectTrigger>
@@ -521,10 +541,7 @@ export function Sent() {
 
                 <div className="flex flex-col gap-field">
                   <Label htmlFor="sent-type">Type</Label>
-                  <Select
-                    value={origin}
-                    onValueChange={onFilterChange<OriginFilter>(setOrigin)}
-                  >
+                  <Select value={origin} onValueChange={onFilterChange("origin")}>
                     <SelectTrigger id="sent-type" width="choice">
                       <SelectValue />
                     </SelectTrigger>
@@ -540,10 +557,7 @@ export function Sent() {
 
                 <div className="flex flex-col gap-field">
                   <Label htmlFor="sent-account">Sent from</Label>
-                  <Select
-                    value={accountId}
-                    onValueChange={onFilterChange<string>(setAccountId)}
-                  >
+                  <Select value={accountId} onValueChange={onFilterChange("account")}>
                     <SelectTrigger id="sent-account" width="choice">
                       <SelectValue />
                     </SelectTrigger>
@@ -560,10 +574,7 @@ export function Sent() {
 
                 <div className="flex flex-col gap-field">
                   <Label htmlFor="sent-window">When</Label>
-                  <Select
-                    value={days}
-                    onValueChange={onFilterChange<string>(setDays)}
-                  >
+                  <Select value={days} onValueChange={onFilterChange("days")}>
                     <SelectTrigger id="sent-window" width="choice">
                       <SelectValue />
                     </SelectTrigger>
@@ -631,7 +642,7 @@ export function Sent() {
               <IconButton
                 label="Previous page"
                 variant="outline"
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                onClick={() => setParam({ page: String(Math.max(1, page - 1)) })}
                 disabled={page <= 1}
               >
                 <ChevronLeft />
@@ -640,7 +651,7 @@ export function Sent() {
                 label="Next page"
                 variant="outline"
                 onClick={() =>
-                  setPage((current) => Math.min(pageCount, current + 1))
+                  setParam({ page: String(Math.min(pageCount, page + 1)) })
                 }
                 disabled={page >= pageCount}
               >
@@ -650,128 +661,6 @@ export function Sent() {
           </div>
         ) : null}
       </PageContainer>
-
-      <SentDetailDialog email={detail} onClose={() => setDetail(null)} />
     </>
-  );
-}
-
-/**
- * One email's full record.
- *
- * The table truncates a recipient list to two addresses and has no room for the
- * sending account at all; this is where the rest of it lives, and it is why a
- * row is clickable. Everything shown here arrived with the row, so opening it
- * costs no request.
- */
-function SentDetailDialog({
-  email,
-  onClose,
-}: {
-  email: SentEmail | null;
-  onClose: () => void;
-}) {
-  const outcomeBadge = email ? outcomeOf(email) : null;
-  const engagement = email ? engagementLabel(email) : null;
-
-  return (
-    <Dialog open={email !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        {email ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>{email.subject || "(no subject)"}</DialogTitle>
-              <DialogDescription>
-                {ORIGIN_LABEL[email.origin]} ·{" "}
-                {formatFullDate(email.sentAt ?? email.createdAt)}
-              </DialogDescription>
-            </DialogHeader>
-
-            <dl className="flex flex-col gap-4 text-ui">
-              <DetailRow label="Outcome">
-                <div className="flex flex-wrap items-center gap-2">
-                  {outcomeBadge ? (
-                    <Badge variant={outcomeBadge.variant}>
-                      {outcomeBadge.label}
-                    </Badge>
-                  ) : null}
-                  {engagement ? (
-                    <span className="text-text-tertiary" data-numeric>
-                      {engagement}
-                    </span>
-                  ) : null}
-                </div>
-              </DetailRow>
-
-              <DetailRow
-                label={email.to.length === 1 ? "Recipient" : "Recipients"}
-              >
-                <ul className="flex flex-col gap-1">
-                  {email.to.map((address) => (
-                    <li key={address} className="break-all">
-                      {address}
-                    </li>
-                  ))}
-                </ul>
-                {email.ccCount + email.bccCount > 0 ? (
-                  <p className="mt-1 text-meta text-text-tertiary" data-numeric>
-                    {email.ccCount} Cc · {email.bccCount} Bcc
-                  </p>
-                ) : null}
-              </DetailRow>
-
-              <DetailRow label="Sent from">
-                {email.sendingAccount ? (
-                  <>
-                    <span className="break-all">
-                      {sendingAccountLabel(email)}
-                    </span>
-                    <p className="text-meta text-text-tertiary">
-                      {email.sendingAccount.name}
-                    </p>
-                  </>
-                ) : (
-                  <span className="text-text-tertiary">
-                    That sending account has since been removed.
-                  </span>
-                )}
-              </DetailRow>
-
-              {email.campaignName ? (
-                <DetailRow label="Campaign">
-                  {email.campaignId ? (
-                    <Button asChild variant="outline" size="sm">
-                      <Link to={`/campaigns/${email.campaignId}/analytics`}>
-                        <BarChart3 />
-                        {email.campaignName}
-                      </Link>
-                    </Button>
-                  ) : (
-                    email.campaignName
-                  )}
-                </DetailRow>
-              ) : null}
-            </dl>
-          </>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function DetailRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-field">
-      <dt className="text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
-        {label}
-      </dt>
-      <dd className="text-text">{children}</dd>
-    </div>
   );
 }

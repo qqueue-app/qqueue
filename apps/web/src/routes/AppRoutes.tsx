@@ -140,6 +140,13 @@ const Sent = lazy(() =>
     default: module.Sent,
   }))
 );
+// Its own chunk, not part of Sent's: reading one email pulls an iframe and an
+// attachment previewer that the list itself has no use for.
+const SentMessage = lazy(() =>
+  import("../pages/SentMessage.js").then((module) => ({
+    default: module.SentMessage,
+  }))
+);
 const SMTPConnections = lazy(() =>
   import("../pages/SMTPConnections.js").then((module) => ({
     default: module.SMTPConnections,
@@ -231,6 +238,7 @@ export function AppRoutes() {
           <Route path="/outbox" element={<Outbox />} />
           {/* The archive the outbox drains into. */}
           <Route path="/sent" element={<Sent />} />
+          <Route path="/sent/:id" element={<SentMessage />} />
           {/* The standalone Send Email page was merged into Email Studio. */}
           <Route
             path="/send-email"

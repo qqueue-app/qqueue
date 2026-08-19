@@ -237,13 +237,36 @@ export function startCampaignProcessingWorker() {
         templateHtml = rendered.html;
       }
 
-      const smtpConnection = await prisma.sMTPConnection.findFirst({
-        where: { organizationId: campaign.organizationId, isDefault: true },
-        select: { id: true }
-      });
+      /*
+        The account this run sends as: the one the campaign named, else the
+        organization's default.
+
+        Re-checked against the org rather than trusted from the column, because
+        a connection can be moved or removed between writing the campaign and
+        firing it (the FK is `SetNull`, so a deleted one already arrives here as
+        NULL). Send-as permission is deliberately not re-verified — that was
+        settled when the campaign was started, and re-asking at fire time would
+        break a recurring campaign the moment its author's grants changed.
+      */
+      const smtpConnection =
+        (campaign.smtpConnectionId
+          ? await prisma.sMTPConnection.findFirst({
+              where: {
+                id: campaign.smtpConnectionId,
+                organizationId: campaign.organizationId
+              },
+              select: { id: true }
+            })
+          : null) ??
+        (await prisma.sMTPConnection.findFirst({
+          where: { organizationId: campaign.organizationId, isDefault: true },
+          select: { id: true }
+        }));
 
       if (!smtpConnection) {
-        throw new Error("Default SMTP connection not found");
+        throw new Error(
+          "Campaign has no sending account and the organization has no default"
+        );
       }
 
       // A segment re-resolves to its current ACTIVE matches at send time; a

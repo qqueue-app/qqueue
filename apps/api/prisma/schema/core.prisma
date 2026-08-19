@@ -361,6 +361,7 @@ model SMTPConnection {
   isDefault         Boolean               @default(false)
   organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   emailJobs         EmailJob[]
+  campaigns         Campaign[]
   grants            SmtpConnectionGrant[]
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
@@ -677,37 +678,45 @@ model Template {
 }
 
 model Campaign {
-  id              String            @id @default(cuid())
-  organizationId  String
-  templateId      String?
-  contactListId   String?
+  id               String            @id @default(cuid())
+  organizationId   String
+  templateId       String?
+  // Which sending account the fan-out sends as. NULL means "whatever the org's
+  // default is when this fires" — the behaviour every campaign had before this
+  // column existed, and the reason it is nullable rather than backfilled: a
+  // campaign written against the default should follow the default when the
+  // default changes. `SetNull` on delete returns a campaign whose account was
+  // removed to that same fallback rather than orphaning it.
+  smtpConnectionId String?
+  contactListId    String?
   // A campaign targets a static contact list OR a dynamic segment (resolved at
   // send time). Exactly one is set; enforced by the API, not the schema.
-  segmentId       String?
-  name            String
-  status          CampaignStatus    @default(DRAFT)
-  scheduledAt     DateTime?
-  cronExpression  String?
-  timezone        String?
-  lastRunAt       DateTime?
-  nextRunAt       DateTime?
+  segmentId        String?
+  name             String
+  status           CampaignStatus    @default(DRAFT)
+  scheduledAt      DateTime?
+  cronExpression   String?
+  timezone         String?
+  lastRunAt        DateTime?
+  nextRunAt        DateTime?
   // A/B subject testing. When enabled, the fan-out splits `abTestPercent` of the
   // audience evenly across `variants`, waits `abTestWindowMin`, then sends the
   // winning subject (by `abWinnerMetric`) to the remainder.
-  abTestEnabled   Boolean           @default(false)
-  abTestPercent   Int?
-  abWinnerMetric  AbWinnerMetric?
-  abTestWindowMin Int?
-  abTestStatus    AbTestStatus?
-  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  template        Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  contactList     ContactList?      @relation(fields: [contactListId], references: [id], onDelete: SetNull)
-  segment         Segment?          @relation(fields: [segmentId], references: [id], onDelete: SetNull)
-  variants        CampaignVariant[]
-  emailJobs       EmailJob[]
-  runs            CampaignRun[]
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  abTestEnabled    Boolean           @default(false)
+  abTestPercent    Int?
+  abWinnerMetric   AbWinnerMetric?
+  abTestWindowMin  Int?
+  abTestStatus     AbTestStatus?
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  template         Template?         @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  smtpConnection   SMTPConnection?   @relation(fields: [smtpConnectionId], references: [id], onDelete: SetNull)
+  contactList      ContactList?      @relation(fields: [contactListId], references: [id], onDelete: SetNull)
+  segment          Segment?          @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  variants         CampaignVariant[]
+  emailJobs        EmailJob[]
+  runs             CampaignRun[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 }
 
 // A subject-line variant for a campaign's A/B test. The body comes from the

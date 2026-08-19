@@ -98,6 +98,9 @@ export const qk = {
   // of the key: each combination is its own cached page.
   sent: (orgId: string, filters?: Record<string, unknown>) =>
     ["sent", orgId, filters ?? {}] as const,
+  // One archived message with its body. Nested under "sent" so clearing the
+  // archive's cache clears the messages opened from it too.
+  sentMessage: (orgId: string, id: string) => ["sent", orgId, "message", id] as const,
 
   inboxAccounts: (orgId: string) => ["inbox-accounts", orgId] as const,
   inboundMessages: (orgId: string, filters?: Record<string, unknown>) =>

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Thin adapter: these tests pin the HTTP contract (envelope, which args reach
 // the service) without re-testing service behaviour.
 vi.mock("./service.js", () => ({
-  sentService: { list: vi.fn() }
+  sentService: { list: vi.fn(), get: vi.fn() }
 }));
 
 const { sentController } = await import("./controller.js");
@@ -22,6 +22,7 @@ const emptyPage = { rows: [], total: 0, page: 1, pageSize: 25 };
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(sentService.list).mockResolvedValue(emptyPage as never);
+  vi.mocked(sentService.get).mockResolvedValue({ id: "job_1" } as never);
 });
 
 describe("sentController.list", () => {
@@ -113,5 +114,39 @@ describe("sentController.list", () => {
       )
     ).rejects.toThrow();
     expect(sentService.list).not.toHaveBeenCalled();
+  });
+});
+
+describe("sentController.get", () => {
+  it("passes the id, the verified org, and the reader", async () => {
+    const res = mockRes();
+
+    await sentController.get(
+      {
+        params: { id: "job_1" },
+        organizationId: "org_1",
+        userId: "usr_1"
+      } as unknown as Request,
+      res
+    );
+
+    expect(sentService.get).toHaveBeenCalledWith("job_1", "org_1", "usr_1");
+    expect(res.json).toHaveBeenCalledWith({ data: { id: "job_1" } });
+  });
+
+  it("reads the org from the membership middleware, not the query string", async () => {
+    const res = mockRes();
+
+    await sentController.get(
+      {
+        params: { id: "job_1" },
+        query: { organizationId: "org_someone_else" },
+        organizationId: "org_1",
+        userId: "usr_1"
+      } as unknown as Request,
+      res
+    );
+
+    expect(sentService.get).toHaveBeenCalledWith("job_1", "org_1", "usr_1");
   });
 });

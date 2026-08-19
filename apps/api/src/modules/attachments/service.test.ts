@@ -130,17 +130,30 @@ describe("attachmentService.upload", () => {
 });
 
 describe("attachmentService.download", () => {
-  beforeEach(() => {
-    storageMock.getObject.mockReset();
-  });
-
-  it("returns metadata and blob for an owned attachment", async () => {
-    prismaMock.emailAttachment.findFirst.mockResolvedValue({
+  /** A stored part, uploaded by `user_2` and sent with job `job_1`. */
+  function sentAttachment(overrides: Record<string, unknown> = {}) {
+    return {
       id: "att_1",
+      organizationId: "org_1",
+      createdByUserId: "user_2",
+      emailJobId: "job_1",
       storageKey: "org/org_1/k-report.pdf",
       filename: "report.pdf",
-      contentType: "application/pdf"
-    } as never);
+      contentType: "application/pdf",
+      ...overrides
+    };
+  }
+
+  beforeEach(() => {
+    storageMock.getObject.mockReset();
+    prismaMock.emailJob.findFirst.mockReset();
+    prismaMock.organizationMember.findUnique.mockReset();
+  });
+
+  it("returns metadata and blob for an attachment the user uploaded", async () => {
+    prismaMock.emailAttachment.findFirst.mockResolvedValue(
+      sentAttachment({ createdByUserId: "user_1" }) as never
+    );
     storageMock.getObject.mockResolvedValue(Buffer.from("data"));
 
     const { attachment, body } = await attachmentService.download(
@@ -148,19 +161,104 @@ describe("attachmentService.download", () => {
       "user_1"
     );
 
-    expect(prismaMock.emailAttachment.findFirst).toHaveBeenCalledWith({
-      where: { id: "att_1", createdByUserId: "user_1" }
-    });
+    // The uploader needs no message to inherit access from, so nothing else is
+    // consulted — this is the path a draft's attachments take.
+    expect(prismaMock.emailJob.findFirst).not.toHaveBeenCalled();
     expect(storageMock.getObject).toHaveBeenCalledWith("org/org_1/k-report.pdf");
     expect(attachment.id).toBe("att_1");
     expect(body.toString()).toBe("data");
   });
 
-  it("throws 404 for an attachment the user does not own", async () => {
+  it("throws 404 when the attachment does not exist", async () => {
     prismaMock.emailAttachment.findFirst.mockResolvedValue(null);
     await expect(
       attachmentService.download("att_1", "user_1")
     ).rejects.toThrow(HttpError);
+    expect(storageMock.getObject).not.toHaveBeenCalled();
+  });
+
+  it("lets someone who may read the message open what it carried", async () => {
+    prismaMock.emailAttachment.findFirst.mockResolvedValue(
+      sentAttachment() as never
+    );
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "OWNER"
+    } as never);
+    prismaMock.emailJob.findFirst.mockResolvedValue({ id: "job_1" } as never);
+    storageMock.getObject.mockResolvedValue(Buffer.from("data"));
+
+    const { body } = await attachmentService.download("att_1", "user_1");
+
+    // Unrestricted, so the job is looked up with no scope clause bolted on.
+    expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
+      where: { id: "job_1", organizationId: "org_1" },
+      select: { id: true }
+    });
+    expect(body.toString()).toBe("data");
+  });
+
+  it("scopes a MEMBER to the mailboxes they hold", async () => {
+    prismaMock.emailAttachment.findFirst.mockResolvedValue(
+      sentAttachment() as never
+    );
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_1" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    // The job doesn't match that scope.
+    prismaMock.emailJob.findFirst.mockResolvedValue(null as never);
+
+    await expect(
+      attachmentService.download("att_1", "user_1")
+    ).rejects.toThrow(HttpError);
+
+    expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "job_1",
+        organizationId: "org_1",
+        AND: [
+          {
+            OR: [
+              { smtpConnectionId: { in: ["smtp_1"] } },
+              { createdByUserId: "user_1" }
+            ]
+          }
+        ]
+      },
+      select: { id: true }
+    });
+    expect(storageMock.getObject).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unsent attachment belonging to somebody else", async () => {
+    // A draft's file has no message to inherit access from, so the uploader
+    // check is its only door — this is what keeps drafts private.
+    prismaMock.emailAttachment.findFirst.mockResolvedValue(
+      sentAttachment({ emailJobId: null }) as never
+    );
+
+    await expect(
+      attachmentService.download("att_1", "user_1")
+    ).rejects.toThrow(HttpError);
+    expect(prismaMock.emailJob.findFirst).not.toHaveBeenCalled();
+    expect(storageMock.getObject).not.toHaveBeenCalled();
+  });
+
+  it("reads as not-found to somebody outside the organization", async () => {
+    prismaMock.emailAttachment.findFirst.mockResolvedValue(
+      sentAttachment() as never
+    );
+    // No membership: 404 rather than the 403 resolveMailboxAccess would throw,
+    // so the id doesn't confirm that something exists here.
+    prismaMock.organizationMember.findUnique.mockResolvedValue(null as never);
+
+    await expect(
+      attachmentService.download("att_1", "user_1")
+    ).rejects.toThrow(HttpError);
+    expect(prismaMock.emailJob.findFirst).not.toHaveBeenCalled();
     expect(storageMock.getObject).not.toHaveBeenCalled();
   });
 });

@@ -1756,11 +1756,22 @@ const campaignTargetExclusive = (
   }
 };
 
+/*
+  Which sending account the fan-out sends as.
+
+  Omitted and explicit `null` are the same answer — "the organization's default,
+  whatever it is when this fires" — and both have to be expressible: a campaign
+  that named an account needs a way to go back to the default, which an optional
+  field alone cannot say (omitting it on a PUT means "leave it alone").
+*/
+const campaignSmtpConnectionId = z.string().min(1).nullish();
+
 export const campaignSchema = z
   .object({
     organizationId: z.string().min(1),
     name: z.string().min(1),
     templateId: z.string().min(1).optional(),
+    smtpConnectionId: campaignSmtpConnectionId,
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
     scheduledAt: z.string().datetime().optional(),
@@ -1773,6 +1784,7 @@ export const campaignUpdateSchema = z
   .object({
     name: z.string().min(1).optional(),
     templateId: z.string().min(1).optional(),
+    smtpConnectionId: campaignSmtpConnectionId,
     contactListId: z.string().min(1).optional(),
     segmentId: z.string().min(1).optional(),
     scheduledAt: z.string().datetime().optional(),
@@ -2413,6 +2425,69 @@ export interface SentEmailPage {
   total: number;
   page: number;
   pageSize: number;
+}
+
+/*
+  One archived message, opened.
+
+  The list row answers "what happened to it"; this answers "what did it say".
+  It is a separate shape rather than more fields on SentEmail because the body
+  is the largest column in the schema — putting it on the row type would mean
+  every page of 25 carried 25 rendered emails to draw a table of subjects.
+*/
+
+/** A part that travelled with the message. */
+export interface SentEmailAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  /**
+   * Carries a Content-ID, so the body renders it in place rather than offering
+   * it as a download. Mirrors InboundAttachment.isInline for received mail.
+   */
+  isInline: boolean;
+  /** MIME Content-ID, as referenced by `cid:` URLs in the body HTML. */
+  contentId?: string | null;
+}
+
+/** One thing the pipeline recorded about this message, in order. */
+export interface SentEmailEvent {
+  id: string;
+  type: EmailEventType;
+  occurredAt: string;
+  /**
+   * The human-readable half of the event's metadata, where it has one: the SMTP
+   * rejection for a BOUNCED event, the error for a FAILED one, the clicked URL
+   * for a CLICKED one. Null for events that are just a fact with a timestamp.
+   */
+  detail?: string | null;
+}
+
+export interface SentEmailDetail extends SentEmail {
+  /**
+   * The body as stored, which is the body *before* the send worker injected
+   * open/click tracking and appended the unsubscribe footer. That is the honest
+   * thing to show: rendering the tracked copy would fire this message's own
+   * open pixel and record a fake open every time someone read their archive.
+   */
+  html?: string | null;
+  text?: string | null;
+  /** Full lists, where the row carries only counts. */
+  cc: string[];
+  bcc: string[];
+  replyTo?: string | null;
+  /** RFC 5322 Message-ID, for matching against a mail server's logs. */
+  messageId?: string | null;
+  attachments: SentEmailAttachment[];
+  /** Oldest first — this is read as a history, not as a feed. */
+  events: SentEmailEvent[];
+  /**
+   * Why this send failed, lifted out of the FAILED/BOUNCED event so the reader
+   * doesn't have to know that "Failed" is a status and the reason is an event.
+   * Null unless the message actually failed.
+   */
+  failureReason?: string | null;
 }
 
 // Draft persistence for the composer. Drafts are intentionally permissive (the

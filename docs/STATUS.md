@@ -148,6 +148,24 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    the delayed BullMQ job; the send worker independently skips `CANCELLED` jobs,
    so a race with an in-flight worker is safe. This is the product-level view of
    the queue — `/queue-operations` remains the admin-only BullMQ inspector.
+6. **Sent archive** (`apps/web/src/pages/Sent.tsx`, `sent` API module) — every
+   `EmailJob` the pipeline has finished with (`SENT`/`FAILED`), with what
+   happened to it after it left. The only list in the app that filters, sorts
+   and pages **on the server**: its row count grows with everything the org has
+   ever sent, so the browser never holds more than one page. Filters live in the
+   query string, so a filtered page is a link and returning from a message
+   restores the archive you left. It opens on `origin = MANUAL` — one campaign
+   to a 10,000-address list would otherwise bury the message someone actually
+   went looking for — and the Type select widens it to everything.
+7. **Message reader** (`apps/web/src/pages/SentMessage.tsx`, `GET /sent/:id`) —
+   one archived message at `/sent/:id`: the body in a sandboxed frame,
+   attachments, the full recipient lists, and the `EmailEvent` history as a
+   dated timeline with the failure reason lifted out of it. The body rendered
+   is the body **as stored**, which is deliberately not what left the building:
+   the send worker injects the open pixel and rewrites links on the way out, so
+   rendering the tracked copy would record a fake open every time somebody read
+   their own archive. `cid:` images are resolved by fetching the inline parts
+   over the authenticated attachment route.
 
 Campaign, transactional, and manual sends are three entry points into a single
 pipeline (`EmailJob` → BullMQ → email-engine → SMTP → `EmailEvent`), not three
@@ -199,7 +217,9 @@ operational and abuse-control gaps from the original audit have been closed.
   module (Email Studio send + preview +
   per-recipient delivery status + recipient autocomplete, cached per org for
   60s over an `(organizationId, createdAt)` index), `email-drafts`
-  module (composer drafts), `outbox` module (queued/scheduled sends + cancel), and
+  module (composer drafts), `outbox` module (queued/scheduled sends + cancel),
+  `sent` module (the server-paged archive plus one message in full — body,
+  parts, and event history), and
   `attachments` module (upload/download/delete to object storage), `images`
   module (editor image uploads; the read endpoint is public and unauthenticated
   because recipients' mail clients load embedded images without a session),
@@ -209,7 +229,8 @@ operational and abuse-control gaps from the original audit have been closed.
   reuses `transactionalEmailService.send` rather than introducing a parallel
   path.
 - `apps/web`: Vite React dashboard. It includes login/register, password reset,
-  dashboard, Compose (Email Studio), drafts, outbox, inbox, contacts, lists, smart lists
+  dashboard, Compose (Email Studio), drafts, outbox, sent archive and the
+  message reader behind it, inbox, contacts, lists, smart lists
   (segments), templates, campaigns, campaign analytics, sending accounts (SMTP
   connections), sending domains, sending health (deliverability), blocked
   addresses (suppressions), background jobs (queue operations),
@@ -378,10 +399,13 @@ operational and abuse-control gaps from the original audit have been closed.
   mailbox or deleting one never makes someone's own mail look lost. Cancelling
   from the outbox is scoped like listing; any member could previously cancel
   any queued job in the org.
-- [x] **Campaigns** are gated on the org *default* connection: fan-out always
-  sends as it, so a campaign has no mailbox of its own to scope by and holding
-  that connection is the whole question. Applies to list, get, create and every
-  operation through `findOwned`.
+- [x] **Campaigns** are gated on the account each one sends as
+  (`Campaign.smtpConnectionId`, or the org default when it names none), so
+  visibility is per campaign rather than one gate over the whole list. Applies
+  to list (as a where clause, not a post-filter), get, create, the account a
+  draft is moved onto, and every operation through `findOwned`. Enforced once
+  when the campaign is started; the worker deliberately does not re-verify, or a
+  recurring campaign would break the moment its author's grants changed.
 - [x] **Push notifications** carry sender and subject, so they answer to the
   same rule — only grant holders and OWNER/ADMIN are notified. Otherwise a
   banner would be a way to read a mailbox you were never given.
@@ -510,6 +534,13 @@ operational and abuse-control gaps from the original audit have been closed.
 
 ### Contacts, Templates, and Campaigns
 
+- [x] A campaign picks the **sending account** it goes out as, rather than
+  always taking the org default. `Campaign.smtpConnectionId` is nullable and is
+  not backfilled: NULL keeps meaning "whatever the default is when this fires",
+  which is what every campaign did before the column existed, and freezing
+  today's answer onto existing rows would change what a recurring campaign does
+  when the default moves. The worker resolves the named account against the org
+  and falls back to the default if it has gone (`ON DELETE SET NULL`).
 - [x] Contacts CRUD exists, with tags and created date surfaced in the UI.
 - [x] Contact lists CRUD, descriptions, and contact membership exist.
 - [x] Templates CRUD exists, with an in-app preview.

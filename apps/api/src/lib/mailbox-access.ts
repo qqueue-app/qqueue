@@ -123,28 +123,60 @@ export function assertInboxAccountAccess(
 }
 
 /**
- * Whether this person may start a campaign, and so whether campaigns are
- * theirs to see at all.
+ * Whether this person may send as one specific connection, without throwing.
  *
- * Campaign fan-out always sends as the organization's default connection
- * (resolved in the worker), so a campaign has no mailbox of its own to scope
- * by — holding the default connection is the whole of the question. This
- * mirrors assertMayUseConnection with no id, without throwing: when there is no
- * default connection there is nothing to guard, and the send would fail later
- * with the clearer missing_smtp_connection.
+ * The read-side twin of assertMayUseConnection: same rule, phrased as a
+ * question, for the places that filter a list rather than refuse a request.
+ * `null` means the organization's default — and when there is no default there
+ * is nothing to guard, so it answers yes and lets the send fail later with the
+ * clearer missing_smtp_connection.
  */
-export async function mayUseDefaultConnection(
-  access: MailboxAccess
+export async function mayUseConnection(
+  access: MailboxAccess,
+  smtpConnectionId: string | null
 ): Promise<boolean> {
   if (access.unrestricted) return true;
 
-  const defaultConnection = await prisma.sMTPConnection.findFirst({
-    where: { organizationId: access.organizationId, isDefault: true },
-    select: { id: true },
-  });
-  if (!defaultConnection) return true;
+  let connectionId = smtpConnectionId;
+  if (!connectionId) {
+    const defaultConnection = await prisma.sMTPConnection.findFirst({
+      where: { organizationId: access.organizationId, isDefault: true },
+      select: { id: true },
+    });
+    if (!defaultConnection) return true;
+    connectionId = defaultConnection.id;
+  }
 
-  return access.smtpConnectionIds.includes(defaultConnection.id);
+  return access.smtpConnectionIds.includes(connectionId);
+}
+
+/**
+ * Which campaigns are this person's to see.
+ *
+ * A campaign has no mailbox of its own beyond the account it sends as, so
+ * "may they see it" has the same answer as "may they start it" — anyone who
+ * could never send a campaign has no reason to read its audience, copy and
+ * results. A campaign that names no account sends as the org default, so it is
+ * visible to whoever holds the default.
+ *
+ * Returned as a where clause rather than a per-row check because the campaign
+ * list would otherwise resolve the same two facts once per row.
+ */
+export async function campaignScope(
+  access: MailboxAccess
+): Promise<Prisma.CampaignWhereInput> {
+  if (access.unrestricted) return {};
+
+  const clauses: Prisma.CampaignWhereInput[] = [
+    { smtpConnectionId: { in: access.smtpConnectionIds } },
+  ];
+  if (await mayUseConnection(access, null)) {
+    clauses.push({ smtpConnectionId: null });
+  }
+
+  // With no grants and no claim on the default this is `{ in: [] }` alone,
+  // which matches nothing — an empty campaign list rather than everyone's.
+  return { OR: clauses };
 }
 
 /**

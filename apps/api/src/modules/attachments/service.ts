@@ -8,6 +8,11 @@ import {
 } from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
+import {
+  emailJobScope,
+  resolveMailboxAccess
+} from "../../lib/mailbox-access.js";
+import { getMembership } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { storage } from "../../lib/storage.js";
 
@@ -107,15 +112,62 @@ export const attachmentService = {
   },
 
   /**
-   * Fetch an attachment (metadata + blob) for download. Scoped to the uploading
-   * user, mirroring the personal scoping of drafts.
+   * Fetch an attachment (metadata + blob) for download.
+   *
+   * Two ways to be entitled to one, because an attachment has two lives:
+   *
+   * 1. You uploaded it. That covers a file still sitting on a draft, which is
+   *    personal — nobody else's business until the message goes out.
+   * 2. It travelled with a message you may read. Once sent, an attachment is
+   *    part of the organization's mail log, and it is scoped exactly like the
+   *    log: the same emailJobScope the sent archive and outbox already use, so
+   *    an admin can open what their org sent and a member cannot open what went
+   *    out from a mailbox they were never given.
+   *
+   * Uploader-only was the whole rule before the sent archive could show a
+   * message's body, and it made every attachment in the archive undownloadable
+   * by anyone but the person who attached it — including the owner of the
+   * mailbox it was sent from.
    */
   async download(id: string, userId: string) {
     const attachment = await prisma.emailAttachment.findFirst({
-      where: { id, createdByUserId: userId }
+      where: { id }
     });
     if (!attachment) {
       throw new HttpError(404, "Attachment not found", "not_found");
+    }
+
+    if (attachment.createdByUserId !== userId) {
+      // Unsent (draft or orphaned) rows have no message to inherit access
+      // from, so the uploader check above was their only door.
+      if (!attachment.emailJobId) {
+        throw new HttpError(404, "Attachment not found", "not_found");
+      }
+
+      // Membership first, and 404 on its absence rather than the 403
+      // resolveMailboxAccess would throw: to someone outside the organization
+      // this id must look like it does not exist, not like something they are
+      // being kept out of.
+      const membership = await getMembership(userId, attachment.organizationId);
+      if (!membership) {
+        throw new HttpError(404, "Attachment not found", "not_found");
+      }
+
+      const access = await resolveMailboxAccess(
+        userId,
+        attachment.organizationId
+      );
+      const readable = await prisma.emailJob.findFirst({
+        where: {
+          id: attachment.emailJobId,
+          organizationId: attachment.organizationId,
+          ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] })
+        },
+        select: { id: true }
+      });
+      if (!readable) {
+        throw new HttpError(404, "Attachment not found", "not_found");
+      }
     }
 
     const body = await storage.getObject(attachment.storageKey);

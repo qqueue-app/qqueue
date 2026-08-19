@@ -205,7 +205,7 @@ describe("campaign-processing worker", () => {
     });
   });
 
-  it("throws when no default SMTP connection exists", async () => {
+  it("throws when the campaign names no account and the org has no default", async () => {
     prismaMock.campaign.findUnique.mockResolvedValue({
       id: "c1",
       status: "SENDING",
@@ -221,8 +221,71 @@ describe("campaign-processing worker", () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(null as never);
 
     await expect(run({ id: "j1", data: { campaignId: "c1" } })).rejects.toThrow(
-      "Default SMTP connection not found"
+      "Campaign has no sending account and the organization has no default"
     );
+  });
+
+  it("sends as the account the campaign names, not the org default", async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      id: "c1",
+      status: "SENDING",
+      cronExpression: null,
+      scheduledAt: null,
+      organizationId: "org1",
+      templateId: "t1",
+      smtpConnectionId: "smtp-chosen",
+      template: baseTemplate,
+      contactList: { members: [{ contact: { email: "a@b.com" } }] }
+    } as never);
+    prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
+    prismaMock.emailJob.findMany
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "new1" }] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-chosen"
+    } as never);
+    prismaMock.emailJob.createMany.mockResolvedValue({ count: 1 } as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    // Looked up by id AND org: a connection moved to another organization
+    // between writing the campaign and firing it must not be usable.
+    expect(prismaMock.sMTPConnection.findFirst).toHaveBeenCalledWith({
+      where: { id: "smtp-chosen", organizationId: "org1" },
+      select: { id: true }
+    });
+    const data = prismaMock.emailJob.createMany.mock.calls[0][0].data;
+    expect(data[0]).toMatchObject({ smtpConnectionId: "smtp-chosen" });
+  });
+
+  it("falls back to the org default when the named account has gone", async () => {
+    prismaMock.campaign.findUnique.mockResolvedValue({
+      id: "c1",
+      status: "SENDING",
+      cronExpression: null,
+      scheduledAt: null,
+      organizationId: "org1",
+      templateId: "t1",
+      smtpConnectionId: "smtp-gone",
+      template: baseTemplate,
+      contactList: { members: [{ contact: { email: "a@b.com" } }] }
+    } as never);
+    prismaMock.campaignRun.upsert.mockResolvedValue({ id: "run1" } as never);
+    prismaMock.emailJob.findMany
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([{ id: "new1" }] as never);
+    // The named connection resolves to nothing; the default query answers next.
+    prismaMock.sMTPConnection.findFirst
+      .mockResolvedValueOnce(null as never)
+      .mockResolvedValueOnce({ id: "smtp-default" } as never);
+    prismaMock.emailJob.createMany.mockResolvedValue({ count: 1 } as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    // Rather than failing the run: a removed account is exactly the case the
+    // nullable column exists for, and the FK already sets it null on delete.
+    const data = prismaMock.emailJob.createMany.mock.calls[0][0].data;
+    expect(data[0]).toMatchObject({ smtpConnectionId: "smtp-default" });
   });
 
   it("settles the run when there are no contacts", async () => {

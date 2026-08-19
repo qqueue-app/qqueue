@@ -34,6 +34,9 @@ const draft = {
   name: "Camp",
   status: "DRAFT",
   templateId: "tpl_1",
+  // Null: this campaign sends as whatever the org default is at fire time,
+  // which is what every campaign did before the column existed.
+  smtpConnectionId: null,
   contactListId: "list_1",
   cronExpression: null,
   timezone: null,
@@ -53,9 +56,66 @@ describe("campaignService.list / get", () => {
     expect(prismaMock.campaign.findFirst).toHaveBeenCalled();
   });
 
-  // A campaign has no mailbox of its own — the fan-out always sends as the org
-  // default — so holding that connection is the whole of "may I see campaigns".
-  it("hides every campaign from a MEMBER who cannot use the default connection", async () => {
+  it("asks for no scope clause at all when the reader is unrestricted", async () => {
+    prismaMock.campaign.findMany.mockResolvedValue([] as never);
+
+    await campaignService.list("org_1", "user_1");
+
+    // An OWNER's query stays exactly the query it was.
+    expect(prismaMock.campaign.findMany.mock.calls[0][0]!.where).toEqual({
+      organizationId: "org_1"
+    });
+  });
+
+  // A campaign's only mailbox is the account it sends as, so visibility is per
+  // campaign now rather than one gate over the whole list.
+  it("shows a MEMBER only campaigns on accounts they hold", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_1" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    // They don't hold the default, so campaigns that name no account are out.
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+    prismaMock.campaign.findMany.mockResolvedValue([] as never);
+
+    await campaignService.list("org_1", "user_1");
+
+    expect(prismaMock.campaign.findMany.mock.calls[0][0]!.where).toEqual({
+      organizationId: "org_1",
+      OR: [{ smtpConnectionId: { in: ["smtp_1"] } }]
+    });
+  });
+
+  it("includes default-account campaigns for a MEMBER who holds the default", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp-default" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp-default"
+    } as never);
+    prismaMock.campaign.findMany.mockResolvedValue([] as never);
+
+    await campaignService.list("org_1", "user_1");
+
+    expect(prismaMock.campaign.findMany.mock.calls[0][0]!.where).toEqual({
+      organizationId: "org_1",
+      OR: [
+        { smtpConnectionId: { in: ["smtp-default"] } },
+        { smtpConnectionId: null }
+      ]
+    });
+  });
+
+  it("matches nothing for a MEMBER with no grants and no claim on the default", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
       role: "MEMBER"
     } as never);
@@ -64,9 +124,31 @@ describe("campaignService.list / get", () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       id: "smtp-default"
     } as never);
+    prismaMock.campaign.findMany.mockResolvedValue([] as never);
 
-    await expect(campaignService.list("org_1", "user_1")).resolves.toEqual([]);
-    expect(prismaMock.campaign.findMany).not.toHaveBeenCalled();
+    await campaignService.list("org_1", "user_1");
+
+    // `{ in: [] }` alone — an empty list rather than everyone's.
+    expect(prismaMock.campaign.findMany.mock.calls[0][0]!.where).toEqual({
+      organizationId: "org_1",
+      OR: [{ smtpConnectionId: { in: [] } }]
+    });
+  });
+
+  it("hides one campaign whose account a MEMBER does not hold", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      smtpConnectionId: "smtp-theirs"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp-mine" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+
+    await expect(campaignService.get("c1", "user_1")).resolves.toBeNull();
   });
 
   it("lists campaigns for a MEMBER who holds the default connection", async () => {
@@ -86,7 +168,7 @@ describe("campaignService.list / get", () => {
     expect(prismaMock.campaign.findMany).toHaveBeenCalled();
   });
 
-  it("refuses creation by a MEMBER who cannot use the default connection", async () => {
+  it("refuses creation by a MEMBER who cannot use the account named", async () => {
     // Letting them create a campaign they would then never see in the list is
     // worse than refusing outright.
     prismaMock.organizationMember.findUnique.mockResolvedValue({
@@ -210,6 +292,87 @@ describe("campaignService.update", () => {
     expect(prismaMock.campaign.update).toHaveBeenCalled();
   });
 
+  it("stores the sending account and verifies it belongs to the org", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp_1"
+    } as never);
+    prismaMock.campaign.update.mockResolvedValue(draft as never);
+
+    await campaignService.update("c1", "user_1", { smtpConnectionId: "smtp_1" });
+
+    expect(prismaMock.sMTPConnection.findFirst).toHaveBeenCalledWith({
+      where: { id: "smtp_1", organizationId: "org_1" },
+      select: { id: true }
+    });
+    expect(prismaMock.campaign.update.mock.calls[0][0].data).toMatchObject({
+      smtpConnectionId: "smtp_1"
+    });
+  });
+
+  it("rejects an account from another organization", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(null as never);
+
+    await expect(
+      campaignService.update("c1", "user_1", { smtpConnectionId: "smtp_other" })
+    ).rejects.toThrow("Sending account not found");
+    expect(prismaMock.campaign.update).not.toHaveBeenCalled();
+  });
+
+  it("writes an explicit null through, returning the campaign to the default", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      smtpConnectionId: "smtp_1"
+    } as never);
+    prismaMock.campaign.update.mockResolvedValue(draft as never);
+
+    await campaignService.update("c1", "user_1", { smtpConnectionId: null });
+
+    // Coalescing this away would make "go back to the default" unsayable.
+    expect(prismaMock.campaign.update.mock.calls[0][0].data).toMatchObject({
+      smtpConnectionId: null
+    });
+  });
+
+  it("leaves the account alone when the field is omitted", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      smtpConnectionId: "smtp_1"
+    } as never);
+    prismaMock.campaign.update.mockResolvedValue(draft as never);
+
+    await campaignService.update("c1", "user_1", { name: "New" });
+
+    expect(prismaMock.campaign.update.mock.calls[0][0].data.smtpConnectionId)
+      .toBeUndefined();
+  });
+
+  it("refuses to move a campaign onto an account the MEMBER cannot use", async () => {
+    // Otherwise a member could create a campaign on an account they hold and
+    // then edit it onto one they don't. It starts on smtp_mine so they can see
+    // it at all — the refusal has to come from the move, not from visibility.
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      smtpConnectionId: "smtp_mine"
+    } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "smtp_theirs"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_mine" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+
+    await expect(
+      campaignService.update("c1", "user_1", { smtpConnectionId: "smtp_theirs" })
+    ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
+    expect(prismaMock.campaign.update).not.toHaveBeenCalled();
+  });
+
   it("throws 404 for a campaign the user does not own", async () => {
     prismaMock.campaign.findFirst.mockResolvedValue(null);
     await expect(
@@ -228,6 +391,62 @@ describe("campaignService.update", () => {
   });
 });
 
+describe("campaignService send-as gate", () => {
+  it("checks the campaign's own account, not the org default, on send", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      smtpConnectionId: "smtp_named"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_named" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
+      id: "grant_1"
+    } as never);
+    prismaMock.campaign.update.mockResolvedValue(draft as never);
+
+    await campaignService.sendNow("c1", "user_1");
+
+    // The grant looked up is the campaign's account. Before this, a member who
+    // held only smtp_named could not start their own campaign, because the
+    // check asked about the org default instead.
+    expect(prismaMock.smtpConnectionGrant.findUnique).toHaveBeenCalledWith({
+      where: {
+        smtpConnectionId_userId: {
+          smtpConnectionId: "smtp_named",
+          userId: "user_1"
+        }
+      },
+      select: { id: true }
+    });
+  });
+
+  it("refuses to start a campaign on an account the MEMBER lost access to", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      smtpConnectionId: "smtp_named"
+    } as never);
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_named" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null as never);
+
+    await expect(campaignService.sendNow("c1", "user_1")).rejects.toMatchObject({
+      statusCode: 403,
+      code: "send_as_denied"
+    });
+    expect(add).not.toHaveBeenCalled();
+  });
+});
+
 describe("campaignService.duplicate", () => {
   it("creates a copy of an owned campaign", async () => {
     prismaMock.campaign.findFirst.mockResolvedValue(draft as never);
@@ -236,6 +455,20 @@ describe("campaignService.duplicate", () => {
     expect(prismaMock.campaign.create.mock.calls[0][0].data.name).toBe(
       "Copy of Camp"
     );
+  });
+
+  it("copies the sending account onto the new draft", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      smtpConnectionId: "smtp_1"
+    } as never);
+    prismaMock.campaign.create.mockResolvedValue(draft as never);
+
+    await campaignService.duplicate("c1", "user_1");
+
+    expect(prismaMock.campaign.create.mock.calls[0][0].data).toMatchObject({
+      smtpConnectionId: "smtp_1"
+    });
   });
 
   // Phase 5: duplicate() used to silently drop the segment and all A/B config.

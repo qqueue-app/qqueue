@@ -8,7 +8,8 @@ import type {
 import { nextCronRun } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import {
-  mayUseDefaultConnection,
+  campaignScope,
+  mayUseConnection,
   resolveMailboxAccess
 } from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
@@ -20,27 +21,37 @@ function recurringSchedulerId(campaignId: string) {
 }
 
 /**
- * Campaign fan-out sends as the org's default connection (resolved in the
- * worker). Send-as enforcement (Phase 4) therefore happens when the campaign
- * is started: the actor must be allowed to use the default connection. The
+ * Campaign fan-out sends as the account the campaign names, or as the org's
+ * default when it names none (resolved in the worker). Send-as enforcement
+ * (Phase 4) therefore happens when the campaign is started: the actor must be
+ * allowed to use whichever of the two this campaign will actually use. The
  * worker does not re-verify at fire time.
  */
-async function assertMayStartCampaign(userId: string, organizationId: string) {
-  await assertMayUseConnection({ userId, organizationId });
+async function assertMayStartCampaign(campaign: {
+  organizationId: string;
+  smtpConnectionId: string | null;
+}, userId: string) {
+  await assertMayUseConnection({
+    userId,
+    organizationId: campaign.organizationId,
+    smtpConnectionId: campaign.smtpConnectionId
+  });
 }
 
 /**
- * Whether campaigns exist at all for this person.
+ * Whether one campaign exists at all for this person.
  *
- * A campaign has no mailbox of its own — the fan-out always sends as the org's
- * default connection — so "which campaigns may a member see" has the same
- * answer as "may they use the default connection", the check that already
- * guards starting one. Someone who could never start a campaign has no reason
- * to read the audience, copy and results of everyone else's.
+ * A campaign has no mailbox of its own beyond the account it sends as, so
+ * "may a member see this campaign" has the same answer as "may they send as
+ * its account", the check that already guards starting one. Someone who could
+ * never start it has no reason to read its audience, copy and results.
  */
-async function campaignsVisibleTo(userId: string, organizationId: string) {
-  const access = await resolveMailboxAccess(userId, organizationId);
-  return mayUseDefaultConnection(access);
+async function campaignVisibleTo(
+  userId: string,
+  campaign: { organizationId: string; smtpConnectionId: string | null }
+) {
+  const access = await resolveMailboxAccess(userId, campaign.organizationId);
+  return mayUseConnection(access, campaign.smtpConnectionId);
 }
 
 const campaignInclude = {
@@ -49,6 +60,12 @@ const campaignInclude = {
   },
   contactList: {
     select: { id: true, name: true, _count: { select: { members: true } } }
+  },
+  // Named so the list can say which account a campaign sends as without a
+  // second request per row. Absent (NULL) means the org default, which the
+  // client resolves against the accounts it already loads.
+  smtpConnection: {
+    select: { id: true, name: true, fromEmail: true, fromName: true }
   },
   segment: {
     select: { id: true, name: true }
@@ -62,9 +79,23 @@ const campaignInclude = {
 async function assertCampaignRelations(input: {
   organizationId: string;
   templateId?: string | null;
+  smtpConnectionId?: string | null;
   contactListId?: string | null;
   segmentId?: string | null;
 }) {
+  if (input.smtpConnectionId) {
+    const connection = await prisma.sMTPConnection.findFirst({
+      where: {
+        id: input.smtpConnectionId,
+        organizationId: input.organizationId
+      },
+      select: { id: true }
+    });
+    if (!connection) {
+      throw new HttpError(404, "Sending account not found");
+    }
+  }
+
   if (input.templateId) {
     const template = await prisma.template.findFirst({
       where: { id: input.templateId, organizationId: input.organizationId },
@@ -107,7 +138,7 @@ async function findOwned(id: string, userId: string) {
   // is the one place the visibility rule has to hold. 404 rather than 403: the
   // campaign is not in this member's world at all, which is also what the empty
   // list tells them.
-  if (!(await campaignsVisibleTo(userId, campaign.organizationId))) {
+  if (!(await campaignVisibleTo(userId, campaign))) {
     throw new HttpError(404, "Campaign not found");
   }
   return campaign;
@@ -136,11 +167,12 @@ async function enqueueCampaign(
 
 export const campaignService = {
   async list(organizationId: string, userId: string) {
-    if (!(await campaignsVisibleTo(userId, organizationId))) {
-      return [];
-    }
+    const access = await resolveMailboxAccess(userId, organizationId);
+    // Scoped in the query rather than filtered afterwards: with per-campaign
+    // accounts, visibility varies row by row, and a post-filter would resolve
+    // the same two grant facts once per campaign.
     return prisma.campaign.findMany({
-      where: { organizationId },
+      where: { organizationId, ...(await campaignScope(access)) },
       include: campaignInclude,
       orderBy: { createdAt: "desc" }
     });
@@ -152,7 +184,7 @@ export const campaignService = {
       include: campaignInclude
     });
     if (!campaign) return null;
-    if (!(await campaignsVisibleTo(userId, campaign.organizationId))) {
+    if (!(await campaignVisibleTo(userId, campaign))) {
       return null;
     }
     return campaign;
@@ -160,21 +192,26 @@ export const campaignService = {
 
   async create(input: CampaignInput, userId: string) {
     // Creation is gated with the rest: letting a member create a campaign they
-    // would then never see in the list is worse than refusing outright.
-    if (!(await campaignsVisibleTo(userId, input.organizationId))) {
+    // would then never see in the list is worse than refusing outright. Gated
+    // on the account this campaign will send as, so picking one you may use is
+    // allowed even when the org default is not yours.
+    const smtpConnectionId = input.smtpConnectionId ?? null;
+    const access = await resolveMailboxAccess(userId, input.organizationId);
+    if (!(await mayUseConnection(access, smtpConnectionId))) {
       throw new HttpError(
         403,
-        "You are not allowed to send campaigns for this organization",
+        "You are not allowed to send campaigns from this account",
         "send_as_denied"
       );
     }
-    await assertCampaignRelations(input);
+    await assertCampaignRelations({ ...input, smtpConnectionId });
 
     return prisma.campaign.create({
       data: {
         organizationId: input.organizationId,
         name: input.name,
         templateId: input.templateId,
+        smtpConnectionId,
         contactListId: input.contactListId,
         segmentId: input.segmentId,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
@@ -193,9 +230,28 @@ export const campaignService = {
     await assertCampaignRelations({
       organizationId: existing.organizationId,
       templateId: input.templateId,
+      smtpConnectionId: input.smtpConnectionId,
       contactListId: input.contactListId,
       segmentId: input.segmentId
     });
+
+    /*
+      Moving a campaign onto an account is a send-as decision, so it is gated
+      like one — otherwise a member could create a campaign on an account they
+      hold and then edit it onto one they don't. `undefined` leaves the account
+      alone and needs no check; `null` returns it to the org default, which is
+      itself a connection someone may or may not hold.
+    */
+    if (input.smtpConnectionId !== undefined) {
+      const access = await resolveMailboxAccess(userId, existing.organizationId);
+      if (!(await mayUseConnection(access, input.smtpConnectionId))) {
+        throw new HttpError(
+          403,
+          "You are not allowed to send campaigns from this account",
+          "send_as_denied"
+        );
+      }
+    }
 
     // Targeting a segment clears any existing contact list and vice versa, so a
     // campaign never ends up pointing at both.
@@ -211,6 +267,9 @@ export const campaignService = {
       data: {
         name: input.name,
         templateId: input.templateId,
+        // Explicit null is a real value here — "go back to the org default" —
+        // so it must survive as null rather than being coalesced away.
+        smtpConnectionId: input.smtpConnectionId,
         ...targetUpdate,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined
       },
@@ -285,6 +344,9 @@ export const campaignService = {
         organizationId: existing.organizationId,
         name: `Copy of ${existing.name}`,
         templateId: existing.templateId,
+        // The copy sends as whatever the original did; findOwned has already
+        // established this actor may see (and so may send as) that account.
+        smtpConnectionId: existing.smtpConnectionId,
         contactListId: existing.contactListId,
         segmentId: existing.segmentId,
         abTestEnabled: existing.abTestEnabled,
@@ -324,7 +386,7 @@ export const campaignService = {
       );
     }
 
-    await assertMayStartCampaign(userId, campaign.organizationId);
+    await assertMayStartCampaign(campaign, userId);
 
     const updated = await prisma.campaign.update({
       where: { id },
@@ -353,7 +415,7 @@ export const campaignService = {
       );
     }
 
-    await assertMayStartCampaign(userId, campaign.organizationId);
+    await assertMayStartCampaign(campaign, userId);
 
     const scheduledAt = new Date(input.scheduledAt);
     if (scheduledAt.getTime() <= Date.now()) {
@@ -404,7 +466,7 @@ export const campaignService = {
       );
     }
 
-    await assertMayStartCampaign(userId, campaign.organizationId);
+    await assertMayStartCampaign(campaign, userId);
 
     const nextRunAt = nextCronRun(input.cronExpression, input.timezone);
     if (!nextRunAt) {

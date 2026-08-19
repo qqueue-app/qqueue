@@ -258,6 +258,218 @@ describe("sentService.list", () => {
   });
 });
 
+describe("sentService.get", () => {
+  /** The archived job a detail request resolves, with its body and history. */
+  function detailJob(overrides: Record<string, unknown> = {}) {
+    return {
+      ...job,
+      replyTo: null,
+      messageId: "<abc@acme.com>",
+      html: "<p>Hello</p>",
+      text: "Hello",
+      attachments: [],
+      events: [
+        {
+          id: "ev_1",
+          type: "SENT",
+          occurredAt: new Date("2026-07-22T09:00:00.000Z"),
+          metadata: null
+        }
+      ],
+      ...overrides
+    };
+  }
+
+  it("returns the stored body, addresses and history", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(detailJob() as never);
+
+    const email = await sentService.get("job_1", "org_1", "user_1");
+
+    expect(email).toMatchObject({
+      id: "job_1",
+      html: "<p>Hello</p>",
+      text: "Hello",
+      cc: ["c@x.com"],
+      bcc: [],
+      messageId: "<abc@acme.com>",
+      to: ["a@x.com", "b@x.com"]
+    });
+    expect(email.events).toEqual([
+      {
+        id: "ev_1",
+        type: "SENT",
+        occurredAt: "2026-07-22T09:00:00.000Z",
+        detail: null
+      }
+    ]);
+  });
+
+  it("reads the archive's terminal statuses only", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(detailJob() as never);
+
+    await sentService.get("job_1", "org_1", "user_1");
+
+    // A queued or cancelled job is not in the archive, so it is not openable
+    // from it either — the outbox owns those.
+    expect(prismaMock.emailJob.findFirst.mock.calls[0][0]!.where).toMatchObject({
+      id: "job_1",
+      organizationId: "org_1",
+      status: { in: ["SENT", "FAILED"] }
+    });
+  });
+
+  it("applies the same mailbox scope the list does", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER"
+    } as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+      { smtpConnectionId: "smtp_1" }
+    ] as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
+    prismaMock.emailJob.findFirst.mockResolvedValue(detailJob() as never);
+
+    await sentService.get("job_1", "org_1", "user_1");
+
+    expect(prismaMock.emailJob.findFirst.mock.calls[0][0]!.where).toMatchObject({
+      AND: [
+        {
+          OR: [
+            { smtpConnectionId: { in: ["smtp_1"] } },
+            { createdByUserId: "user_1" }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("404s rather than 403s for a message outside the reader's scope", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(null as never);
+
+    await expect(
+      sentService.get("job_1", "org_1", "user_1")
+    ).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it("splits parts into inline and attached by their Content-ID", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(
+      detailJob({
+        attachments: [
+          {
+            id: "att_1",
+            filename: "report.pdf",
+            contentType: "application/pdf",
+            size: 12,
+            cid: null
+          },
+          {
+            id: "att_2",
+            filename: "qr.png",
+            contentType: "image/png",
+            size: 34,
+            cid: "<qr@acme>"
+          }
+        ]
+      }) as never
+    );
+
+    const email = await sentService.get("job_1", "org_1", "user_1");
+
+    expect(email.attachments).toEqual([
+      {
+        id: "att_1",
+        filename: "report.pdf",
+        contentType: "application/pdf",
+        size: 12,
+        isInline: false,
+        contentId: null
+      },
+      {
+        id: "att_2",
+        filename: "qr.png",
+        contentType: "image/png",
+        size: 34,
+        isInline: true,
+        contentId: "<qr@acme>"
+      }
+    ]);
+  });
+
+  it.each([
+    ["FAILED", { message: "550 no such user" }, "550 no such user"],
+    ["BOUNCED", { reason: "mailbox full" }, "mailbox full"]
+  ])("lifts the reason out of a %s event", async (type, metadata, expected) => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(
+      detailJob({
+        status: "FAILED",
+        events: [
+          {
+            id: "ev_1",
+            type,
+            occurredAt: new Date("2026-07-22T09:00:00.000Z"),
+            metadata
+          }
+        ]
+      }) as never
+    );
+
+    const email = await sentService.get("job_1", "org_1", "user_1");
+
+    // Surfaced on its own so the reader doesn't have to know that "Failed" is a
+    // status while the reason is an event.
+    expect(email.failureReason).toBe(expected);
+    expect(email.events[0].detail).toBe(expected);
+  });
+
+  it("reports no failure reason for a message that did not fail", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(
+      detailJob({
+        status: "SENT",
+        events: [
+          {
+            id: "ev_1",
+            type: "BOUNCED",
+            occurredAt: new Date("2026-07-22T09:00:00.000Z"),
+            metadata: { reason: "soft bounce, retried" }
+          }
+        ]
+      }) as never
+    );
+
+    const email = await sentService.get("job_1", "org_1", "user_1");
+
+    // A delivered message with an old soft bounce on record has not failed.
+    expect(email.failureReason).toBeNull();
+  });
+
+  it("survives event metadata in a shape it does not recognise", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(
+      detailJob({
+        events: [
+          {
+            id: "ev_1",
+            type: "CLICKED",
+            occurredAt: new Date("2026-07-22T09:00:00.000Z"),
+            // Written by several code paths over several releases; a shape that
+            // has since changed must degrade, never throw mid-render.
+            metadata: ["not", "an", "object"]
+          },
+          {
+            id: "ev_2",
+            type: "CLICKED",
+            occurredAt: new Date("2026-07-22T09:05:00.000Z"),
+            metadata: { url: "https://acme.com/pricing" }
+          }
+        ]
+      }) as never
+    );
+
+    const email = await sentService.get("job_1", "org_1", "user_1");
+
+    expect(email.events[0].detail).toBeNull();
+    expect(email.events[1].detail).toBe("https://acme.com/pricing");
+  });
+});
+
 describe("sentEmailQuerySchema", () => {
   it("defaults to the whole archive, newest page first", () => {
     expect(query()).toMatchObject({

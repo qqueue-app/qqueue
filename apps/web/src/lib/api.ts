@@ -617,6 +617,57 @@ export interface SentEmailPage {
   pageSize: number;
 }
 
+/** A part that travelled with an archived message. */
+export interface SentEmailAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  /** Referenced by `cid:` in the body, so it renders in place. */
+  isInline: boolean;
+  contentId?: string | null;
+}
+
+/** One thing the pipeline recorded about a message, in order. */
+export interface SentEmailEvent {
+  id: string;
+  type:
+    | "QUEUED"
+    | "SENT"
+    | "DELIVERED"
+    | "OPENED"
+    | "CLICKED"
+    | "BOUNCED"
+    | "COMPLAINED"
+    | "FAILED";
+  occurredAt: string;
+  /** The readable half of the event's metadata, where it has one. */
+  detail?: string | null;
+}
+
+/**
+ * One archived message, opened. A second request rather than more fields on
+ * SentEmail: the body is the widest column in the schema and a page of 25
+ * subjects has no use for 25 rendered emails.
+ */
+export interface SentEmailDetail extends SentEmail {
+  /**
+   * The body as stored — before the send worker injected tracking and appended
+   * the unsubscribe footer. Reading your own archive must not fire the
+   * message's open pixel.
+   */
+  html?: string | null;
+  text?: string | null;
+  cc: string[];
+  bcc: string[];
+  replyTo?: string | null;
+  messageId?: string | null;
+  attachments: SentEmailAttachment[];
+  /** Oldest first — read as a history, not a feed. */
+  events: SentEmailEvent[];
+  failureReason?: string | null;
+}
+
 export interface SentEmailQuery {
   organizationId: string;
   q?: string;
@@ -1021,8 +1072,16 @@ export interface Campaign {
   lastRunAt?: string | null;
   nextRunAt?: string | null;
   templateId?: string | null;
+  /** Null means the fan-out sends as the org's default account. */
+  smtpConnectionId?: string | null;
   contactListId?: string | null;
   template?: { id: string; name: string; subject: string } | null;
+  smtpConnection?: {
+    id: string;
+    name: string;
+    fromEmail: string;
+    fromName?: string | null;
+  } | null;
   contactList?: {
     id: string;
     name: string;
@@ -2160,6 +2219,12 @@ export const api = {
     return request<SentEmailPage>(`/api/v1/sent?${params.toString()}`);
   },
 
+  getSentEmail(id: string, organizationId: string) {
+    return request<SentEmailDetail>(
+      `/api/v1/sent/${encodeURIComponent(id)}?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
   cancelOutboxEmail(id: string, organizationId: string) {
     return request<{ id: string; status: string }>(
       `/api/v1/outbox/${encodeURIComponent(id)}/cancel`,
@@ -2371,6 +2436,23 @@ export const api = {
     const { accessToken } = getSession();
     const response = await fetch(
       `${apiBaseUrl}/api/v1/inbox/messages/${encodeURIComponent(input.messageId)}/attachments/${encodeURIComponent(input.attachmentId)}?organizationId=${encodeURIComponent(input.organizationId)}`,
+      {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      }
+    );
+    if (!response.ok) {
+      throw new ApiError("Unable to download attachment", response.status);
+    }
+    return response.blob();
+  },
+
+  // The outbound twin of the above: a part of a message we sent, rather than
+  // one we received. Same reason it bypasses request() — the response is bytes,
+  // and the bearer token has to ride on an explicit fetch.
+  async downloadAttachment(id: string) {
+    const { accessToken } = getSession();
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/attachments/${encodeURIComponent(id)}`,
       {
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       }
