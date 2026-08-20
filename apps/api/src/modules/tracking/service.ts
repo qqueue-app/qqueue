@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { classifyBounce } from "@qqueue/email-engine";
+import { classifyBounce, classifyOpen } from "@qqueue/email-engine";
 import { emailAddressSchema } from "@qqueue/shared";
+import { logger } from "../../lib/logger.js";
 import { prisma } from "../../lib/prisma.js";
+import { redis } from "../../lib/redis.js";
 import { suppressionService } from "../suppressions/service.js";
 import { webhookEndpointService } from "../webhooks/service.js";
 
@@ -29,8 +31,62 @@ export type WebhookEventInput = z.infer<typeof webhookEventSchema>;
 async function findJob(emailJobId: string) {
   return prisma.emailJob.findUnique({
     where: { id: emailJobId },
-    select: { id: true, organizationId: true, toEmail: true }
+    // `sentAt` is read by open classification: an open arriving seconds after
+    // the send is a machine pre-fetching, not a reader.
+    select: { id: true, organizationId: true, toEmail: true, sentAt: true }
   });
+}
+
+/** What the pixel request itself tells us, lifted off the HTTP layer. */
+export interface OpenContext {
+  userAgent?: string | null;
+  ip?: string | null;
+}
+
+/*
+  User-Agents are attacker-controlled and unbounded; this column is JSON on the
+  largest table in the schema. Long enough to keep every real client string,
+  short enough that a hostile one can't be used to inflate a row.
+*/
+const MAX_USER_AGENT_LENGTH = 256;
+
+/**
+ * How long one email job's opens collapse into a single outbound webhook.
+ *
+ * Without this every pixel fetch queued its own `email.opened` delivery, with
+ * five retries behind it — so one reader with the message on screen could send
+ * a subscriber's endpoint a dozen POSTs about a single email. Subscribers want
+ * to know the message was opened; they do not want a render log. The first
+ * open in a window is delivered immediately, and the raw events remain on the
+ * job for anyone who asks the API.
+ */
+const OPEN_WEBHOOK_WINDOW_SECONDS = 60 * 60;
+
+/**
+ * Claim the right to emit an `email.opened` webhook for this job, once per
+ * window. `SET NX EX` so concurrent opens can't both win.
+ *
+ * Fails open: if Redis is unreachable we would rather send a duplicate webhook
+ * than drop the only notification of an open — and in that state the delivery
+ * queue (also Redis) is down too, so the enqueue below fails on its own.
+ */
+async function claimOpenWebhookSlot(emailJobId: string): Promise<boolean> {
+  try {
+    const claimed = await redis.set(
+      `open-webhook:${emailJobId}`,
+      "1",
+      "EX",
+      OPEN_WEBHOOK_WINDOW_SECONDS,
+      "NX"
+    );
+    return claimed === "OK";
+  } catch (error) {
+    logger.warn(
+      { err: error, emailJobId },
+      "open webhook debounce unavailable; emitting"
+    );
+    return true;
+  }
 }
 
 export const trackingService = {
@@ -46,25 +102,54 @@ export const trackingService = {
    * reported only from sources that observe it — an ESP webhook, or a DSN.
    * Consumers who want the open signal already receive the OPENED event.
    */
-  async recordOpen(emailJobId: string) {
+  async recordOpen(emailJobId: string, context: OpenContext = {}) {
     const job = await findJob(emailJobId);
     if (!job) {
       return;
     }
 
-    await prisma.emailEvent.create({
+    const secondsSinceSent = job.sentAt
+      ? (Date.now() - job.sentAt.getTime()) / 1000
+      : null;
+    const userAgent =
+      context.userAgent?.slice(0, MAX_USER_AGENT_LENGTH).trim() || null;
+    const classification = classifyOpen({ userAgent, secondsSinceSent });
+
+    /*
+      Every open carries the evidence it was judged on, not just the verdict.
+      The heuristics will be wrong sometimes and will change; a row that records
+      only "automated: true" can never be re-examined, whereas one that keeps
+      the agent string and the elapsed time can be re-classified later against
+      the same facts.
+    */
+    const event = await prisma.emailEvent.create({
       data: {
         organizationId: job.organizationId,
         emailJobId,
-        type: "OPENED"
+        type: "OPENED",
+        metadata: {
+          ...(userAgent ? { userAgent } : {}),
+          ...(context.ip ? { ip: context.ip } : {}),
+          ...(secondsSinceSent !== null
+            ? { secondsSinceSent: Math.round(secondsSinceSent) }
+            : {}),
+          ...(classification.automated
+            ? { automated: true, automatedReason: classification.reason }
+            : {})
+        }
       }
     });
 
-    await webhookEndpointService.enqueueLatestForEmailEvent({
-      organizationId: job.organizationId,
-      emailJobId,
-      type: "OPENED"
-    });
+    // A scanner fetching the pixel is not news. Notifying a subscriber that
+    // their mail was "opened" by a security appliance is worse than silence:
+    // it is a false engagement signal they will act on.
+    if (classification.automated) {
+      return;
+    }
+
+    if (await claimOpenWebhookSlot(emailJobId)) {
+      await webhookEndpointService.enqueueForEmailEvent(event.id);
+    }
   },
 
   /** Record a link click. `url` is the verified original destination. */

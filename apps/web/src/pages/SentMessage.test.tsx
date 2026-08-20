@@ -71,6 +71,9 @@ function detail(overrides: Record<string, unknown> = {}) {
         type: "SENT" as const,
         occurredAt: "2026-07-22T09:00:00.000Z",
         detail: null,
+        count: 1,
+        lastOccurredAt: null,
+        automatedCount: 0,
       },
     ],
     failureReason: null,
@@ -199,6 +202,55 @@ describe("SentMessage", () => {
     expect(
       within(history).getByText("https://acme.com/pricing")
     ).toBeInTheDocument();
+  });
+
+  it("says a repeated open is one reader, not many", async () => {
+    mockedApi.getSentEmail.mockResolvedValue(
+      detail({
+        opens: 12,
+        events: [
+          {
+            id: "ev_2",
+            type: "OPENED" as const,
+            occurredAt: "2026-07-22T09:00:20.000Z",
+            detail: null,
+            count: 13,
+            lastOccurredAt: "2026-07-22T15:17:57.000Z",
+            automatedCount: 1,
+          },
+        ],
+      })
+    );
+    renderWithProviders(<SentMessage />);
+
+    const history = await screen.findByRole("list", {
+      name: "Message history",
+    });
+    // One line, not thirteen — and the span it covers, because a bare count
+    // reads as thirteen readers all over again.
+    expect(within(history).getAllByText("Opened")).toHaveLength(1);
+    expect(
+      within(history).getByText(/13 times/)
+    ).toBeInTheDocument();
+    expect(
+      within(history).getByText(/1 looked automated/)
+    ).toBeInTheDocument();
+    // And the gloss that stops "13" being read as thirteen people.
+    expect(
+      screen.getByText(/An open is recorded every time/)
+    ).toBeInTheDocument();
+  });
+
+  it("leaves a one-off event unadorned", async () => {
+    renderWithProviders(<SentMessage />);
+
+    const history = await screen.findByRole("list", {
+      name: "Message history",
+    });
+    expect(within(history).queryByText(/times/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/An open is recorded every time/)
+    ).not.toBeInTheDocument();
   });
 
   it("offers the attached parts and downloads one on request", async () => {

@@ -78,7 +78,12 @@ describe("trackingController.open", () => {
 
     await trackingController.open(mockReq({ params: { token } }), res);
 
-    expect(trackingService.recordOpen).toHaveBeenCalledWith("job_1");
+    // The request's own headers are the only evidence of who fetched the
+    // pixel, so they travel into the event rather than being dropped.
+    expect(trackingService.recordOpen).toHaveBeenCalledWith("job_1", {
+      userAgent: null,
+      ip: null
+    });
     expect(res.set).toHaveBeenCalledWith(
       expect.objectContaining({
         "Content-Type": "image/gif",
@@ -89,6 +94,27 @@ describe("trackingController.open", () => {
       })
     );
     expect(res.end).toHaveBeenCalledWith(TRACKING_PIXEL);
+  });
+
+  it("carries the fetcher's User-Agent and address into the event", async () => {
+    vi.mocked(trackingService.recordOpen).mockResolvedValue(undefined);
+    const token = signTrackingToken({ j: "job_1" }, "test-tracking-secret");
+
+    await trackingController.open(
+      mockReq({
+        params: { token },
+        ip: "203.0.113.7",
+        headers: { "user-agent": "Proofpoint-Urldefense/1.0" }
+      }),
+      mockRes()
+    );
+
+    // Without these the event cannot say whether a person or an appliance
+    // fetched the pixel — and the headers are gone once the response is sent.
+    expect(trackingService.recordOpen).toHaveBeenCalledWith("job_1", {
+      userAgent: "Proofpoint-Urldefense/1.0",
+      ip: "203.0.113.7"
+    });
   });
 
   // A mangled or forged link must never break image rendering in a mail client.

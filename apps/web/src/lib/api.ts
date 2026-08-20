@@ -640,9 +640,20 @@ export interface SentEmailEvent {
     | "BOUNCED"
     | "COMPLAINED"
     | "FAILED";
+  /** When the first of the folded events happened. */
   occurredAt: string;
   /** The readable half of the event's metadata, where it has one. */
   detail?: string | null;
+  /**
+   * How many recorded events this entry folds together. A mail client re-fetches
+   * the open pixel on every render, so one reader can write a dozen OPENED rows;
+   * identical events collapse into one entry that carries its own count.
+   */
+  count: number;
+  /** The newest of the folded events. Null when `count` is 1. */
+  lastOccurredAt?: string | null;
+  /** How many of the folded events looked automated rather than human. */
+  automatedCount: number;
 }
 
 /**

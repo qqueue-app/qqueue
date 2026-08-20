@@ -2455,13 +2455,33 @@ export interface SentEmailAttachment {
 export interface SentEmailEvent {
   id: string;
   type: EmailEventType;
+  /** When the first of the folded events happened. */
   occurredAt: string;
   /**
-   * The human-readable half of the event's metadata, where it has one: the SMTP
+   * The readable half of the event's metadata, where it has one: the SMTP
    * rejection for a BOUNCED event, the error for a FAILED one, the clicked URL
    * for a CLICKED one. Null for events that are just a fact with a timestamp.
    */
   detail?: string | null;
+  /**
+   * How many recorded events this entry folds together.
+   *
+   * A pixel fetch is not a reader, and a reader is not one fetch: a mail client
+   * re-requests the image on every render, so one person reading once can write
+   * a dozen OPENED rows. The history reads as a story, and a dozen identical
+   * "Opened" lines is not one — so identical events collapse into a single
+   * entry carrying its own count. 1 for a one-off.
+   */
+  count: number;
+  /** The newest of the folded events. Null when `count` is 1. */
+  lastOccurredAt?: string | null;
+  /**
+   * How many of the folded events looked like a machine rather than a person —
+   * a security scanner, or a privacy proxy fetching on delivery. Counted, not
+   * hidden: the reader is told the number is soft rather than shown a number
+   * that quietly disagrees with the raw log.
+   */
+  automatedCount: number;
 }
 
 export interface SentEmailDetail extends SentEmail {

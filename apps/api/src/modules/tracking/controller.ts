@@ -5,6 +5,7 @@ import {
   type ClickTokenPayload
 } from "@qqueue/email-engine";
 import { env } from "../../config/env.js";
+import { logger } from "../../lib/logger.js";
 import {
   TRACKING_PIXEL,
   trackingService,
@@ -40,7 +41,19 @@ export const trackingController = {
       env.TRACKING_SECRET
     );
     if (payload?.j) {
-      await trackingService.recordOpen(payload.j).catch(() => undefined);
+      // The request's own headers are the only evidence of *who* fetched this,
+      // and they are gone the moment the response is written — so they travel
+      // with the event rather than being re-derived later.
+      await trackingService
+        .recordOpen(payload.j, {
+          userAgent: req.get("user-agent") ?? null,
+          ip: req.ip ?? null
+        })
+        .catch((error: unknown) => {
+          // Swallowed so a mail client still gets its image, but never
+          // silently: a run of these is why an org's opens stopped arriving.
+          logger.warn({ err: error, emailJobId: payload.j }, "open not recorded");
+        });
     }
     sendPixel(res);
   },
@@ -58,7 +71,11 @@ export const trackingController = {
       return;
     }
 
-    await trackingService.recordClick(payload.j, payload.u).catch(() => undefined);
+    await trackingService
+      .recordClick(payload.j, payload.u)
+      .catch((error: unknown) => {
+        logger.warn({ err: error, emailJobId: payload.j }, "click not recorded");
+      });
     res.redirect(302, payload.u);
   },
 

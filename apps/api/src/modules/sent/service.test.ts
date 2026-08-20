@@ -241,6 +241,35 @@ describe("sentService.list", () => {
     });
   });
 
+  it("leaves automated opens out of the engagement count", async () => {
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      {
+        ...job,
+        events: [
+          { type: "SENT", metadata: null },
+          { type: "OPENED", metadata: { automated: true, automatedReason: "scanner" } },
+          { type: "OPENED", metadata: { userAgent: "Mac Mail" } }
+        ]
+      }
+    ] as never);
+
+    const { rows } = await sentService.list(query(), "user_1");
+
+    // A link scanner pulling the pixel is not engagement, and "1 open" that
+    // came only from an appliance is a number someone would act on.
+    expect(rows[0].opens).toBe(1);
+  });
+
+  it("reads a pre-classification open as human rather than throwing", async () => {
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      { ...job, events: [{ type: "OPENED" }, { type: "OPENED", metadata: "junk" }] }
+    ] as never);
+
+    const { rows } = await sentService.list(query(), "user_1");
+
+    expect(rows[0].opens).toBe(2);
+  });
+
   it("labels a campaign send with its campaign", async () => {
     prismaMock.emailJob.findMany.mockResolvedValue([
       {
@@ -280,6 +309,96 @@ describe("sentService.get", () => {
     };
   }
 
+  it("folds repeated opens into one entry that says how many", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(
+      detailJob({
+        events: [
+          {
+            id: "ev_1",
+            type: "SENT",
+            occurredAt: new Date("2026-07-22T09:00:00.000Z"),
+            metadata: null
+          },
+          {
+            id: "ev_2",
+            type: "OPENED",
+            occurredAt: new Date("2026-07-22T09:00:20.000Z"),
+            metadata: { automated: true, automatedReason: "prefetch" }
+          },
+          {
+            id: "ev_3",
+            type: "OPENED",
+            occurredAt: new Date("2026-07-22T13:47:06.000Z"),
+            metadata: { userAgent: "Mac Mail" }
+          },
+          {
+            id: "ev_4",
+            type: "OPENED",
+            occurredAt: new Date("2026-07-22T15:17:57.000Z"),
+            metadata: { userAgent: "Mac Mail" }
+          }
+        ]
+      }) as never
+    );
+
+    const email = await sentService.get("job_1", "org_1", "user_1");
+
+    // One reader with the message on screen wrote three rows. The history is
+    // read as a story, and three identical lines is not one.
+    expect(email.events).toHaveLength(2);
+    expect(email.events[1]).toMatchObject({
+      id: "ev_2",
+      type: "OPENED",
+      // Positioned at the first open, carrying the last.
+      occurredAt: "2026-07-22T09:00:20.000Z",
+      lastOccurredAt: "2026-07-22T15:17:57.000Z",
+      count: 3,
+      automatedCount: 1
+    });
+  });
+
+  it("keeps clicks on different links apart when it folds", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue(
+      detailJob({
+        events: [
+          {
+            id: "ev_1",
+            type: "CLICKED",
+            occurredAt: new Date("2026-07-22T09:00:00.000Z"),
+            metadata: { url: "https://acme.com/pricing" }
+          },
+          {
+            id: "ev_2",
+            type: "CLICKED",
+            occurredAt: new Date("2026-07-22T09:05:00.000Z"),
+            metadata: { url: "https://acme.com/docs" }
+          },
+          {
+            id: "ev_3",
+            type: "CLICKED",
+            occurredAt: new Date("2026-07-22T09:06:00.000Z"),
+            metadata: { url: "https://acme.com/pricing" }
+          }
+        ]
+      }) as never
+    );
+
+    const email = await sentService.get("job_1", "org_1", "user_1");
+
+    // Which link was clicked is the substance of a click, so folding is keyed
+    // on the detail as well as the type.
+    expect(email.events).toHaveLength(2);
+    expect(email.events[0]).toMatchObject({
+      detail: "https://acme.com/pricing",
+      count: 2
+    });
+    expect(email.events[1]).toMatchObject({
+      detail: "https://acme.com/docs",
+      count: 1,
+      lastOccurredAt: null
+    });
+  });
+
   it("returns the stored body, addresses and history", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue(detailJob() as never);
 
@@ -299,7 +418,10 @@ describe("sentService.get", () => {
         id: "ev_1",
         type: "SENT",
         occurredAt: "2026-07-22T09:00:00.000Z",
-        detail: null
+        detail: null,
+        count: 1,
+        lastOccurredAt: null,
+        automatedCount: 0
       }
     ]);
   });

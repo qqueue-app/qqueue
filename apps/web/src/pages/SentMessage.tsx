@@ -75,6 +75,33 @@ const EVENT_ICON: Record<SentEmailEvent["type"], LucideIcon> = {
   FAILED: TriangleAlert,
 };
 
+/**
+ * The second line of a folded history entry, or null for a one-off.
+ *
+ * An open is one fetch of the tracking pixel, and a mail client re-fetches on
+ * every render — so "Opened" thirteen times is usually one person with the
+ * message on screen, not thirteen readers. Saying that plainly, with the span
+ * it happened over, is the whole point of folding: a count without a last
+ * timestamp reads as thirteen readers all over again.
+ */
+function repeatSummary(event: SentEmailEvent): string | null {
+  const parts: string[] = [];
+  if (event.count > 1) {
+    parts.push(`${event.count} times`);
+    if (event.lastOccurredAt) {
+      parts.push(`last ${formatFullDate(event.lastOccurredAt)}`);
+    }
+  }
+  if (event.automatedCount > 0) {
+    parts.push(
+      event.automatedCount === event.count
+        ? "looked automated"
+        : `${event.automatedCount} looked automated`
+    );
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
 function eventTone(type: SentEmailEvent["type"]) {
   if (type === "BOUNCED" || type === "COMPLAINED" || type === "FAILED") {
     return "text-err";
@@ -215,6 +242,23 @@ export function SentMessage() {
   const body = useMemo(
     () => (email?.html ? resolveInlineImages(email.html, inlineImages) : null),
     [email?.html, inlineImages]
+  );
+
+  /*
+    Whether the history needs a sentence explaining itself.
+
+    Only when it would otherwise mislead: a message opened once needs no gloss,
+    but "Opened · 13 times" invites the reading that thirteen people read it,
+    and an open marked automated invites the opposite mistake — that nobody did.
+  */
+  const opensNeedExplaining = useMemo(
+    () =>
+      (email?.events ?? []).some(
+        (event) =>
+          event.type === "OPENED" &&
+          (event.count > 1 || event.automatedCount > 0)
+      ),
+    [email?.events]
   );
 
   async function openAttachment(file: SentEmailAttachment) {
@@ -427,6 +471,14 @@ export function SentMessage() {
         {/* -------------------------------------------------------- history */}
         <section className="space-y-2">
           <SectionTitle>History</SectionTitle>
+          {opensNeedExplaining ? (
+            <p className="text-meta leading-5 text-text-tertiary">
+              An open is recorded every time this message&rsquo;s images are
+              fetched, so one reader can register several. Fetches that looked
+              like a scanner or a privacy proxy rather than a person are marked,
+              and left out of the open count.
+            </p>
+          ) : null}
           {email.events.length > 0 ? (
             /* Named: the envelope above already renders the recipients as a
                list, so "the list of events" has to be findable as itself. */
@@ -436,6 +488,7 @@ export function SentMessage() {
             >
               {email.events.map((event) => {
                 const Icon = EVENT_ICON[event.type];
+                const repeat = repeatSummary(event);
                 return (
                   <li
                     key={event.id}
@@ -455,6 +508,11 @@ export function SentMessage() {
                       {event.detail ? (
                         <p className="mt-0.5 break-all text-meta text-text-secondary">
                           {event.detail}
+                        </p>
+                      ) : null}
+                      {repeat ? (
+                        <p className="mt-0.5 text-meta text-text-tertiary">
+                          {repeat}
                         </p>
                       ) : null}
                     </div>
