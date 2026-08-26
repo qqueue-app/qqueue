@@ -20,6 +20,7 @@ vi.mock("../lib/api.js", async (importOriginal) => ({
     deliverabilityOverview: vi.fn(),
     deliverabilityAlerts: vi.fn(),
     deliverabilityDomains: vi.fn(),
+    unattributedBounces: vi.fn(),
     getSuppressionPolicy: vi.fn(),
     listDomainThrottles: vi.fn(),
     updateSuppressionPolicy: vi.fn(),
@@ -101,6 +102,7 @@ describe("Deliverability", () => {
         }
       ]
     });
+    mockedApi.unattributedBounces.mockResolvedValue({ bounces: [] });
     mockedApi.getSuppressionPolicy.mockResolvedValue({
       organizationId: "org_1",
       softBounceThreshold: 3,
@@ -212,6 +214,30 @@ describe("Deliverability", () => {
   it("derives alerts locally instead of paying for a second aggregation", async () => { renderWithProviders(<Deliverability />);
     await screen.findByText("Reputation alerts");
     expect(mockedApi.deliverabilityAlerts).not.toHaveBeenCalled();
+  });
+
+  it("shows unattributed bounces separately", async () => {
+    mockedApi.unattributedBounces.mockResolvedValue({
+      bounces: [{
+        id: "in_1:0",
+        inboundMessageId: "in_1",
+        mailbox: "noreply@example.com",
+        recipient: "outside@example.net",
+        subject: "Undelivered Mail Returned to Sender",
+        status: "5.1.1",
+        reason: "550 5.1.1 user unknown",
+        bounceType: "HARD",
+        suppressed: true,
+        receivedAt: "2026-08-16T13:32:04.000Z"
+      }]
+    });
+
+    renderWithProviders(<Deliverability />);
+
+    expect(await screen.findByText("outside@example.net")).toBeInTheDocument();
+    expect(screen.getByText("Not a QQueue send")).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
+    expect(screen.getByText(/excluded from the bounce rate/i)).toBeInTheDocument();
   });
 
   it("saves the auto-suppression policy", async () => {

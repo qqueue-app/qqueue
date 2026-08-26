@@ -1,10 +1,16 @@
 import { Prisma } from "@prisma/client";
 import {
-  type DeliverabilityDomains,
-  type DeliverabilityOverview,
-  type DeliverySignal,
-  deriveReputationAlerts
+  classifyBounce,
+  parseDsnRecipientReports,
+  scanDsnTextForBounce,
+} from "@qqueue/email-engine";
+import type {
+  DeliverabilityDomains,
+  DeliverabilityOverview,
+  DeliverySignal,
+  UnattributedBounces,
 } from "@qqueue/shared";
+import { deriveReputationAlerts } from "@qqueue/shared";
 import { prisma } from "../../lib/prisma.js";
 
 /**
@@ -18,8 +24,8 @@ const CONFIRMED_DELIVERY_SOURCES = ["webhook", "dsn"] as const;
 const confirmedDeliveryFilter = {
   type: "DELIVERED" as const,
   OR: CONFIRMED_DELIVERY_SOURCES.map((source) => ({
-    metadata: { path: ["source"], equals: source }
-  }))
+    metadata: { path: ["source"], equals: source },
+  })),
 };
 
 function resolveWindow(input: { from?: string; to?: string }) {
@@ -28,6 +34,14 @@ function resolveWindow(input: { from?: string; to?: string }) {
     ? new Date(input.from)
     : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
   return { from, to };
+}
+
+function bounceTypeOf(report: { status?: string; diagnosticCode?: string }) {
+  const statusClass = report.status?.charAt(0);
+  return classifyBounce({
+    code: statusClass === "5" ? 500 : statusClass === "4" ? 400 : undefined,
+    message: report.diagnosticCode,
+  });
 }
 
 /**
@@ -44,8 +58,8 @@ function jobCohort(organizationId: string, from: Date, to: Date) {
     organizationId,
     OR: [
       { sentAt: { gte: from, lte: to } },
-      { sentAt: null, createdAt: { gte: from, lte: to } }
-    ]
+      { sentAt: null, createdAt: { gte: from, lte: to } },
+    ],
   };
 }
 
@@ -65,7 +79,7 @@ function terminalCohort(
 ): Prisma.EmailJobWhereInput {
   return {
     ...jobCohort(organizationId, from, to),
-    status: { in: ["SENT", "FAILED"] }
+    status: { in: ["SENT", "FAILED"] },
   };
 }
 
@@ -80,14 +94,14 @@ async function distinctJobs(
 ): Promise<number> {
   const rows = await prisma.emailEvent.groupBy({
     by: ["emailJobId"],
-    where: { ...where, emailJob: cohort }
+    where: { ...where, emailJob: cohort },
   });
   return rows.length;
 }
 
 const bounceClass = (bounceType: "HARD" | "SOFT" | "BLOCK") => ({
   type: "BOUNCED" as const,
-  metadata: { path: ["bounceType"], equals: bounceType }
+  metadata: { path: ["bounceType"], equals: bounceType },
 });
 
 export const deliverabilityService = {
@@ -113,26 +127,33 @@ export const deliverabilityService = {
       opened,
       clicked,
       suppressedInWindow,
-      suppressedTotal
+      suppressedTotal,
     ] = await Promise.all([
       prisma.emailJob.groupBy({
         by: ["status"],
         where: cohort,
-        _count: { _all: true }
+        _count: { _all: true },
       }),
       // A FAILED job with no BOUNCED event never reached a recipient's mail
       // server: the send threw before handoff. `events: { none: ... }` rather
       // than a FAILED-event lookup because a job can carry both (it bounced on
       // one attempt and errored on another), and a bounce is the stronger fact.
       prisma.emailJob.count({
-        where: { ...cohort, status: "FAILED", events: { none: { type: "BOUNCED" } } }
+        where: {
+          ...cohort,
+          status: "FAILED",
+          events: { none: { type: "BOUNCED" } },
+        },
       }),
       distinctJobs(terminal, confirmedDeliveryFilter),
       // Org-wide and all-time: distinguishes "no deliveries confirmed in this
       // window" from "nothing here can confirm a delivery at all".
       prisma.emailEvent.findFirst({
-        where: { organizationId: input.organizationId, ...confirmedDeliveryFilter },
-        select: { id: true }
+        where: {
+          organizationId: input.organizationId,
+          ...confirmedDeliveryFilter,
+        },
+        select: { id: true },
       }),
       distinctJobs(terminal, { type: "BOUNCED" }),
       distinctJobs(terminal, bounceClass("HARD")),
@@ -144,16 +165,18 @@ export const deliverabilityService = {
       prisma.suppression.count({
         where: {
           organizationId: input.organizationId,
-          createdAt: { gte: from, lte: to }
-        }
+          createdAt: { gte: from, lte: to },
+        },
       }),
-      prisma.suppression.count({ where: { organizationId: input.organizationId } })
+      prisma.suppression.count({
+        where: { organizationId: input.organizationId },
+      }),
     ]);
 
     const jobs = Object.fromEntries(
       byStatus.map((row: { status: string; _count: { _all: number } }) => [
         row.status,
-        row._count._all
+        row._count._all,
       ])
     ) as Partial<Record<string, number>>;
 
@@ -172,7 +195,9 @@ export const deliverabilityService = {
     // and an SMTP outage during a send is exactly when the rates matter most.
     const attempted = terminalTotal - failedBeforeHandoff;
 
-    const deliverySignal: DeliverySignal = deliverySource ? "confirmed" : "none";
+    const deliverySignal: DeliverySignal = deliverySource
+      ? "confirmed"
+      : "none";
 
     return {
       window: { from: from.toISOString(), to: to.toISOString() },
@@ -194,7 +219,7 @@ export const deliverabilityService = {
         opened,
         clicked,
         suppressedInWindow,
-        suppressedTotal
+        suppressedTotal,
       },
       rates: {
         accepted: rate(sent, attempted),
@@ -204,8 +229,8 @@ export const deliverabilityService = {
         complaint: rate(complained, attempted),
         open: rate(opened, sent),
         click: rate(clicked, sent),
-        deliveryFailure: rate(failedBeforeHandoff, terminalTotal)
-      }
+        deliveryFailure: rate(failedBeforeHandoff, terminalTotal),
+      },
     };
   },
 
@@ -287,9 +312,121 @@ export const deliverabilityService = {
           bounced,
           complained,
           bounceRate: rate(bounced, attempted),
-          complaintRate: rate(complained, attempted)
+          complaintRate: rate(complained, attempted),
         };
+      }),
+    };
+  },
+
+  /**
+   * Failed DSNs received by this org that cannot be attached to a QQueue job.
+   * They are operationally useful, but deliberately excluded from rates: with
+   * no EmailJob there is no corresponding send for the denominator.
+   *
+   * Details are reconstructed from the stored DSN text, so notices that
+   * predate this view appear immediately without a schema backfill.
+   */
+  async unattributedBounces(input: {
+    organizationId: string;
+    from?: string;
+    to?: string;
+  }): Promise<UnattributedBounces> {
+    const { from, to } = resolveWindow(input);
+    const messages = await prisma.inboundMessage.findMany({
+      where: {
+        organizationId: input.organizationId,
+        isDsn: true,
+        receivedAt: { gte: from, lte: to },
+      },
+      select: {
+        id: true,
+        subject: true,
+        text: true,
+        fromEmail: true,
+        receivedAt: true,
+        inboxAccount: { select: { email: true } },
+      },
+      orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
+    });
+
+    if (messages.length === 0) return { bounces: [] };
+
+    const linkedEvents = await prisma.emailEvent.findMany({
+      where: {
+        organizationId: input.organizationId,
+        type: { in: ["BOUNCED", "DELIVERED"] },
+        OR: messages.map((message) => ({
+          metadata: { path: ["inboundMessageId"], equals: message.id },
+        })),
+      },
+      select: { metadata: true },
+    });
+    const attributedIds = new Set(
+      linkedEvents.flatMap((event) => {
+        const metadata = event.metadata as {
+          inboundMessageId?: unknown;
+        } | null;
+        return typeof metadata?.inboundMessageId === "string"
+          ? [metadata.inboundMessageId]
+          : [];
       })
+    );
+
+    const bounces = messages
+      .filter((message) => !attributedIds.has(message.id))
+      .flatMap((message) => {
+        const structured = parseDsnRecipientReports(message.text ?? "");
+        const reports =
+          structured.length > 0
+            ? structured
+            : scanDsnTextForBounce({
+                subject: message.subject,
+                text: message.text,
+                excludeAddresses: [
+                  message.inboxAccount.email,
+                  message.fromEmail,
+                ],
+              });
+
+        return reports
+          .filter((report) => report.action === "failed")
+          .map((report, index) => ({
+            id: `${message.id}:${index}`,
+            inboundMessageId: message.id,
+            mailbox: message.inboxAccount.email,
+            recipient: report.recipient ?? null,
+            subject: message.subject,
+            status: report.status ?? null,
+            reason: report.diagnosticCode?.replace(/^smtp;\s*/i, "") ?? null,
+            bounceType: bounceTypeOf(report),
+            receivedAt: message.receivedAt.toISOString(),
+          }));
+      });
+    if (bounces.length === 0) return { bounces: [] };
+
+    // Older versions suppressed even an uncorrelated DSN. Preserve and expose
+    // that historical state rather than silently reactivating an address or
+    // claiming it is not blocked. New unattributed notices no longer write it.
+    const suppressionRows = await prisma.suppression.findMany({
+      where: {
+        organizationId: input.organizationId,
+        email: {
+          in: [...new Set(bounces.flatMap((bounce) => bounce.recipient ?? []))],
+        },
+      },
+      select: { email: true },
+    });
+    const suppressedEmails = new Set(
+      suppressionRows.map((row) => row.email.toLowerCase())
+    );
+
+    return {
+      bounces: bounces.map((bounce) => ({
+        ...bounce,
+        suppressed:
+          bounce.recipient !== null &&
+          suppressedEmails.has(bounce.recipient.toLowerCase()),
+      })),
     };
   },
 
@@ -298,5 +435,5 @@ export const deliverabilityService = {
   async alerts(input: { organizationId: string; from?: string; to?: string }) {
     const overview = await this.overview(input);
     return { alerts: deriveReputationAlerts(overview) };
-  }
+  },
 };

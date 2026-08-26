@@ -9,6 +9,7 @@ vi.mock("./service.js", () => ({
   deliverabilityService: {
     overview: vi.fn(),
     domains: vi.fn(),
+    unattributedBounces: vi.fn(),
     alerts: vi.fn()
   }
 }));
@@ -105,6 +106,26 @@ describe("deliverabilityController.domains", () => {
       )
     ).rejects.toThrow();
     expect(deliverabilityService.domains).not.toHaveBeenCalled();
+  });
+});
+
+describe("deliverabilityController.unattributedBounces", () => {
+  it("returns unattributed delivery failures for the requested window", async () => {
+    const data = { bounces: [{ id: "in_1:0" }] };
+    vi.mocked(deliverabilityService.unattributedBounces).mockResolvedValue(data as never);
+    const res = mockRes();
+
+    await deliverabilityController.unattributedBounces(
+      { organizationId: "org_1", query: { from: FROM, to: TO } } as unknown as Request,
+      res
+    );
+
+    expect(deliverabilityService.unattributedBounces).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      from: FROM,
+      to: TO
+    });
+    expect(res.json).toHaveBeenCalledWith({ data });
   });
 });
 

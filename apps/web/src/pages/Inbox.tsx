@@ -386,7 +386,8 @@ export function Inbox() {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest?.("input, textarea, [contenteditable='true']")) return;
+      if (target?.closest?.("input, textarea, [contenteditable='true']"))
+        return;
       setOpenedThread(null);
     }
 
@@ -536,6 +537,13 @@ export function Inbox() {
                     >
                       <Badge variant="outline" className="cursor-help">
                         Reply to your email
+                      </Badge>
+                    </Hint>
+                  ) : null}
+                  {message.dsnAttribution === "UNATTRIBUTED" ? (
+                    <Hint label="This delivery failure does not match an email sent through QQueue, so it is excluded from bounce analytics.">
+                      <Badge variant="warn" className="cursor-help">
+                        Unattributed bounce
                       </Badge>
                     </Hint>
                   ) : null}
@@ -739,7 +747,10 @@ export function Inbox() {
                 </div>
 
                 {accounts.length > 1 ? (
-                  <Select value={accountFilter} onValueChange={setAccountFilter}>
+                  <Select
+                    value={accountFilter}
+                    onValueChange={setAccountFilter}
+                  >
                     <SelectTrigger
                       aria-label="Filter by mailbox"
                       className="w-field-choice"
@@ -815,6 +826,9 @@ export function Inbox() {
               <ul className="divide-y divide-border">
                 {threads.map((thread) => {
                   const unread = thread.unreadCount > 0;
+                  const hasUnattributedBounce = thread.messages.some(
+                    (message) => message.dsnAttribution === "UNATTRIBUTED"
+                  );
                   const hasAttachment = thread.messages.some((message) =>
                     message.attachments?.some((file) => !file.isInline)
                   );
@@ -884,6 +898,11 @@ export function Inbox() {
                             >
                               {thread.subject}
                             </span>
+                            {hasUnattributedBounce ? (
+                              <Badge variant="warn" className="shrink-0">
+                                Unattributed
+                              </Badge>
+                            ) : null}
                             <p className="truncate text-meta text-text-tertiary">
                               {snippet(thread.latestMessage)}
                             </p>
@@ -910,7 +929,9 @@ export function Inbox() {
                                 )}
                                 data-numeric
                               >
-                                {formatMailDate(thread.latestMessage.receivedAt)}
+                                {formatMailDate(
+                                  thread.latestMessage.receivedAt
+                                )}
                               </span>
                             </Hint>
                           </div>

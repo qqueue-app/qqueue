@@ -1,11 +1,9 @@
-# CLAUDE.md
-
 QQueue is a self-hosted **email operations platform** — a TypeScript monorepo
 (pnpm workspaces + Turborepo) at a feature-complete self-hosted beta.
 
 **Before building anything, check `docs/STATUS.md`** — it is the authoritative
 feature inventory and most of the platform already exists. `docs/ROADMAP.md` has
-the plan and the deferred backlog; `docs/DECISIONS.md` has the *why*.
+the plan and the deferred backlog; `docs/DECISIONS.md` has the _why_.
 
 ## Git rules (non-negotiable)
 
@@ -32,7 +30,7 @@ to `CAMPAIGN | TRANSACTIONAL | MANUAL` and `createdByUserId` where relevant). Do
 **not** introduce a parallel delivery path. `manual-email` is the reference
 example: it resolves recipients then delegates to `transactionalEmailService.send`.
 
-Every send resolves *who it sends as* from the SMTP connection: an explicit
+Every send resolves _who it sends as_ from the SMTP connection: an explicit
 `smtpConnectionId` on the request, else the org's default. Don't hand-build From
 headers per send path. (Sending Domains / Sender Identities / managed DKIM were
 removed from core in `bcb3475` — don't resurrect them without a fresh decision.)
@@ -73,7 +71,7 @@ enforces this; see `docs/CLOUD_BOUNDARY.md`.
   - Nav lives in the `navSections` table at the top of
     `layouts/DashboardLayout.tsx` — add destinations there, not in the JSX.
   - Don't wrap a `NavLink` in `<Hint>` (or any `asChild` trigger): Radix's slot
-    string-joins `className`, so `NavLink`'s *function* className gets
+    string-joins `className`, so `NavLink`'s _function_ className gets
     stringified into garbage classes and the item loses all its styling.
 - `apps/worker` — BullMQ workers (`src/workers/*`); startup recovery re-enqueues
   queued/scheduled work.

@@ -246,6 +246,8 @@ export interface InboundMessage {
   receivedAt: string;
   readAt?: string | null;
   imapUid?: number | null;
+  isDsn?: boolean;
+  dsnAttribution?: "ATTRIBUTED" | "UNATTRIBUTED" | null;
   emailJob?: {
     id: string;
     subject: string;
@@ -394,6 +396,23 @@ export interface DeliverabilityDomains {
   domains: DeliverabilityDomainRow[];
 }
 
+export interface UnattributedBounce {
+  id: string;
+  inboundMessageId: string;
+  mailbox: string;
+  recipient: string | null;
+  subject: string;
+  status: string | null;
+  reason: string | null;
+  bounceType: "HARD" | "SOFT" | "BLOCK";
+  suppressed: boolean;
+  receivedAt: string;
+}
+
+export interface UnattributedBounces {
+  bounces: UnattributedBounce[];
+}
+
 export interface ReputationAlert {
   level: "warning" | "critical";
   metric: "bounceRate" | "complaintRate";
@@ -435,7 +454,7 @@ export function deriveReputationAlerts(
       value: bounce,
       threshold: BOUNCE_RATE_ALERT,
       message:
-        "Bounce rate is above 5%. Clean your list and verify addresses to protect sender reputation."
+        "Bounce rate is above 5%. Clean your list and verify addresses to protect sender reputation.",
     });
   }
   if (complaint !== null && complaint > COMPLAINT_RATE_ALERT) {
@@ -445,7 +464,7 @@ export function deriveReputationAlerts(
       value: complaint,
       threshold: COMPLAINT_RATE_ALERT,
       message:
-        "Complaint rate is above 0.1%. Review targeting and unsubscribe handling."
+        "Complaint rate is above 0.1%. Review targeting and unsubscribe handling.",
     });
   }
   return alerts;
@@ -828,8 +847,7 @@ export interface InstanceOrganizationSummary {
   muted?: boolean;
 }
 
-export interface InstanceOrganizationDetail
-  extends InstanceOrganizationSummary {
+export interface InstanceOrganizationDetail extends InstanceOrganizationSummary {
   members: {
     id: string;
     email: string;
@@ -2034,6 +2052,12 @@ export const api = {
     );
   },
 
+  unattributedBounces(organizationId: string) {
+    return request<UnattributedBounces>(
+      `/api/v1/deliverability/unattributed-bounces?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+
   deliverabilityAlerts(organizationId: string) {
     return request<DeliverabilityAlerts>(
       `/api/v1/deliverability/alerts?organizationId=${encodeURIComponent(organizationId)}`
@@ -2219,7 +2243,8 @@ export const api = {
     // the server's default, so the query string stays readable in the network
     // tab and an unfiltered request is just `?organizationId=…`.
     if (query.q) params.set("q", query.q);
-    if (query.origin && query.origin !== "all") params.set("origin", query.origin);
+    if (query.origin && query.origin !== "all")
+      params.set("origin", query.origin);
     if (query.outcome && query.outcome !== "all")
       params.set("outcome", query.outcome);
     if (query.smtpConnectionId)

@@ -428,6 +428,14 @@ counted from `EmailJob` rows; see the entry below for why.
 `EmailEvent` is the wrong unit for a rate, and using it produced numbers that
 were not merely imprecise but backwards.
 
+An inbound DSN with no matching `EmailJob` is therefore **visible but
+unattributed**. It appears on Sending health and is badged in the Inbox, but it
+does not enter bounce-rate math and cannot suppress its reported recipient.
+There is no trustworthy denominator for it, and the message may have come from
+another SMTP client or from backscatter rather than QQueue's delivery pipeline.
+Stored DSN text is parsed at read time for this view, so historical inbox rows
+need no schema backfill.
+
 **Events are many-per-recipient.** One address can emit a synchronous SMTP
 rejection, a later DSN, and an ESP webhook for a single send. **They arrive
 after the attempt**, so a window filtered on `occurredAt` scores Tuesday's DSN

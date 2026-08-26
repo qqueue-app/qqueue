@@ -1,5 +1,11 @@
 import type { ParsedMail } from "mailparser";
-import { type BounceType, classifyBounce } from "@qqueue/email-engine";
+import {
+  type BounceType,
+  classifyBounce,
+  type DsnRecipientReport,
+  parseDsnRecipientReports,
+  scanDsnTextForBounce,
+} from "@qqueue/email-engine";
 import { enqueueLatestWebhookDeliveries } from "./outbound-webhooks.js";
 import { prisma } from "./prisma.js";
 import { addSuppression, shouldSuppressBounce } from "./suppression.js";
@@ -20,16 +26,7 @@ import { addSuppression, shouldSuppressBounce } from "./suppression.js";
  */
 
 /** One per-recipient block of a DSN's machine-readable part. */
-export interface DsnRecipientReport {
-  /** Final-Recipient address, lowercased. */
-  recipient: string;
-  /** RFC 3464 Action field, lowercased. Only "failed" feeds bounce handling. */
-  action: string;
-  /** Enhanced status code like "5.1.1", when present. */
-  status?: string;
-  /** Free-text Diagnostic-Code (unfolded), when present. */
-  diagnosticCode?: string;
-}
+export type { DsnRecipientReport } from "@qqueue/email-engine";
 
 export interface ParsedDsn {
   recipients: DsnRecipientReport[];
@@ -99,107 +96,6 @@ function deliveryStatusText(mail: ParsedMail): string {
   return mail.text ?? "";
 }
 
-/** Unfold RFC 822 continuation lines so folded Diagnostic-Codes read whole. */
-function unfold(text: string): string {
-  return text.replace(/\r?\n[ \t]+/g, " ");
-}
-
-function fieldValue(block: string, name: string): string | undefined {
-  const match = block.match(new RegExp(`^${name}:[ \\t]*(.+)$`, "im"));
-  return match?.[1]?.trim() || undefined;
-}
-
-/** Strip the RFC 3464 address-type prefix: "rfc822; bob@x.com" -> address. */
-function parseFinalRecipient(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const withoutType = value.replace(/^[\w-]+\s*;\s*/, "").trim();
-  const match = withoutType.match(/[^\s<>,;"']+@[^\s<>,;"']+\.[^\s<>,;"']+/);
-  return match?.[0]?.toLowerCase();
-}
-
-/** Parse the per-recipient blocks of a delivery-status body. */
-function parseRecipientReports(text: string): DsnRecipientReport[] {
-  const unfolded = unfold(text);
-  const reports: DsnRecipientReport[] = [];
-
-  for (const block of unfolded.split(/\r?\n\s*\r?\n/)) {
-    const recipient = parseFinalRecipient(
-      fieldValue(block, "Final-Recipient") ??
-        fieldValue(block, "Original-Recipient")
-    );
-    if (!recipient) {
-      continue;
-    }
-    reports.push({
-      recipient,
-      // A block with a recipient but no Action is treated as failed: senders
-      // that omit Action are reporting a failure, and unknown-as-failure
-      // matches classifyBounce's conservative default.
-      action: fieldValue(block, "Action")?.toLowerCase() ?? "failed",
-      status: fieldValue(block, "Status")?.match(
-        /\b([245]\.\d{1,3}\.\d{1,3})\b/
-      )?.[1],
-      diagnosticCode: fieldValue(block, "Diagnostic-Code"),
-    });
-  }
-
-  return reports;
-}
-
-const DELAYED_NOTICE =
-  /delivery (?:is |has been |was )?delayed|delayed delivery|delivery incomplete|will (?:keep|continue) (?:re)?trying|has not (?:yet )?been delivered yet|delivery will be attempted/i;
-
-/**
- * Last-ditch parse when a bounce-shaped message carries no parseable
- * delivery-status fields: find an SMTP status code plus a recipient address in
- * the body. Skips messages that read as delay notices — without an Action
- * field, "still trying" must not be recorded as a failure.
- */
-function scanBodyForBounce(
-  mail: ParsedMail,
-  excludeAddresses: Set<string>
-): DsnRecipientReport[] {
-  const text = `${mail.subject ?? ""}\n${mail.text ?? ""}`;
-  if (DELAYED_NOTICE.test(text)) {
-    return [];
-  }
-
-  const status = text.match(/\b([45]\.\d{1,3}\.\d{1,3})\b/)?.[1];
-  const basicCode = text.match(/(?:^|\s)([45]\d{2})(?:\s|$|-)/m)?.[1];
-  if (!status && !basicCode) {
-    return [];
-  }
-
-  const recipient = Array.from(
-    text.matchAll(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g),
-    (match) => match[0].toLowerCase()
-  ).find(
-    (address) => !excludeAddresses.has(address) && !DAEMON_FROM.test(address)
-  );
-  if (!recipient) {
-    return [];
-  }
-
-  return [
-    {
-      recipient,
-      action: "failed",
-      status,
-      // The line the code appeared on is the best free-text reason available.
-      diagnosticCode: text
-        .split(/\r?\n/)
-        .find(
-          (line) =>
-            (status && line.includes(status)) ||
-            (basicCode && line.includes(basicCode))
-        )
-        ?.trim(),
-    },
-  ];
-}
-
 /** Pull the original send's Message-ID out of the returned message part. */
 function originalMessageIdOf(mail: ParsedMail): string | undefined {
   const part = mail.attachments?.find((attachment) => {
@@ -212,7 +108,9 @@ function originalMessageIdOf(mail: ParsedMail): string | undefined {
   // Headers live at the top of the part; 64KB is far more than any header
   // block and keeps a huge returned original from being scanned end to end.
   const head = part.content.toString("utf8", 0, 64 * 1024);
-  return unfold(head).match(/^Message-ID:[ \t]*(<[^>]+>)/im)?.[1];
+  return head
+    .replace(/\r?\n[ \t]+/g, " ")
+    .match(/^Message-ID:[ \t]*(<[^>]+>)/im)?.[1];
 }
 
 /**
@@ -235,7 +133,7 @@ export function parseDsn(
     return null;
   }
 
-  const recipients = parseRecipientReports(deliveryStatusText(mail));
+  const recipients = parseDsnRecipientReports(deliveryStatusText(mail));
   if (recipients.length > 0) {
     return {
       recipients,
@@ -251,12 +149,11 @@ export function parseDsn(
     return null;
   }
 
-  const exclude = new Set(
-    (options.excludeAddresses ?? [])
-      .map((address) => address.toLowerCase())
-      .filter(Boolean)
-  );
-  const scanned = scanBodyForBounce(mail, exclude);
+  const scanned = scanDsnTextForBounce({
+    subject: mail.subject,
+    text: mail.text,
+    excludeAddresses: options.excludeAddresses,
+  });
   if (scanned.length === 0) {
     return null;
   }
@@ -337,9 +234,9 @@ function classifyDsnBounce(report: DsnRecipientReport): BounceType {
  * For each *failed* recipient: correlate the originating EmailJob, record a
  * BOUNCED event, flip the job SENT -> FAILED, and run the auto-suppression
  * policy — the same sequence the send worker performs for a synchronous
- * rejection. When no job can be correlated the bounce still counts against the
- * address: org-level suppression proceeds from the recipient alone (the org
- * comes from the inbox account that received the DSN).
+ * rejection. An uncorrelated failure stays visible as an inbound DSN but has no
+ * authority to alter analytics or suppression: it may have been sent by a
+ * different SMTP client or be backscatter for a forged envelope sender.
  *
  * For each *delivered* or *relayed* recipient: record a DELIVERED event tagged
  * `source: "dsn"`. This is the only delivery confirmation a self-hosted install
@@ -439,15 +336,17 @@ export async function applyDsnBounce(input: {
       });
     }
 
-    // Hard/block bounces suppress immediately; a soft bounce only once the
-    // org's threshold is reached (the event recorded above counts toward it —
-    // an uncorrelated soft bounce has no event and so only counts prior ones).
+    // Only a bounce tied to a QQueue EmailJob can change QQueue's sending
+    // policy. An uncorrelated DSN may come from another SMTP client or from
+    // backscatter; letting it suppress an arbitrary address lets inbox noise
+    // alter a pipeline it never passed through.
     if (
-      await shouldSuppressBounce({
+      correlated &&
+      (await shouldSuppressBounce({
         organizationId: input.organizationId,
         email: report.recipient,
         bounceType,
-      })
+      }))
     ) {
       await prisma.contact.updateMany({
         where: {

@@ -351,6 +351,91 @@ describe("deliverabilityService.domains", () => {
   });
 });
 
+describe("deliverabilityService.unattributedBounces", () => {
+  it("lists failed DSNs with no linked QQueue event", async () => {
+    prismaMock.inboundMessage.findMany.mockResolvedValue([
+      {
+        id: "in_unattributed",
+        subject: "Undelivered Mail Returned to Sender",
+        text: [
+          "Reporting-MTA: dns; mx.example.test",
+          "",
+          "Final-Recipient: rfc822; outside@example.com",
+          "Action: failed",
+          "Status: 5.1.1",
+          "Diagnostic-Code: smtp; 550 5.1.1 user unknown"
+        ].join("\n"),
+        fromEmail: "mailer-daemon@mx.example.test",
+        receivedAt: new Date("2026-08-16T13:32:04.000Z"),
+        inboxAccount: { email: "sender@example.test" }
+      },
+      {
+        id: "in_attributed",
+        subject: "Undelivered Mail Returned to Sender",
+        text: [
+          "Final-Recipient: rfc822; tracked@example.com",
+          "Action: failed",
+          "Status: 5.1.1"
+        ].join("\n"),
+        fromEmail: "mailer-daemon@mx.example.test",
+        receivedAt: new Date("2026-08-15T10:00:00.000Z"),
+        inboxAccount: { email: "sender@example.test" }
+      }
+    ] as never);
+    prismaMock.emailEvent.findMany.mockResolvedValue([
+      { metadata: { source: "dsn", inboundMessageId: "in_attributed" } }
+    ] as never);
+    prismaMock.suppression.findMany.mockResolvedValue([
+      { email: "outside@example.com" }
+    ] as never);
+
+    const result = await deliverabilityService.unattributedBounces({
+      organizationId: "org_1",
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-09-01T00:00:00.000Z"
+    });
+
+    expect(result.bounces).toEqual([
+      {
+        id: "in_unattributed:0",
+        inboundMessageId: "in_unattributed",
+        mailbox: "sender@example.test",
+        recipient: "outside@example.com",
+        subject: "Undelivered Mail Returned to Sender",
+        status: "5.1.1",
+        reason: "550 5.1.1 user unknown",
+        bounceType: "HARD",
+        suppressed: true,
+        receivedAt: "2026-08-16T13:32:04.000Z"
+      }
+    ]);
+  });
+
+  it("does not present delayed notices as bounces", async () => {
+    prismaMock.inboundMessage.findMany.mockResolvedValue([
+      {
+        id: "in_delay",
+        subject: "Delivery Status Notification (Delay)",
+        text: [
+          "Final-Recipient: rfc822; later@example.com",
+          "Action: delayed",
+          "Status: 4.4.1"
+        ].join("\n"),
+        fromEmail: "mailer-daemon@mx.example.test",
+        receivedAt: new Date("2026-08-16T13:32:04.000Z"),
+        inboxAccount: { email: "sender@example.test" }
+      }
+    ] as never);
+    prismaMock.emailEvent.findMany.mockResolvedValue([] as never);
+
+    const result = await deliverabilityService.unattributedBounces({
+      organizationId: "org_1"
+    });
+
+    expect(result.bounces).toEqual([]);
+  });
+});
+
 describe("deliverabilityService.alerts", () => {
   it("raises critical alerts when bounce/complaint rates exceed thresholds", async () => {
     stubOverview({

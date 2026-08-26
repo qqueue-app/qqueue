@@ -25,6 +25,7 @@ Following the Beta Polish + Launch Prep Sprint, QQueue now includes:
 - Transactional API
 - API keys
 - Tracking
+- Unattributed bounce visibility (delivery notices not tied to QQueue sends)
 - Webhooks
 - Queue workers
 - Queue operations dashboard
@@ -790,8 +791,9 @@ End-to-end, the app can currently support a self-hosted operator who:
 4. Gather first beta users.
 5. Make bounce accounting observable (ROADMAP "Phase 2c") — a setup-time check
    that DSN parsing is reachable, plus a backfill for DSNs that predate the
-   inbox account. Until then a bounce count of zero is indistinguishable from
-   perfect delivery.
+   inbox account. Delivery notices already stored by QQueue are now separated
+   into attributed rate events and visible "unattributed bounces"; notices that
+   never reached a synced inbox still need the backfill.
 6. Add usage metrics dashboard.
 7. Expand SDK functionality.
 8. Improve onboarding UX.

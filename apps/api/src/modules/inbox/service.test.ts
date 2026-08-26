@@ -171,6 +171,26 @@ describe("inboxService", () => {
     expect(call.take).toBe(26);
   });
 
+  it("labels a DSN by whether it produced a QQueue event", async () => {
+    prismaMock.inboundMessage.findMany.mockResolvedValue([
+      { id: "dsn_1", isDsn: true, receivedAt: new Date("2026-08-16T00:00:00.000Z") },
+      { id: "dsn_2", isDsn: true, receivedAt: new Date("2026-08-15T00:00:00.000Z") }
+    ] as never);
+    prismaMock.emailEvent.findMany.mockResolvedValue([
+      { metadata: { source: "dsn", inboundMessageId: "dsn_2" } }
+    ] as never);
+
+    const result = await inboxService.listMessages(
+      { organizationId: "org_1", read: "all", limit: 25 },
+      "user_1"
+    );
+
+    expect(result.data.map((message) => message.dsnAttribution)).toEqual([
+      "UNATTRIBUTED",
+      "ATTRIBUTED"
+    ]);
+  });
+
   it("replies to inbound messages through the manual send pipeline", async () => {
     prismaMock.inboundMessage.findFirst.mockResolvedValue({
       id: "msg_1",

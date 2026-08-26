@@ -336,7 +336,7 @@ describe("applyDsnBounce", () => {
     });
   });
 
-  it("still suppresses a hard bounce when no job could be correlated", async () => {
+  it("does not let an uncorrelated DSN suppress an address", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue(null);
 
     await applyDsnBounce({
@@ -349,14 +349,10 @@ describe("applyDsnBounce", () => {
     expect(prismaMock.emailEvent.create).not.toHaveBeenCalled();
     expect(prismaMock.emailJob.updateMany).not.toHaveBeenCalled();
     expect(h.enqueueLatestWebhookDeliveries).not.toHaveBeenCalled();
-    expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({
-          email: "bob@example.com",
-          reason: "BOUNCE",
-        }),
-      })
-    );
+    // This may be mail sent by another SMTP client or forged backscatter. With
+    // no QQueue job there is no trusted send to apply policy to.
+    expect(prismaMock.contact.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
   });
 
   it("counts a soft bounce toward the threshold without suppressing below it", async () => {
@@ -477,7 +473,7 @@ describe("applyDsnBounce", () => {
       // A delivery is not a bounce: nothing flips status, nothing suppresses.
       expect(prismaMock.emailJob.updateMany).not.toHaveBeenCalled();
       expect(prismaMock.suppression.upsert).not.toHaveBeenCalled();
-    },
+    }
   );
 
   it("drops an uncorrelated delivery report", async () => {
@@ -492,7 +488,11 @@ describe("applyDsnBounce", () => {
       threadEmailJobId: null,
       dsn: dsn({
         recipients: [
-          { recipient: "ghost@example.com", action: "delivered", status: "2.0.0" },
+          {
+            recipient: "ghost@example.com",
+            action: "delivered",
+            status: "2.0.0",
+          },
         ],
         originalMessageId: null,
       }),

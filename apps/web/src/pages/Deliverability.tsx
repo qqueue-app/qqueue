@@ -1,5 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Gauge, Info, Plus, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import {
+  AlertTriangle,
+  Gauge,
+  Info,
+  MailWarning,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { PageContainer } from "../components/PageContainer.js";
 import { PageHeader } from "../components/PageHeader.js";
@@ -8,8 +16,12 @@ import {
   deriveReputationAlerts,
   type DeliverabilityDomains,
   type DeliverabilityOverview,
-  type DomainThrottle
+  type DomainThrottle,
+  type UnattributedBounce,
 } from "../lib/api.js";
+import { formatFullDate, formatMailDate } from "../lib/format.js";
+import { qk } from "../lib/query-client.js";
+import { useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
@@ -17,13 +29,15 @@ import { Label } from "../components/ui/label.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Card } from "../components/ui/card.js";
+import { Badge } from "../components/ui/badge.js";
+import { DataGrid, type DataGridColumn } from "../components/ui/data-grid.js";
 import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
-  TableRow
+  TableRow,
 } from "../components/ui/table.js";
 
 /**
@@ -36,6 +50,7 @@ const pct = (value: number | null) =>
 
 export function Deliverability() {
   const { currentOrganizationId: organizationId } = useSession();
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<DeliverabilityOverview | null>(null);
   const [domains, setDomains] = useState<DeliverabilityDomains | null>(null);
   const [throttles, setThrottles] = useState<DomainThrottle[]>([]);
@@ -47,6 +62,61 @@ export function Deliverability() {
   const [loading, setLoading] = useState(true);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [savingThrottle, setSavingThrottle] = useState(false);
+
+  const unattributedQuery = useOrgQuery(
+    organizationId,
+    qk.unattributedBounces(organizationId ?? ""),
+    (id) => api.unattributedBounces(id)
+  );
+
+  const unattributedColumns = useMemo<DataGridColumn<UnattributedBounce>[]>(
+    () => [
+      {
+        accessorKey: "recipient",
+        header: "Failed recipient",
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.recipient ?? "Unknown recipient"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "mailbox",
+        header: "Mailbox",
+        meta: { hideBelowMd: true },
+      },
+      {
+        id: "failure",
+        header: "Failure",
+        accessorFn: (row) => [row.status, row.reason].filter(Boolean).join(" "),
+        cell: ({ row }) => (
+          <div className="max-w-cell-lg">
+            <div className="flex items-center gap-2">
+              <Badge variant="warn">Not a QQueue send</Badge>
+              {row.original.suppressed ? (
+                <Badge variant="err">Blocked</Badge>
+              ) : null}
+              {row.original.status ? (
+                <span className="text-meta text-muted-foreground" data-numeric>
+                  {row.original.status}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 truncate text-meta text-muted-foreground">
+              {row.original.reason ?? "Open the notice for details."}
+            </p>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "receivedAt",
+        header: "Received",
+        cell: ({ row }) => formatMailDate(row.original.receivedAt),
+        meta: { align: "right" },
+      },
+    ],
+    []
+  );
 
   async function load() {
     if (!organizationId) {
@@ -63,7 +133,7 @@ export function Deliverability() {
           api.deliverabilityOverview(organizationId),
           api.deliverabilityDomains(organizationId),
           api.getSuppressionPolicy(organizationId),
-          api.listDomainThrottles(organizationId)
+          api.listDomainThrottles(organizationId),
         ]);
       setOverview(overviewData);
       setDomains(domainsData);
@@ -97,7 +167,7 @@ export function Deliverability() {
       await api.updateSuppressionPolicy({
         organizationId,
         softBounceThreshold: Number(threshold),
-        softBounceWindowDays: Number(windowDays)
+        softBounceWindowDays: Number(windowDays),
       });
       toast.success("Auto-suppression policy saved.");
     } catch (error) {
@@ -115,7 +185,7 @@ export function Deliverability() {
       await api.upsertDomainThrottle({
         organizationId,
         domain: throttleDomain.trim(),
-        maxPerMinute: Number(throttleRate)
+        maxPerMinute: Number(throttleRate),
       });
       toast.success("Throttle saved.");
       setThrottleDomain("");
@@ -174,12 +244,12 @@ export function Deliverability() {
                     {
                       label: "Attempted",
                       value: String(overview.totals.attempted),
-                      hint: "Reached a recipient's mail server."
+                      hint: "Reached a recipient's mail server.",
                     },
                     {
                       label: "Accepted by server",
                       value: pct(overview.rates.accepted),
-                      hint: "Handed off to the next hop without rejection."
+                      hint: "Handed off to the next hop without rejection.",
                     },
                     {
                       label: "Confirmed delivered",
@@ -190,33 +260,33 @@ export function Deliverability() {
                       hint:
                         overview.deliverySignal === "none"
                           ? "No delivery confirmation source configured."
-                          : "Confirmed by an ESP webhook or a delivery notification."
+                          : "Confirmed by an ESP webhook or a delivery notification.",
                     },
                     {
                       label: "Bounce rate",
                       value: pct(overview.rates.bounce),
-                      hint: `${overview.totals.bounced} of ${overview.totals.attempted} attempted`
+                      hint: `${overview.totals.bounced} of ${overview.totals.attempted} attempted`,
                     },
                     {
                       label: "Complaint rate",
                       value: pct(overview.rates.complaint),
-                      hint: `${overview.totals.complained} marked as spam`
+                      hint: `${overview.totals.complained} marked as spam`,
                     },
                     {
                       label: "Open rate",
                       value: pct(overview.rates.open),
-                      hint: `${overview.totals.opened} of ${overview.totals.sent} sent`
+                      hint: `${overview.totals.opened} of ${overview.totals.sent} sent`,
                     },
                     {
                       label: "Click rate",
                       value: pct(overview.rates.click),
-                      hint: `${overview.totals.clicked} of ${overview.totals.sent} sent`
+                      hint: `${overview.totals.clicked} of ${overview.totals.sent} sent`,
                     },
                     {
                       label: "Hard / soft / block",
                       value: `${overview.totals.hardBounced} / ${overview.totals.softBounced} / ${overview.totals.blockBounced}`,
-                      hint: "Bounces by class."
-                    }
+                      hint: "Bounces by class.",
+                    },
                   ].map((stat) => (
                     <Card key={stat.label} className="p-4">
                       <div className="text-meta text-muted-foreground">
@@ -269,7 +339,9 @@ export function Deliverability() {
                     <p>
                       <span className="font-medium text-foreground">
                         {overview.totals.failedBeforeHandoff} send
-                        {overview.totals.failedBeforeHandoff === 1 ? "" : "s"}{" "}
+                        {overview.totals.failedBeforeHandoff === 1
+                          ? ""
+                          : "s"}{" "}
                         never left your server
                       </span>{" "}
                       ({pct(overview.rates.deliveryFailure)} of everything that
@@ -291,7 +363,7 @@ export function Deliverability() {
                     ["Bounced", overview.totals.bounced],
                     ["Never left", overview.totals.failedBeforeHandoff],
                     ["Skipped (suppressed)", overview.totals.suppressedAtSend],
-                    ["Still in flight", overview.totals.inFlight]
+                    ["Still in flight", overview.totals.inFlight],
                   ].map(([label, value]) => (
                     <div
                       key={String(label)}
@@ -305,8 +377,74 @@ export function Deliverability() {
               </>
             )}
 
+            <Card className="p-4">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <MailWarning className="h-4 w-4 text-amber-600" />
+                <h2 className="font-medium">Unattributed bounces</h2>
+                {(unattributedQuery.data?.bounces.length ?? 0) > 0 ? (
+                  <Badge variant="warn">
+                    {unattributedQuery.data?.bounces.length}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mb-4 text-meta text-muted-foreground">
+                Delivery failures received by your mailboxes that do not match a
+                QQueue send. They are excluded from the bounce rate and do not
+                automatically block the recipient. Older notices may show as
+                blocked if they were processed before this safeguard.
+              </p>
+              <DataGrid
+                label="Unattributed bounces"
+                data={unattributedQuery.data?.bounces ?? []}
+                columns={unattributedColumns}
+                getRowId={(row) => row.id}
+                loading={unattributedQuery.isPending}
+                pageSize={10}
+                searchPlaceholder="Search recipients or mailboxes…"
+                empty={
+                  <p className="p-4 text-body text-muted-foreground">
+                    No unattributed bounce notices in the last 30 days.
+                  </p>
+                }
+                onRowClick={(row) =>
+                  navigate(
+                    `/inbox?message=${encodeURIComponent(row.inboundMessageId)}`
+                  )
+                }
+                getRowLabel={(row) =>
+                  `Open delivery notice for ${row.recipient ?? "unknown recipient"}`
+                }
+                renderMobileRow={(row) => (
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">
+                      {row.recipient ?? "Unknown recipient"}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <Badge variant="warn">Not a QQueue send</Badge>
+                      {row.suppressed ? (
+                        <Badge variant="err">Blocked</Badge>
+                      ) : null}
+                      {row.status ? (
+                        <span className="text-meta text-muted-foreground">
+                          {row.status}
+                        </span>
+                      ) : null}
+                      <span className="text-meta text-muted-foreground">
+                        {formatFullDate(row.receivedAt)}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-meta text-muted-foreground">
+                      {row.reason ?? row.mailbox}
+                    </p>
+                  </div>
+                )}
+              />
+            </Card>
+
             <Card className="overflow-hidden">
-              <div className="border-b p-4 font-medium">By recipient domain</div>
+              <div className="border-b p-4 font-medium">
+                By recipient domain
+              </div>
               {domains && domains.domains.length > 0 ? (
                 <div className="overflow-x-auto">
                   <Table>
@@ -367,7 +505,9 @@ export function Deliverability() {
                 )}
                 <form onSubmit={savePolicy} className="space-y-3">
                   <div className="space-y-1">
-                    <Label htmlFor="soft-threshold">Soft-bounce threshold</Label>
+                    <Label htmlFor="soft-threshold">
+                      Soft-bounce threshold
+                    </Label>
                     <Input
                       id="soft-threshold"
                       type="number"
@@ -426,7 +566,11 @@ export function Deliverability() {
                     />
                   </div>
                   <Button type="submit" disabled={savingThrottle}>
-                    {savingThrottle ? <Spinner /> : <Plus className="h-4 w-4" />}
+                    {savingThrottle ? (
+                      <Spinner />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
                     Add
                   </Button>
                 </form>

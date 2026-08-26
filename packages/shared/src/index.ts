@@ -249,6 +249,10 @@ export interface InboundMessage {
   receivedAt: string;
   readAt?: string | null;
   imapUid?: number | null;
+  /** True when inbox sync recognized a delivery status notification. */
+  isDsn?: boolean;
+  /** Whether that notice could be tied to a QQueue EmailJob. */
+  dsnAttribution?: "ATTRIBUTED" | "UNATTRIBUTED" | null;
   emailJob?: {
     id: string;
     subject: string;
@@ -1993,6 +1997,26 @@ export interface DeliverabilityDomainRow {
 
 export interface DeliverabilityDomains {
   domains: DeliverabilityDomainRow[];
+}
+
+/** A failed delivery notice for a message QQueue did not send. */
+export interface UnattributedBounce {
+  /** Stable per-recipient row id; one DSN may report several recipients. */
+  id: string;
+  inboundMessageId: string;
+  mailbox: string;
+  recipient: string | null;
+  subject: string;
+  status: string | null;
+  reason: string | null;
+  bounceType: "HARD" | "SOFT" | "BLOCK";
+  /** May be true for notices processed before unattributed suppression stopped. */
+  suppressed: boolean;
+  receivedAt: string;
+}
+
+export interface UnattributedBounces {
+  bounces: UnattributedBounce[];
 }
 
 export interface ReputationAlert {

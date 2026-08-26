@@ -507,6 +507,9 @@ describe("api endpoint builders", () => {
     // --- campaigns ---
     { name: "configureAbTest", method: "PUT", path: "/api/v1/campaigns/cmp_1/ab-test", call: () => api.configureAbTest("cmp_1", {}) },
 
+    // --- deliverability ---
+    { name: "unattributedBounces", method: "GET", path: "/api/v1/deliverability/unattributed-bounces?organizationId=org_1", call: () => api.unattributedBounces(ORG) },
+
     // --- manual email ---
     { name: "sendManualEmail", method: "POST", path: "/api/v1/manual-email/send", call: () => api.sendManualEmail({ organizationId: ORG }) },
     { name: "previewEmail", method: "POST", path: "/api/v1/manual-email/preview", call: () => api.previewEmail({ organizationId: ORG }) },

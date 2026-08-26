@@ -111,6 +111,20 @@ describe("Inbox single-screen navigation", () => {
     expect(mockedApi.markInboundMessageRead).not.toHaveBeenCalled();
   });
 
+  it("labels an unattributed delivery failure in the list and reader", async () => {
+    const user = userEvent.setup();
+    setup([makeMessage({
+      subject: "Undelivered Mail Returned to Sender",
+      isDsn: true,
+      dsnAttribution: "UNATTRIBUTED"
+    })]);
+    renderWithProviders(<Inbox />);
+
+    expect(await screen.findByText("Unattributed")).toBeInTheDocument();
+    await openRow(user, /Undelivered Mail Returned to Sender/);
+    expect(screen.getByText("Unattributed bounce")).toBeInTheDocument();
+  });
+
   it("opens the conversation full-width and comes back to the list", async () => {
     const user = userEvent.setup();
     setup([makeMessage({ readAt: "2026-07-01T12:00:00.000Z" })]);

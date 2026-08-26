@@ -6,8 +6,15 @@ import { deliverabilityController } from "./controller.js";
 export const deliverabilityRouter = Router();
 
 // Deliverability is an operations view, restricted to OWNER/ADMIN.
-deliverabilityRouter.use(requireOrgMembership, requireOrgRole("OWNER", "ADMIN"));
+deliverabilityRouter.use(
+  requireOrgMembership,
+  requireOrgRole("OWNER", "ADMIN")
+);
 
 deliverabilityRouter.get("/overview", deliverabilityController.overview);
 deliverabilityRouter.get("/domains", deliverabilityController.domains);
+deliverabilityRouter.get(
+  "/unattributed-bounces",
+  deliverabilityController.unattributedBounces
+);
 deliverabilityRouter.get("/alerts", deliverabilityController.alerts);

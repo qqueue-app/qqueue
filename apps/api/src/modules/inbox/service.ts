@@ -42,6 +42,50 @@ const messageInclude = {
   },
 } satisfies Prisma.InboundMessageInclude;
 
+type IncludedMessage = Prisma.InboundMessageGetPayload<{
+  include: typeof messageInclude;
+}>;
+
+async function withDsnAttribution(
+  organizationId: string,
+  messages: IncludedMessage[]
+) {
+  const dsnIds = messages
+    .filter((message) => message.isDsn)
+    .map((message) => message.id);
+  if (dsnIds.length === 0) {
+    return messages.map((message) => ({ ...message, dsnAttribution: null }));
+  }
+
+  const events = await prisma.emailEvent.findMany({
+    where: {
+      organizationId,
+      type: { in: ["BOUNCED", "DELIVERED"] },
+      OR: dsnIds.map((id) => ({
+        metadata: { path: ["inboundMessageId"], equals: id },
+      })),
+    },
+    select: { metadata: true },
+  });
+  const attributed = new Set(
+    events.flatMap((event) => {
+      const metadata = event.metadata as { inboundMessageId?: unknown } | null;
+      return typeof metadata?.inboundMessageId === "string"
+        ? [metadata.inboundMessageId]
+        : [];
+    })
+  );
+
+  return messages.map((message) => ({
+    ...message,
+    dsnAttribution: message.isDsn
+      ? attributed.has(message.id)
+        ? ("ATTRIBUTED" as const)
+        : ("UNATTRIBUTED" as const)
+      : null,
+  }));
+}
+
 function candidateThreadHeaders(input: {
   inReplyTo?: string | null;
   references?: string[];
@@ -80,9 +124,7 @@ export const inboxService = {
     return prisma.inboxAccount.findMany({
       where: {
         organizationId,
-        ...(access.unrestricted
-          ? {}
-          : { id: { in: access.inboxAccountIds } }),
+        ...(access.unrestricted ? {} : { id: { in: access.inboxAccountIds } }),
       },
       select: {
         id: true,
@@ -331,7 +373,10 @@ export const inboxService = {
       messages.length > query.limit ? messages[query.limit]?.id : undefined;
 
     return {
-      data: messages.slice(0, query.limit),
+      data: await withDsnAttribution(
+        query.organizationId,
+        messages.slice(0, query.limit)
+      ),
       nextCursor,
     };
   },

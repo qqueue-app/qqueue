@@ -370,7 +370,12 @@ reason — so future work starts from a decision, not a rediscovery:
   scope.
 - **Worker-side per-key idempotency TTL** — `Idempotency-Key` rows never expire
   (unbounded growth); revisit alongside the EmailEvent analytics work.
-- **Phase 2c — make async bounce accounting observable.** Phase 2b's DSN parser
+- **Phase 2c — finish async bounce accounting observability.** Stored DSNs that
+  do not correlate to a QQueue `EmailJob` now appear as **Unattributed
+  bounces** on Sending health and carry an Inbox badge. They remain outside the
+  rate (there is no send denominator) and cannot suppress an address; this
+  protects the pipeline from direct-SMTP notices and backscatter. Phase 2b's
+  DSN parser
   (`apps/worker/src/lib/dsn.ts`) only sees bounces that arrive in a synced
   `InboxAccount` mailbox. An instance whose DSNs predate that account — or that
   has no inbox account at all — reports a structural zero for bounces, which is

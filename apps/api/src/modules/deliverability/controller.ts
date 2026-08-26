@@ -6,7 +6,7 @@ function parseQuery(req: Request) {
   return deliverabilityQuerySchema.parse({
     organizationId: req.organizationId!,
     from: typeof req.query.from === "string" ? req.query.from : undefined,
-    to: typeof req.query.to === "string" ? req.query.to : undefined
+    to: typeof req.query.to === "string" ? req.query.to : undefined,
   });
 }
 
@@ -21,8 +21,15 @@ export const deliverabilityController = {
     res.json({ data });
   },
 
+  async unattributedBounces(req: Request, res: Response) {
+    const data = await deliverabilityService.unattributedBounces(
+      parseQuery(req)
+    );
+    res.json({ data });
+  },
+
   async alerts(req: Request, res: Response) {
     const data = await deliverabilityService.alerts(parseQuery(req));
     res.json({ data });
-  }
+  },
 };
