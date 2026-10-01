@@ -172,7 +172,7 @@ services:
   # Bundled S3-compatible object storage for attachments. Replace by pointing the
   # S3_* vars (on api/worker) at an external S3 provider and removing this block.
   minio:
-    image: minio/minio:latest
+    image: ghcr.io/coollabsio/minio:latest
     container_name: qqueue-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"

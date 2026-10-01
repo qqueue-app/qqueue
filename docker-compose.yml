@@ -22,7 +22,7 @@ services:
   # S3-compatible object storage for email attachments. The host S3 API is on
   # :9100 and the console is on :9101 (matches the default S3_ENDPOINT).
   minio:
-    image: minio/minio:latest
+    image: ghcr.io/coollabsio/minio:latest
     container_name: qqueue-minio
     command: server /data --console-address ":9001"
     environment:
