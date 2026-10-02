@@ -246,6 +246,8 @@ export const transactionalEmailService = {
           subject,
           html,
           text,
+          headers: input.headers as InputJsonValue | undefined,
+          isBulk: input.isBulk ?? false,
           variables: input.variables as InputJsonValue | undefined,
           status: "SUPPRESSED"
         },
@@ -279,6 +281,8 @@ export const transactionalEmailService = {
         subject,
         html,
         text,
+        headers: input.headers as InputJsonValue | undefined,
+        isBulk: input.isBulk ?? false,
         variables: input.variables as InputJsonValue | undefined,
         status: "QUEUED",
         scheduledAt,

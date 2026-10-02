@@ -31,29 +31,40 @@ function startFakeSmtp(): Promise<{
   server: Server;
   port: number;
   sockets: Set<Socket>;
+  messages: string[];
 }> {
   const sockets = new Set<Socket>();
+  const messages: string[] = [];
   const server = createServer((socket: Socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     let inData = false;
     let authLoginStep = 0;
+    let pending = "";
+    let messageLines: string[] = [];
 
     socket.write("220 qqueue-smoke ESMTP\r\n");
     socket.on("data", (chunk) => {
-      for (const rawLine of chunk.toString("utf8").split(/\r?\n/)) {
+      pending += chunk.toString("utf8");
+      let newline: number;
+      while ((newline = pending.indexOf("\n")) !== -1) {
+        const rawLine = pending.slice(0, newline).replace(/\r$/, "");
+        pending = pending.slice(newline + 1);
         const line = rawLine.trim();
-        if (!line) {
-          continue;
-        }
 
         if (inData) {
           if (line === ".") {
             inData = false;
+            messages.push(messageLines.join("\r\n"));
+            messageLines = [];
             socket.write("250 queued\r\n");
+          } else {
+            messageLines.push(rawLine);
           }
           continue;
         }
+
+        if (!line) continue;
 
         const upper = line.toUpperCase();
         if (upper.startsWith("EHLO") || upper.startsWith("HELO")) {
@@ -95,7 +106,7 @@ function startFakeSmtp(): Promise<{
       if (!address || typeof address === "string") {
         throw new Error("Fake SMTP server did not bind to a TCP port");
       }
-      resolve({ server, port: address.port, sockets });
+      resolve({ server, port: address.port, sockets, messages });
     });
   });
 }
@@ -153,7 +164,8 @@ async function main() {
   const {
     server: smtpServer,
     port: smtpPort,
-    sockets: smtpSockets
+    sockets: smtpSockets,
+    messages: smtpMessages
   } = await startFakeSmtp();
   const worker = startEmailSendingWorker();
   const app = createApp();
@@ -232,6 +244,11 @@ async function main() {
         to: "recipient@example.com",
         subject: "Smoke test",
         text: "Smoke test",
+        isBulk: true,
+        headers: {
+          "List-Unsubscribe": "<https://example.com/unsubscribe/signed-token>",
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+        },
         scheduledAt
       })
       .expect(202);
@@ -243,6 +260,16 @@ async function main() {
         select: { id: true, status: true, messageId: true }
       })
     );
+
+    const rawMessage = smtpMessages[0] ?? "";
+    const rawBody = rawMessage.split("\r\n\r\n").slice(1).join("\r\n\r\n");
+    if (
+      !rawMessage.includes("List-Unsubscribe: <https://example.com/unsubscribe/signed-token>") ||
+      !rawMessage.includes("List-Unsubscribe-Post: List-Unsubscribe=One-Click") ||
+      !rawBody.includes("https://example.com/unsubscribe/signed-token")
+    ) {
+      throw new Error("Smoke SMTP message is missing the one-click headers or footer");
+    }
 
     console.log(`Smoke test passed: ${sentJob.id} ${sentJob.status}`);
     process.exit(0);

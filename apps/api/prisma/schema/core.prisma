@@ -777,6 +777,8 @@ model EmailJob {
   subject          String
   html             String?
   text             String?
+  // Validated caller-supplied message headers, retained through queue retries.
+  headers          Json?
   variables        Json?
   origin           EmailOrigin       @default(TRANSACTIONAL)
   createdByUserId  String?

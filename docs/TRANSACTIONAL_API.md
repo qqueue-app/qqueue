@@ -36,19 +36,59 @@ Successful sends return `202 Accepted` with a compact job reference:
 {
   "data": {
     "id": "email_job_id",
-    "status": "SENT"
+    "status": "QUEUED"
   }
 }
 ```
 
-`status` is `SENT` for an immediate send and `QUEUED` for a scheduled send (one
-with `scheduledAt`).
+Both immediate and scheduled sends enter the queue; the response reports the
+job's current status, not SMTP delivery.
+
+### Per-message headers (including one-click unsubscribe)
+
+Put message headers in the JSON body, **not** in the HTTP request headers.
+Use a distinct signed URL for each recipient and a distinct `Idempotency-Key`
+for each logical send:
+
+```sh
+curl -s -X POST http://localhost:4000/api/v1/transactional-email/send \
+  -H "Authorization: Bearer qq_live_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: newsletter-42-recipient-123" \
+  -d '{
+    "to": "reader@example.com",
+    "subject": "Newsletter",
+    "html": "<p>News and an unsubscribe link...</p>",
+    "isBulk": true,
+    "headers": {
+      "List-Unsubscribe": "<https://example.com/unsubscribe/signed-token>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    }
+  }'
+```
+
+`headers` accepts at most 20 entries, each value at most 2,048 characters.
+Header names are case-insensitive; duplicates, control characters, and
+identity/envelope/MIME headers such as `From`, `To`, `Subject`, and
+`Content-Type` are rejected. One-click unsubscribe requires exactly one
+angle-bracketed HTTPS URL and the exact `List-Unsubscribe-Post` value above.
+Set `isBulk: true` for newsletters. QQueue then uses the supplied one-click
+URL for both the message headers and a visible unsubscribe footer. Without
+`isBulk`, QQueue forwards the headers but does not append a footer. Keep
+external opt-outs in QQueue's suppression list too, since QQueue checks it
+before and during send.
+
+Campaign jobs already carry QQueue-generated unsubscribe headers. When a bulk
+job has its own complete one-click header pair, the worker uses that URL for
+both headers and the visible footer. The current campaign API does not accept
+per-recipient URLs; a campaign-wide static URL must not be used for signed
+recipient-specific unsubscribe links.
 
 ### Choosing who the email sends as
 
 The From header always comes from a sending account (an SMTP connection), never
 from the request — so you never build a From header yourself. Two optional
-fields choose *which* account:
+fields choose _which_ account:
 
 - `from` — the address the account sends as, e.g. `"support@acme.com"`. The
   readable option: you configure the account once in the dashboard and name it
@@ -153,13 +193,13 @@ import { QQueueClient } from "qqueue-sdk";
 
 const qqueue = new QQueueClient({
   apiKey: process.env.QQUEUE_API_KEY!,
-  baseUrl: "https://mail.example.com/api/v1"
+  baseUrl: "https://mail.example.com/api/v1",
 });
 
 const email = await qqueue.sendEmail({
   to: "recipient@example.com",
   templateId: "template_id",
-  variables: { firstName: "Ada" }
+  variables: { firstName: "Ada" },
 });
 
 console.log(email.id, email.status);
@@ -187,14 +227,14 @@ Error responses include a stable machine-readable `error.code` when available:
 
 Transactional API codes:
 
-| Code | Meaning |
-| --- | --- |
-| `invalid_api_key` | The bearer token looks like an API key but is missing, revoked, or unknown. |
+| Code                      | Meaning                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `invalid_api_key`         | The bearer token looks like an API key but is missing, revoked, or unknown.                           |
 | `missing_smtp_connection` | No sending account matched `from` or `smtpConnectionId`, or no default sending account is configured. |
-| `invalid_template` | The provided template id does not exist in the API key's organization. |
-| `smtp_failure` | The SMTP provider rejected or failed the send attempt. |
-| `invalid_schedule` | `scheduledAt` is malformed or not in the future. |
-| `validation_error` | The request body is invalid or lacks required email content. |
+| `invalid_template`        | The provided template id does not exist in the API key's organization.                                |
+| `smtp_failure`            | The SMTP provider rejected or failed the send attempt.                                                |
+| `invalid_schedule`        | `scheduledAt` is malformed or not in the future.                                                      |
+| `validation_error`        | The request body is invalid or lacks required email content.                                          |
 
 ## Webhook Signing
 

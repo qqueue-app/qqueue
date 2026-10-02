@@ -284,6 +284,55 @@ describe("cron and timezone schemas", () => {
 });
 
 describe("sendEmailSchema", () => {
+  it("accepts per-message one-click unsubscribe headers", () => {
+    const parsed = sendEmailSchema.parse({
+      organizationId: "org_1",
+      to: "a@b.com",
+      subject: "Newsletter",
+      text: "Body",
+      isBulk: true,
+      headers: {
+        "List-Unsubscribe": "<https://example.com/unsubscribe?token=signed>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "X-Campaign-Id": "october"
+      }
+    });
+    expect(parsed.headers?.["List-Unsubscribe-Post"]).toBe(
+      "List-Unsubscribe=One-Click"
+    );
+    expect(parsed.isBulk).toBe(true);
+  });
+
+  it.each([
+    { From: "spoof@example.com" },
+    { "cOnTeNt-TyPe": "text/plain" },
+    { "X-Note": "safe\r\nBcc: victim@example.com" },
+    { "X-Note": "a", "x-note": "b" },
+    { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+    {
+      "List-Unsubscribe": "<http://example.com/u>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    },
+    {
+      "List-Unsubscribe": "<https://example.com/u>",
+      "List-Unsubscribe-Post": "bad"
+    },
+    {
+      "List-Unsubscribe": "<https://example.com/unsubscribe token>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    }
+  ])("rejects unsafe or incomplete message headers: %j", (headers) => {
+    expect(
+      sendEmailSchema.safeParse({
+        organizationId: "org_1",
+        to: "a@b.com",
+        subject: "Hi",
+        text: "Body",
+        headers
+      }).success
+    ).toBe(false);
+  });
+
   it("accepts a template-based send", () => {
     expect(
       sendEmailSchema.safeParse({

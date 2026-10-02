@@ -41,6 +41,10 @@ export interface PublicSendEmailInput {
   subject?: string;
   html?: string;
   text?: string;
+  /** Extra message headers. Use this for a per-recipient List-Unsubscribe URL. */
+  headers?: Record<string, string>;
+  /** Marks a newsletter send as bulk so QQueue adds a matching unsubscribe footer. */
+  isBulk?: boolean;
   variables?: Record<string, unknown>;
   /** Message-ID this replies to, for threading in the recipient's client. */
   inReplyTo?: string;

@@ -99,6 +99,35 @@ describe("QQueueClient", () => {
     expect(body.attachments).toEqual(attachments);
   });
 
+  it("sends message headers in the JSON body, separate from HTTP headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: vi
+        .fn()
+        .mockResolvedValue({ data: { id: "job_1", status: "QUEUED" } })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const headers = {
+      "List-Unsubscribe": "<https://example.com/u/signed>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    };
+    await new QQueueClient({ apiKey: "key_3" }).sendEmail(
+      { to: "a@b.com", subject: "Newsletter", text: "Body", headers, isBulk: true },
+      { idempotencyKey: "newsletter-1-a" }
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      headers,
+      isBulk: true
+    });
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty(
+      "List-Unsubscribe"
+    );
+    expect(fetchMock.mock.calls[0][1].headers["Idempotency-Key"]).toBe(
+      "newsletter-1-a"
+    );
+  });
+
   it("sends the Idempotency-Key header only when a key is given", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

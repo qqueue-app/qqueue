@@ -545,6 +545,65 @@ describe("email-sending worker", () => {
     expect(send.mock.calls[0][0].headers).toBeUndefined();
   });
 
+  it("forwards the sender's one-click headers on a transactional send", async () => {
+    const headers = {
+      "List-Unsubscribe": "<https://example.com/u/signed>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    };
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "TRANSACTIONAL",
+      isBulk: false,
+      headers
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(send.mock.calls[0][0].headers).toEqual(headers);
+    expect(h.buildUnsubscribeUrl).not.toHaveBeenCalled();
+    expect(h.appendUnsubscribeFooter).not.toHaveBeenCalled();
+  });
+
+  it("uses a bulk job's custom one-click URL for both headers and footer", async () => {
+    const url = "https://example.com/u/signed";
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "CAMPAIGN",
+      isBulk: true,
+      headers: {
+        "list-unsubscribe": `<${url}>`,
+        "list-unsubscribe-post": "List-Unsubscribe=One-Click",
+        "X-Campaign-Id": "october"
+      }
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: []
+    });
+
+    await run(makeJob());
+
+    expect(h.buildUnsubscribeUrl).not.toHaveBeenCalled();
+    expect(h.listUnsubscribeHeadersForUrl).toHaveBeenCalledWith(url);
+    expect(send.mock.calls[0][0].headers).toMatchObject({
+      "List-Unsubscribe": `<${url}>`,
+      "X-Campaign-Id": "october"
+    });
+    expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
+      expect.anything(),
+      url,
+      expect.anything()
+    );
+  });
+
   it("appends the unsubscribe footer to bulk mail, after tracking injection", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,

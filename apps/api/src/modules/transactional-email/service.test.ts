@@ -253,6 +253,33 @@ describe("transactionalEmailService.send", () => {
     expect(opts).toMatchObject({ delay: 0, jobId: "email-job_1", attempts: 3 });
   });
 
+  it("persists caller headers on a queued send", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED"
+    } as never);
+    const headers = {
+      "List-Unsubscribe": "<https://example.com/u/signed>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    };
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Newsletter",
+      html: "<p>Hi</p>",
+      headers,
+      isBulk: true
+    });
+    expect(prismaMock.emailJob.create.mock.calls[0][0].data.headers).toEqual(
+      headers
+    );
+    expect(prismaMock.emailJob.create.mock.calls[0][0].data.isBulk).toBe(true);
+    expect(queueAdd).toHaveBeenCalledOnce();
+  });
+
   it("queues a future email with the schedule delay", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));

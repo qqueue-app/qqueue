@@ -32,6 +32,35 @@ const email = await qqueue.sendEmail({
 console.log(email.id, email.status);
 ```
 
+## Newsletter unsubscribe headers
+
+Pass message headers in the payload. Each recipient needs their own signed
+unsubscribe URL and retry key. The API key's organization must also suppress
+recipients who opt out through your external unsubscribe endpoint.
+
+```ts
+await qqueue.sendEmail(
+  {
+    to: reader.email,
+    subject: "Newsletter",
+    html: newsletterHtml,
+    isBulk: true,
+    headers: {
+      "List-Unsubscribe": `<${reader.signedUnsubscribeUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+    }
+  },
+  { idempotencyKey: `newsletter-42-${reader.id}` }
+);
+```
+
+`isBulk: true` makes QQueue append a visible footer with the same URL. The URL
+must be HTTPS. QQueue's API
+limits this endpoint to 120 requests per minute per bearer token and delays
+delivery above the configured per-recipient-domain send cap (60 per minute by
+default). These limits do not imply an approved bulk volume from your SMTP
+provider.
+
 ## Templates
 
 ```ts

@@ -8,6 +8,7 @@ import {
   injectTracking,
   listUnsubscribeHeadersForUrl
 } from "@qqueue/email-engine";
+import { emailHeadersSchema } from "@qqueue/shared";
 import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
 import { loadAttachmentsForJob } from "../lib/attachments.js";
@@ -162,22 +163,51 @@ export function startEmailSendingWorker() {
 
         const attachments = await loadAttachmentsForJob(emailJob.id);
 
-        // Bulk mail (campaign fan-out, recurring sends — flagged at job
-        // creation) offers a one-click unsubscribe; transactional, one-off
-        // manual, and SYSTEM sends do not. One URL serves both the RFC 8058
+        // Headers are validated at the API boundary and checked again here in
+        // case an older or manually inserted job reaches the queue.
+        const callerHeaders = emailJob.headers
+          ? emailHeadersSchema.parse(emailJob.headers)
+          : undefined;
+        const oneClickHeader = Object.entries(callerHeaders ?? {}).find(
+          ([name]) => name.toLowerCase() === "list-unsubscribe-post"
+        );
+        const customUnsubscribeUrl = oneClickHeader
+          ? /^<(https:\/\/[^<>]+)>$/.exec(
+              Object.entries(callerHeaders ?? {}).find(
+                ([name]) => name.toLowerCase() === "list-unsubscribe"
+              )?.[1] ?? ""
+            )?.[1]
+          : undefined;
+
+        // Bulk mail (campaign fan-out, recurring sends, or a bulk API send)
+        // offers a one-click unsubscribe. One URL serves both the RFC 8058
         // headers and the visible footer, so they cannot drift apart.
         const unsubscribeUrl = emailJob.isBulk
-          ? buildUnsubscribeUrl(
+          ? (customUnsubscribeUrl ??
+            buildUnsubscribeUrl(
               env.APP_URL,
               emailJob.organizationId,
               emailJob.toEmail,
               env.TRACKING_SECRET
-            )
+            ))
           : undefined;
 
+        // For bulk jobs, QQueue's pair is authoritative unless the caller
+        // supplied a complete one-click pair. Its footer then uses that same
+        // URL. Strip caller spellings first to avoid case-variant duplicates.
+        const otherHeaders = emailJob.isBulk
+          ? Object.fromEntries(
+              Object.entries(callerHeaders ?? {}).filter(
+                ([name]) =>
+                  !["list-unsubscribe", "list-unsubscribe-post"].includes(
+                    name.toLowerCase()
+                  )
+              )
+            )
+          : callerHeaders;
         const headers = unsubscribeUrl
-          ? listUnsubscribeHeadersForUrl(unsubscribeUrl)
-          : undefined;
+          ? { ...otherHeaders, ...listUnsubscribeHeadersForUrl(unsubscribeUrl) }
+          : callerHeaders;
 
         // The footer goes on *after* tracking injection, so the opt-out link is
         // the only one in the message that isn't rewritten through the click

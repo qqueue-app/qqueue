@@ -629,6 +629,9 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Public transactional send endpoint accepts API keys.
 - [x] Dashboard JWT flow can also use transactional send with organization ID.
 - [x] Direct content and template-based sends exist.
+- [x] Transactional sends accept validated per-message headers and a bulk flag
+  through the API and SDK, including recipient-specific one-click unsubscribe
+  headers and a matching visible footer; headers persist through queue retries.
 - [x] Delayed sends with `scheduledAt` exist.
 - [x] Stable `{ id, status }` response and machine-readable error codes exist.
 - [x] Transactional API docs and SDK examples exist.

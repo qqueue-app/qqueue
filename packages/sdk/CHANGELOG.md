@@ -2,6 +2,13 @@
 
 All notable changes to `qqueue-sdk` are documented here.
 
+## Unreleased
+
+- Add per-message `headers` and `isBulk` to `sendEmail`, including
+  recipient-specific `List-Unsubscribe` and `List-Unsubscribe-Post` for
+  newsletter integrations and a matching visible footer.
+  Requires a QQueue API and worker with the email-job headers migration.
+
 ## 0.2.0 - 2026-08-18
 
 - Add `attachments` to `sendEmail`: small base64 attachments carried on the

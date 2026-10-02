@@ -2149,6 +2149,112 @@ export const inlineAttachmentSchema = z.object({
 
 export type InlineAttachmentInput = z.infer<typeof inlineAttachmentSchema>;
 
+// Message headers travel through a persisted EmailJob before SMTP delivery.
+// Keep the caller from replacing envelope/identity/MIME headers or injecting a
+// second header with control characters. Header names are case-insensitive.
+const protectedEmailHeaders = new Set([
+  "from",
+  "sender",
+  "to",
+  "cc",
+  "bcc",
+  "reply-to",
+  "subject",
+  "date",
+  "message-id",
+  "return-path",
+  "mime-version",
+  "content-type",
+  "content-transfer-encoding",
+  "dkim-signature",
+  "authentication-results",
+  "received"
+]);
+
+export const emailHeadersSchema = z
+  .record(z.string(), z.string())
+  .superRefine((headers, context) => {
+    const entries = Object.entries(headers);
+    if (entries.length > 20) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "At most 20 email headers are allowed"
+      });
+    }
+    const seen = new Set<string>();
+    for (const [name, value] of entries) {
+      const normalized = name.toLowerCase();
+      if (
+        !/^[A-Za-z][A-Za-z0-9-]{0,77}$/.test(name) ||
+        protectedEmailHeaders.has(normalized) ||
+        normalized.startsWith("resent-") ||
+        normalized.startsWith("content-") ||
+        normalized.startsWith("arc-")
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Email header ${name} is not allowed`
+        });
+      }
+      if (seen.has(normalized)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate email header ${name}`
+        });
+      }
+      seen.add(normalized);
+      if (
+        !value ||
+        value.length > 2048 ||
+        Array.from(value).some((character) => {
+          const code = character.charCodeAt(0);
+          return code < 32 || code === 127;
+        })
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid value for email header ${name}`
+        });
+      }
+    }
+
+    const unsubscribe = entries.find(
+      ([name]) => name.toLowerCase() === "list-unsubscribe"
+    )?.[1];
+    const post = entries.find(
+      ([name]) => name.toLowerCase() === "list-unsubscribe-post"
+    )?.[1];
+    if (post !== undefined) {
+      if (post !== "List-Unsubscribe=One-Click") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "List-Unsubscribe-Post must be List-Unsubscribe=One-Click"
+        });
+      }
+      const urlText = /^<(https:\/\/[^<>]+)>$/.exec(unsubscribe ?? "")?.[1];
+      try {
+        const url = new URL(urlText ?? "");
+        if (
+          !urlText ||
+          /\s/.test(urlText) ||
+          url.protocol !== "https:" ||
+          url.username ||
+          url.password ||
+          url.hash
+        )
+          throw new Error("invalid URL");
+      } catch {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "One-click List-Unsubscribe requires one angle-bracketed HTTPS URL"
+        });
+      }
+    }
+  });
+
+export type EmailHeadersInput = z.infer<typeof emailHeadersSchema>;
+
 export const sendEmailSchema = z.object({
   organizationId: z.string().min(1),
   to: emailAddressSchema,
@@ -2167,6 +2273,8 @@ export const sendEmailSchema = z.object({
   subject: z.string().min(1).optional(),
   html: z.string().optional(),
   text: z.string().optional(),
+  headers: emailHeadersSchema.optional(),
+  isBulk: z.boolean().optional(),
   variables: z.record(z.unknown()).optional(),
   inReplyTo: z.string().min(1).optional(),
   references: z.array(z.string().min(1)).optional(),
