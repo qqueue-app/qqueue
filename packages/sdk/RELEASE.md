@@ -36,7 +36,21 @@ node --input-type=module -e "import { QQueueClient } from 'qqueue-sdk'; new QQue
 
 The import should print `ok` without module resolution errors.
 
-## 4. Tag and Publish
+## 4. Configure npm Trusted Publishing
+
+In the `qqueue-sdk` package settings on npm, add a GitHub Actions trusted
+publisher with:
+
+- Organization or user: `qqueue-app`
+- Repository: `qqueue`
+- Workflow filename: `publish-sdk.yml`
+- Environment: `npm`
+- Allowed action: `npm publish`
+
+The workflow uses GitHub's short-lived OIDC identity. It does not need an
+`NPM_TOKEN` secret. Package settings must be saved by an npm package maintainer.
+
+## 5. Tag and Publish
 
 Create and push a release tag that matches `packages/sdk/package.json`.
 GitHub Actions will run the SDK preflight checks and publish the package to npm.
@@ -46,8 +60,10 @@ git tag qqueue-sdk-v<version>
 git push origin qqueue-sdk-v<version>
 ```
 
-The workflow requires an npm automation token stored as the repository secret
-`NPM_TOKEN`.
+If a tag's workflow failed after the tag was already pushed, do not move the
+tag. After fixing the workflow on the default branch and configuring the trusted
+publisher, start `Publish SDK` with **Run workflow** on that branch. Confirm
+that its package version is still the intended unpublished version first.
 
 After the workflow succeeds, verify the package page and install metadata:
 
