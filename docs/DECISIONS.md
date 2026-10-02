@@ -279,6 +279,11 @@ the template-versioning deferral, drafts are single mutable rows.
 
 ## Keep the Inbox Modular and Focused
 
+> Historical decision. The everyday email app direction in
+> [ROADMAP.md](ROADMAP.md#everyday-email-app-next-phase) supersedes the narrow
+> product scope here. The inbox remains a separate module, and outbound mail
+> still uses the shared delivery pipeline.
+
 Inbox/IMAP functionality is a **separate module** with a narrow product scope.
 It is not tightly coupled to the core sending pipeline.
 

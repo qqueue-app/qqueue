@@ -15,7 +15,6 @@ Following the Beta Polish + Launch Prep Sprint, QQueue now includes:
 - Authentication
 - Organizations
 - SMTP connections
-- Sender identities and sending domains (EXTERNAL/MANAGED DKIM)
 - Contacts (with tags + created date in the UI)
 - Contact lists (with descriptions and membership management)
 - Templates (with preview and MJML-aware source)
@@ -117,6 +116,33 @@ learning a new vocabulary. What changed:
 
 Compose and Campaigns were deliberately **not** merged — see
 `docs/DECISIONS.md`.
+
+## Email app direction (2026-10-02)
+
+QQueue's next product goal is an everyday email app for people using an
+administrator-assigned mailbox on a phone or laptop. The administrator creates
+or connects mailboxes, invites people, and grants each person access to the
+mailboxes they may read and send from. Members then manage their mail in the
+QQueue app without needing the mail server's administration UI.
+
+The foundation already exists: mailbox provisioning and access grants, IMAP
+inbox sync, a responsive installable PWA, new-mail push notifications, compose,
+reply, drafts, and the shared send pipeline. The current inbox is still a
+read-only IMAP import: marking a message read changes QQueue's database, not
+the mail server; only one configured folder (normally INBOX) is synced; the
+initial import takes at most `INBOX_SYNC_MAX_MESSAGES`; and the web inbox
+renders the first page of the paginated API. There is no archive, trash, move,
+or flag action. Mail sent through another client and drafts saved there do not
+appear in QQueue's Sent and Drafts views.
+
+The immediate priority is making the existing app easy for nontechnical sales
+and office users, and for administrators assigning their mailboxes. Inbox and
+Compose work, but the main navigation and composer expose statistics, campaign
+tools, delivery diagnostics, and advanced options beside daily mail tasks.
+Simplify those journeys and test them with real users before expanding mailbox
+behavior. See [ROADMAP.md](ROADMAP.md#everyday-email-app-next-phase) for the
+ordered work and acceptance criteria. The earlier narrow inbox scope below is
+historical and is superseded by this direction.
 
 ## Product Direction
 

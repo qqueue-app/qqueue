@@ -165,9 +165,13 @@ function buildConversationThreads(messages: InboundMessage[]) {
 export function Inbox() {
   const {
     currentOrganizationId: organizationId,
+    currentOrganization,
     organizations,
     setCurrentOrganizationId,
   } = useSession();
+  const canManageMailboxes =
+    currentOrganization?.role === "OWNER" ||
+    currentOrganization?.role === "ADMIN";
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -689,13 +693,15 @@ export function Inbox() {
                       className={cn(messagesQuery.isFetching && "animate-spin")}
                     />
                   </IconButton>
-                  <IconButton
-                    label="Connect a mailbox"
-                    onClick={() => setConnectOpen(true)}
-                    disabled={!organizationId}
-                  >
-                    <MailPlus />
-                  </IconButton>
+                  {canManageMailboxes ? (
+                    <IconButton
+                      label="Connect a mailbox"
+                      onClick={() => setConnectOpen(true)}
+                      disabled={!organizationId}
+                    >
+                      <MailPlus />
+                    </IconButton>
+                  ) : null}
                 </div>
               </div>
 
@@ -774,16 +780,18 @@ export function Inbox() {
                       {selectedAccount.status}
                     </Badge>
                     <span className="truncate">
-                      Synced {formatFullDate(selectedAccount.lastSyncedAt)}
+                      Last checked {formatFullDate(selectedAccount.lastSyncedAt)}
                     </span>
-                    <IconButton
-                      label={`Disconnect ${selectedAccount.email}`}
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => removeAccount.mutate(selectedAccount.id)}
-                    >
-                      <Trash2 />
-                    </IconButton>
+                    {canManageMailboxes ? (
+                      <IconButton
+                        label={`Disconnect ${selectedAccount.email}`}
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => removeAccount.mutate(selectedAccount.id)}
+                      >
+                        <Trash2 />
+                      </IconButton>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -798,9 +806,17 @@ export function Inbox() {
             ) : accounts.length === 0 ? (
               <EmptyState
                 icon={MailPlus}
-                title="No mailbox connected"
-                description="Connect a mailbox and replies to your emails will show up here."
-                action={
+                title={
+                  canManageMailboxes
+                    ? "No mailbox connected"
+                    : "No mailbox assigned yet"
+                }
+                description={
+                  canManageMailboxes
+                    ? "Connect a mailbox to receive mail here."
+                    : "Ask an administrator to assign you a mailbox."
+                }
+                action={canManageMailboxes ? (
                   <Button
                     variant="secondary"
                     onClick={() => setConnectOpen(true)}
@@ -808,7 +824,7 @@ export function Inbox() {
                     <MailPlus className="h-4 w-4" />
                     Connect a mailbox
                   </Button>
-                }
+                ) : undefined}
               />
             ) : threads.length === 0 ? (
               <EmptyState
@@ -819,7 +835,7 @@ export function Inbox() {
                 description={
                   submittedSearch
                     ? "Try a different search, or clear it to see everything."
-                    : "Replies will appear here once your mailbox finishes syncing."
+                    : "New mail will appear here after your mailbox is checked."
                 }
               />
             ) : (
@@ -946,11 +962,13 @@ export function Inbox() {
         </>
       )}
 
-      <ConnectInboxDialog
-        open={connectOpen}
-        onOpenChange={setConnectOpen}
-        organizationId={organizationId ?? ""}
-      />
+      {canManageMailboxes ? (
+        <ConnectInboxDialog
+          open={connectOpen}
+          onOpenChange={setConnectOpen}
+          organizationId={organizationId ?? ""}
+        />
+      ) : null}
 
       <AttachmentPreviewDialog
         preview={preview}

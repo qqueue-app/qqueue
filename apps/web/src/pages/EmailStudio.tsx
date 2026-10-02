@@ -1231,7 +1231,7 @@ export function EmailStudio() {
     <>
       <PageHeader
         title="Compose"
-        description="Write and send a one-off email through your delivery pipeline."
+        description="Write and send an email."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button

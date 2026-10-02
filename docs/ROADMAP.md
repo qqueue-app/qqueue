@@ -7,6 +7,114 @@ gaps, beta checklist, and recommended next sprint. As of the Beta Polish +
 Launch Prep Sprint, QQueue is a **feature-complete self-hosted beta candidate
 undergoing launch preparation** — see the Beta Readiness Assessment in STATUS.md.
 
+## Everyday email app (next phase)
+
+**Goal:** An administrator provisions or connects a mailbox, grants it to a
+person, and that person can manage ordinary mail from an installed QQueue app
+on a phone or from a laptop. This supersedes the earlier decision to keep the
+inbox limited to replies to QQueue sends. Mailcow-backed mailboxes are the
+first supported end-to-end path; the existing external IMAP/SMTP connection
+path remains available.
+
+**Already present:** organization invitations, mailbox provisioning, paired
+read/send grants, IMAP import, inbox search and read filters, reply, compose,
+drafts, sent archive, responsive PWA, and optional push notifications. Reuse
+these foundations and preserve the shared `EmailJob` delivery pipeline.
+
+### First priority: make the existing app easy to use
+
+The immediate product risk is usability for a sales or office worker who only
+wants to read, answer, and send mail, and for the administrator assigning their
+mailbox. The current shell exposes Home (statistics), Outbox, audience tools,
+campaigns, and Settings beside Inbox and Compose. Compose includes templates,
+recurring sends, preview, and delivery details. These are useful capabilities,
+but ordinary mail tasks should not require someone to understand them.
+
+- [ ] Walk through the admin journey (invite a colleague, assign a mailbox,
+      verify they can receive and send) and the member journey (open mail,
+      reply, compose, find Sent, adjust notifications) on a phone and laptop.
+      Observe nontechnical users without coaching; record where they hesitate,
+      take a wrong turn, or need a term explained.
+- [ ] Make Inbox, Compose, Drafts, Sent, and search the obvious daily paths.
+      Group campaign, analytics, queue, API, and server configuration by the
+      jobs and roles that use them. Preserve access to advanced features;
+      simplify their placement instead of deleting them.
+- [ ] Keep the default compose and reply flows short. Reveal templates,
+      scheduling, recurrence, tracking, and delivery diagnostics when needed,
+      with clear labels and safe defaults.
+- [ ] Use plain mail language in navigation, empty states, errors, and help.
+      Explain the next action instead of exposing SMTP, IMAP, queues, sync, or
+      pipeline concepts to a person reading or writing mail.
+- [ ] Make first-use guidance contextual: an unassigned member should know to
+      ask an admin; an admin should see the next setup step; a connected but
+      empty inbox should explain when mail will appear.
+- [ ] Repeat task testing after each change. A first-release usability check is
+      that a new member can read, reply, compose, and find sent mail, and an
+      admin can assign a mailbox, without training or technical vocabulary.
+
+This work comes before expanding IMAP behavior. Use the existing installable
+web app as the first phone experience; decide on a native app only if testing
+shows a concrete need for it.
+
+### 1. Make assigned mailboxes usable every day
+
+- [x] Scope the member's inbox and mailbox picker to assigned mailboxes, show
+      a clear empty state when none is assigned, and keep mailbox connection
+      controls in the inbox admin-only. Provisioning and grants already require
+      an admin on the API.
+- [ ] Page through all accessible mail server messages, with server-side mailbox
+      filtering, stable ordering, and a way to load older mail on the phone.
+- [ ] Import older mail in controlled batches. Record IMAP mailbox identity
+      (`UIDVALIDITY`) so a server rebuild or folder recreation cannot silently
+      attach a new message to an old UID.
+- [ ] Exercise the complete administrator → invite → grant → phone install →
+      receive → reply flow against Mailcow on real devices and desktop browsers.
+
+### 2. Synchronize mailbox state in both directions
+
+- [ ] Treat the IMAP server as the source of truth for mailbox folders and
+      flags. Sync changes made by other clients, including read/unread,
+      starred/flagged, moves, and deletions; reflect them in QQueue.
+- [ ] Add read/unread, star, archive, trash, restore, and move actions in the
+      API and mobile UI. Authorize every action against the mailbox grant;
+      apply it to IMAP, surface failures, and reconcile the local copy after
+      retries. Define the behavior for an offline or unavailable server.
+- [ ] Sync the folders required for the first mail-app release: Inbox, Sent,
+      Drafts, Archive, and Trash where the server exposes them. Account for
+      server-specific folder names and special-use flags.
+
+### 3. Complete conversations and compose
+
+- [ ] Add reply-all and forward, including attachments, with a mobile-friendly
+      composer and per-mailbox From selection. Continue routing all QQueue
+      sends through `EmailJob` → BullMQ → `@qqueue/email-engine` → SMTP →
+      `EmailEvent`, using the connection's identity and existing send-as grants,
+      suppression checks, and idempotency rules.
+- [ ] Reconcile QQueue-sent mail with the mailbox's IMAP Sent folder and display
+      mail sent from other clients without duplicates. Decide how remote Drafts
+      interact with QQueue's existing per-user drafts before enabling edits.
+- [ ] Make message/thread views work across paged folders; preserve attachment
+      privacy and safely display remote HTML on phones and laptops.
+
+### 4. Make the installed app dependable
+
+- [ ] Test install, sign-in persistence, push delivery, deep links, background
+      refresh, and notification permissions on supported iOS/Android browsers.
+- [ ] Provide a clear offline state. Define whether the first release offers
+      read-only cached mail and offline drafts; never claim that a server action
+      succeeded until it has been applied or is visibly queued.
+- [ ] Check keyboard, screen-reader, and touch use for the member workflows.
+
+**Release check:** With two members granted different mailboxes, each can see
+only their own mail and notifications. Each can read, reply, compose, search,
+page older mail, and organize messages on phone and laptop. Changes made in
+QQueue appear in another IMAP client and vice versa. A failed server action is
+visible and recoverable, and outgoing mail still uses the shared pipeline.
+
+After the usability pass, the first deeper mailbox slice is complete inbox
+pagination and a real Mailcow device trial. That exposes sync problems before
+building folder mutations on top of the current import.
+
 ## Phase 0: Project Scaffold
 
 - [x] Monorepo setup
@@ -275,6 +383,9 @@ build on.
   reputation alerts; dashboard hosts the policy + throttle controls)
 
 ### Phase E: Inbox module
+
+> Historical scope. The [everyday email app](#everyday-email-app-next-phase)
+> now extends the inbox beyond this initial reply workflow.
 
 Separate module with focused IMAP sync and reply workflows. It exists to
 support sending by showing conversations and letting operators reply, not to

@@ -193,7 +193,7 @@ export function SettingsHub() {
     <>
       <PageHeader
         title="Settings"
-        description="Your organization, your team, and the technical bits."
+        description="Manage your account, notifications, and organization."
       />
 
       <PageContainer>

@@ -9,6 +9,7 @@ const toast = vi.hoisted(() => ({
   loading: vi.fn(),
   message: vi.fn()
 }));
+const session = vi.hoisted(() => ({ role: "ADMIN" as "ADMIN" | "MEMBER" }));
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
@@ -24,7 +25,10 @@ vi.mock("../lib/api.js", () => ({
 }));
 
 vi.mock("../lib/session-context.js", () => ({
-  useSession: () => ({ currentOrganizationId: "org_1" })
+  useSession: () => ({
+    currentOrganizationId: "org_1",
+    currentOrganization: { role: session.role },
+  })
 }));
 
 import { api } from "../lib/api.js";
@@ -89,10 +93,33 @@ async function openRow(user: ReturnType<typeof userEvent.setup>, subject = /Quar
 
 beforeEach(() => {
   vi.clearAllMocks();
+  session.role = "ADMIN";
   // jsdom implements neither half of the object-URL API, which attachment
   // downloads and inline images both rely on.
   URL.createObjectURL = vi.fn(() => "blob:qqueue/inline-1");
   URL.revokeObjectURL = vi.fn();
+});
+
+describe("Inbox mailbox access", () => {
+  it("directs a member without a mailbox to their administrator", async () => {
+    session.role = "MEMBER";
+    mockedApi.listInboxAccounts.mockResolvedValue([]);
+    mockedApi.listInboundMessages.mockResolvedValue({ data: [] });
+    renderWithProviders(<Inbox />);
+
+    expect(await screen.findByText("No mailbox assigned yet")).toBeInTheDocument();
+    expect(screen.getByText("Ask an administrator to assign you a mailbox.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connect a mailbox/i })).not.toBeInTheDocument();
+  });
+
+  it("hides mailbox administration from members who can read mail", async () => {
+    session.role = "MEMBER";
+    setup([makeMessage()]);
+    renderWithProviders(<Inbox />);
+
+    await findRow();
+    expect(screen.queryByRole("button", { name: /connect a mailbox/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("Inbox single-screen navigation", () => {
