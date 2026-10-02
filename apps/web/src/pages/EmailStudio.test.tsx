@@ -167,6 +167,24 @@ describe("EmailStudio", () => {
     expect(screen.getByRole("button", { name: /Send email/i })).toBeDisabled();
   });
 
+  it("starts with the ordinary send flow and reveals advanced choices on request", async () => {
+    const user = userEvent.setup();
+    setup();
+    await renderStudio();
+
+    expect(screen.getByLabelText("To")).toBeInTheDocument();
+    expect(screen.getByLabelText("Subject")).toBeInTheDocument();
+    expect(screen.getByLabelText("body-editor")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send email" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Template" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Schedule for later")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
+    expect(screen.getByLabelText("Schedule for later")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use a template" }));
+    expect(screen.getByRole("combobox", { name: "Template" })).toBeInTheDocument();
+  });
+
   it("sends a manually composed email through the manual pipeline", async () => {
     const user = userEvent.setup();
     setup();
@@ -268,6 +286,7 @@ describe("EmailStudio", () => {
     setup();
     await renderStudio();
 
+    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
     await user.click(screen.getByLabelText("Schedule for later"));
     expect(screen.getByLabelText("Scheduled time")).toBeInTheDocument();
     expect(
@@ -287,6 +306,7 @@ describe("EmailStudio", () => {
     await user.type(screen.getByLabelText("To"), "person@example.com{Enter}");
     await user.type(screen.getByLabelText("Subject"), "Weekly digest");
     await user.type(screen.getByLabelText("body-editor"), "<p>Digest</p>");
+    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
     await user.click(screen.getByLabelText("Repeat on a schedule"));
 
     expect(
@@ -316,6 +336,7 @@ describe("EmailStudio", () => {
     setup();
     await renderStudio();
 
+    await user.click(screen.getByRole("button", { name: "Use a template" }));
     await user.click(screen.getByRole("combobox", { name: "Template" }));
     await user.click(await screen.findByRole("option", { name: "Welcome" }));
 
@@ -515,10 +536,12 @@ describe("EmailStudio", () => {
   // The rail holds this message's options only; the list of every recurring
   // send in the org is a page of its own now (§4).
   it("links out to the recurring sends page instead of listing them", async () => {
+    const user = userEvent.setup();
     setup();
     await renderStudio();
 
     expect(mockedApi.listRecurringSends).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
     expect(
       screen.getByRole("link", { name: /Manage recurring sends/i })
     ).toHaveAttribute("href", "/campaigns/recurring");
@@ -560,6 +583,7 @@ describe("EmailStudio", () => {
     // Now the composer in the state that used to overflow the rail: recipient
     // chips, an open recurrence, and the attachment tray revealed.
     await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
     await user.click(screen.getByLabelText("Repeat on a schedule"));
     await user.click(screen.getByRole("button", { name: /Attachments/i }));
 
@@ -617,6 +641,7 @@ describe("EmailStudio", () => {
     await renderStudio();
 
     await user.type(screen.getByLabelText("Subject"), "My own subject");
+    await user.click(screen.getByRole("button", { name: "Use a template" }));
     await user.click(screen.getByRole("combobox", { name: "Template" }));
     await user.click(await screen.findByRole("option", { name: "Welcome" }));
 
@@ -638,6 +663,7 @@ describe("EmailStudio", () => {
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
     await user.type(screen.getByLabelText("Subject"), "Hi");
     await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
+    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
     await user.click(screen.getByLabelText("Schedule for later"));
     const future = new Date(Date.now() + 60 * 60 * 1000)
       .toISOString()

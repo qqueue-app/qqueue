@@ -25,11 +25,16 @@ these foundations and preserve the shared `EmailJob` delivery pipeline.
 
 The immediate product risk is usability for a sales or office worker who only
 wants to read, answer, and send mail, and for the administrator assigning their
-mailbox. The current shell exposes Home (statistics), Outbox, audience tools,
-campaigns, and Settings beside Inbox and Compose. Compose includes templates,
-recurring sends, preview, and delivery details. These are useful capabilities,
+mailbox. The shell has begun to put daily mail first, but still exposes Outbox,
+audience tools, campaigns, and Settings beside Inbox and Compose on desktop.
+Compose now reveals templates and scheduling on request, while contact lists,
+preview, and delivery details remain nearby. These are useful capabilities,
 but ordinary mail tasks should not require someone to understand them.
 
+- [x] Put Inbox first in navigation, give Sent a primary phone tab, and label
+      the statistics destination Insights rather than Home.
+- [x] Keep ordinary compose fields and Send visible; reveal templates and
+      schedule or repeat controls on request.
 - [ ] Walk through the admin journey (invite a colleague, assign a mailbox,
       verify they can receive and send) and the member journey (open mail,
       reply, compose, find Sent, adjust notifications) on a phone and laptop.

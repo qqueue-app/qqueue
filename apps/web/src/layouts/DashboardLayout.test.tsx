@@ -83,7 +83,7 @@ describe("DashboardLayout", () => {
 
   it("renders the sidebar nav and the routed outlet", () => {
     renderLayout("/");
-    expect(screen.getAllByText("Home").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Insights").length).toBeGreaterThan(0);
     expect(screen.getByText("Inbox page")).toBeInTheDocument();
   });
 
@@ -193,7 +193,7 @@ describe("DashboardLayout", () => {
       const tabBar = within(
         container.querySelector("nav[aria-label='Primary']") as HTMLElement
       );
-      expect(tabBar.getByRole("link", { name: /Home/ })).toBeInTheDocument();
+      expect(tabBar.getByRole("link", { name: /Sent/ })).toBeInTheDocument();
       expect(tabBar.getByRole("link", { name: /Compose/ })).toBeInTheDocument();
       expect(tabBar.getByRole("link", { name: /Inbox/ })).toBeInTheDocument();
       expect(tabBar.getByRole("link", { name: /Contacts/ })).toBeInTheDocument();
@@ -212,6 +212,7 @@ describe("DashboardLayout", () => {
       for (const label of [
         "Drafts",
         "Outbox",
+        "Insights",
         "Lists",
         "Templates",
         "Campaigns",
@@ -220,7 +221,7 @@ describe("DashboardLayout", () => {
         expect(sheet.getByRole("link", { name: label })).toBeInTheDocument();
       }
       // Tab-bar destinations aren't repeated in the sheet.
-      expect(sheet.queryByRole("link", { name: "Home" })).not.toBeInTheDocument();
+      expect(sheet.queryByRole("link", { name: "Sent" })).not.toBeInTheDocument();
       expect(
         sheet.queryByRole("link", { name: "Contacts" })
       ).not.toBeInTheDocument();

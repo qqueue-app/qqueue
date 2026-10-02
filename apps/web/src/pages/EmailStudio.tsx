@@ -456,6 +456,8 @@ export function EmailStudio() {
   const [sending, setSending] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [listPickerOpen, setListPickerOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [sendOptionsOpen, setSendOptionsOpen] = useState(false);
   const [draftsOpen, setDraftsOpen] = useState(false);
   const [deleteDraftTarget, setDeleteDraftTarget] = useState<EmailDraft | null>(
     null
@@ -623,6 +625,8 @@ export function EmailStudio() {
     setAttachments([]);
     setCopyRevealed(false);
     setAttachmentsRevealed(false);
+    setTemplatePickerOpen(false);
+    setSendOptionsOpen(false);
     setScheduleForLater(false);
     setScheduledAt("");
     setRecurring(false);
@@ -1476,23 +1480,37 @@ export function EmailStudio() {
                   }
                 >
                   <Field className="space-y-4">
-                    <Select value={templateId} onValueChange={selectTemplate}>
-                      <SelectTrigger
-                        id="template"
-                        width="name"
-                        aria-label="Template"
+                    {templatePickerOpen || templateId !== NO_TEMPLATE ? (
+                      <Select value={templateId} onValueChange={selectTemplate}>
+                        <SelectTrigger
+                          id="template"
+                          width="name"
+                          aria-label="Template"
+                        >
+                          <SelectValue placeholder="Start from a template" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
+                          {templates.map((template) => (
+                            <SelectItem key={template.id} value={template.id}>
+                              {template.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-3"
+                        aria-expanded={false}
+                        aria-controls="template"
+                        onClick={() => setTemplatePickerOpen(true)}
                       >
-                        <SelectValue placeholder="Start from a template" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
-                        {templates.map((template) => (
-                          <SelectItem key={template.id} value={template.id}>
-                            {template.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                        Use a template
+                      </Button>
+                    )}
 
                     {/* The editor is the one control that legitimately fills
                         the form column — prose has no natural width. */}
@@ -1608,30 +1626,52 @@ export function EmailStudio() {
             */}
             <div className="min-w-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
               <Card className="space-y-4 p-card">
-                <div>
-                  <h2 className="text-section font-semibold text-text">
-                    Send options
-                  </h2>
-                  <p className="mt-1 text-ui leading-5 text-text-secondary">
-                    Send now, schedule it for later, or repeat it on a schedule.
-                  </p>
-                </div>
-                <ScheduleControls
-                  scheduleEnabled={scheduleForLater}
-                  onScheduleEnabledChange={setScheduleForLater}
-                  scheduledAt={scheduledAt}
-                  onScheduledAtChange={setScheduledAt}
-                  recurring={recurring}
-                  onRecurringChange={setRecurring}
-                  recurrence={recurrence}
-                  onRecurrenceChange={setRecurrence}
-                />
-                {recurring && attachments.length > 0 ? (
-                  <p className="text-meta leading-5 text-err">
-                    Recurring sends can&apos;t include attachments — each
-                    occurrence would need its own copy.
-                  </p>
-                ) : null}
+                {sendOptionsOpen || scheduleForLater || recurring ? (
+                  <div id="send-options" className="space-y-4">
+                    <h2 className="text-section font-semibold text-text">
+                      Send options
+                    </h2>
+                    <ScheduleControls
+                      scheduleEnabled={scheduleForLater}
+                      onScheduleEnabledChange={setScheduleForLater}
+                      scheduledAt={scheduledAt}
+                      onScheduledAtChange={setScheduledAt}
+                      recurring={recurring}
+                      onRecurringChange={setRecurring}
+                      recurrence={recurrence}
+                      onRecurrenceChange={setRecurrence}
+                    />
+                    {recurring && attachments.length > 0 ? (
+                      <p className="text-meta leading-5 text-err">
+                        Recurring sends can&apos;t include attachments — each
+                        occurrence would need its own copy.
+                      </p>
+                    ) : null}
+                    <Link
+                      to="/campaigns/recurring"
+                      className={cn(
+                        "-mx-1 flex min-h-touch items-center justify-between gap-2 rounded-control px-1",
+                        "text-ui font-medium text-text-secondary sm:min-h-0 sm:py-1",
+                        "transition-colors duration-fast ease-out hover:text-text"
+                      )}
+                    >
+                      Manage recurring sends
+                      <ArrowUpRight className="h-4 w-4 shrink-0" />
+                    </Link>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="-ml-3"
+                    aria-expanded={false}
+                    aria-controls="send-options"
+                    onClick={() => setSendOptionsOpen(true)}
+                  >
+                    Schedule or repeat
+                  </Button>
+                )}
 
                 {/*
                   The running tally lives with the button that acts on it —
@@ -1674,22 +1714,6 @@ export function EmailStudio() {
                   </p>
                 ) : null}
 
-                {/*
-                  Where the list that used to fill this rail went. It sits
-                  under the repeat switch because that is the control it
-                  explains: turning it on adds a row over there.
-                */}
-                <Link
-                  to="/campaigns/recurring"
-                  className={cn(
-                    "-mx-1 flex min-h-touch items-center justify-between gap-2 rounded-control px-1",
-                    "text-ui font-medium text-text-secondary sm:min-h-0 sm:py-1",
-                    "transition-colors duration-fast ease-out hover:text-text"
-                  )}
-                >
-                  Manage recurring sends
-                  <ArrowUpRight className="h-4 w-4 shrink-0" />
-                </Link>
               </Card>
 
               {deliveryStatus ? (

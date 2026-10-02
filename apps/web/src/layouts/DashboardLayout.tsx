@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import {
-  Home,
+  BarChart3,
   Inbox,
   FileEdit,
   MailCheck,
@@ -40,19 +40,15 @@ import type { MobileTab, NavSection } from "../components/shell/nav-types.js";
 const navSections: NavSection[] = [
   {
     items: [
-      // Signing in lands on the inbox; the stats page it used to open is at
-      // /insights. Same destination, new path.
-      { to: "/insights", label: "Home", icon: Home, end: true },
+      // Daily mail comes first. The index route "/" is the inbox, so it
+      // lights this destination up too.
+      { to: "/inbox", label: "Inbox", icon: Inbox, badge: "unread", activePaths: ["/"] },
       { to: "/email-studio", label: "Compose", icon: PenSquare },
+      { to: "/sent", label: "Sent", icon: MailCheck },
       { to: "/drafts", label: "Drafts", icon: FileEdit },
       { to: "/outbox", label: "Outbox", icon: Send },
-      // Sits next to the Outbox because it is the same mail one step later:
-      // what left, and what happened to it. Anyone who has used a mail client
-      // looks for it here, which is the one argument strong enough to spend a
-      // sidebar row on — see the note above about keeping this list short.
-      { to: "/sent", label: "Sent", icon: MailCheck },
-      // The index route "/" *is* the inbox, so it lights this up too.
-      { to: "/inbox", label: "Inbox", icon: Inbox, badge: "unread", activePaths: ["/"] },
+      // Statistics are useful, but this is a report rather than the mail home.
+      { to: "/insights", label: "Insights", icon: BarChart3, end: true },
     ],
   },
   {
@@ -109,9 +105,9 @@ const navSections: NavSection[] = [
   up on a phone without a second edit here.
 */
 const mobileTabs: MobileTab[] = [
-  { to: "/insights", label: "Home", icon: Home, end: true },
-  { to: "/email-studio", label: "Compose", icon: PenSquare, emphasis: true },
   { to: "/inbox", label: "Inbox", icon: Inbox, badge: "unread", activePaths: ["/"] },
+  { to: "/email-studio", label: "Compose", icon: PenSquare, emphasis: true },
+  { to: "/sent", label: "Sent", icon: MailCheck },
   { to: "/contacts", label: "Contacts", icon: Users },
 ];
 

@@ -137,8 +137,10 @@ appear in QQueue's Sent and Drafts views.
 
 The immediate priority is making the existing app easy for nontechnical sales
 and office users, and for administrators assigning their mailboxes. Inbox and
-Compose work, but the main navigation and composer expose statistics, campaign
-tools, delivery diagnostics, and advanced options beside daily mail tasks.
+Compose work, and navigation now places Inbox first with Sent on the phone tab
+bar. Compose now reveals templates and scheduling on request. The desktop
+navigation and remaining composer controls still expose campaign tools,
+statistics, and delivery details near daily mail tasks.
 Simplify those journeys and test them with real users before expanding mailbox
 behavior. See [ROADMAP.md](ROADMAP.md#everyday-email-app-next-phase) for the
 ordered work and acceptance criteria. The earlier narrow inbox scope below is
