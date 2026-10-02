@@ -2,7 +2,7 @@
 
 All notable changes to `qqueue-sdk` are documented here.
 
-## Unreleased
+## 0.3.0 - 2026-10-02
 
 - Add per-message `headers` and `isBulk` to `sendEmail`, including
   recipient-specific `List-Unsubscribe` and `List-Unsubscribe-Post` for
