@@ -147,8 +147,17 @@ worker) plus these non-obvious ones:
 ## Verification
 
 ```sh
-pnpm typecheck && pnpm lint && pnpm build && pnpm test
+pnpm typecheck && pnpm lint && pnpm build && pnpm test && pnpm test:coverage
 ```
+
+`pnpm test:coverage` is the same per-package threshold gate run by
+`.github/workflows/coverage.yml` on pushes and pull requests. Run it after
+changes to covered source, including UI pages and API controllers, and fix any
+threshold failures with tests for the affected behavior before finishing.
+`pnpm test` alone cannot detect this failure: every test may pass while coverage
+is below the gate. Do not lower thresholds or exclude production files merely
+to make the number pass. Coverage badges are generated only after this gate
+succeeds.
 
 Send-pipeline or migration changes: also `pnpm test:smoke:docker`. Dependency or
 cloud-boundary changes: also `pnpm license:audit` and `pnpm cloud:boundary`.
