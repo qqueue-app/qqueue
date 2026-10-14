@@ -104,6 +104,8 @@ export const qk = {
     ["sent", orgId, "message", id] as const,
 
   inboxAccounts: (orgId: string) => ["inbox-accounts", orgId] as const,
+  inboxConversation: (orgId: string, messageId: string) =>
+    ["inbox-conversation", orgId, messageId] as const,
   inboundMessages: (orgId: string, filters?: Record<string, unknown>) =>
     ["inbound-messages", orgId, filters ?? {}] as const,
   inboxUnreadCount: (orgId: string) => ["inbox-unread", orgId] as const,

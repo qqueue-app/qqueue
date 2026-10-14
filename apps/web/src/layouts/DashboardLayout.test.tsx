@@ -1,4 +1,9 @@
-import { renderWithProviders, screen, waitFor, within } from "../test/render.js";
+import {
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,15 +13,16 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
   // Used by actions that report progress before their result.
   loading: vi.fn(),
-  message: vi.fn()
+  message: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast }));
 
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom"
-  );
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom"
+    );
   return { ...actual, useNavigate: () => navigate };
 });
 
@@ -25,16 +31,16 @@ const sessionValue = vi.hoisted(() => ({
     user: { id: "u1", email: "me@x.com", name: "Ada" },
     organizations: [
       { id: "o1", name: "Acme" },
-      { id: "o2", name: "Beta" }
+      { id: "o2", name: "Beta" },
     ],
     currentOrganizationId: "o1",
     currentOrganization: { id: "o1", name: "Acme" },
     setCurrentOrganizationId: vi.fn(),
-    signOut: vi.fn()
-  }
+    signOut: vi.fn(),
+  },
 }));
 vi.mock("../lib/session-context.js", () => ({
-  useSession: () => sessionValue.current
+  useSession: () => sessionValue.current,
 }));
 
 import { DashboardLayout } from "./DashboardLayout.js";
@@ -61,8 +67,9 @@ function renderLayout(initial = "/") {
           />
         </Route>
       </Routes>
-    </MemoryRouter>
-  , { withRouter: false });
+    </MemoryRouter>,
+    { withRouter: false }
+  );
 }
 
 /** Every class name in a rendered tree, flattened. */
@@ -83,8 +90,27 @@ describe("DashboardLayout", () => {
 
   it("renders the sidebar nav and the routed outlet", () => {
     renderLayout("/");
-    expect(screen.getAllByText("Insights").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("link", { name: "Insights" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show more tools" })
+    ).toBeInTheDocument();
     expect(screen.getByText("Inbox page")).toBeInTheDocument();
+  });
+
+  it("reveals extra tools on request and lets everyday mail stay uncluttered", async () => {
+    const user = userEvent.setup();
+    renderLayout("/");
+    expect(
+      screen.queryByRole("link", { name: "Campaigns" })
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show more tools" }));
+    expect(screen.getByRole("link", { name: "Campaigns" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hide extra tools" }));
+    expect(
+      screen.queryByRole("link", { name: "Campaigns" })
+    ).not.toBeInTheDocument();
   });
 
   it("opens the org switcher and switches organization", async () => {
@@ -95,9 +121,9 @@ describe("DashboardLayout", () => {
     const beta = await screen.findByText("Beta");
     await user.click(beta);
     await waitFor(() =>
-      expect(sessionValue.current.setCurrentOrganizationId).toHaveBeenCalledWith(
-        "o2"
-      )
+      expect(
+        sessionValue.current.setCurrentOrganizationId
+      ).toHaveBeenCalledWith("o2")
     );
     expect(toast.success).toHaveBeenCalledWith("Switched to Beta.");
   });
@@ -117,7 +143,7 @@ describe("DashboardLayout", () => {
       ...sessionValue.current,
       user: undefined,
       organizations: [],
-      currentOrganization: undefined
+      currentOrganization: undefined,
     } as never;
     renderLayout("/");
     expect(screen.getAllByText("Sign in").length).toBeGreaterThan(0);
@@ -128,9 +154,10 @@ describe("DashboardLayout", () => {
     it("shows Settings as a single destination, not an expandable group", () => {
       renderLayout("/");
       // It is a link, and there is no disclosure button that expands it.
-      expect(
-        screen.getByRole("link", { name: "Settings" })
-      ).toHaveAttribute("href", "/settings");
+      expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+        "href",
+        "/settings"
+      );
       expect(
         screen.queryByRole("button", { name: /Settings/ })
       ).not.toBeInTheDocument();
@@ -196,7 +223,9 @@ describe("DashboardLayout", () => {
       expect(tabBar.getByRole("link", { name: /Sent/ })).toBeInTheDocument();
       expect(tabBar.getByRole("link", { name: /Compose/ })).toBeInTheDocument();
       expect(tabBar.getByRole("link", { name: /Inbox/ })).toBeInTheDocument();
-      expect(tabBar.getByRole("link", { name: /Contacts/ })).toBeInTheDocument();
+      expect(
+        tabBar.getByRole("link", { name: /Contacts/ })
+      ).toBeInTheDocument();
       expect(tabBar.getByRole("button", { name: "More" })).toBeInTheDocument();
     });
 
@@ -216,12 +245,14 @@ describe("DashboardLayout", () => {
         "Lists",
         "Templates",
         "Campaigns",
-        "Settings"
+        "Settings",
       ]) {
         expect(sheet.getByRole("link", { name: label })).toBeInTheDocument();
       }
       // Tab-bar destinations aren't repeated in the sheet.
-      expect(sheet.queryByRole("link", { name: "Sent" })).not.toBeInTheDocument();
+      expect(
+        sheet.queryByRole("link", { name: "Sent" })
+      ).not.toBeInTheDocument();
       expect(
         sheet.queryByRole("link", { name: "Contacts" })
       ).not.toBeInTheDocument();
@@ -250,7 +281,9 @@ describe("DashboardLayout", () => {
     const close = await screen.findByLabelText("Close navigation");
     await user.click(close);
     await waitFor(() =>
-      expect(screen.queryByLabelText("Close navigation")).not.toBeInTheDocument()
+      expect(
+        screen.queryByLabelText("Close navigation")
+      ).not.toBeInTheDocument()
     );
   });
 

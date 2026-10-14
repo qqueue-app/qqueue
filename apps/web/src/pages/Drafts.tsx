@@ -54,7 +54,11 @@ export function Drafts() {
   // The composer owns draft loading, so this page just hands it an id and lets
   // it restore recipients, attachments, and the rest.
   function openDraft(draft: EmailDraft) {
-    navigate(`/email-studio?draft=${draft.id}`);
+    navigate(
+      draft.inboundMessageId
+        ? `/inbox?message=${encodeURIComponent(draft.inboundMessageId)}&replyDraft=${encodeURIComponent(draft.id)}`
+        : `/email-studio?draft=${draft.id}`
+    );
   }
 
   const columns = useMemo<ColumnDef<EmailDraft, unknown>[]>(
@@ -194,7 +198,10 @@ export function Drafts() {
               <p className="truncate text-ui text-text-secondary">
                 {describeRecipients(draft)}
               </p>
-              <p className="text-right text-meta text-text-tertiary" data-numeric>
+              <p
+                className="text-right text-meta text-text-tertiary"
+                data-numeric
+              >
                 Edited {formatMailDate(draft.updatedAt)}
               </p>
             </div>

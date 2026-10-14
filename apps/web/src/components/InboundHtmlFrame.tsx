@@ -38,11 +38,22 @@ function prepareBody(
 ) {
   // Nothing to rewrite in an image-less body, and re-serializing costs fidelity
   // (the parser normalizes markup), so leave those messages exactly as sent.
-  if (!/<img/i.test(html) && !html.includes("cid:")) {
+  if (!/<(?:img|a)\b/i.test(html) && !html.includes("cid:")) {
     return html;
   }
 
   const doc = new DOMParser().parseFromString(html, "text/html");
+  for (const link of Array.from(doc.querySelectorAll("a[href]"))) {
+    const href = link.getAttribute("href")?.trim() ?? "";
+    if (!/^(https?:\/\/|mailto:|tel:|#)/i.test(href)) {
+      link.removeAttribute("href");
+      continue;
+    }
+    if (!href.startsWith("#")) {
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener noreferrer");
+    }
+  }
 
   for (const img of Array.from(doc.querySelectorAll("img"))) {
     const src = img.getAttribute("src") ?? "";
@@ -97,7 +108,7 @@ export function InboundHtmlFrame({
   inlineImages,
   className,
   title = "Message body",
-  "data-testid": testId
+  "data-testid": testId,
 }: InboundHtmlFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(160);
@@ -113,7 +124,7 @@ export function InboundHtmlFrame({
       "default-src 'none'",
       `img-src ${imgSrc}`,
       "style-src 'unsafe-inline'",
-      "font-src data:"
+      "font-src data:",
     ].join("; ");
 
     return [
@@ -134,9 +145,9 @@ export function InboundHtmlFrame({
       "</style></head><body>",
       prepareBody(html, {
         showRemoteContent,
-        inlineImages: inlineImages ?? {}
+        inlineImages: inlineImages ?? {},
       }),
-      "</body></html>"
+      "</body></html>",
     ].join("");
   }, [html, showRemoteContent, inlineImages]);
 
@@ -166,7 +177,7 @@ export function InboundHtmlFrame({
       data-testid={testId}
       onLoad={resize}
       srcDoc={srcDoc}
-      sandbox="allow-same-origin"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       className={cn("w-full border-0 bg-transparent", className)}
       style={{ height }}
     />

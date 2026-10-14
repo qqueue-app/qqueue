@@ -24,7 +24,7 @@ export function nextCronRun(
   try {
     const interval = CronExpressionParser.parse(cronExpression, {
       currentDate: from,
-      tz: timezone ?? "UTC"
+      tz: timezone ?? "UTC",
     });
     return interval.next().toDate();
   } catch {
@@ -166,7 +166,10 @@ export interface EffectiveSuppressionPolicy {
  */
 export function resolveSuppressionPolicy(
   row:
-    | { softBounceThreshold?: number | null; softBounceWindowDays?: number | null }
+    | {
+        softBounceThreshold?: number | null;
+        softBounceWindowDays?: number | null;
+      }
     | null
     | undefined,
   defaults: EffectiveSuppressionPolicy
@@ -175,7 +178,7 @@ export function resolveSuppressionPolicy(
     softBounceThreshold:
       row?.softBounceThreshold ?? defaults.softBounceThreshold,
     softBounceWindowDays:
-      row?.softBounceWindowDays ?? defaults.softBounceWindowDays
+      row?.softBounceWindowDays ?? defaults.softBounceWindowDays,
   };
 }
 
@@ -227,6 +230,7 @@ export interface InboxAccount {
   status: InboxAccountStatus;
   lastSyncedAt?: string | null;
   lastSeenUid?: number | null;
+  lastSyncError?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -241,6 +245,7 @@ export interface InboundMessage {
   references: string[];
   fromEmail: string;
   fromName?: string | null;
+  replyTo?: string[];
   to: string[];
   cc: string[];
   subject: string;
@@ -1005,7 +1010,7 @@ export const organizationBrandingSchema = z.object({
       .string()
       .url()
       .refine((value) => /^https?:\/\//i.test(value), {
-        message: "Logo URL must be absolute (http or https)"
+        message: "Logo URL must be absolute (http or https)",
       })
       .nullable()
   ),
@@ -1023,7 +1028,7 @@ export const organizationBrandingSchema = z.object({
    * outgoing mail at all. The address and unsubscribe link ignore this: they are
    * obligations on bulk mail, not styling.
    */
-  brandingEnabled: z.boolean()
+  brandingEnabled: z.boolean(),
 });
 
 export type OrganizationBrandingInput = z.infer<
@@ -1336,13 +1341,10 @@ export const csvImportSchema = z
     defaultResolution: contactImportResolutionSchema.optional(),
     overrides: z.record(z.string(), contactImportOverrideSchema).optional(),
   })
-  .refine(
-    (value) => !(value.contactListId && value.contactListName),
-    {
-      message: "Provide either contactListId or contactListName, not both",
-      path: ["contactListName"],
-    },
-  );
+  .refine((value) => !(value.contactListId && value.contactListName), {
+    message: "Provide either contactListId or contactListName, not both",
+    path: ["contactListName"],
+  });
 
 export type CsvImportInput = z.infer<typeof csvImportSchema>;
 
@@ -1355,13 +1357,10 @@ export const csvImportPreviewSchema = z
     contactListId: z.string().min(1).optional(),
     contactListName: z.string().min(1).max(200).optional(),
   })
-  .refine(
-    (value) => !(value.contactListId && value.contactListName),
-    {
-      message: "Provide either contactListId or contactListName, not both",
-      path: ["contactListName"],
-    },
-  );
+  .refine((value) => !(value.contactListId && value.contactListName), {
+    message: "Provide either contactListId or contactListName, not both",
+    path: ["contactListName"],
+  });
 
 export type CsvImportPreviewInput = z.infer<typeof csvImportPreviewSchema>;
 
@@ -1443,6 +1442,7 @@ export const inboundMessageStoreSchema = z.object({
   references: z.array(z.string().min(1)).default([]),
   fromEmail: emailAddressSchema,
   fromName: z.string().optional(),
+  replyTo: z.array(emailAddressSchema).optional(),
   to: z.array(emailAddressSchema).default([]),
   cc: z.array(emailAddressSchema).default([]),
   subject: z.string().default(""),
@@ -1458,6 +1458,7 @@ export type InboundMessageStoreInput = z.infer<
 
 export const inboundMessageQuerySchema = z.object({
   organizationId: z.string().min(1),
+  inboxAccountId: z.string().min(1).optional(),
   q: z.string().trim().min(1).optional(),
   read: z.enum(["read", "unread", "all"]).default("all").optional(),
   cursor: z.string().min(1).optional(),
@@ -1471,10 +1472,13 @@ export type InboundMessageQueryInput = z.infer<
 export const inboundMessageReplySchema = z
   .object({
     organizationId: z.string().min(1),
+    idempotencyKey: z.string().min(1).max(128).optional(),
     smtpConnectionId: z.string().min(1).optional(),
     subject: z.string().min(1),
     html: z.string().optional(),
     text: z.string().optional(),
+    attachmentIds: z.array(z.string().min(1)).max(50).optional(),
+    replyAll: z.boolean().optional(),
   })
   .refine((input) => Boolean(input.html || input.text), {
     message: "Provide an email body",
@@ -1484,6 +1488,12 @@ export const inboundMessageReplySchema = z
 export type InboundMessageReplyInput = z.infer<
   typeof inboundMessageReplySchema
 >;
+
+export const inboundBulkReadSchema = z.object({
+  organizationId: z.string().min(1),
+  messageIds: z.array(z.string().min(1)).min(1).max(1000),
+  read: z.boolean(),
+});
 
 export const contactActivityQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
@@ -1736,7 +1746,11 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
     variables: [
       { name: "firstName", label: "First name", defaultValue: "there" },
       { name: "company", label: "Company", defaultValue: "QQueue" },
-      { name: "feature", label: "Feature name", defaultValue: "our new feature" },
+      {
+        name: "feature",
+        label: "Feature name",
+        defaultValue: "our new feature",
+      },
       {
         name: "ctaUrl",
         label: "Call-to-action URL",
@@ -2044,7 +2058,7 @@ export const MIN_ATTEMPTS_FOR_ALERT = 50;
  * paying for a second full aggregation.
  */
 export function deriveReputationAlerts(
-  overview: DeliverabilityOverview,
+  overview: DeliverabilityOverview
 ): ReputationAlert[] {
   const alerts: ReputationAlert[] = [];
   if (overview.totals.attempted < MIN_ATTEMPTS_FOR_ALERT) {
@@ -2130,10 +2144,10 @@ export const inlineAttachmentSchema = z.object({
     .string()
     .min(1)
     .refine((v) => v.length % 4 === 0 && BASE64_PATTERN.test(v), {
-      message: "contentBase64 must be strict, padded base64"
+      message: "contentBase64 must be strict, padded base64",
     })
     .refine((v) => base64DecodedBytes(v) <= INLINE_ATTACHMENT_MAX_BYTES, {
-      message: `Inline attachments are capped at ${INLINE_ATTACHMENT_MAX_BYTES} bytes; upload larger files via POST /attachments`
+      message: `Inline attachments are capped at ${INLINE_ATTACHMENT_MAX_BYTES} bytes; upload larger files via POST /attachments`,
     }),
   contentType: z.string().min(1).max(200).optional(),
   // Content-ID for inline display: HTML referencing `cid:<cid>` renders the
@@ -2142,9 +2156,9 @@ export const inlineAttachmentSchema = z.object({
   cid: z
     .string()
     .regex(/^[^\s<>]{1,200}$/, {
-      message: "cid must contain no whitespace or angle brackets"
+      message: "cid must contain no whitespace or angle brackets",
     })
-    .optional()
+    .optional(),
 });
 
 export type InlineAttachmentInput = z.infer<typeof inlineAttachmentSchema>;
@@ -2168,7 +2182,7 @@ const protectedEmailHeaders = new Set([
   "content-transfer-encoding",
   "dkim-signature",
   "authentication-results",
-  "received"
+  "received",
 ]);
 
 export const emailHeadersSchema = z
@@ -2178,7 +2192,7 @@ export const emailHeadersSchema = z
     if (entries.length > 20) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "At most 20 email headers are allowed"
+        message: "At most 20 email headers are allowed",
       });
     }
     const seen = new Set<string>();
@@ -2193,13 +2207,13 @@ export const emailHeadersSchema = z
       ) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Email header ${name} is not allowed`
+          message: `Email header ${name} is not allowed`,
         });
       }
       if (seen.has(normalized)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Duplicate email header ${name}`
+          message: `Duplicate email header ${name}`,
         });
       }
       seen.add(normalized);
@@ -2213,7 +2227,7 @@ export const emailHeadersSchema = z
       ) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Invalid value for email header ${name}`
+          message: `Invalid value for email header ${name}`,
         });
       }
     }
@@ -2228,7 +2242,7 @@ export const emailHeadersSchema = z
       if (post !== "List-Unsubscribe=One-Click") {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "List-Unsubscribe-Post must be List-Unsubscribe=One-Click"
+          message: "List-Unsubscribe-Post must be List-Unsubscribe=One-Click",
         });
       }
       const urlText = /^<(https:\/\/[^<>]+)>$/.exec(unsubscribe ?? "")?.[1];
@@ -2247,7 +2261,7 @@ export const emailHeadersSchema = z
         context.addIssue({
           code: z.ZodIssueCode.custom,
           message:
-            "One-click List-Unsubscribe requires one angle-bracketed HTTPS URL"
+            "One-click List-Unsubscribe requires one angle-bracketed HTTPS URL",
         });
       }
     }
@@ -2308,6 +2322,7 @@ export type PublicSendEmailInput = z.infer<typeof publicSendEmailSchema>;
 export const manualEmailSendSchema = z
   .object({
     organizationId: z.string().min(1),
+    idempotencyKey: z.string().min(1).max(128).optional(),
     to: z.array(emailAddressSchema).optional(),
     cc: z.array(emailAddressSchema).optional(),
     bcc: z.array(emailAddressSchema).optional(),
@@ -2371,7 +2386,7 @@ export const recurringSendCreateSchema = z
         (input.contactIds?.length ?? 0) +
         (input.listIds?.length ?? 0) >
       0,
-    { message: "At least one recipient is required", path: ["to"] },
+    { message: "At least one recipient is required", path: ["to"] }
   )
   .refine((input) => Boolean(input.html || input.text), {
     message: "Provide an email body",
@@ -2498,7 +2513,7 @@ export const SENT_EMAIL_OUTCOMES = [
   "clicked",
   "bounced",
   "complained",
-  "failed"
+  "failed",
 ] as const;
 
 export type SentEmailOutcome = (typeof SENT_EMAIL_OUTCOMES)[number];
@@ -2518,7 +2533,7 @@ export const sentEmailQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   // Capped at 100: this is the one endpoint someone could ask for the whole
   // archive from, and a page is rendered as DOM rows either way.
-  pageSize: z.coerce.number().int().min(1).max(100).default(25)
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 
 export type SentEmailQueryInput = z.infer<typeof sentEmailQuerySchema>;
@@ -2647,6 +2662,7 @@ export interface SentEmailDetail extends SentEmail {
 // message can always be saved. Validation happens at send time.
 export const emailDraftSchema = z.object({
   organizationId: z.string().min(1),
+  inboundMessageId: z.string().min(1).optional(),
   subject: z.string().optional(),
   html: z.string().optional(),
   text: z.string().optional(),
@@ -2670,6 +2686,7 @@ export const emailDraftUpdateSchema = emailDraftSchema
 export type EmailDraftUpdateInput = z.infer<typeof emailDraftUpdateSchema>;
 
 export interface EmailDraft {
+  inboundMessageId?: string | null;
   id: string;
   organizationId: string;
   createdByUserId: string;

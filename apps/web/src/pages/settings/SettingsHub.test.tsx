@@ -63,7 +63,8 @@ describe("SettingsHub", () => {
     expect(row("Background jobs")).not.toBeInTheDocument();
     // Everything they can actually use is still there.
     expect(row("Sending accounts")).toBeInTheDocument();
-    expect(row("Suppressions")).toBeInTheDocument();
+    expect(row("Suppressions")).not.toBeInTheDocument();
+    expect(row("API")).not.toBeInTheDocument();
     expect(row("Account")).toBeInTheDocument();
   });
 

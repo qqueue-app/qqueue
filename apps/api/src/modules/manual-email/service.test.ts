@@ -3,7 +3,7 @@ import { prismaMock } from "../../test/prisma-mock.js";
 
 const send = vi.fn();
 vi.mock("../transactional-email/service.js", () => ({
-  transactionalEmailService: { send }
+  transactionalEmailService: { send },
 }));
 
 const renderHtmlAsEmailSafe = vi.hoisted(() => vi.fn());
@@ -11,18 +11,23 @@ vi.mock("@qqueue/email-engine", () => ({
   renderHtmlAsEmailSafe,
   injectTracking: vi.fn((html?: string) =>
     html === undefined ? undefined : `${html}<pixel>`
-  )
+  ),
 }));
 
 const { manualEmailService } = await import("./service.js");
 
 beforeEach(() => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER",
+  } as never);
   send.mockReset().mockResolvedValue({ id: "job_1", status: "QUEUED" });
-  renderHtmlAsEmailSafe.mockReset().mockImplementation(async (html: string) => ({
-    html: `<safe>${html}</safe>`,
-    errors: [],
-    usedFallback: false
-  }));
+  renderHtmlAsEmailSafe
+    .mockReset()
+    .mockImplementation(async (html: string) => ({
+      html: `<safe>${html}</safe>`,
+      errors: [],
+      usedFallback: false,
+    }));
   prismaMock.contact.findMany.mockResolvedValue([] as never);
   prismaMock.contactListMember.findMany.mockResolvedValue([] as never);
   // Default: nobody is suppressed (carrier selection queries this).
@@ -32,13 +37,13 @@ beforeEach(() => {
 describe("manualEmailService.resolveRecipients", () => {
   it("dedupes and lowercases To across manual entries and contacts", async () => {
     prismaMock.contact.findMany.mockResolvedValue([
-      { email: "Alice@example.com" }
+      { email: "Alice@example.com" },
     ] as never);
 
     const result = await manualEmailService.resolveRecipients({
       organizationId: "org_1",
       to: ["bob@example.com", "BOB@example.com"],
-      contactIds: ["c1"]
+      contactIds: ["c1"],
     });
 
     expect(result.to).toEqual(["bob@example.com", "alice@example.com"]);
@@ -50,7 +55,7 @@ describe("manualEmailService.resolveRecipients", () => {
       organizationId: "org_1",
       to: ["a@x.com"],
       cc: ["a@x.com", "b@x.com"],
-      bcc: ["b@x.com", "c@x.com"]
+      bcc: ["b@x.com", "c@x.com"],
     });
 
     expect(result.to).toEqual(["a@x.com"]);
@@ -62,24 +67,24 @@ describe("manualEmailService.resolveRecipients", () => {
   it("expands contact-list members into recipients", async () => {
     prismaMock.contactListMember.findMany.mockResolvedValue([
       { contactId: "c1" },
-      { contactId: "c2" }
+      { contactId: "c2" },
     ] as never);
     prismaMock.contact.findMany.mockResolvedValue([
       { email: "one@x.com" },
-      { email: "two@x.com" }
+      { email: "two@x.com" },
     ] as never);
 
     const result = await manualEmailService.resolveRecipients({
       organizationId: "org_1",
-      listIds: ["list_1"]
+      listIds: ["list_1"],
     });
 
     expect(prismaMock.contactListMember.findMany).toHaveBeenCalledWith({
       where: {
         contactListId: { in: ["list_1"] },
-        contactList: { organizationId: "org_1" }
+        contactList: { organizationId: "org_1" },
       },
-      select: { contactId: true }
+      select: { contactId: true },
     });
     expect(result.to).toEqual(["one@x.com", "two@x.com"]);
   });
@@ -93,7 +98,7 @@ describe("manualEmailService.send", () => {
           organizationId: "org_1",
           to: [],
           subject: "Hi",
-          html: "<p>Hi</p>"
+          html: "<p>Hi</p>",
         },
         "user_1"
       )
@@ -109,7 +114,7 @@ describe("manualEmailService.send", () => {
         cc: ["cc@x.com"],
         bcc: ["bcc@x.com"],
         subject: "Hello",
-        html: "<p>Body</p>"
+        html: "<p>Body</p>",
       },
       "user_1"
     );
@@ -140,7 +145,7 @@ describe("manualEmailService.send", () => {
         to: ["a@x.com", "b@x.com"],
         cc: ["cc@x.com"],
         subject: "Hi",
-        html: "<p>Hi</p>"
+        html: "<p>Hi</p>",
       },
       "user_1"
     );
@@ -162,7 +167,7 @@ describe("manualEmailService.send", () => {
   it("moves the CC carrier past a suppressed first recipient", async () => {
     // a@x.com is suppressed: copies must ride a job that will actually send.
     prismaMock.suppression.findMany.mockResolvedValue([
-      { email: "a@x.com" }
+      { email: "a@x.com" },
     ] as never);
     send
       .mockResolvedValueOnce({ id: "job_a", status: "SUPPRESSED" })
@@ -174,7 +179,7 @@ describe("manualEmailService.send", () => {
         to: ["a@x.com", "b@x.com"],
         cc: ["cc@x.com"],
         subject: "Hi",
-        html: "<p>Hi</p>"
+        html: "<p>Hi</p>",
       },
       "user_1"
     );
@@ -193,7 +198,7 @@ describe("manualEmailService.send", () => {
         to: ["a@x.com", "b@x.com"],
         subject: "Hi",
         html: "<p>Hi</p>",
-        attachmentIds: ["att_1", "att_2"]
+        attachmentIds: ["att_1", "att_2"],
       },
       "user_1"
     );
@@ -209,12 +214,17 @@ describe("manualEmailService.send", () => {
     renderHtmlAsEmailSafe.mockResolvedValue({
       html: "<p>Body</p>",
       errors: ["Unexpected token"],
-      usedFallback: true
+      usedFallback: true,
     });
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await manualEmailService.send(
-      { organizationId: "org_1", to: ["a@x.com"], subject: "Hi", html: "<p>Body</p>" },
+      {
+        organizationId: "org_1",
+        to: ["a@x.com"],
+        subject: "Hi",
+        html: "<p>Body</p>",
+      },
       "user_1"
     );
 
@@ -229,12 +239,17 @@ describe("manualEmailService.send", () => {
     renderHtmlAsEmailSafe.mockResolvedValue({
       html: "<safe/>",
       errors: ["mj-raw is not allowed here"],
-      usedFallback: false
+      usedFallback: false,
     });
     const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await manualEmailService.send(
-      { organizationId: "org_1", to: ["a@x.com"], subject: "Hi", html: "<p>Body</p>" },
+      {
+        organizationId: "org_1",
+        to: ["a@x.com"],
+        subject: "Hi",
+        html: "<p>Body</p>",
+      },
       "user_1"
     );
 
@@ -246,10 +261,9 @@ describe("manualEmailService.send", () => {
   // real one emitting an invisible body (the mj-raw-in-<tbody> bug). This one
   // drives the actual MJML layer through the manual send path.
   it("sends a visible body through the real MJML renderer", async () => {
-    const actual =
-      await vi.importActual<typeof import("@qqueue/email-engine")>(
-        "@qqueue/email-engine"
-      );
+    const actual = await vi.importActual<typeof import("@qqueue/email-engine")>(
+      "@qqueue/email-engine"
+    );
     renderHtmlAsEmailSafe.mockImplementation(actual.renderHtmlAsEmailSafe);
 
     await manualEmailService.send(
@@ -257,7 +271,7 @@ describe("manualEmailService.send", () => {
         organizationId: "org_1",
         to: ["a@x.com"],
         subject: "Hi",
-        html: "<p>My typed content</p>"
+        html: "<p>My typed content</p>",
       },
       "user_1"
     );
@@ -273,7 +287,7 @@ describe("manualEmailService.deliveryStatus", () => {
   it("throws 404 when the job is not in the org", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue(null);
     await expect(
-      manualEmailService.deliveryStatus("job_1", "org_1")
+      manualEmailService.deliveryStatus("job_1", "org_1", "user_1")
     ).rejects.toThrow("Email not found");
   });
 
@@ -288,22 +302,29 @@ describe("manualEmailService.deliveryStatus", () => {
       events: [
         {
           type: "SENT",
-          metadata: { accepted: ["a@x.com", "cc@x.com"], rejected: ["b@x.com"] }
+          metadata: {
+            accepted: ["a@x.com", "cc@x.com"],
+            rejected: ["b@x.com"],
+          },
         },
         { type: "OPENED", metadata: null },
         { type: "OPENED", metadata: null },
-        { type: "CLICKED", metadata: null }
-      ]
+        { type: "CLICKED", metadata: null },
+      ],
     } as never);
 
-    const result = await manualEmailService.deliveryStatus("job_1", "org_1");
+    const result = await manualEmailService.deliveryStatus(
+      "job_1",
+      "org_1",
+      "user_1"
+    );
 
     expect(result.sentAt).toBe("2026-06-15T10:00:00.000Z");
     expect(result.recipients).toEqual([
       { email: "a@x.com", field: "to", status: "delivered" },
       { email: "b@x.com", field: "to", status: "rejected" },
       { email: "cc@x.com", field: "cc", status: "delivered" },
-      { email: "bcc@x.com", field: "bcc", status: "pending" }
+      { email: "bcc@x.com", field: "bcc", status: "pending" },
     ]);
     expect(result.opens).toBe(2);
     expect(result.clicks).toBe(1);
@@ -318,14 +339,18 @@ describe("manualEmailService.deliveryStatus", () => {
       toEmail: "a@x.com",
       cc: [],
       bcc: [],
-      events: [{ type: "FAILED", metadata: { message: "boom" } }]
+      events: [{ type: "FAILED", metadata: { message: "boom" } }],
     } as never);
 
-    const result = await manualEmailService.deliveryStatus("job_1", "org_1");
+    const result = await manualEmailService.deliveryStatus(
+      "job_1",
+      "org_1",
+      "user_1"
+    );
 
     expect(result.sentAt).toBeNull();
     expect(result.recipients).toEqual([
-      { email: "a@x.com", field: "to", status: "failed" }
+      { email: "a@x.com", field: "to", status: "failed" },
     ]);
   });
 
@@ -339,7 +364,7 @@ describe("manualEmailService.deliveryStatus", () => {
       bcc: [],
       sendGroupId: "grp_1",
       createdAt: new Date("2026-06-15T09:59:00.000Z"),
-      events: []
+      events: [],
     } as never);
     prismaMock.emailJob.findMany.mockResolvedValue([
       {
@@ -354,10 +379,10 @@ describe("manualEmailService.deliveryStatus", () => {
         events: [
           {
             type: "SENT",
-            metadata: { accepted: ["a@x.com", "cc@x.com"], rejected: [] }
+            metadata: { accepted: ["a@x.com", "cc@x.com"], rejected: [] },
           },
-          { type: "OPENED", metadata: null }
-        ]
+          { type: "OPENED", metadata: null },
+        ],
       },
       {
         id: "job_b",
@@ -368,19 +393,23 @@ describe("manualEmailService.deliveryStatus", () => {
         bcc: [],
         sendGroupId: "grp_1",
         createdAt: new Date("2026-06-15T09:59:01.000Z"),
-        events: []
-      }
+        events: [],
+      },
     ] as never);
 
-    const result = await manualEmailService.deliveryStatus("job_a", "org_1");
+    const result = await manualEmailService.deliveryStatus(
+      "job_a",
+      "org_1",
+      "user_1"
+    );
 
     expect(prismaMock.emailJob.findMany.mock.calls[0][0]).toMatchObject({
-      where: { organizationId: "org_1", sendGroupId: "grp_1" }
+      where: { organizationId: "org_1", sendGroupId: "grp_1" },
     });
     expect(result.recipients).toEqual([
       { email: "a@x.com", field: "to", status: "delivered" },
       { email: "cc@x.com", field: "cc", status: "delivered" },
-      { email: "b@x.com", field: "to", status: "suppressed" }
+      { email: "b@x.com", field: "to", status: "suppressed" },
     ]);
     // A send happened, so the aggregate reports SENT (terminal for the poll).
     expect(result.status).toBe("SENT");
@@ -397,7 +426,7 @@ describe("manualEmailService.deliveryStatus", () => {
       bcc: [],
       sendGroupId: "grp_1",
       createdAt: new Date(),
-      events: []
+      events: [],
     } as never);
     prismaMock.emailJob.findMany.mockResolvedValue([
       {
@@ -409,7 +438,7 @@ describe("manualEmailService.deliveryStatus", () => {
         bcc: [],
         sendGroupId: "grp_1",
         createdAt: new Date(),
-        events: []
+        events: [],
       },
       {
         id: "job_b",
@@ -420,17 +449,21 @@ describe("manualEmailService.deliveryStatus", () => {
         bcc: [],
         sendGroupId: "grp_1",
         createdAt: new Date(),
-        events: []
-      }
+        events: [],
+      },
     ] as never);
 
-    const result = await manualEmailService.deliveryStatus("job_a", "org_1");
+    const result = await manualEmailService.deliveryStatus(
+      "job_a",
+      "org_1",
+      "user_1"
+    );
 
     expect(result.status).toBe("QUEUED");
     expect(result.recipients).toContainEqual({
       email: "b@x.com",
       field: "to",
-      status: "pending"
+      status: "pending",
     });
   });
 });
@@ -444,31 +477,34 @@ describe("manualEmailService.recentRecipients", () => {
     prismaMock.emailJob.findMany.mockResolvedValue([
       // toEmail holds the comma-joined To set for multi-recipient sends.
       { toEmail: "a@x.com, b@x.com", cc: ["c@x.com"], bcc: [] },
-      { toEmail: "A@X.com", cc: [], bcc: ["d@x.com"] }
+      { toEmail: "A@X.com", cc: [], bcc: ["d@x.com"] },
     ] as never);
 
-    const suggestions = await manualEmailService.recentRecipients("org_1");
+    const suggestions = await manualEmailService.recentRecipients(
+      "org_1",
+      "user_1"
+    );
 
     expect(suggestions.map((item) => item.email)).toEqual([
       "a@x.com",
       "b@x.com",
       "c@x.com",
-      "d@x.com"
+      "d@x.com",
     ]);
     expect(suggestions.every((item) => item.source === "recent")).toBe(true);
     expect(prismaMock.emailJob.findMany.mock.calls[0][0]).toMatchObject({
       where: { organizationId: "org_1" },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
   });
 
   it("serves repeat reads from cache instead of rescanning", async () => {
     prismaMock.emailJob.findMany.mockResolvedValue([
-      { toEmail: "a@x.com", cc: [], bcc: [] }
+      { toEmail: "a@x.com", cc: [], bcc: [] },
     ] as never);
 
-    const first = await manualEmailService.recentRecipients("org_1");
-    const second = await manualEmailService.recentRecipients("org_1");
+    const first = await manualEmailService.recentRecipients("org_1", "user_1");
+    const second = await manualEmailService.recentRecipients("org_1", "user_1");
 
     expect(second).toEqual(first);
     // Every composer load would otherwise scan 500 rows.
@@ -478,14 +514,14 @@ describe("manualEmailService.recentRecipients", () => {
   it("caches per organization rather than globally", async () => {
     prismaMock.emailJob.findMany
       .mockResolvedValueOnce([
-        { toEmail: "a@org1.com", cc: [], bcc: [] }
+        { toEmail: "a@org1.com", cc: [], bcc: [] },
       ] as never)
       .mockResolvedValueOnce([
-        { toEmail: "b@org2.com", cc: [], bcc: [] }
+        { toEmail: "b@org2.com", cc: [], bcc: [] },
       ] as never);
 
-    const one = await manualEmailService.recentRecipients("org_1");
-    const two = await manualEmailService.recentRecipients("org_2");
+    const one = await manualEmailService.recentRecipients("org_1", "user_1");
+    const two = await manualEmailService.recentRecipients("org_2", "user_1");
 
     // One org must never be offered another's addresses.
     expect(one.map((item) => item.email)).toEqual(["a@org1.com"]);
@@ -496,12 +532,12 @@ describe("manualEmailService.recentRecipients", () => {
     vi.useFakeTimers();
     try {
       prismaMock.emailJob.findMany.mockResolvedValue([
-        { toEmail: "a@x.com", cc: [], bcc: [] }
+        { toEmail: "a@x.com", cc: [], bcc: [] },
       ] as never);
 
-      await manualEmailService.recentRecipients("org_1");
+      await manualEmailService.recentRecipients("org_1", "user_1");
       vi.advanceTimersByTime(61_000);
-      await manualEmailService.recentRecipients("org_1");
+      await manualEmailService.recentRecipients("org_1", "user_1");
 
       expect(prismaMock.emailJob.findMany).toHaveBeenCalledTimes(2);
     } finally {
@@ -517,7 +553,7 @@ describe("manualEmailService.preview", () => {
       organizationId: "org_1",
       subject: "Subject",
       html: "<p>Hi</p>",
-      to: ["a@x.com", "a@x.com"]
+      to: ["a@x.com", "a@x.com"],
     });
 
     expect(result.subject).toBe("Subject");
@@ -528,7 +564,7 @@ describe("manualEmailService.preview", () => {
 
   it("returns an empty body when there is nothing to render", async () => {
     const result = await manualEmailService.preview({
-      organizationId: "org_1"
+      organizationId: "org_1",
     });
     expect(result.html).toBe("");
     expect(result.recipients.total).toBe(0);

@@ -6,7 +6,7 @@ import { HttpError } from "../../lib/http-error.js";
 const storageMock = {
   putObject: vi.fn(),
   getObject: vi.fn(),
-  deleteObject: vi.fn()
+  deleteObject: vi.fn(),
 };
 
 vi.mock("../../lib/storage.js", () => ({ storage: storageMock }));
@@ -20,7 +20,7 @@ function baseInput() {
     filename: "report.pdf",
     contentType: "application/pdf",
     size: 1024,
-    buffer: Buffer.from("hello")
+    buffer: Buffer.from("hello"),
   };
 }
 
@@ -36,7 +36,7 @@ describe("attachmentService.upload", () => {
       id: "att_1",
       filename: "report.pdf",
       contentType: "application/pdf",
-      size: 1024
+      size: 1024,
     } as never);
 
     const result = await attachmentService.upload(baseInput());
@@ -54,7 +54,7 @@ describe("attachmentService.upload", () => {
       id: "att_1",
       filename: "report.pdf",
       contentType: "application/pdf",
-      size: 1024
+      size: 1024,
     });
   });
 
@@ -78,14 +78,14 @@ describe("attachmentService.upload", () => {
       id: "att_1",
       filename: "report.pdf",
       contentType: "application/pdf",
-      size: 1024
+      size: 1024,
     } as never);
 
     await attachmentService.upload({ ...baseInput(), emailDraftId: "d1" });
 
     expect(prismaMock.emailDraft.findFirst).toHaveBeenCalledWith({
       where: { id: "d1", organizationId: "org_1", createdByUserId: "user_1" },
-      select: { id: true }
+      select: { id: true },
     });
     expect(
       prismaMock.emailAttachment.create.mock.calls[0][0].data.emailDraftId
@@ -98,7 +98,7 @@ describe("attachmentService.upload", () => {
       id: "att_1",
       filename: "report.pdf",
       contentType: "application/pdf",
-      size: 1024
+      size: 1024,
     } as never);
 
     await attachmentService.upload({ ...baseInput(), emailDraftId: "nope" });
@@ -113,14 +113,14 @@ describe("attachmentService.upload", () => {
       id: "att_1",
       filename: "passwd",
       contentType: "text/plain",
-      size: 10
+      size: 10,
     } as never);
 
     await attachmentService.upload({
       ...baseInput(),
       filename: "../../etc/passwd",
       contentType: "text/plain",
-      size: 10
+      size: 10,
     });
 
     const data = prismaMock.emailAttachment.create.mock.calls[0][0].data;
@@ -140,7 +140,7 @@ describe("attachmentService.download", () => {
       storageKey: "org/org_1/k-report.pdf",
       filename: "report.pdf",
       contentType: "application/pdf",
-      ...overrides
+      ...overrides,
     };
   }
 
@@ -164,16 +164,18 @@ describe("attachmentService.download", () => {
     // The uploader needs no message to inherit access from, so nothing else is
     // consulted — this is the path a draft's attachments take.
     expect(prismaMock.emailJob.findFirst).not.toHaveBeenCalled();
-    expect(storageMock.getObject).toHaveBeenCalledWith("org/org_1/k-report.pdf");
+    expect(storageMock.getObject).toHaveBeenCalledWith(
+      "org/org_1/k-report.pdf"
+    );
     expect(attachment.id).toBe("att_1");
     expect(body.toString()).toBe("data");
   });
 
   it("throws 404 when the attachment does not exist", async () => {
     prismaMock.emailAttachment.findFirst.mockResolvedValue(null);
-    await expect(
-      attachmentService.download("att_1", "user_1")
-    ).rejects.toThrow(HttpError);
+    await expect(attachmentService.download("att_1", "user_1")).rejects.toThrow(
+      HttpError
+    );
     expect(storageMock.getObject).not.toHaveBeenCalled();
   });
 
@@ -182,7 +184,7 @@ describe("attachmentService.download", () => {
       sentAttachment() as never
     );
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.emailJob.findFirst.mockResolvedValue({ id: "job_1" } as never);
     storageMock.getObject.mockResolvedValue(Buffer.from("data"));
@@ -191,8 +193,12 @@ describe("attachmentService.download", () => {
 
     // Unrestricted, so the job is looked up with no scope clause bolted on.
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
-      where: { id: "job_1", organizationId: "org_1" },
-      select: { id: true }
+      where: {
+        id: "job_1",
+        organizationId: "org_1",
+        NOT: { origin: "SYSTEM" },
+      },
+      select: { id: true },
     });
     expect(body.toString()).toBe("data");
   });
@@ -202,33 +208,34 @@ describe("attachmentService.download", () => {
       sentAttachment() as never
     );
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
-      { smtpConnectionId: "smtp_1" }
+      { smtpConnectionId: "smtp_1" },
     ] as never);
     prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
     // The job doesn't match that scope.
     prismaMock.emailJob.findFirst.mockResolvedValue(null as never);
 
-    await expect(
-      attachmentService.download("att_1", "user_1")
-    ).rejects.toThrow(HttpError);
+    await expect(attachmentService.download("att_1", "user_1")).rejects.toThrow(
+      HttpError
+    );
 
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
       where: {
         id: "job_1",
         organizationId: "org_1",
+        NOT: { origin: "SYSTEM" },
         AND: [
           {
             OR: [
               { smtpConnectionId: { in: ["smtp_1"] } },
-              { createdByUserId: "user_1" }
-            ]
-          }
-        ]
+              { createdByUserId: "user_1" },
+            ],
+          },
+        ],
       },
-      select: { id: true }
+      select: { id: true },
     });
     expect(storageMock.getObject).not.toHaveBeenCalled();
   });
@@ -240,9 +247,9 @@ describe("attachmentService.download", () => {
       sentAttachment({ emailJobId: null }) as never
     );
 
-    await expect(
-      attachmentService.download("att_1", "user_1")
-    ).rejects.toThrow(HttpError);
+    await expect(attachmentService.download("att_1", "user_1")).rejects.toThrow(
+      HttpError
+    );
     expect(prismaMock.emailJob.findFirst).not.toHaveBeenCalled();
     expect(storageMock.getObject).not.toHaveBeenCalled();
   });
@@ -255,9 +262,9 @@ describe("attachmentService.download", () => {
     // so the id doesn't confirm that something exists here.
     prismaMock.organizationMember.findUnique.mockResolvedValue(null as never);
 
-    await expect(
-      attachmentService.download("att_1", "user_1")
-    ).rejects.toThrow(HttpError);
+    await expect(attachmentService.download("att_1", "user_1")).rejects.toThrow(
+      HttpError
+    );
     expect(prismaMock.emailJob.findFirst).not.toHaveBeenCalled();
     expect(storageMock.getObject).not.toHaveBeenCalled();
   });
@@ -271,7 +278,7 @@ describe("attachmentService.delete", () => {
   it("removes the blob and the metadata row", async () => {
     prismaMock.emailAttachment.findFirst.mockResolvedValue({
       id: "att_1",
-      storageKey: "org/org_1/k-report.pdf"
+      storageKey: "org/org_1/k-report.pdf",
     } as never);
     prismaMock.emailAttachment.delete.mockResolvedValue({} as never);
 
@@ -281,14 +288,14 @@ describe("attachmentService.delete", () => {
       "org/org_1/k-report.pdf"
     );
     expect(prismaMock.emailAttachment.delete).toHaveBeenCalledWith({
-      where: { id: "att_1" }
+      where: { id: "att_1" },
     });
   });
 
   it("still clears the row when blob deletion fails", async () => {
     prismaMock.emailAttachment.findFirst.mockResolvedValue({
       id: "att_1",
-      storageKey: "k"
+      storageKey: "k",
     } as never);
     storageMock.deleteObject.mockRejectedValue(new Error("s3 down"));
     prismaMock.emailAttachment.delete.mockResolvedValue({} as never);
@@ -320,14 +327,18 @@ describe("attachmentService.linkToJob", () => {
 
   it("claims unlinked attachments for the job", async () => {
     prismaMock.emailAttachment.updateMany.mockResolvedValue({
-      count: 2
+      count: 2,
     } as never);
 
     await attachmentService.linkToJob(["a1", "a2"], "org_1", "job_1");
 
     expect(prismaMock.emailAttachment.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["a1", "a2"] }, organizationId: "org_1", emailJobId: null },
-      data: { emailJobId: "job_1" }
+      where: {
+        id: { in: ["a1", "a2"] },
+        organizationId: "org_1",
+        emailJobId: null,
+      },
+      data: { emailJobId: "job_1" },
     });
   });
 
@@ -335,7 +346,7 @@ describe("attachmentService.linkToJob", () => {
   // attachments than the caller asked for and reporting success.
   it("throws when an id cannot be claimed (already sent, unknown, or other org)", async () => {
     prismaMock.emailAttachment.updateMany.mockResolvedValue({
-      count: 1
+      count: 1,
     } as never);
 
     await expect(
@@ -345,7 +356,7 @@ describe("attachmentService.linkToJob", () => {
 
   it("counts duplicate ids once so a repeated id is not a false mismatch", async () => {
     prismaMock.emailAttachment.updateMany.mockResolvedValue({
-      count: 1
+      count: 1,
     } as never);
 
     await expect(
@@ -377,11 +388,11 @@ describe("attachmentService.copyToJob", () => {
         size: 3,
         storageKey: "org/org_1/k-report.pdf",
         cid: "qr",
-        createdByUserId: "user_1"
-      }
+        createdByUserId: "user_1",
+      },
     ] as never);
     prismaMock.emailAttachment.createMany.mockResolvedValue({
-      count: 1
+      count: 1,
     } as never);
 
     await attachmentService.copyToJob(["a1"], "org_1", "job_2");
@@ -396,9 +407,9 @@ describe("attachmentService.copyToJob", () => {
           size: 3,
           storageKey: "org/org_1/k-report.pdf",
           cid: "qr",
-          createdByUserId: "user_1"
-        }
-      ]
+          createdByUserId: "user_1",
+        },
+      ],
     });
   });
 
@@ -427,7 +438,9 @@ describe("attachmentService.createInlineForJob", () => {
   });
 
   it("stores the decoded blob and a row carrying the cid, linked to the job", async () => {
-    prismaMock.emailAttachment.create.mockResolvedValue({ id: "att_1" } as never);
+    prismaMock.emailAttachment.create.mockResolvedValue({
+      id: "att_1",
+    } as never);
 
     await attachmentService.createInlineForJob(
       [
@@ -435,8 +448,8 @@ describe("attachmentService.createInlineForJob", () => {
           filename: "qr.png",
           contentBase64: Buffer.from("png-bytes").toString("base64"),
           contentType: "image/png",
-          cid: "ticket-qr"
-        }
+          cid: "ticket-qr",
+        },
       ],
       "org_1",
       "job_1",
@@ -458,14 +471,16 @@ describe("attachmentService.createInlineForJob", () => {
   });
 
   it("defaults the content type and leaves cid unset when omitted", async () => {
-    prismaMock.emailAttachment.create.mockResolvedValue({ id: "att_1" } as never);
+    prismaMock.emailAttachment.create.mockResolvedValue({
+      id: "att_1",
+    } as never);
 
     await attachmentService.createInlineForJob(
       [
         {
           filename: "notes.txt",
-          contentBase64: Buffer.from("hello").toString("base64")
-        }
+          contentBase64: Buffer.from("hello").toString("base64"),
+        },
       ],
       "org_1",
       "job_1",

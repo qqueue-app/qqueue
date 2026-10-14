@@ -9,17 +9,35 @@ function fakeReq(partial: Partial<Request>): Request {
 }
 
 describe("requireOrgMembership", () => {
+  it("rejects conflicting query and body organizations before any role lookup", async () => {
+    await expect(
+      requireOrgMembership(
+        fakeReq({
+          userId: "user_1",
+          query: { organizationId: "admin_org" },
+          body: { organizationId: "member_org" },
+        }),
+        {} as Response,
+        vi.fn()
+      )
+    ).rejects.toThrow("Conflicting organization IDs");
+    expect(prismaMock.organizationMember.findUnique).not.toHaveBeenCalled();
+  });
   it("pins organizationId and role from the query string", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     const req = fakeReq({
       userId: "user_1",
-      query: { organizationId: "org_1" }
+      query: { organizationId: "org_1" },
     });
     const next = vi.fn();
 
-    await requireOrgMembership(req, {} as Response, next as unknown as NextFunction);
+    await requireOrgMembership(
+      req,
+      {} as Response,
+      next as unknown as NextFunction
+    );
 
     expect(req.organizationId).toBe("org_1");
     expect(req.orgRole).toBe("OWNER");
@@ -28,15 +46,19 @@ describe("requireOrgMembership", () => {
 
   it("reads organizationId from the body when not in the query", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     const req = fakeReq({
       userId: "user_1",
-      body: { organizationId: "org_2" }
+      body: { organizationId: "org_2" },
     });
     const next = vi.fn();
 
-    await requireOrgMembership(req, {} as Response, next as unknown as NextFunction);
+    await requireOrgMembership(
+      req,
+      {} as Response,
+      next as unknown as NextFunction
+    );
 
     expect(req.organizationId).toBe("org_2");
     expect(req.orgRole).toBe("MEMBER");
@@ -45,14 +67,22 @@ describe("requireOrgMembership", () => {
   it("throws 401 when there is no authenticated user", async () => {
     const req = fakeReq({ query: { organizationId: "org_1" } });
     await expect(
-      requireOrgMembership(req, {} as Response, vi.fn() as unknown as NextFunction)
+      requireOrgMembership(
+        req,
+        {} as Response,
+        vi.fn() as unknown as NextFunction
+      )
     ).rejects.toThrow("Authentication required");
   });
 
   it("throws 400 when organizationId is missing", async () => {
     const req = fakeReq({ userId: "user_1" });
     await expect(
-      requireOrgMembership(req, {} as Response, vi.fn() as unknown as NextFunction)
+      requireOrgMembership(
+        req,
+        {} as Response,
+        vi.fn() as unknown as NextFunction
+      )
     ).rejects.toThrow("organizationId is required");
   });
 
@@ -60,10 +90,14 @@ describe("requireOrgMembership", () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue(null);
     const req = fakeReq({
       userId: "user_1",
-      query: { organizationId: "org_1" }
+      query: { organizationId: "org_1" },
     });
     await expect(
-      requireOrgMembership(req, {} as Response, vi.fn() as unknown as NextFunction)
+      requireOrgMembership(
+        req,
+        {} as Response,
+        vi.fn() as unknown as NextFunction
+      )
     ).rejects.toThrow(HttpError);
   });
 });

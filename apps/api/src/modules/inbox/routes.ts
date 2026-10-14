@@ -4,6 +4,7 @@ import { requireOrgRole } from "../../middleware/require-org-role.js";
 import { inboxController } from "./controller.js";
 
 export const inboxRouter = Router();
+inboxRouter.post("/sync", requireOrgMembership, inboxController.requestSync);
 
 inboxRouter.get(
   "/accounts",
@@ -47,6 +48,11 @@ inboxRouter.post(
   inboxController.storeInboundMessage
 );
 inboxRouter.patch(
+  "/messages/read",
+  requireOrgMembership,
+  inboxController.markManyRead
+);
+inboxRouter.patch(
   "/messages/:id/read",
   requireOrgMembership,
   inboxController.markRead
@@ -55,6 +61,11 @@ inboxRouter.post(
   "/messages/:id/reply",
   requireOrgMembership,
   inboxController.replyToMessage
+);
+inboxRouter.get(
+  "/messages/:id/conversation",
+  requireOrgMembership,
+  inboxController.getConversation
 );
 // Authenticated download of a file that arrived on a received message. Private
 // by design — the public /images/:publicId route exists for the opposite case

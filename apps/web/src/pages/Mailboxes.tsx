@@ -544,7 +544,7 @@ export function Mailboxes() {
                   // Edits what QQueue sends as, so it needs a sending account
                   // rather than a mailbox: a SERVER_ONLY row has nowhere to
                   // keep a display name or a Reply-To until it is connected.
-                  label: "Edit mailbox",
+                  label: "Edit sender details",
                   icon: Pencil,
                   primary: true,
                   hidden: !connectionId,
@@ -711,7 +711,8 @@ export function Mailboxes() {
                       </SelectItem>
                       {domains.map((candidate) => (
                         <SelectItem key={candidate} value={candidate}>
-                          {candidate} ({mailboxCountByDomain.get(candidate) ?? 0})
+                          {candidate} (
+                          {mailboxCountByDomain.get(candidate) ?? 0})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -806,7 +807,6 @@ export function Mailboxes() {
               />
             </div>
           </TabsContent>
-
         </Tabs>
       </PageContainer>
 
@@ -968,7 +968,7 @@ function EditMailboxDialog({
     <Dialog open={mailbox !== null} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit {mailbox?.email}</DialogTitle>
+          <DialogTitle>Edit sender details for {mailbox?.email}</DialogTitle>
           <DialogDescription>
             How this mailbox appears to the people it writes to. The address
             itself and its credentials don't change.
@@ -1022,7 +1022,7 @@ function EditMailboxDialog({
             </Button>
             <Button type="submit" disabled={save.isPending}>
               {save.isPending ? <Spinner /> : <Pencil className="h-4 w-4" />}
-              Save mailbox
+              Save sender details
             </Button>
           </DialogFooter>
         </form>
@@ -1271,85 +1271,85 @@ function NewMailboxDialog({
             </p>
           ) : (
             <>
-            <div className="space-y-2">
-              <Label htmlFor="mailbox-local-part">Address</Label>
-              <div className="flex items-center gap-2">
+              <div className="space-y-2">
+                <Label htmlFor="mailbox-local-part">Address</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="mailbox-local-part"
+                    value={localPart}
+                    onChange={(event) => setLocalPart(event.target.value)}
+                    placeholder="support"
+                    autoFocus
+                    required
+                  />
+                  <span className="text-muted-foreground">@</span>
+                  <Select value={domain} onValueChange={setDomain}>
+                    <SelectTrigger aria-label="Domain" className="w-44">
+                      <SelectValue placeholder="Domain" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {domains.map((candidate) => (
+                        <SelectItem key={candidate} value={candidate}>
+                          {candidate}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {address ? (
+                  <p className="text-meta text-muted-foreground">
+                    Mail will arrive at <strong>{address}</strong>.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="mailbox-name">Display name</Label>
                 <Input
-                  id="mailbox-local-part"
-                  value={localPart}
-                  onChange={(event) => setLocalPart(event.target.value)}
-                  placeholder="support"
-                  autoFocus
-                  required
+                  id="mailbox-name"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="Support Team"
                 />
-                <span className="text-muted-foreground">@</span>
-                <Select value={domain} onValueChange={setDomain}>
-                  <SelectTrigger aria-label="Domain" className="w-44">
-                    <SelectValue placeholder="Domain" />
+                <p className="text-meta text-muted-foreground">
+                  What recipients see in the From line. Optional.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="mailbox-reply-to">Reply-To (optional)</Label>
+                <Input
+                  id="mailbox-reply-to"
+                  type="email"
+                  value={replyTo}
+                  onChange={(event) => setReplyTo(event.target.value)}
+                  placeholder={address ?? "replies@example.com"}
+                />
+                <p className="text-meta text-muted-foreground">
+                  Send-only addresses usually want answers somewhere a human
+                  reads. Leave empty and replies come back to this mailbox.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Give someone access</Label>
+                <Select value={assignTo} onValueChange={setAssignTo}>
+                  <SelectTrigger aria-label="Give someone access">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {domains.map((candidate) => (
-                      <SelectItem key={candidate} value={candidate}>
-                        {candidate}
+                    <SelectItem value={NO_ASSIGNEE}>Nobody yet</SelectItem>
+                    {members.map((member) => (
+                      <SelectItem key={member.userId} value={member.userId}>
+                        {memberName(member)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              {address ? (
                 <p className="text-meta text-muted-foreground">
-                  Mail will arrive at <strong>{address}</strong>.
+                  You can change this any time on the "Who has access" tab.
                 </p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="mailbox-name">Display name</Label>
-              <Input
-                id="mailbox-name"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Support Team"
-              />
-              <p className="text-meta text-muted-foreground">
-                What recipients see in the From line. Optional.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="mailbox-reply-to">Reply-To (optional)</Label>
-              <Input
-                id="mailbox-reply-to"
-                type="email"
-                value={replyTo}
-                onChange={(event) => setReplyTo(event.target.value)}
-                placeholder={address ?? "replies@example.com"}
-              />
-              <p className="text-meta text-muted-foreground">
-                Send-only addresses usually want answers somewhere a human
-                reads. Leave empty and replies come back to this mailbox.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Give someone access</Label>
-              <Select value={assignTo} onValueChange={setAssignTo}>
-                <SelectTrigger aria-label="Give someone access">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_ASSIGNEE}>Nobody yet</SelectItem>
-                  {members.map((member) => (
-                    <SelectItem key={member.userId} value={member.userId}>
-                      {memberName(member)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-meta text-muted-foreground">
-                You can change this any time on the "Who has access" tab.
-              </p>
-            </div>
+              </div>
             </>
           )}
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,7 +9,6 @@ import {
   Paperclip,
   RefreshCw,
   Reply,
-  Send,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,7 +28,11 @@ import {
 import { formatFullDate, formatMailDate, formatBytes } from "../lib/format.js";
 import { useInboundInlineImages } from "../lib/inbound-inline-images.js";
 import { qk } from "../lib/query-client.js";
-import { useApiMutation, useOrgQuery } from "../lib/use-api.js";
+import {
+  useApiMutation,
+  useOrgQuery,
+  useOrgInfiniteQuery,
+} from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { cn } from "../lib/utils.js";
 import { Avatar } from "../components/ui/avatar.js";
@@ -38,7 +41,10 @@ import { Button } from "../components/ui/button.js";
 import { IconButton } from "../components/ui/icon-button.js";
 import { Input } from "../components/ui/input.js";
 import { Spinner } from "../components/ui/spinner.js";
-import { Textarea } from "../components/ui/textarea.js";
+import { DataGrid } from "../components/ui/data-grid.js";
+import { RowActions } from "../components/ui/row-actions.js";
+import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { ReplyComposer } from "../components/inbox/ReplyComposer.js";
 import { Hint } from "../components/ui/tooltip.js";
 import {
   Select,
@@ -91,12 +97,12 @@ function snippet(message: InboundMessage) {
 }
 
 function threadKeyForMessage(message: InboundMessage) {
-  return (
+  return `${message.inboxAccountId}:${
     message.references[0] ??
     message.inReplyTo ??
     message.emailJob?.messageId ??
     message.messageId
-  );
+  }`;
 }
 
 function compareMessages(a: InboundMessage, b: InboundMessage) {
@@ -163,6 +169,11 @@ function buildConversationThreads(messages: InboundMessage[]) {
  * conversation, so arriving at the inbox never marks a message read.
  */
 export function Inbox() {
+  const { currentOrganizationId } = useSession();
+  return <InboxWorkspace key={currentOrganizationId} />;
+}
+
+function InboxWorkspace() {
   const {
     currentOrganizationId: organizationId,
     currentOrganization,
@@ -193,7 +204,9 @@ export function Inbox() {
     null
   );
   const [connectOpen, setConnectOpen] = useState(false);
-  const [replyBody, setReplyBody] = useState("");
+  const [replyTarget, setReplyTarget] = useState<InboundMessage | null>(null);
+  const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
+  const readMessages = useRef(new Set<string>());
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     attachment: InboundAttachment;
@@ -206,22 +219,37 @@ export function Inbox() {
     (id) => api.listInboxAccounts(id)
   );
 
-  const messagesQuery = useOrgQuery(
+  const messageFilters = {
+    q: submittedSearch,
+    read: readFilter,
+    inboxAccountId: accountFilter === "all" ? undefined : accountFilter,
+  };
+  const messagesQuery = useOrgInfiniteQuery(
     organizationId,
-    qk.inboundMessages(organizationId ?? "", {
-      q: submittedSearch,
-      read: readFilter,
-    }),
-    (id) =>
+    qk.inboundMessages(organizationId ?? "", messageFilters),
+    (id, cursor) =>
       api.listInboundMessages({
         organizationId: id,
         q: submittedSearch || undefined,
         read: readFilter,
-      }),
+        inboxAccountId: messageFilters.inboxAccountId,
+        cursor,
+      })
+  );
+  const conversationQuery = useOrgQuery(
+    organizationId,
+    qk.inboxConversation(
+      organizationId ?? "",
+      openedThread?.latestMessage.id ?? searchParams.get("message") ?? ""
+    ),
+    (id) =>
+      api.getInboxConversation(
+        openedThread?.latestMessage.id ?? searchParams.get("message") ?? "",
+        id
+      ),
     {
-      // Mail arrives on the worker's IMAP cadence; refetching while the tab is
-      // open keeps the list live without anyone pressing refresh.
-      refetchInterval: 60_000,
+      enabled: Boolean(openedThread || searchParams.get("message")),
+      refetchInterval: 10_000,
     }
   );
 
@@ -230,7 +258,7 @@ export function Inbox() {
     [accountsQuery.data]
   );
   const messages = useMemo(
-    () => messagesQuery.data?.data ?? [],
+    () => messagesQuery.data?.pages.flatMap((page) => page.data) ?? [],
     [messagesQuery.data]
   );
 
@@ -247,15 +275,25 @@ export function Inbox() {
     () => buildConversationThreads(filteredMessages),
     [filteredMessages]
   );
-  const selectedThread = useMemo(
-    () =>
+  const selectedThread = useMemo(() => {
+    if (!openedThread) return null;
+    const full = conversationQuery.data?.messages;
+    if (full?.length) {
+      const sorted = [...full].sort(compareMessages);
+      const latestMessage = sorted[sorted.length - 1];
+      return {
+        ...openedThread,
+        messages: sorted,
+        latestMessage,
+        unreadCount: sorted.filter((message) => !message.readAt).length,
+      };
+    }
+    return (
+      threads.find((thread) => thread.threadKey === openedThread.threadKey) ??
       openedThread
-        ? (threads.find(
-            (thread) => thread.threadKey === openedThread.threadKey
-          ) ?? openedThread)
-        : null,
-    [threads, openedThread]
-  );
+    );
+  }, [threads, openedThread, conversationQuery.data]);
+
   const unreadCount = filteredMessages.filter(
     (message) => !message.readAt
   ).length;
@@ -276,10 +314,7 @@ export function Inbox() {
     {
       errorMessage: "Couldn't update that message.",
       invalidates: () => [
-        qk.inboundMessages(organizationId ?? "", {
-          q: submittedSearch,
-          read: readFilter,
-        }),
+        ["inbound-messages", organizationId ?? ""],
         // The nav badge reads its own query; keep the two in step.
         qk.inboxUnreadCount(organizationId ?? ""),
       ],
@@ -297,20 +332,37 @@ export function Inbox() {
     }
   );
 
-  const reply = useApiMutation(
-    (input: { messageId: string; subject: string; text: string }) =>
-      api.replyToInboundMessage(input.messageId, {
-        organizationId: organizationId as string,
-        subject: input.subject,
-        text: input.text,
-      }),
+  const markMany = useApiMutation(
+    (input: { ids: string[]; read: boolean }) =>
+      api.markInboundMessagesRead(
+        organizationId as string,
+        input.ids,
+        input.read
+      ),
     {
-      successMessage: "Reply sent.",
-      errorMessage: "Couldn't send that reply.",
+      errorMessage: "Couldn't update these messages.",
+      invalidates: [
+        ["inbound-messages", organizationId ?? ""],
+        qk.inboxUnreadCount(organizationId ?? ""),
+      ],
       onSuccess: () => {
-        setReplyBody("");
-        void queryClient.invalidateQueries({ queryKey: ["inbound-messages"] });
+        readMessages.current.clear();
       },
+    }
+  );
+  const sync = useApiMutation(
+    () =>
+      api.syncInbox(
+        organizationId as string,
+        accountFilter === "all" ? undefined : accountFilter
+      ),
+    {
+      successMessage:
+        "Checking your mailbox. New mail will appear automatically.",
+      invalidates: [
+        ["inbound-messages", organizationId ?? ""],
+        qk.inboxAccounts(organizationId ?? ""),
+      ],
     }
   );
 
@@ -321,7 +373,10 @@ export function Inbox() {
     // with nothing left to click.
     thread.messages
       .filter((message) => !message.readAt)
-      .forEach((message) => markRead.mutate({ id: message.id, read: true }));
+      .forEach((message) => {
+        readMessages.current.add(message.id);
+        markRead.mutate({ id: message.id, read: true });
+      });
   }
 
   // A notification can be about an org other than the one on screen — one
@@ -370,7 +425,7 @@ export function Inbox() {
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
-        next.delete("message");
+        if (!next.has("replyDraft")) next.delete("message");
         return next;
       },
       { replace: true }
@@ -378,8 +433,26 @@ export function Inbox() {
   }, [searchParams, messages, threads, setSearchParams]);
 
   useEffect(() => {
-    setReplyBody("");
-  }, [openedThread?.threadKey]);
+    const full = conversationQuery.data?.messages;
+    if (full?.length && !openedThread && searchParams.get("message")) {
+      const thread = buildConversationThreads(full)[0];
+      if (thread) setOpenedThread(thread);
+    }
+    full
+      ?.filter(
+        (message) => !message.readAt && !readMessages.current.has(message.id)
+      )
+      .forEach((message) => {
+        readMessages.current.add(message.id);
+        markRead.mutate({ id: message.id, read: true });
+      });
+    if (searchParams.get("replyDraft") && full?.length && !replyTarget) {
+      const target = full.find(
+        (message) => message.id === searchParams.get("message")
+      );
+      if (target) setReplyTarget(target);
+    }
+  }, [conversationQuery.data]);
 
   // Escape leaves the conversation, the way it does in a mail client. Skipped
   // while an overlay is up — there the key belongs to the dialog — and while
@@ -407,15 +480,21 @@ export function Inbox() {
    * Either way the bytes come over the authenticated download route — inbound
    * files are never exposed publicly, so the file can't just be linked to.
    */
-  async function openAttachment(messageId: string, file: InboundAttachment) {
+  async function openAttachment(
+    messageId: string,
+    file: InboundAttachment,
+    outgoing = false
+  ) {
     if (!organizationId) return;
     setOpeningId(file.id);
     try {
-      const blob = await api.downloadInboundAttachment({
-        messageId,
-        attachmentId: file.id,
-        organizationId,
-      });
+      const blob = outgoing
+        ? await api.downloadAttachment(file.id)
+        : await api.downloadInboundAttachment({
+            messageId,
+            attachmentId: file.id,
+            organizationId,
+          });
       if (attachmentPreviewKind(file.contentType)) {
         setPreview({ attachment: file, blob });
       } else {
@@ -428,16 +507,6 @@ export function Inbox() {
     }
   }
 
-  function submitReply(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedThread || !replyBody.trim()) return;
-    reply.mutate({
-      messageId: selectedThread.latestMessage.id,
-      subject: selectedThread.latestMessage.subject || "(no subject)",
-      text: replyBody,
-    });
-  }
-
   const loading = accountsQuery.isPending || messagesQuery.isPending;
   // With a single mailbox there is no filter to pick it with, so treat it as
   // selected — otherwise its status and its Disconnect control would be
@@ -445,6 +514,46 @@ export function Inbox() {
   const selectedAccount =
     accounts.find((account) => account.id === accountFilter) ??
     (accounts.length === 1 ? accounts[0] : undefined);
+
+  function renderThread(thread: ConversationThread) {
+    const unread = thread.unreadCount > 0;
+    return (
+      <button
+        type="button"
+        onClick={() => openThread(thread)}
+        className={cn(
+          "flex min-h-touch w-full items-start gap-3 rounded-control p-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          unread ? "bg-surface" : "bg-transparent"
+        )}
+      >
+        {unread ? <span className="sr-only">Unread</span> : null}
+        <Avatar name={thread.senderName} size="md" />
+        <span className="min-w-0 flex-1">
+          <span
+            className={cn("block truncate text-ui", unread && "font-semibold")}
+          >
+            {thread.senderName}
+          </span>
+          <span
+            className={cn("block truncate text-ui", unread && "font-semibold")}
+          >
+            {thread.subject}
+          </span>
+          <span className="block truncate text-meta text-text-tertiary">
+            {snippet(thread.latestMessage)}
+          </span>
+          {thread.messages.some(
+            (message) => message.dsnAttribution === "UNATTRIBUTED"
+          ) ? (
+            <Badge variant="warn">Unattributed</Badge>
+          ) : null}
+        </span>
+        <span className="shrink-0 text-meta text-text-secondary">
+          {formatMailDate(thread.latestMessage.receivedAt)}
+        </span>
+      </button>
+    );
+  }
 
   /*
     The document is the only scroll container (§2), so nothing here sets a
@@ -491,12 +600,7 @@ export function Inbox() {
                   </IconButton>
                   <IconButton
                     label="Reply"
-                    onClick={() => {
-                      document
-                        .getElementById("inbox-reply")
-                        ?.scrollIntoView({ behavior: "smooth" });
-                      document.getElementById("inbox-reply")?.focus();
-                    }}
+                    onClick={() => setReplyTarget(selectedThread.latestMessage)}
                   >
                     <Reply />
                   </IconButton>
@@ -515,52 +619,171 @@ export function Inbox() {
           </header>
 
           <div className="mx-auto w-full max-w-page space-y-4 px-4 py-4 sm:px-6 sm:py-6">
-            {selectedThread.messages.map((message) => (
-              <article
-                key={message.id}
-                className="rounded-card border border-border bg-surface p-4 shadow-card"
+            {conversationQuery.isError ? (
+              <div
+                role="alert"
+                className="rounded-card border border-err p-4 text-ui"
               >
-                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Avatar name={senderName(message)} size="sm" />
-                    <div className="min-w-0">
-                      <div className="truncate text-ui font-semibold text-text">
-                        {senderLabel(message)}
-                      </div>
-                      <div
-                        className="text-meta text-text-tertiary"
-                        data-numeric
-                      >
-                        {formatFullDate(message.receivedAt)}
-                      </div>
-                    </div>
-                  </div>
-                  {message.emailJob ? (
-                    <Hint
-                      label={`This is a reply to the email "${message.emailJob.subject}" that you sent`}
+                Couldn't load the complete conversation.{" "}
+                <Button
+                  variant="secondary"
+                  onClick={() => void conversationQuery.refetch()}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : null}
+            {[
+              ...selectedThread.messages.map((message) => ({
+                kind: "incoming" as const,
+                message,
+                date: message.receivedAt,
+              })),
+              ...(conversationQuery.data?.outgoing ?? []).map((message) => ({
+                kind: "outgoing" as const,
+                message,
+                date: message.sentAt ?? message.createdAt,
+              })),
+            ]
+              .sort(
+                (a, b) =>
+                  new Date(a.date).getTime() - new Date(b.date).getTime()
+              )
+              .map((entry) => {
+                if (entry.kind === "outgoing") {
+                  const message = entry.message;
+                  return (
+                    <article
+                      key={message.id}
+                      className="rounded-card border border-border bg-surface p-4 shadow-card"
                     >
-                      <Badge variant="outline" className="cursor-help">
-                        Reply to your email
-                      </Badge>
-                    </Hint>
-                  ) : null}
-                  {message.dsnAttribution === "UNATTRIBUTED" ? (
-                    <Hint label="This delivery failure does not match an email sent through QQueue, so it is excluded from bounce analytics.">
-                      <Badge variant="warn" className="cursor-help">
-                        Unattributed bounce
-                      </Badge>
-                    </Hint>
-                  ) : null}
-                </div>
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-ui font-medium">
+                          {message.sentByName} ·{" "}
+                          {message.smtpConnection?.fromEmail ?? "Your team"}
+                        </p>
+                        <Badge
+                          variant={
+                            message.status === "FAILED" ? "warn" : "outline"
+                          }
+                        >
+                          {message.status === "SENT"
+                            ? "Sent"
+                            : message.status === "FAILED"
+                              ? "Failed — check Sent for details"
+                              : message.status === "SUPPRESSED"
+                                ? "Not sent — recipient blocked"
+                                : message.status === "CANCELLED"
+                                  ? "Cancelled"
+                                  : "Sending…"}
+                        </Badge>
+                      </div>
+                      <p className="mb-2 text-meta text-text-secondary">
+                        To: {message.toEmail} ·{" "}
+                        {formatFullDate(message.sentAt ?? message.createdAt)}
+                      </p>
+                      {message.html ? (
+                        <InboundHtmlFrame
+                          html={message.html}
+                          showRemoteContent
+                          title="Your reply"
+                        />
+                      ) : (
+                        <p className="whitespace-pre-wrap">{message.text}</p>
+                      )}
+                      {(message.attachments ?? [])
+                        .filter((file) => !file.isInline)
+                        .map((file) => (
+                          <Button
+                            key={file.id}
+                            variant="outline"
+                            size="sm"
+                            className="mt-3"
+                            disabled={openingId === file.id}
+                            onClick={() =>
+                              void openAttachment(message.id, file, true)
+                            }
+                          >
+                            <Paperclip />
+                            {file.filename} · {formatBytes(file.size)}
+                          </Button>
+                        ))}
+                    </article>
+                  );
+                }
+                const message = entry.message;
+                return (
+                  <article
+                    key={message.id}
+                    className="rounded-card border border-border bg-surface p-4 shadow-card"
+                  >
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Avatar name={senderName(message)} size="sm" />
+                        <div className="min-w-0">
+                          <div className="truncate text-ui font-semibold text-text">
+                            {senderLabel(message)}
+                          </div>
+                          <div
+                            className="text-meta text-text-tertiary"
+                            data-numeric
+                          >
+                            {formatFullDate(message.receivedAt)}
+                          </div>
+                        </div>
+                      </div>
+                      <IconButton
+                        label={`Reply to this message from ${senderName(message)}`}
+                        onClick={() => setReplyTarget(message)}
+                      >
+                        <Reply />
+                      </IconButton>
+                      {message.emailJob ? (
+                        <Hint
+                          label={`This is a reply to the email "${message.emailJob.subject}" that you sent`}
+                        >
+                          <Badge variant="outline" className="cursor-help">
+                            Reply to your email
+                          </Badge>
+                        </Hint>
+                      ) : null}
+                      {message.dsnAttribution === "UNATTRIBUTED" ? (
+                        <Hint label="This delivery failure does not match an email sent through QQueue, so it is excluded from bounce analytics.">
+                          <Badge variant="warn" className="cursor-help">
+                            Unattributed bounce
+                          </Badge>
+                        </Hint>
+                      ) : null}
+                    </div>
 
-                {/*
+                    <details className="mb-3 text-meta text-text-secondary">
+                      <summary className="cursor-pointer">
+                        Message details
+                      </summary>
+                      <p>To: {message.to.join(", ")}</p>
+                      {message.cc.length ? (
+                        <p>Cc: {message.cc.join(", ")}</p>
+                      ) : null}
+                      {message.replyTo?.length ? (
+                        <p>Reply to: {message.replyTo.join(", ")}</p>
+                      ) : null}
+                      <p>
+                        Mailbox:{" "}
+                        {
+                          accounts.find(
+                            (account) => account.id === message.inboxAccountId
+                          )?.email
+                        }
+                      </p>
+                    </details>
+                    {/*
                   Prefer the HTML part — formatted mail (tables especially)
                   reads badly as the flattened text/plain alternative.
                 */}
-                {message.html ? (
-                  <InboundHtmlFrame
-                    html={message.html}
-                    /*
+                    {message.html ? (
+                      <InboundHtmlFrame
+                        html={message.html}
+                        /*
                       Remote images load without an opt-in. Most mail is
                       image-heavy and a blocked-image prompt on every message
                       made the inbox unreadable; the tradeoff is that opening
@@ -569,98 +792,80 @@ export function Inbox() {
                       still refuses scripts, frames and network fetches — only
                       img-src is widened.
                     */
-                    showRemoteContent
-                    inlineImages={inlineImages[message.id]}
-                    title={`Message from ${senderLabel(message)}`}
-                  />
-                ) : (
-                  <div className="whitespace-pre-wrap text-body leading-6 text-text">
-                    {message.text || "This message has no body."}
-                  </div>
-                )}
+                        showRemoteContent
+                        inlineImages={inlineImages[message.id]}
+                        title={`Message from ${senderLabel(message)}`}
+                      />
+                    ) : (
+                      <div className="whitespace-pre-wrap text-body leading-6 text-text">
+                        {message.text || "This message has no body."}
+                      </div>
+                    )}
 
-                {/*
+                    {/*
                   Attached parts. Inline parts (cid: images the sender meant
                   to render in the body) are filtered out so a signature logo
                   doesn't look like an attachment.
                 */}
-                {(message.attachments ?? []).filter((file) => !file.isInline)
-                  .length > 0 ? (
-                  <div className="mt-4 border-t border-border pt-3">
-                    <div className="mb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
-                      Attachments
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(message.attachments ?? [])
-                        .filter((file) => !file.isInline)
-                        .map((file) => (
-                          <Hint
-                            key={file.id}
-                            label={`${
-                              attachmentPreviewKind(file.contentType)
-                                ? "Open"
-                                : "Download"
-                            } ${file.filename} (${formatBytes(file.size)})`}
-                          >
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={openingId === file.id}
-                              onClick={() =>
-                                void openAttachment(message.id, file)
-                              }
-                              className="h-auto gap-2 py-field"
-                            >
-                              {openingId === file.id ? (
-                                <Spinner className="h-3.5 w-3.5" />
-                              ) : (
-                                <Paperclip className="h-3.5 w-3.5" />
-                              )}
-                              <span className="max-w-cell truncate">
-                                {file.filename}
-                              </span>
-                              <span
-                                className="text-meta text-text-tertiary"
-                                data-numeric
+                    {(message.attachments ?? []).filter(
+                      (file) => !file.isInline
+                    ).length > 0 ? (
+                      <div className="mt-4 border-t border-border pt-3">
+                        <div className="mb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
+                          Attachments
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {(message.attachments ?? [])
+                            .filter((file) => !file.isInline)
+                            .map((file) => (
+                              <Hint
+                                key={file.id}
+                                label={`${
+                                  attachmentPreviewKind(file.contentType)
+                                    ? "Open"
+                                    : "Download"
+                                } ${file.filename} (${formatBytes(file.size)})`}
                               >
-                                {formatBytes(file.size)}
-                              </span>
-                            </Button>
-                          </Hint>
-                        ))}
-                    </div>
-                  </div>
-                ) : null}
-              </article>
-            ))}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={openingId === file.id}
+                                  onClick={() =>
+                                    void openAttachment(message.id, file)
+                                  }
+                                  className="h-auto gap-2 py-field"
+                                >
+                                  {openingId === file.id ? (
+                                    <Spinner className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Paperclip className="h-3.5 w-3.5" />
+                                  )}
+                                  <span className="max-w-cell truncate">
+                                    {file.filename}
+                                  </span>
+                                  <span
+                                    className="text-meta text-text-tertiary"
+                                    data-numeric
+                                  >
+                                    {formatBytes(file.size)}
+                                  </span>
+                                </Button>
+                              </Hint>
+                            ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
 
-            <form
-              className="rounded-card border border-border bg-surface p-4 shadow-card"
-              onSubmit={submitReply}
+            <Button
+              variant="secondary"
+              onClick={() => setReplyTarget(selectedThread.latestMessage)}
             >
-              <Textarea
-                id="inbox-reply"
-                value={replyBody}
-                onChange={(event) => setReplyBody(event.target.value)}
-                placeholder={`Reply to ${selectedThread.senderName}…`}
-                rows={3}
-                className="resize-y"
-                aria-label={`Reply to ${selectedThread.senderName}`}
-              />
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <p className="text-meta text-text-tertiary">
-                  Sends from the mailbox this arrived in.
-                </p>
-                <Button
-                  type="submit"
-                  disabled={reply.isPending || !replyBody.trim()}
-                >
-                  {reply.isPending ? <Spinner /> : <Send className="h-4 w-4" />}
-                  Send
-                </Button>
-              </div>
-            </form>
+              <Reply /> Write a reply
+            </Button>
           </div>
         </>
       ) : (
@@ -682,12 +887,8 @@ export function Inbox() {
                 <div className="flex items-center gap-1">
                   <IconButton
                     label="Check for new mail"
-                    onClick={() => {
-                      void queryClient.invalidateQueries({
-                        queryKey: ["inbound-messages"],
-                      });
-                    }}
-                    disabled={messagesQuery.isFetching}
+                    onClick={() => sync.mutate()}
+                    disabled={sync.isPending}
                   >
                     <RefreshCw
                       className={cn(messagesQuery.isFetching && "animate-spin")}
@@ -777,17 +978,27 @@ export function Inbox() {
                 {selectedAccount ? (
                   <div className="flex min-w-0 items-center gap-2 text-meta text-text-tertiary sm:ml-auto">
                     <Badge variant="outline" className="text-meta">
-                      {selectedAccount.status}
+                      {selectedAccount.status === "DISABLED"
+                        ? "Disconnected"
+                        : selectedAccount.lastSyncError
+                          ? "Needs attention"
+                          : "Connected"}
                     </Badge>
+                    {selectedAccount.lastSyncError ? (
+                      <span role="alert" className="text-err">
+                        {selectedAccount.lastSyncError}
+                      </span>
+                    ) : null}
                     <span className="truncate">
-                      Last checked {formatFullDate(selectedAccount.lastSyncedAt)}
+                      Last checked{" "}
+                      {formatFullDate(selectedAccount.lastSyncedAt)}
                     </span>
                     {canManageMailboxes ? (
                       <IconButton
                         label={`Disconnect ${selectedAccount.email}`}
                         size="sm"
                         variant="destructive"
-                        onClick={() => removeAccount.mutate(selectedAccount.id)}
+                        onClick={() => setDisconnectTarget(selectedAccount.id)}
                       >
                         <Trash2 />
                       </IconButton>
@@ -799,7 +1010,22 @@ export function Inbox() {
           </header>
 
           <div className="mx-auto w-full max-w-page">
-            {loading ? (
+            {accountsQuery.isError || messagesQuery.isError ? (
+              <EmptyState
+                title="Couldn't load your mail"
+                description="Your mailbox may still contain messages. Try loading it again."
+                action={
+                  <Button
+                    onClick={() => {
+                      void accountsQuery.refetch();
+                      void messagesQuery.refetch();
+                    }}
+                  >
+                    Try again
+                  </Button>
+                }
+              />
+            ) : loading ? (
               <div className="flex h-40 items-center justify-center">
                 <Spinner />
               </div>
@@ -816,21 +1042,27 @@ export function Inbox() {
                     ? "Connect a mailbox to receive mail here."
                     : "Ask an administrator to assign you a mailbox."
                 }
-                action={canManageMailboxes ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() => setConnectOpen(true)}
-                  >
-                    <MailPlus className="h-4 w-4" />
-                    Connect a mailbox
-                  </Button>
-                ) : undefined}
+                action={
+                  canManageMailboxes ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => setConnectOpen(true)}
+                    >
+                      <MailPlus className="h-4 w-4" />
+                      Connect a mailbox
+                    </Button>
+                  ) : undefined
+                }
               />
             ) : threads.length === 0 ? (
               <EmptyState
                 icon={InboxIcon}
                 title={
-                  submittedSearch ? "Nothing matched" : "No conversations yet"
+                  submittedSearch
+                    ? "Nothing matched"
+                    : readFilter === "unread"
+                      ? "You’re all caught up"
+                      : "No conversations yet"
                 }
                 description={
                   submittedSearch
@@ -839,129 +1071,161 @@ export function Inbox() {
                 }
               />
             ) : (
-              <ul className="divide-y divide-border">
-                {threads.map((thread) => {
-                  const unread = thread.unreadCount > 0;
-                  const hasUnattributedBounce = thread.messages.some(
-                    (message) => message.dsnAttribution === "UNATTRIBUTED"
-                  );
-                  const hasAttachment = thread.messages.some((message) =>
-                    message.attachments?.some((file) => !file.isInline)
-                  );
-                  return (
-                    <li key={thread.threadKey}>
-                      {/*
-                        One row of markup for both layouts, reflowed by wrapping
-                        rather than rendered twice: `order` puts the date second
-                        on a phone (beside the sender) and last above `sm`, and
-                        the subject block's `w-full` is what forces the wrap
-                        below `sm` and stops forcing it above.
-                      */}
-                      <button
-                        type="button"
-                        onClick={() => openThread(thread)}
-                        className={cn(
-                          "relative flex min-h-touch w-full items-start gap-3 px-4 py-3 text-left transition-shadow duration-fast ease-out hover:z-10 hover:bg-surface hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:items-center sm:gap-4 sm:px-6",
-                          // Unread mail sits on white while read mail sinks
-                          // into the page. That is the signal that survives
-                          // scanning a full screen of rows, which a weight
-                          // change alone does not.
-                          unread ? "bg-surface" : "bg-transparent"
-                        )}
-                      >
-                        {unread ? (
-                          <>
-                            <span className="sr-only">Unread</span>
-                            <span
-                              aria-hidden
-                              className="mt-4 h-2 w-2 shrink-0 rounded-pill bg-primary sm:mt-0"
-                            />
-                          </>
-                        ) : (
-                          // Holds the dot's column so read and unread rows
-                          // start their avatars on the same vertical line.
-                          <span aria-hidden className="h-2 w-2 shrink-0" />
-                        )}
-
-                        <Avatar name={thread.senderName} size="md" />
-
-                        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
-                          <span
-                            className={cn(
-                              "order-1 min-w-0 flex-1 truncate text-ui sm:w-list-sender sm:flex-none",
-                              unread
-                                ? "font-semibold text-text"
-                                : "text-text-secondary"
-                            )}
-                          >
-                            {thread.senderName}
-                            {thread.messages.length > 1 ? (
-                              <span
-                                className="ml-1 font-text text-text-tertiary"
-                                data-numeric
-                              >
-                                {thread.messages.length}
-                              </span>
-                            ) : null}
-                          </span>
-
-                          <div className="order-3 flex w-full min-w-0 flex-col gap-1 sm:order-2 sm:w-auto sm:flex-1 sm:flex-row sm:items-baseline sm:gap-2">
-                            <span
-                              className={cn(
-                                "truncate text-ui text-text sm:max-w-cell-lg sm:shrink-0",
-                                unread && "font-semibold"
-                              )}
-                            >
-                              {thread.subject}
-                            </span>
-                            {hasUnattributedBounce ? (
-                              <Badge variant="warn" className="shrink-0">
-                                Unattributed
-                              </Badge>
-                            ) : null}
-                            <p className="truncate text-meta text-text-tertiary">
-                              {snippet(thread.latestMessage)}
-                            </p>
-                          </div>
-
-                          <div className="order-2 ml-auto flex shrink-0 items-center gap-2 sm:order-3 sm:ml-0">
-                            {hasAttachment ? (
-                              <Paperclip
-                                aria-hidden
-                                className="h-3.5 w-3.5 text-text-tertiary"
-                              />
-                            ) : null}
-                            <Hint
-                              label={formatFullDate(
-                                thread.latestMessage.receivedAt
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  "cursor-help text-meta",
-                                  unread
-                                    ? "font-semibold text-text"
-                                    : "text-text-tertiary"
-                                )}
-                                data-numeric
-                              >
-                                {formatMailDate(
-                                  thread.latestMessage.receivedAt
-                                )}
-                              </span>
-                            </Hint>
-                          </div>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+              <DataGrid
+                label="Inbox conversations"
+                data={threads}
+                getRowId={(thread) => thread.threadKey}
+                columns={[
+                  {
+                    id: "conversation",
+                    header: "Conversation",
+                    enableSorting: false,
+                    cell: ({ row }) => renderThread(row.original),
+                  },
+                  {
+                    id: "actions",
+                    header: "",
+                    enableSorting: false,
+                    meta: { pinned: true },
+                    cell: ({ row }) => (
+                      <RowActions
+                        rowLabel={row.original.subject}
+                        actions={[
+                          {
+                            label: row.original.unreadCount
+                              ? "Mark as read"
+                              : "Mark as unread",
+                            icon: Mail,
+                            primary: true,
+                            onSelect: () =>
+                              markMany.mutate({
+                                ids: row.original.messages.map(
+                                  (message) => message.id
+                                ),
+                                read: row.original.unreadCount > 0,
+                              }),
+                          },
+                        ]}
+                      />
+                    ),
+                  },
+                ]}
+                searchable={false}
+                enableSelection
+                paginated={false}
+                renderMobileRow={renderThread}
+                bulkActions={(rows, clear) => (
+                  <>
+                    <Button
+                      variant="secondary"
+                      disabled={markMany.isPending}
+                      onClick={() =>
+                        markMany.mutate(
+                          {
+                            ids: rows.flatMap((thread) =>
+                              thread.messages.map((message) => message.id)
+                            ),
+                            read: true,
+                          },
+                          { onSuccess: clear }
+                        )
+                      }
+                    >
+                      Mark selected as read
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={markMany.isPending}
+                      onClick={() =>
+                        markMany.mutate(
+                          {
+                            ids: rows.flatMap((thread) =>
+                              thread.messages.map((message) => message.id)
+                            ),
+                            read: false,
+                          },
+                          { onSuccess: clear }
+                        )
+                      }
+                    >
+                      Mark selected as unread
+                    </Button>
+                  </>
+                )}
+              />
             )}
+            {messagesQuery.hasNextPage ? (
+              <div className="p-4 text-center">
+                <Button
+                  variant="secondary"
+                  disabled={messagesQuery.isFetchingNextPage}
+                  onClick={() => void messagesQuery.fetchNextPage()}
+                >
+                  {messagesQuery.isFetchingNextPage ? <Spinner /> : null} Load
+                  older mail
+                </Button>
+              </div>
+            ) : null}
           </div>
         </>
       )}
 
+      {replyTarget && organizationId ? (
+        <ReplyComposer
+          key={replyTarget.id}
+          message={replyTarget}
+          organizationId={organizationId}
+          mailboxEmail={
+            accounts.find(
+              (account) => account.id === replyTarget.inboxAccountId
+            )?.email ?? "Receiving mailbox"
+          }
+          initialDraftId={searchParams.get("replyDraft") ?? undefined}
+          onClose={() => {
+            setReplyTarget(null);
+            setSearchParams(
+              (current) => {
+                const next = new URLSearchParams(current);
+                next.delete("replyDraft");
+                return next;
+              },
+              { replace: true }
+            );
+          }}
+          onQueued={() => {
+            setReplyTarget(null);
+            setSearchParams(
+              (current) => {
+                const next = new URLSearchParams(current);
+                next.delete("replyDraft");
+                next.delete("message");
+                return next;
+              },
+              { replace: true }
+            );
+            void conversationQuery.refetch();
+            void queryClient.invalidateQueries({
+              queryKey: ["outbox", organizationId],
+            });
+          }}
+        />
+      ) : null}
+      <ConfirmDialog
+        open={Boolean(disconnectTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDisconnectTarget(null);
+        }}
+        title="Disconnect this mailbox?"
+        description="New mail will stop syncing. Messages already received in QQueue will be kept, and the mailbox on your mail server is unchanged."
+        confirmLabel="Disconnect mailbox"
+        loading={removeAccount.isPending}
+        onConfirm={() => {
+          if (disconnectTarget)
+            removeAccount.mutate(disconnectTarget, {
+              onSuccess: () => setDisconnectTarget(null),
+            });
+        }}
+      />
       {canManageMailboxes ? (
         <ConnectInboxDialog
           open={connectOpen}

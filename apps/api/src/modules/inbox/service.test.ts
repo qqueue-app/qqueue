@@ -32,12 +32,70 @@ vi.mock("../manual-email/service.js", () => ({
 // so the scope drops out and these cases keep asserting the query they always
 // asserted. The MEMBER path has its own describe block below.
 beforeEach(() => {
+  prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+    id: "smtp_support",
+    fromEmail: "support@example.com",
+  } as never);
   prismaMock.organizationMember.findUnique.mockResolvedValue({
     role: "OWNER",
   } as never);
 });
 
 describe("inboxService", () => {
+  it("reconnects a disabled inbox in place without losing its message relationships", async () => {
+    prismaMock.inboxAccount.findUnique.mockResolvedValue({
+      id: "existing_inbox",
+      status: "DISABLED",
+    } as never);
+    prismaMock.inboxAccount.update.mockResolvedValue({
+      id: "existing_inbox",
+      status: "ACTIVE",
+    } as never);
+    await inboxService.createAccount({
+      organizationId: "org_1",
+      name: "Support",
+      email: "support@example.com",
+      host: "imap.example.com",
+      port: 993,
+      secure: true,
+      username: "support",
+      password: "new-password",
+      mailbox: "INBOX",
+    });
+    expect(prismaMock.inboxAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "existing_inbox" },
+        data: expect.objectContaining({
+          status: "ACTIVE",
+          lastSeenUid: null,
+          uidValidity: null,
+        }),
+      })
+    );
+    expect(prismaMock.inboxAccount.create).not.toHaveBeenCalled();
+    expect(prismaMock.inboundMessage.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite an already connected inbox", async () => {
+    prismaMock.inboxAccount.findUnique.mockResolvedValue({
+      id: "existing_inbox",
+      status: "ACTIVE",
+    } as never);
+    await expect(
+      inboxService.createAccount({
+        organizationId: "org_1",
+        name: "Support",
+        email: "support@example.com",
+        host: "imap.example.com",
+        port: 993,
+        secure: true,
+        username: "support",
+        password: "new-password",
+        mailbox: "INBOX",
+      })
+    ).rejects.toThrow("already connected");
+    expect(prismaMock.inboxAccount.update).not.toHaveBeenCalled();
+  });
   it("lists inbox accounts without returning encrypted secrets", async () => {
     prismaMock.inboxAccount.findMany.mockResolvedValue([] as never);
 
@@ -173,11 +231,19 @@ describe("inboxService", () => {
 
   it("labels a DSN by whether it produced a QQueue event", async () => {
     prismaMock.inboundMessage.findMany.mockResolvedValue([
-      { id: "dsn_1", isDsn: true, receivedAt: new Date("2026-08-16T00:00:00.000Z") },
-      { id: "dsn_2", isDsn: true, receivedAt: new Date("2026-08-15T00:00:00.000Z") }
+      {
+        id: "dsn_1",
+        isDsn: true,
+        receivedAt: new Date("2026-08-16T00:00:00.000Z"),
+      },
+      {
+        id: "dsn_2",
+        isDsn: true,
+        receivedAt: new Date("2026-08-15T00:00:00.000Z"),
+      },
     ] as never);
     prismaMock.emailEvent.findMany.mockResolvedValue([
-      { metadata: { source: "dsn", inboundMessageId: "dsn_2" } }
+      { metadata: { source: "dsn", inboundMessageId: "dsn_2" } },
     ] as never);
 
     const result = await inboxService.listMessages(
@@ -187,7 +253,7 @@ describe("inboxService", () => {
 
     expect(result.data.map((message) => message.dsnAttribution)).toEqual([
       "UNATTRIBUTED",
-      "ATTRIBUTED"
+      "ATTRIBUTED",
     ]);
   });
 
@@ -217,11 +283,13 @@ describe("inboxService", () => {
       {
         organizationId: "org_1",
         to: ["customer@example.com"],
-        replyTo: "support@example.com",
-        smtpConnectionId: undefined,
+        cc: undefined,
+        smtpConnectionId: "smtp_support",
         subject: "Re: Question",
         html: undefined,
         text: "Thanks for reaching out.",
+        attachmentIds: undefined,
+        idempotencyKey: undefined,
         inReplyTo: "<reply@example.com>",
         references: [
           "<root@example.com>",

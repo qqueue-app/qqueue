@@ -6,10 +6,7 @@ import {
   SettingsLinkRow,
   type SettingsLink,
 } from "../../components/settings/SettingsLinkRow.js";
-import {
-  SetupChecklist,
-  setupSteps,
-} from "../../components/SetupChecklist.js";
+import { SetupChecklist, setupSteps } from "../../components/SetupChecklist.js";
 import { api } from "../../lib/api.js";
 import { qk } from "../../lib/query-client.js";
 import { useOrgQuery } from "../../lib/use-api.js";
@@ -54,6 +51,7 @@ const groups: { heading: string; links: HubLink[] }[] = [
       {
         to: "/settings/sending/health",
         title: "Sending health",
+        orgAdminOnly: true,
         description:
           "Bounces, complaints, and how each recipient domain treats you.",
       },
@@ -72,11 +70,13 @@ const groups: { heading: string; links: HubLink[] }[] = [
       {
         to: "/settings/suppressions",
         title: "Suppressions",
+        orgAdminOnly: true,
         description: "Addresses QQueue will never email, across every send.",
       },
       {
         to: "/settings/api",
         title: "API",
+        orgAdminOnly: true,
         description: "Keys and webhooks, for sending from your own code.",
       },
     ],
@@ -131,8 +131,7 @@ const groups: { heading: string; links: HubLink[] }[] = [
       {
         to: "/settings/notifications",
         title: "Notifications",
-        description:
-          "Which mailboxes may interrupt you, and on which devices.",
+        description: "Which mailboxes may interrupt you, and on which devices.",
       },
       {
         to: "/settings/account",

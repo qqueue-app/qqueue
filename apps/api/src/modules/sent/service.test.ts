@@ -8,7 +8,7 @@ const { sentService } = await import("./service.js");
 function query(overrides: Record<string, unknown> = {}) {
   return sentEmailQuerySchema.parse({
     organizationId: "org_1",
-    ...overrides
+    ...overrides,
   });
 }
 
@@ -28,15 +28,15 @@ const job = {
   smtpConnection: {
     name: "Primary",
     fromEmail: "hi@acme.com",
-    fromName: "Acme"
+    fromName: "Acme",
   },
-  events: []
+  events: [],
 };
 
 beforeEach(() => {
   // OWNER: the archive is unscoped, which is what most of these cases assert.
   prismaMock.organizationMember.findUnique.mockResolvedValue({
-    role: "OWNER"
+    role: "OWNER",
   } as never);
   prismaMock.emailJob.findMany.mockResolvedValue([] as never);
   prismaMock.emailJob.count.mockResolvedValue(0 as never);
@@ -45,10 +45,10 @@ beforeEach(() => {
 describe("sentService.list mailbox scope", () => {
   beforeEach(() => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
-      { smtpConnectionId: "smtp_1" }
+      { smtpConnectionId: "smtp_1" },
     ] as never);
     prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
   });
@@ -63,10 +63,10 @@ describe("sentService.list mailbox scope", () => {
         {
           OR: [
             { smtpConnectionId: { in: ["smtp_1"] } },
-            { createdByUserId: "user_1" }
-          ]
-        }
-      ]
+            { createdByUserId: "user_1" },
+          ],
+        },
+      ],
     });
   });
 
@@ -81,9 +81,9 @@ describe("sentService.list mailbox scope", () => {
       {
         OR: [
           { smtpConnectionId: { in: ["smtp_1"] } },
-          { createdByUserId: "user_1" }
-        ]
-      }
+          { createdByUserId: "user_1" },
+        ],
+      },
     ]);
     expect(args.where.OR).toHaveLength(3);
   });
@@ -95,7 +95,7 @@ describe("sentService.list mailbox scope", () => {
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where.AND).toEqual([
-      { OR: [{ smtpConnectionId: { in: [] } }, { createdByUserId: "user_1" }] }
+      { OR: [{ smtpConnectionId: { in: [] } }, { createdByUserId: "user_1" }] },
     ]);
   });
 });
@@ -106,21 +106,25 @@ describe("sentService.list", () => {
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where).toEqual({
+      NOT: { origin: "SYSTEM" },
       organizationId: "org_1",
-      status: { in: ["SENT", "FAILED"] }
+      status: { in: ["SENT", "FAILED"] },
     });
     // Failures have no sentAt, and Postgres would otherwise sort those NULLs
     // to the very top of the archive.
     expect(args.orderBy).toEqual([
       { sentAt: { sort: "desc", nulls: "last" } },
-      { createdAt: "desc" }
+      { createdAt: "desc" },
     ]);
   });
 
   it("pages in Postgres rather than in the browser", async () => {
     prismaMock.emailJob.count.mockResolvedValue(310 as never);
 
-    const page = await sentService.list(query({ page: 3, pageSize: 25 }), "user_1");
+    const page = await sentService.list(
+      query({ page: 3, pageSize: 25 }),
+      "user_1"
+    );
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.skip).toBe(50);
@@ -144,7 +148,7 @@ describe("sentService.list", () => {
     expect(args.where?.OR).toEqual([
       { subject: { contains: "launch", mode: "insensitive" } },
       { toEmail: { contains: "launch", mode: "insensitive" } },
-      { campaign: { name: { contains: "launch", mode: "insensitive" } } }
+      { campaign: { name: { contains: "launch", mode: "insensitive" } } },
     ]);
   });
 
@@ -153,14 +157,17 @@ describe("sentService.list", () => {
     ["opened", "OPENED"],
     ["clicked", "CLICKED"],
     ["bounced", "BOUNCED"],
-    ["complained", "COMPLAINED"]
-  ])("filters %s against the event the pipeline wrote", async (outcome, type) => {
-    await sentService.list(query({ outcome }), "user_1");
+    ["complained", "COMPLAINED"],
+  ])(
+    "filters %s against the event the pipeline wrote",
+    async (outcome, type) => {
+      await sentService.list(query({ outcome }), "user_1");
 
-    const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
-    expect(args.where?.events).toEqual({ some: { type } });
-    expect(args.where?.status).toEqual({ in: ["SENT", "FAILED"] });
-  });
+      const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
+      expect(args.where?.events).toEqual({ some: { type } });
+      expect(args.where?.status).toEqual({ in: ["SENT", "FAILED"] });
+    }
+  );
 
   it("filters failures on the job's own status, not an event", async () => {
     await sentService.list(query({ outcome: "failed" }), "user_1");
@@ -179,7 +186,7 @@ describe("sentService.list", () => {
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where).toMatchObject({
       origin: "TRANSACTIONAL",
-      smtpConnectionId: "smtp_1"
+      smtpConnectionId: "smtp_1",
     });
   });
 
@@ -211,7 +218,7 @@ describe("sentService.list", () => {
     expect(rows[0].sendingAccount).toEqual({
       name: "Primary",
       fromEmail: "hi@acme.com",
-      fromName: "Acme"
+      fromName: "Acme",
     });
   });
 
@@ -224,9 +231,9 @@ describe("sentService.list", () => {
           { type: "DELIVERED" },
           { type: "OPENED" },
           { type: "OPENED" },
-          { type: "CLICKED" }
-        ]
-      }
+          { type: "CLICKED" },
+        ],
+      },
     ] as never);
 
     const { rows } = await sentService.list(query(), "user_1");
@@ -237,7 +244,7 @@ describe("sentService.list", () => {
       opens: 2,
       clicks: 1,
       bounced: false,
-      complained: false
+      complained: false,
     });
   });
 
@@ -247,10 +254,13 @@ describe("sentService.list", () => {
         ...job,
         events: [
           { type: "SENT", metadata: null },
-          { type: "OPENED", metadata: { automated: true, automatedReason: "scanner" } },
-          { type: "OPENED", metadata: { userAgent: "Mac Mail" } }
-        ]
-      }
+          {
+            type: "OPENED",
+            metadata: { automated: true, automatedReason: "scanner" },
+          },
+          { type: "OPENED", metadata: { userAgent: "Mac Mail" } },
+        ],
+      },
     ] as never);
 
     const { rows } = await sentService.list(query(), "user_1");
@@ -262,7 +272,10 @@ describe("sentService.list", () => {
 
   it("reads a pre-classification open as human rather than throwing", async () => {
     prismaMock.emailJob.findMany.mockResolvedValue([
-      { ...job, events: [{ type: "OPENED" }, { type: "OPENED", metadata: "junk" }] }
+      {
+        ...job,
+        events: [{ type: "OPENED" }, { type: "OPENED", metadata: "junk" }],
+      },
     ] as never);
 
     const { rows } = await sentService.list(query(), "user_1");
@@ -276,8 +289,8 @@ describe("sentService.list", () => {
         ...job,
         origin: "CAMPAIGN",
         campaignId: "camp_1",
-        campaign: { name: "July newsletter" }
-      }
+        campaign: { name: "July newsletter" },
+      },
     ] as never);
 
     const { rows } = await sentService.list(query(), "user_1");
@@ -302,10 +315,10 @@ describe("sentService.get", () => {
           id: "ev_1",
           type: "SENT",
           occurredAt: new Date("2026-07-22T09:00:00.000Z"),
-          metadata: null
-        }
+          metadata: null,
+        },
       ],
-      ...overrides
+      ...overrides,
     };
   }
 
@@ -317,27 +330,27 @@ describe("sentService.get", () => {
             id: "ev_1",
             type: "SENT",
             occurredAt: new Date("2026-07-22T09:00:00.000Z"),
-            metadata: null
+            metadata: null,
           },
           {
             id: "ev_2",
             type: "OPENED",
             occurredAt: new Date("2026-07-22T09:00:20.000Z"),
-            metadata: { automated: true, automatedReason: "prefetch" }
+            metadata: { automated: true, automatedReason: "prefetch" },
           },
           {
             id: "ev_3",
             type: "OPENED",
             occurredAt: new Date("2026-07-22T13:47:06.000Z"),
-            metadata: { userAgent: "Mac Mail" }
+            metadata: { userAgent: "Mac Mail" },
           },
           {
             id: "ev_4",
             type: "OPENED",
             occurredAt: new Date("2026-07-22T15:17:57.000Z"),
-            metadata: { userAgent: "Mac Mail" }
-          }
-        ]
+            metadata: { userAgent: "Mac Mail" },
+          },
+        ],
       }) as never
     );
 
@@ -353,7 +366,7 @@ describe("sentService.get", () => {
       occurredAt: "2026-07-22T09:00:20.000Z",
       lastOccurredAt: "2026-07-22T15:17:57.000Z",
       count: 3,
-      automatedCount: 1
+      automatedCount: 1,
     });
   });
 
@@ -365,21 +378,21 @@ describe("sentService.get", () => {
             id: "ev_1",
             type: "CLICKED",
             occurredAt: new Date("2026-07-22T09:00:00.000Z"),
-            metadata: { url: "https://acme.com/pricing" }
+            metadata: { url: "https://acme.com/pricing" },
           },
           {
             id: "ev_2",
             type: "CLICKED",
             occurredAt: new Date("2026-07-22T09:05:00.000Z"),
-            metadata: { url: "https://acme.com/docs" }
+            metadata: { url: "https://acme.com/docs" },
           },
           {
             id: "ev_3",
             type: "CLICKED",
             occurredAt: new Date("2026-07-22T09:06:00.000Z"),
-            metadata: { url: "https://acme.com/pricing" }
-          }
-        ]
+            metadata: { url: "https://acme.com/pricing" },
+          },
+        ],
       }) as never
     );
 
@@ -390,12 +403,12 @@ describe("sentService.get", () => {
     expect(email.events).toHaveLength(2);
     expect(email.events[0]).toMatchObject({
       detail: "https://acme.com/pricing",
-      count: 2
+      count: 2,
     });
     expect(email.events[1]).toMatchObject({
       detail: "https://acme.com/docs",
       count: 1,
-      lastOccurredAt: null
+      lastOccurredAt: null,
     });
   });
 
@@ -411,7 +424,7 @@ describe("sentService.get", () => {
       cc: ["c@x.com"],
       bcc: [],
       messageId: "<abc@acme.com>",
-      to: ["a@x.com", "b@x.com"]
+      to: ["a@x.com", "b@x.com"],
     });
     expect(email.events).toEqual([
       {
@@ -421,8 +434,8 @@ describe("sentService.get", () => {
         detail: null,
         count: 1,
         lastOccurredAt: null,
-        automatedCount: 0
-      }
+        automatedCount: 0,
+      },
     ]);
   });
 
@@ -433,35 +446,39 @@ describe("sentService.get", () => {
 
     // A queued or cancelled job is not in the archive, so it is not openable
     // from it either — the outbox owns those.
-    expect(prismaMock.emailJob.findFirst.mock.calls[0][0]!.where).toMatchObject({
-      id: "job_1",
-      organizationId: "org_1",
-      status: { in: ["SENT", "FAILED"] }
-    });
+    expect(prismaMock.emailJob.findFirst.mock.calls[0][0]!.where).toMatchObject(
+      {
+        id: "job_1",
+        organizationId: "org_1",
+        status: { in: ["SENT", "FAILED"] },
+      }
+    );
   });
 
   it("applies the same mailbox scope the list does", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
-      { smtpConnectionId: "smtp_1" }
+      { smtpConnectionId: "smtp_1" },
     ] as never);
     prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
     prismaMock.emailJob.findFirst.mockResolvedValue(detailJob() as never);
 
     await sentService.get("job_1", "org_1", "user_1");
 
-    expect(prismaMock.emailJob.findFirst.mock.calls[0][0]!.where).toMatchObject({
-      AND: [
-        {
-          OR: [
-            { smtpConnectionId: { in: ["smtp_1"] } },
-            { createdByUserId: "user_1" }
-          ]
-        }
-      ]
-    });
+    expect(prismaMock.emailJob.findFirst.mock.calls[0][0]!.where).toMatchObject(
+      {
+        AND: [
+          {
+            OR: [
+              { smtpConnectionId: { in: ["smtp_1"] } },
+              { createdByUserId: "user_1" },
+            ],
+          },
+        ],
+      }
+    );
   });
 
   it("404s rather than 403s for a message outside the reader's scope", async () => {
@@ -481,16 +498,16 @@ describe("sentService.get", () => {
             filename: "report.pdf",
             contentType: "application/pdf",
             size: 12,
-            cid: null
+            cid: null,
           },
           {
             id: "att_2",
             filename: "qr.png",
             contentType: "image/png",
             size: 34,
-            cid: "<qr@acme>"
-          }
-        ]
+            cid: "<qr@acme>",
+          },
+        ],
       }) as never
     );
 
@@ -503,7 +520,7 @@ describe("sentService.get", () => {
         contentType: "application/pdf",
         size: 12,
         isInline: false,
-        contentId: null
+        contentId: null,
       },
       {
         id: "att_2",
@@ -511,14 +528,14 @@ describe("sentService.get", () => {
         contentType: "image/png",
         size: 34,
         isInline: true,
-        contentId: "<qr@acme>"
-      }
+        contentId: "<qr@acme>",
+      },
     ]);
   });
 
   it.each([
     ["FAILED", { message: "550 no such user" }, "550 no such user"],
-    ["BOUNCED", { reason: "mailbox full" }, "mailbox full"]
+    ["BOUNCED", { reason: "mailbox full" }, "mailbox full"],
   ])("lifts the reason out of a %s event", async (type, metadata, expected) => {
     prismaMock.emailJob.findFirst.mockResolvedValue(
       detailJob({
@@ -528,9 +545,9 @@ describe("sentService.get", () => {
             id: "ev_1",
             type,
             occurredAt: new Date("2026-07-22T09:00:00.000Z"),
-            metadata
-          }
-        ]
+            metadata,
+          },
+        ],
       }) as never
     );
 
@@ -551,9 +568,9 @@ describe("sentService.get", () => {
             id: "ev_1",
             type: "BOUNCED",
             occurredAt: new Date("2026-07-22T09:00:00.000Z"),
-            metadata: { reason: "soft bounce, retried" }
-          }
-        ]
+            metadata: { reason: "soft bounce, retried" },
+          },
+        ],
       }) as never
     );
 
@@ -573,15 +590,15 @@ describe("sentService.get", () => {
             occurredAt: new Date("2026-07-22T09:00:00.000Z"),
             // Written by several code paths over several releases; a shape that
             // has since changed must degrade, never throw mid-render.
-            metadata: ["not", "an", "object"]
+            metadata: ["not", "an", "object"],
           },
           {
             id: "ev_2",
             type: "CLICKED",
             occurredAt: new Date("2026-07-22T09:05:00.000Z"),
-            metadata: { url: "https://acme.com/pricing" }
-          }
-        ]
+            metadata: { url: "https://acme.com/pricing" },
+          },
+        ],
       }) as never
     );
 
@@ -599,7 +616,7 @@ describe("sentEmailQuerySchema", () => {
       outcome: "all",
       days: 0,
       page: 1,
-      pageSize: 25
+      pageSize: 25,
     });
   });
 

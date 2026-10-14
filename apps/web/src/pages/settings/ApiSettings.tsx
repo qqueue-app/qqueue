@@ -60,6 +60,27 @@ function deliveryBadgeVariant(status: string) {
  * to finish one integration.
  */
 export function ApiSettings() {
+  const { currentOrganization, currentOrganizationId } = useSession();
+  if (currentOrganization?.role === "MEMBER")
+    return (
+      <>
+        <PageHeader
+          title="API"
+          description="API keys and webhooks are managed by your organization's administrators."
+          breadcrumb={{ label: "Settings", to: "/settings" }}
+        />
+        <PageContainer>
+          <EmptyState
+            title="Administrators manage integrations"
+            description="Ask an administrator to configure API keys and webhooks."
+          />
+        </PageContainer>
+      </>
+    );
+  return <AdminApiSettings key={currentOrganizationId} />;
+}
+
+function AdminApiSettings() {
   const { currentOrganizationId } = useSession();
 
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -70,7 +91,9 @@ export function ApiSettings() {
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
   const [revoking, setRevoking] = useState(false);
 
-  const [webhookEndpoints, setWebhookEndpoints] = useState<WebhookEndpoint[]>([]);
+  const [webhookEndpoints, setWebhookEndpoints] = useState<WebhookEndpoint[]>(
+    []
+  );
   const [webhooksLoading, setWebhooksLoading] = useState(false);
   const [webhookName, setWebhookName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -80,9 +103,9 @@ export function ApiSettings() {
     "email.bounced",
   ]);
   const [creatingWebhook, setCreatingWebhook] = useState(false);
-  const [createdWebhookSecret, setCreatedWebhookSecret] = useState<string | null>(
-    null
-  );
+  const [createdWebhookSecret, setCreatedWebhookSecret] = useState<
+    string | null
+  >(null);
   const [deleteWebhookTarget, setDeleteWebhookTarget] =
     useState<WebhookEndpoint | null>(null);
   const [deletingWebhook, setDeletingWebhook] = useState(false);
@@ -367,7 +390,11 @@ export function ApiSettings() {
                   creatingApiKey || !currentOrganizationId || !apiKeyName.trim()
                 }
               >
-                {creatingApiKey ? <Spinner /> : <KeyRound className="h-4 w-4" />}
+                {creatingApiKey ? (
+                  <Spinner />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
                 Create key
               </Button>
             </form>
@@ -463,7 +490,9 @@ export function ApiSettings() {
                   value={webhookUrl}
                   onChange={(event) => setWebhookUrl(event.target.value)}
                 />
-                <FieldHint>Must accept POST and answer within 10 seconds.</FieldHint>
+                <FieldHint>
+                  Must accept POST and answer within 10 seconds.
+                </FieldHint>
               </Field>
 
               {/*
@@ -621,11 +650,16 @@ export function ApiSettings() {
                           <span className="text-body font-medium text-text">
                             {delivery.eventName}
                           </span>
-                          <Badge variant={deliveryBadgeVariant(delivery.status)}>
+                          <Badge
+                            variant={deliveryBadgeVariant(delivery.status)}
+                          >
                             {delivery.status}
                           </Badge>
                         </div>
-                        <div data-numeric className="text-meta text-text-tertiary">
+                        <div
+                          data-numeric
+                          className="text-meta text-text-tertiary"
+                        >
                           {delivery.deliveredAt
                             ? `Delivered ${formatFullDate(delivery.deliveredAt)}`
                             : `${delivery.attempts} attempt${

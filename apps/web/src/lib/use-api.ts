@@ -1,6 +1,7 @@
 import {
   useMutation,
   useQuery,
+  useInfiniteQuery,
   useQueryClient,
   type QueryKey,
   type UseMutationOptions,
@@ -56,11 +57,27 @@ export function useOrgQuery<TData>(
   });
 }
 
-export interface ApiMutationOptions<TData, TVariables>
-  extends Omit<
-    UseMutationOptions<TData, unknown, TVariables>,
-    "mutationFn" | "onSuccess" | "onError"
-  > {
+export function useOrgInfiniteQuery<
+  TData extends { nextCursor?: string | null },
+>(
+  organizationId: string | undefined,
+  key: QueryKey,
+  fetcher: (organizationId: string, cursor?: string) => Promise<TData>
+) {
+  return useInfiniteQuery({
+    queryKey: key,
+    queryFn: ({ pageParam }) => fetcher(organizationId as string, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    enabled: Boolean(organizationId),
+    refetchInterval: 15_000,
+  });
+}
+
+export interface ApiMutationOptions<TData, TVariables> extends Omit<
+  UseMutationOptions<TData, unknown, TVariables>,
+  "mutationFn" | "onSuccess" | "onError"
+> {
   /** Toasted on success. Pass a function to build it from the result. */
   successMessage?: string | ((data: TData, variables: TVariables) => string);
   /** Toasted on failure, unless the API supplied a more specific message. */
@@ -93,7 +110,9 @@ export function useApiMutation<TData, TVariables = void>(
     mutationFn,
     onSuccess: async (data, variables) => {
       const keys =
-        typeof invalidates === "function" ? invalidates(variables) : invalidates;
+        typeof invalidates === "function"
+          ? invalidates(variables)
+          : invalidates;
       if (keys?.length) {
         await Promise.all(
           keys.map((key) => queryClient.invalidateQueries({ queryKey: key }))

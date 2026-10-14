@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installFakeIndexedDB, type FakeIndexedDB } from "../test/fake-indexeddb.js";
+import {
+  installFakeIndexedDB,
+  type FakeIndexedDB,
+} from "../test/fake-indexeddb.js";
 import { ApiError, api } from "./api.js";
 import {
   deletePendingDraft,
@@ -11,6 +14,7 @@ import {
 
 function draft(overrides: Partial<PendingDraft> = {}): PendingDraft {
   return {
+    userId: "user-1",
     localId: "local-1",
     organizationId: "org-1",
     draftId: null,
@@ -31,11 +35,16 @@ describe("offline drafts (§5)", () => {
   let db: FakeIndexedDB;
 
   beforeEach(() => {
+    localStorage.setItem(
+      "qqueue.session",
+      JSON.stringify({ user: { id: "user-1" }, organizations: [] })
+    );
     db = installFakeIndexedDB();
   });
 
   afterEach(() => {
     db.restore();
+    localStorage.removeItem("qqueue.session");
     vi.restoreAllMocks();
   });
 
@@ -55,6 +64,27 @@ describe("offline drafts (§5)", () => {
     expect(await listPendingDrafts("org-1")).toHaveLength(1);
     expect(await listPendingDrafts("org-2")).toHaveLength(1);
     expect(await listPendingDrafts()).toHaveLength(2);
+  });
+
+  it("never restores or uploads another person's drafts on a shared browser", async () => {
+    await savePendingDraft(draft());
+    localStorage.setItem(
+      "qqueue.session",
+      JSON.stringify({ user: { id: "other-user" }, organizations: [] })
+    );
+    const create = vi.spyOn(api, "createEmailDraft");
+    expect(await listPendingDrafts("org-1")).toEqual([]);
+    expect(await flushPendingDrafts()).toEqual([]);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("retains drafts when the session expires instead of deleting them", async () => {
+    vi.spyOn(api, "createEmailDraft").mockRejectedValue(
+      new ApiError("Sign in again", 401)
+    );
+    await savePendingDraft(draft());
+    expect(await flushPendingDrafts()).toEqual([]);
+    expect(await listPendingDrafts()).toHaveLength(1);
   });
 
   it("creates the draft on the server when it flushes, then forgets it locally", async () => {
@@ -90,12 +120,12 @@ describe("offline drafts (§5)", () => {
 
   it("flushes oldest first, so the newest edit is the one that lands last", async () => {
     const seen: string[] = [];
-    vi.spyOn(api, "createEmailDraft").mockImplementation(
-      (async (input: { subject: string }) => {
-        seen.push(input.subject);
-        return { id: "s", updatedAt: "x" };
-      }) as never
-    );
+    vi.spyOn(api, "createEmailDraft").mockImplementation((async (input: {
+      subject: string;
+    }) => {
+      seen.push(input.subject);
+      return { id: "s", updatedAt: "x" };
+    }) as never);
 
     await savePendingDraft(
       draft({
@@ -134,8 +164,12 @@ describe("offline drafts (§5)", () => {
       .mockRejectedValueOnce(new ApiError("Draft no longer exists", 404))
       .mockResolvedValueOnce({ id: "server-2", updatedAt: "x" } as never);
 
-    await savePendingDraft(draft({ localId: "doomed", updatedAt: "2026-08-07T09:00:00.000Z" }));
-    await savePendingDraft(draft({ localId: "fine", updatedAt: "2026-08-07T10:00:00.000Z" }));
+    await savePendingDraft(
+      draft({ localId: "doomed", updatedAt: "2026-08-07T09:00:00.000Z" })
+    );
+    await savePendingDraft(
+      draft({ localId: "fine", updatedAt: "2026-08-07T10:00:00.000Z" })
+    );
 
     const synced = await flushPendingDrafts();
 

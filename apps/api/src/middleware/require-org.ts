@@ -30,6 +30,13 @@ export async function requireOrgMembership(
     throw new HttpError(400, "organizationId is required");
   }
 
+  if (
+    typeof req.body?.organizationId === "string" &&
+    req.body.organizationId !== raw
+  ) {
+    throw new HttpError(400, "Conflicting organization IDs");
+  }
+
   const membership = await assertOrgAccess(req.userId, raw);
   req.organizationId = raw;
   req.orgRole = membership.role;

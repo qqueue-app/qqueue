@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   type EmailBranding,
   injectTracking,
-  renderHtmlAsEmailSafe
+  renderHtmlAsEmailSafe,
 } from "@qqueue/email-engine";
 import type {
   EmailPreviewInput,
@@ -12,11 +12,15 @@ import type {
   RecipientDelivery,
   RecipientDeliveryStatus,
   RecipientSuggestion,
-  TransactionalSendResponse
+  TransactionalSendResponse,
 } from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
+import {
+  emailJobScope,
+  resolveMailboxAccess,
+} from "../../lib/mailbox-access.js";
 import { suppressionService } from "../suppressions/service.js";
 import { transactionalEmailService } from "../transactional-email/service.js";
 
@@ -70,9 +74,9 @@ export async function resolveRecipients(
     const members = await prisma.contactListMember.findMany({
       where: {
         contactListId: { in: input.listIds },
-        contactList: { organizationId: input.organizationId }
+        contactList: { organizationId: input.organizationId },
       },
-      select: { contactId: true }
+      select: { contactId: true },
     });
     for (const member of members) {
       contactIds.add(member.contactId);
@@ -84,9 +88,9 @@ export async function resolveRecipients(
     const contacts = await prisma.contact.findMany({
       where: {
         id: { in: [...contactIds] },
-        organizationId: input.organizationId
+        organizationId: input.organizationId,
       },
-      select: { email: true }
+      select: { email: true },
     });
     contactEmails = contacts.map((contact) => contact.email);
   }
@@ -122,15 +126,15 @@ async function orgBranding(organizationId: string): Promise<EmailBranding> {
       brandName: true,
       logoUrl: true,
       accentColor: true,
-      footerNote: true
-    }
+      footerNote: true,
+    },
   });
 
   return {
     brandName: organization?.brandName ?? undefined,
     logoUrl: organization?.logoUrl ?? undefined,
     accentColor: organization?.accentColor ?? undefined,
-    footerNote: organization?.footerNote ?? undefined
+    footerNote: organization?.footerNote ?? undefined,
   };
 }
 
@@ -144,7 +148,7 @@ async function renderBody(html: string | undefined, organizationId: string) {
     return undefined;
   }
   const result = await renderHtmlAsEmailSafe(html, {
-    branding: await orgBranding(organizationId)
+    branding: await orgBranding(organizationId),
   });
 
   // renderHtmlAsEmailSafe never throws: a compile failure silently degrades to
@@ -191,17 +195,31 @@ export const manualEmailService = {
    * merges these with the contact book so someone who was emailed once (but
    * never saved as a contact) can still be autocompleted.
    */
-  async recentRecipients(organizationId: string): Promise<RecipientSuggestion[]> {
-    const cached = suggestionCache.get(organizationId);
+  async recentRecipients(
+    organizationId: string,
+    userId: string
+  ): Promise<RecipientSuggestion[]> {
+    const access = await resolveMailboxAccess(userId, organizationId);
+    const cacheKey = JSON.stringify([
+      organizationId,
+      userId,
+      access.unrestricted,
+      [...access.smtpConnectionIds].sort(),
+    ]);
+    const cached = suggestionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
 
     const jobs = await prisma.emailJob.findMany({
-      where: { organizationId },
+      where: {
+        organizationId,
+        NOT: { origin: "SYSTEM" },
+        ...emailJobScope(access),
+      },
       select: { toEmail: true, cc: true, bcc: true },
       orderBy: { createdAt: "desc" },
-      take: SUGGESTION_JOB_SCAN
+      take: SUGGESTION_JOB_SCAN,
     });
 
     // toEmail is the comma-joined To set (see deliveryStatus), so it has to be
@@ -209,7 +227,7 @@ export const manualEmailService = {
     const addresses = jobs.flatMap((job) => [
       ...job.toEmail.split(","),
       ...job.cc,
-      ...job.bcc
+      ...job.bcc,
     ]);
 
     const suggestions = dedupe(addresses)
@@ -234,9 +252,9 @@ export const manualEmailService = {
       }
     }
 
-    suggestionCache.set(organizationId, {
+    suggestionCache.set(cacheKey, {
       value: suggestions,
-      expiresAt: Date.now() + SUGGESTION_CACHE_TTL_MS
+      expiresAt: Date.now() + SUGGESTION_CACHE_TTL_MS,
     });
 
     return suggestions;
@@ -290,7 +308,16 @@ export const manualEmailService = {
     );
     const carrierIndex = Math.max(0, firstDeliverable);
 
-    const sendGroupId = recipients.to.length > 1 ? randomUUID() : null;
+    const sendGroupId =
+      recipients.to.length > 1
+        ? input.idempotencyKey
+          ? createHash("sha256")
+              .update(
+                `${userId}:${input.organizationId}:${input.idempotencyKey}`
+              )
+              .digest("hex")
+          : randomUUID()
+        : null;
 
     const base = {
       organizationId: input.organizationId,
@@ -306,7 +333,7 @@ export const manualEmailService = {
       scheduledAt: input.scheduledAt,
       origin: "MANUAL" as const,
       createdByUserId: userId,
-      sendGroupId
+      sendGroupId,
     };
 
     const results: TransactionalSendResponse[] = [];
@@ -315,13 +342,16 @@ export const manualEmailService = {
       results.push(
         await transactionalEmailService.send({
           ...base,
+          idempotencyKey: input.idempotencyKey
+            ? `manual:${createHash("sha256").update(`${userId}:${input.idempotencyKey}:${recipient}`).digest("hex")}`
+            : undefined,
           to: recipient,
           cc: isCarrier && recipients.cc.length ? recipients.cc : undefined,
           bcc: isCarrier && recipients.bcc.length ? recipients.bcc : undefined,
           attachmentIds: input.attachmentIds,
           // The first job claims the uploaded attachment rows; siblings get
           // metadata copies pointing at the same stored blobs.
-          attachmentMode: index === 0 ? "link" : "copy"
+          attachmentMode: index === 0 ? "link" : "copy",
         })
       );
     }
@@ -341,7 +371,7 @@ export const manualEmailService = {
       injectTracking(rendered, {
         emailJobId: "preview",
         baseUrl: env.APP_URL,
-        secret: env.TRACKING_SECRET
+        secret: env.TRACKING_SECRET,
       }) ??
       rendered ??
       "";
@@ -349,7 +379,7 @@ export const manualEmailService = {
     return {
       subject: input.subject ?? "",
       html,
-      recipients
+      recipients,
     };
   },
 
@@ -363,8 +393,10 @@ export const manualEmailService = {
    */
   async deliveryStatus(
     emailJobId: string,
-    organizationId: string
+    organizationId: string,
+    userId: string
   ): Promise<ManualEmailDeliveryStatus> {
+    const access = await resolveMailboxAccess(userId, organizationId);
     const jobSelect = {
       id: true,
       status: true,
@@ -374,12 +406,17 @@ export const manualEmailService = {
       bcc: true,
       sendGroupId: true,
       createdAt: true,
-      events: { select: { type: true, metadata: true } }
+      events: { select: { type: true, metadata: true } },
     } as const;
 
     const job = await prisma.emailJob.findFirst({
-      where: { id: emailJobId, organizationId },
-      select: jobSelect
+      where: {
+        id: emailJobId,
+        organizationId,
+        NOT: { origin: "SYSTEM" },
+        ...emailJobScope(access),
+      },
+      select: jobSelect,
     });
 
     if (!job) {
@@ -388,9 +425,14 @@ export const manualEmailService = {
 
     const jobs = job.sendGroupId
       ? await prisma.emailJob.findMany({
-          where: { organizationId, sendGroupId: job.sendGroupId },
+          where: {
+            organizationId,
+            sendGroupId: job.sendGroupId,
+            NOT: { origin: "SYSTEM" },
+            ...emailJobScope(access),
+          },
           select: jobSelect,
-          orderBy: { createdAt: "asc" }
+          orderBy: { createdAt: "asc" },
         })
       : [job];
 
@@ -433,10 +475,7 @@ export const manualEmailService = {
         if (rejected.has(key)) return "rejected";
         if (accepted.has(key)) return "delivered";
         if (groupJob.status === "SUPPRESSED") return "suppressed";
-        if (
-          groupJob.status === "FAILED" ||
-          groupJob.status === "CANCELLED"
-        ) {
+        if (groupJob.status === "FAILED" || groupJob.status === "CANCELLED") {
           return "failed";
         }
         return "pending";
@@ -453,17 +492,17 @@ export const manualEmailService = {
         ...toList.map((email) => ({
           email,
           field: "to" as const,
-          status: statusFor(email)
+          status: statusFor(email),
         })),
         ...groupJob.cc.map((email) => ({
           email,
           field: "cc" as const,
-          status: statusFor(email)
+          status: statusFor(email),
         })),
         ...groupJob.bcc.map((email) => ({
           email,
           field: "bcc" as const,
-          status: statusFor(email)
+          status: statusFor(email),
         }))
       );
     }
@@ -472,9 +511,7 @@ export const manualEmailService = {
     // terminates correctly: stay non-terminal while any job is still moving,
     // then prefer reporting a send over a failure over a suppression.
     const TERMINAL = new Set(["SENT", "FAILED", "SUPPRESSED", "CANCELLED"]);
-    const allTerminal = jobs.every((groupJob) =>
-      TERMINAL.has(groupJob.status)
-    );
+    const allTerminal = jobs.every((groupJob) => TERMINAL.has(groupJob.status));
     const aggregateStatus = !allTerminal
       ? jobs.some((groupJob) => groupJob.status === "PROCESSING")
         ? "PROCESSING"
@@ -502,7 +539,7 @@ export const manualEmailService = {
       opens,
       clicks,
       bounces,
-      complaints
+      complaints,
     };
-  }
+  },
 };

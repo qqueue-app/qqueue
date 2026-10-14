@@ -6,6 +6,8 @@ import { OrgSwitcher } from "./OrgSwitcher.js";
 import { isNavItemActive, type NavSection } from "./nav-types.js";
 
 interface SidebarNavProps {
+  moreTools?: boolean;
+  onToggleMoreTools?: () => void;
   sections: NavSection[];
   unread: number;
   /** The drawer draws its own header with a close button, so it hides this one. */
@@ -25,6 +27,8 @@ export function SidebarNav({
   sections,
   unread,
   showBrand = true,
+  moreTools,
+  onToggleMoreTools,
 }: SidebarNavProps) {
   const { pathname } = useLocation();
 
@@ -89,6 +93,16 @@ export function SidebarNav({
           </div>
         ))}
       </nav>
+      {onToggleMoreTools ? (
+        <button
+          type="button"
+          aria-expanded={Boolean(moreTools)}
+          onClick={onToggleMoreTools}
+          className="mx-3 mt-2 min-h-touch rounded-control px-2 text-left text-ui text-text-secondary hover:bg-surface-sunken"
+        >
+          {moreTools ? "Hide extra tools" : "Show more tools"}
+        </button>
+      ) : null}
 
       {/* Pushes the account block to the bottom without making anything scroll. */}
       <div className="flex-1" aria-hidden />

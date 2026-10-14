@@ -24,7 +24,7 @@ import {
   Braces,
   Code2,
   Undo,
-  Redo
+  Redo,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Menu,
@@ -45,7 +45,7 @@ import {
   MenuItem,
   MenuLabel,
   MenuSeparator,
-  MenuTrigger
+  MenuTrigger,
 } from "@/components/ui/menu";
 import type { ButtonAlign, ButtonFormValue } from "./button-extension";
 import { ButtonDialog } from "./ButtonDialog";
@@ -56,7 +56,7 @@ import { holdsSameDocument } from "./document-model";
 import {
   DELETE_RAW_EVENT,
   EDIT_RAW_EVENT,
-  type RawBlockEventDetail
+  type RawBlockEventDetail,
 } from "./raw-html-extension";
 import { normalizeUrl } from "./url";
 import { useOverflowFade } from "./use-overflow-fade";
@@ -73,7 +73,7 @@ const TEXT_COLORS = [
   { label: "Green", value: EMAIL_SWATCHES.accent },
   { label: "Blue", value: EMAIL_SWATCHES.blue },
   { label: "Red", value: EMAIL_SWATCHES.red },
-  { label: "Amber", value: EMAIL_SWATCHES.amber }
+  { label: "Amber", value: EMAIL_SWATCHES.amber },
 ];
 
 interface PromptField {
@@ -106,7 +106,7 @@ interface PromptConfig {
 
 function EditorPromptDialog({
   config,
-  onClose
+  onClose,
 }: {
   config: PromptConfig | null;
   onClose: () => void;
@@ -171,7 +171,9 @@ function EditorPromptDialog({
         <form onSubmit={submit} className="space-y-4">
           {config.fields.map((field, index) => (
             <div key={field.name} className="space-y-2">
-              <Label htmlFor={`editor-prompt-${field.name}`}>{field.label}</Label>
+              <Label htmlFor={`editor-prompt-${field.name}`}>
+                {field.label}
+              </Label>
               <Input
                 id={`editor-prompt-${field.name}`}
                 type={field.type ?? "text"}
@@ -184,7 +186,7 @@ function EditorPromptDialog({
                 onChange={(event) =>
                   setValues((current) => ({
                     ...current,
-                    [field.name]: event.target.value
+                    [field.name]: event.target.value,
                   }))
                 }
               />
@@ -221,6 +223,8 @@ function EditorPromptDialog({
 }
 
 interface RichTextEditorProps {
+  disabled?: boolean;
+  ariaLabel?: string;
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
@@ -240,7 +244,7 @@ function ToolbarButton({
   active,
   disabled,
   label,
-  children
+  children,
 }: {
   onClick: () => void;
   active?: boolean;
@@ -314,7 +318,7 @@ function ColorMenu({ editor }: { editor: Editor }) {
 function VariableMenu({
   editor,
   variables,
-  onInsertCustom
+  onInsertCustom,
 }: {
   editor: Editor;
   variables: string[];
@@ -363,7 +367,9 @@ export function RichTextEditor({
   variables = DEFAULT_VARIABLES,
   showVariables = true,
   className,
-  onUploadImage
+  onUploadImage,
+  ariaLabel = "Message body",
+  disabled = false,
 }: RichTextEditorProps) {
   const [prompt, setPrompt] = useState<PromptConfig | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
@@ -390,6 +396,7 @@ export function RichTextEditor({
   const loaded = useRef(value);
   const edited = useRef(false);
   const editor = useEditor({
+    editable: !disabled,
     // Shared with the partitioner that decides what may be loaded into this
     // editor. The two have to be the same schema or the partitioner's answer is
     // about a different editor than the one on screen.
@@ -402,9 +409,12 @@ export function RichTextEditor({
     shouldRerenderOnTransaction: true,
     editorProps: {
       attributes: {
+        role: "textbox",
+        "aria-label": ariaLabel,
+        "aria-multiline": "true",
         class:
-          "prose prose-sm max-w-none min-h-pane-sm px-3 py-2 focus:outline-none prose-headings:font-semibold prose-a:text-primary"
-      }
+          "prose prose-sm max-w-none min-h-pane-sm px-3 py-2 focus:outline-none prose-headings:font-semibold prose-a:text-primary",
+      },
     },
     onUpdate: ({ editor: instance }) => {
       const html = instance.getHTML();
@@ -415,8 +425,13 @@ export function RichTextEditor({
         edited.current = true;
       }
       onChange(html);
-    }
+    },
   });
+
+  useEffect(() => {
+    if (editor && editor.isEditable === disabled)
+      editor.setEditable(!disabled, false);
+  }, [editor, disabled]);
 
   // Sync external value changes (e.g. opening the editor with existing content).
   //
@@ -507,19 +522,19 @@ export function RichTextEditor({
       button: {
         title: "Button link",
         description: "Where the selected button sends the reader.",
-        submitLabel: "Update button link"
+        submitLabel: "Update button link",
       },
       insert: {
         title: "Insert link",
         description:
           "Nothing is selected, so this inserts a new link where the cursor is.",
-        submitLabel: "Insert link"
+        submitLabel: "Insert link",
       },
       mark: {
         title: existing ? "Edit link" : "Add link",
         description: "The selected text becomes a link to this address.",
-        submitLabel: existing ? "Update link" : "Add link"
-      }
+        submitLabel: existing ? "Update link" : "Add link",
+      },
     }[mode];
 
     const currentHref =
@@ -538,7 +553,7 @@ export function RichTextEditor({
           // is filled in by normalizeUrl instead of being demanded.
           inputMode: "url",
           placeholder: "example.com",
-          normalize: normalizeUrl
+          normalize: normalizeUrl,
         },
         ...(mode === "insert"
           ? [
@@ -546,10 +561,10 @@ export function RichTextEditor({
                 name: "text",
                 label: "Link text",
                 placeholder: "Defaults to the URL",
-                optional: true
-              }
+                optional: true,
+              },
             ]
-          : [])
+          : []),
       ],
       // Empty rather than an "https://" stub: the placeholder says more, and a
       // stub left untouched used to sail through the required check and link
@@ -574,7 +589,7 @@ export function RichTextEditor({
                 .insertContent({
                   type: "text",
                   text: text || href,
-                  marks: [{ type: "link", attrs: { href } }]
+                  marks: [{ type: "link", attrs: { href } }],
                 })
                 // Without this the mark stays stored and whatever is typed next
                 // joins the link.
@@ -593,7 +608,7 @@ export function RichTextEditor({
         if (!applied) {
           return "That address can't be linked. Try a full web address.";
         }
-      }
+      },
     });
   }
 
@@ -604,7 +619,7 @@ export function RichTextEditor({
         "Use letters, numbers, dots, dashes and underscores. Anything else is stripped.",
       submitLabel: "Insert variable",
       fields: [
-        { name: "name", label: "Variable name", placeholder: "company.name" }
+        { name: "name", label: "Variable name", placeholder: "company.name" },
       ],
       initial: { name: "" },
       onSubmit: ({ name }) => {
@@ -613,7 +628,7 @@ export function RichTextEditor({
           return "That leaves nothing usable — try letters, numbers, dots, dashes or underscores.";
         }
         editor!.chain().focus().insertContent(`{{${clean}}}`).run();
-      }
+      },
     });
   }
 
@@ -642,193 +657,197 @@ export function RichTextEditor({
           */
           className="qq-toolbar-scroller scrollbar-hidden flex flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain p-field sm:flex-wrap sm:overflow-visible sm:[mask-image:none]"
         >
-        <ToolbarButton
-          label="Bold"
-          active={editor.isActive("bold")}
-          onClick={() => editor.chain().focus().toggleBold().run()}
-        >
-          <Bold />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Italic"
-          active={editor.isActive("italic")}
-          onClick={() => editor.chain().focus().toggleItalic().run()}
-        >
-          <Italic />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Underline"
-          active={editor.isActive("underline")}
-          onClick={() => editor.chain().focus().toggleUnderline().run()}
-        >
-          <UnderlineIcon />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Strikethrough"
-          active={editor.isActive("strike")}
-          onClick={() => editor.chain().focus().toggleStrike().run()}
-        >
-          <Strikethrough />
-        </ToolbarButton>
-        <ColorMenu editor={editor} />
+          <ToolbarButton
+            label="Bold"
+            active={editor.isActive("bold")}
+            onClick={() => editor.chain().focus().toggleBold().run()}
+          >
+            <Bold />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Italic"
+            active={editor.isActive("italic")}
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+          >
+            <Italic />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Underline"
+            active={editor.isActive("underline")}
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
+          >
+            <UnderlineIcon />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Strikethrough"
+            active={editor.isActive("strike")}
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+          >
+            <Strikethrough />
+          </ToolbarButton>
+          <ColorMenu editor={editor} />
 
-        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
+          <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
-        <ToolbarButton
-          label="Heading 1"
-          active={editor.isActive("heading", { level: 1 })}
-          onClick={() =>
-            editor.chain().focus().toggleHeading({ level: 1 }).run()
-          }
-        >
-          <Heading1 />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Heading 2"
-          active={editor.isActive("heading", { level: 2 })}
-          onClick={() =>
-            editor.chain().focus().toggleHeading({ level: 2 }).run()
-          }
-        >
-          <Heading2 />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Bullet list"
-          active={editor.isActive("bulletList")}
-          onClick={() => editor.chain().focus().toggleBulletList().run()}
-        >
-          <List />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Numbered list"
-          active={editor.isActive("orderedList")}
-          onClick={() => editor.chain().focus().toggleOrderedList().run()}
-        >
-          <ListOrdered />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Quote"
-          active={editor.isActive("blockquote")}
-          onClick={() => editor.chain().focus().toggleBlockquote().run()}
-        >
-          <Quote />
-        </ToolbarButton>
-
-        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
-
-        <ToolbarButton
-          label="Align left"
-          active={editor.isActive({ textAlign: "left" })}
-          onClick={() => editor.chain().focus().setTextAlign("left").run()}
-        >
-          <AlignLeft />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Align centre"
-          active={editor.isActive({ textAlign: "center" })}
-          onClick={() => editor.chain().focus().setTextAlign("center").run()}
-        >
-          <AlignCenter />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Align right"
-          active={editor.isActive({ textAlign: "right" })}
-          onClick={() => editor.chain().focus().setTextAlign("right").run()}
-        >
-          <AlignRight />
-        </ToolbarButton>
-
-        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
-
-        <ToolbarButton label="Link" active={editor.isActive("link")} onClick={setLink}>
-          <LinkIcon />
-        </ToolbarButton>
-        <ToolbarButton label="Image" onClick={() => setImageOpen(true)}>
-          <ImageIcon />
-        </ToolbarButton>
-        {/* Labelled rather than icon-only: an icon alone made this hard to
-            find, and it doubles as "edit" when a button is selected. */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => setButtonOpen(true)}
-          aria-label={buttonSelected ? "Edit button" : "Button"}
-          className={cn(
-            "h-touch shrink-0 gap-field px-2 text-muted-foreground hover:text-foreground sm:h-8",
-            buttonSelected && "bg-primary/10 text-primary"
-          )}
-        >
-          <RectangleHorizontal className="h-4 w-4" />
-          {buttonSelected ? "Edit button" : "Button"}
-        </Button>
-        <ToolbarButton
-          label={
-            editor.isActive("table") ? "Delete table" : "Insert table (3×3)"
-          }
-          active={editor.isActive("table")}
-          onClick={() => {
-            if (editor.isActive("table")) {
-              editor.chain().focus().deleteTable().run();
-              return;
+          <ToolbarButton
+            label="Heading 1"
+            active={editor.isActive("heading", { level: 1 })}
+            onClick={() =>
+              editor.chain().focus().toggleHeading({ level: 1 }).run()
             }
-            editor
-              .chain()
-              .focus()
-              .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-              .run();
-          }}
-        >
-          <TableIcon />
-        </ToolbarButton>
-        {editor.isActive("table") ? (
-          <>
-            <ToolbarButton
-              label="Add row"
-              onClick={() => editor.chain().focus().addRowAfter().run()}
-            >
-              <Rows3 />
-            </ToolbarButton>
-            <ToolbarButton
-              label="Add column"
-              onClick={() => editor.chain().focus().addColumnAfter().run()}
-            >
-              <Columns3 />
-            </ToolbarButton>
-          </>
-        ) : null}
-        <ToolbarButton
-          label="Divider"
-          onClick={() => editor.chain().focus().setHorizontalRule().run()}
-        >
-          <Minus />
-        </ToolbarButton>
-        {/* Dropping a snippet in no longer means abandoning the editor for the
+          >
+            <Heading1 />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Heading 2"
+            active={editor.isActive("heading", { level: 2 })}
+            onClick={() =>
+              editor.chain().focus().toggleHeading({ level: 2 }).run()
+            }
+          >
+            <Heading2 />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Bullet list"
+            active={editor.isActive("bulletList")}
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+          >
+            <List />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Numbered list"
+            active={editor.isActive("orderedList")}
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+          >
+            <ListOrdered />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Quote"
+            active={editor.isActive("blockquote")}
+            onClick={() => editor.chain().focus().toggleBlockquote().run()}
+          >
+            <Quote />
+          </ToolbarButton>
+
+          <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
+
+          <ToolbarButton
+            label="Align left"
+            active={editor.isActive({ textAlign: "left" })}
+            onClick={() => editor.chain().focus().setTextAlign("left").run()}
+          >
+            <AlignLeft />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Align centre"
+            active={editor.isActive({ textAlign: "center" })}
+            onClick={() => editor.chain().focus().setTextAlign("center").run()}
+          >
+            <AlignCenter />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Align right"
+            active={editor.isActive({ textAlign: "right" })}
+            onClick={() => editor.chain().focus().setTextAlign("right").run()}
+          >
+            <AlignRight />
+          </ToolbarButton>
+
+          <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
+
+          <ToolbarButton
+            label="Link"
+            active={editor.isActive("link")}
+            onClick={setLink}
+          >
+            <LinkIcon />
+          </ToolbarButton>
+          <ToolbarButton label="Image" onClick={() => setImageOpen(true)}>
+            <ImageIcon />
+          </ToolbarButton>
+          {/* Labelled rather than icon-only: an icon alone made this hard to
+            find, and it doubles as "edit" when a button is selected. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setButtonOpen(true)}
+            aria-label={buttonSelected ? "Edit button" : "Button"}
+            className={cn(
+              "h-touch shrink-0 gap-field px-2 text-muted-foreground hover:text-foreground sm:h-8",
+              buttonSelected && "bg-primary/10 text-primary"
+            )}
+          >
+            <RectangleHorizontal className="h-4 w-4" />
+            {buttonSelected ? "Edit button" : "Button"}
+          </Button>
+          <ToolbarButton
+            label={
+              editor.isActive("table") ? "Delete table" : "Insert table (3×3)"
+            }
+            active={editor.isActive("table")}
+            onClick={() => {
+              if (editor.isActive("table")) {
+                editor.chain().focus().deleteTable().run();
+                return;
+              }
+              editor
+                .chain()
+                .focus()
+                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                .run();
+            }}
+          >
+            <TableIcon />
+          </ToolbarButton>
+          {editor.isActive("table") ? (
+            <>
+              <ToolbarButton
+                label="Add row"
+                onClick={() => editor.chain().focus().addRowAfter().run()}
+              >
+                <Rows3 />
+              </ToolbarButton>
+              <ToolbarButton
+                label="Add column"
+                onClick={() => editor.chain().focus().addColumnAfter().run()}
+              >
+                <Columns3 />
+              </ToolbarButton>
+            </>
+          ) : null}
+          <ToolbarButton
+            label="Divider"
+            onClick={() => editor.chain().focus().setHorizontalRule().run()}
+          >
+            <Minus />
+          </ToolbarButton>
+          {/* Dropping a snippet in no longer means abandoning the editor for the
             source view: it lands as a block that keeps its own markup. */}
-        <ToolbarButton
-          label="HTML block"
-          onClick={() => setRawEdit({ pos: null, html: "" })}
-        >
-          <Code2 />
-        </ToolbarButton>
+          <ToolbarButton
+            label="HTML block"
+            onClick={() => setRawEdit({ pos: null, html: "" })}
+          >
+            <Code2 />
+          </ToolbarButton>
 
-        <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
+          <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
-        <ToolbarButton
-          label="Undo"
-          disabled={!editor.can().undo()}
-          onClick={() => editor.chain().focus().undo().run()}
-        >
-          <Undo />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Redo"
-          disabled={!editor.can().redo()}
-          onClick={() => editor.chain().focus().redo().run()}
-        >
-          <Redo />
-        </ToolbarButton>
+          <ToolbarButton
+            label="Undo"
+            disabled={!editor.can().undo()}
+            onClick={() => editor.chain().focus().undo().run()}
+          >
+            <Undo />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Redo"
+            disabled={!editor.can().redo()}
+            onClick={() => editor.chain().focus().redo().run()}
+          >
+            <Redo />
+          </ToolbarButton>
 
           {showVariables ? (
             /*
@@ -860,7 +879,11 @@ export function RichTextEditor({
         onSubmit={(html) => {
           const pos = rawEdit?.pos;
           if (pos === null || pos === undefined) {
-            editor.chain().focus().insertContent({ type: "rawHtml", attrs: { html } }).run();
+            editor
+              .chain()
+              .focus()
+              .insertContent({ type: "rawHtml", attrs: { html } })
+              .run();
           } else {
             editor
               .chain()
@@ -888,7 +911,7 @@ export function RichTextEditor({
           buttonSelected
             ? ({
                 ...editor.getAttributes("ctaButton"),
-                align: currentAlign
+                align: currentAlign,
               } as Partial<ButtonFormValue>)
             : undefined
         }

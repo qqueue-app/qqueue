@@ -844,6 +844,7 @@ model EmailDraft {
   id               String            @id @default(cuid())
   organizationId   String
   createdByUserId  String
+  inboundMessageId String?
   smtpConnectionId String?
   templateId       String?
   subject          String            @default("")
@@ -949,6 +950,8 @@ model InboxAccount {
   status            InboxAccountStatus @default(ACTIVE)
   lastSyncedAt      DateTime?
   lastSeenUid       Int?
+  uidValidity       String?
+  lastSyncError     String?
   organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboundMessages   InboundMessage[]
   grants            InboxAccountGrant[]
@@ -1046,6 +1049,7 @@ model InboundMessage {
   references             String[]               @default([])
   fromEmail              String
   fromName               String?
+  replyTo                String[]               @default([])
   to                     String[]               @default([])
   cc                     String[]               @default([])
   subject                String

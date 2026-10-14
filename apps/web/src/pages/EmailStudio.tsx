@@ -1,4 +1,11 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
@@ -10,7 +17,7 @@ import {
   Send,
   Trash2,
   Users,
-  X
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageContainer } from "../components/PageContainer.js";
@@ -22,16 +29,15 @@ import { BodyEditor } from "../components/editor/BodyEditor.js";
 import {
   Field,
   FormSection,
-  FormSections
+  FormSections,
 } from "../components/settings/FormLayout.js";
 import {
   buildCron,
   describeCron,
   emptyRecurrence,
-  ScheduleControls
+  ScheduleControls,
 } from "../components/ScheduleControls.js";
 import {
-  ApiError,
   api,
   type Contact,
   type ContactList,
@@ -42,17 +48,18 @@ import {
   type RecipientDelivery,
   type RecipientSuggestion,
   type SMTPConnection,
-  type Template
+  type Template,
 } from "../lib/api.js";
 import { formatBytes } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
 import { useSession } from "../lib/session-context.js";
+import { getSession } from "../lib/session.js";
 import { useOnline } from "../lib/use-online.js";
 import {
   deletePendingDraft,
   flushPendingDrafts,
   listPendingDrafts,
-  savePendingDraft
+  savePendingDraft,
 } from "../lib/offline-drafts.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
@@ -70,14 +77,14 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "../components/ui/dialog.js";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "../components/ui/select.js";
 
 const DEFAULT_SMTP = "__default__";
@@ -91,7 +98,10 @@ function isValidEmail(value: string) {
 }
 
 function htmlIsEmpty(html: string) {
-  const stripped = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+  const stripped = html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .trim();
   return stripped === "" && !/<(img|hr|br)/i.test(html);
 }
 
@@ -106,7 +116,7 @@ function formatSendTime(iso: string) {
     day: "numeric",
     month: "short",
     hour: "numeric",
-    minute: "2-digit"
+    minute: "2-digit",
   });
 }
 
@@ -152,7 +162,7 @@ function RecipientField({
   emails,
   onChange,
   suggestions = [],
-  width = "long"
+  width = "long",
 }: RecipientFieldProps) {
   const [value, setValue] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -187,7 +197,9 @@ function RecipientField({
         toast.error(`"${candidate}" is not a valid email address.`);
         continue;
       }
-      if (next.some((email) => email.toLowerCase() === candidate.toLowerCase())) {
+      if (
+        next.some((email) => email.toLowerCase() === candidate.toLowerCase())
+      ) {
         continue;
       }
       next.push(candidate);
@@ -364,7 +376,12 @@ function RecipientField({
 }
 
 export function EmailStudio() {
-  const { currentOrganizationId: organizationId } = useSession();
+  const { currentOrganizationId, user } = useSession();
+  return <EmailStudioWorkspace key={`${user?.id}:${currentOrganizationId}`} />;
+}
+
+function EmailStudioWorkspace() {
+  const { currentOrganizationId: organizationId, user } = useSession();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -535,7 +552,9 @@ export function EmailStudio() {
   const sendingConnection =
     smtpConnectionId === DEFAULT_SMTP
       ? defaultConnection
-      : smtpConnections.find((connection) => connection.id === smtpConnectionId);
+      : smtpConnections.find(
+          (connection) => connection.id === smtpConnectionId
+        );
   const inheritedReplyTo =
     sendingConnection?.replyTo || sendingConnection?.fromEmail || "";
 
@@ -554,7 +573,7 @@ export function EmailStudio() {
         name:
           [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
           null,
-        source: "contact"
+        source: "contact",
       });
     }
     for (const recent of recentRecipients) {
@@ -581,7 +600,7 @@ export function EmailStudio() {
         contactData,
         listData,
         draftData,
-        recentData
+        recentData,
       ] = await Promise.all([
         api.listTemplates(organizationId),
         // Only identities this user may send as (Phase 4): members see their
@@ -591,7 +610,7 @@ export function EmailStudio() {
         api.listContactLists(organizationId),
         api.listEmailDrafts(organizationId),
         // Autocomplete is a convenience: never let it fail the whole page.
-        api.listRecipientSuggestions(organizationId).catch(() => [])
+        api.listRecipientSuggestions(organizationId).catch(() => []),
       ]);
       setTemplates(templateData);
       setSMTPConnections(smtpData);
@@ -673,7 +692,9 @@ export function EmailStudio() {
     const next = [...toEmails];
     for (const contact of selected) {
       if (
-        !next.some((email) => email.toLowerCase() === contact.email.toLowerCase())
+        !next.some(
+          (email) => email.toLowerCase() === contact.email.toLowerCase()
+        )
       ) {
         next.push(contact.email);
       }
@@ -700,7 +721,7 @@ export function EmailStudio() {
         try {
           const attachment = await api.uploadAttachment(file, {
             organizationId,
-            emailDraftId: ensuredDraftId
+            emailDraftId: ensuredDraftId,
           });
           setAttachments((current) => [...current, attachment]);
         } catch (error) {
@@ -758,7 +779,7 @@ export function EmailStudio() {
           listIds: selectedListIds,
           smtpConnectionId:
             smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
-          templateId: templateId === NO_TEMPLATE ? undefined : templateId
+          templateId: templateId === NO_TEMPLATE ? undefined : templateId,
         };
 
         /*
@@ -772,13 +793,15 @@ export function EmailStudio() {
           can see.
         */
         await savePendingDraft({
+          userId: user?.id ?? "",
           localId: localDraftId.current,
           organizationId,
           draftId,
           payload,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
         });
 
+        if (user?.id && getSession().user?.id !== user.id) return null;
         let saved: EmailDraft;
         if (draftId) {
           saved = await api.updateEmailDraft(draftId, payload);
@@ -806,8 +829,16 @@ export function EmailStudio() {
           identically forever, so the record is dropped and the real message
           shown.
         */
+        const status =
+          typeof error === "object" && error !== null && "status" in error
+            ? error.status
+            : undefined;
         const retryable =
-          !(error instanceof ApiError) || error.status === 0 || error.status >= 500;
+          typeof status !== "number" ||
+          status === 0 ||
+          status >= 500 ||
+          status === 401 ||
+          status === 403;
 
         if (retryable) {
           setPendingLocally(true);
@@ -832,6 +863,7 @@ export function EmailStudio() {
     },
     [
       organizationId,
+      user?.id,
       subject,
       html,
       toEmails,
@@ -840,7 +872,7 @@ export function EmailStudio() {
       selectedListIds,
       smtpConnectionId,
       templateId,
-      draftId
+      draftId,
     ]
   );
 
@@ -848,6 +880,14 @@ export function EmailStudio() {
   // something worth keeping.
   const autoSaveRef = useRef(saveDraft);
   autoSaveRef.current = saveDraft;
+  const hasUnsavedContent = useRef(hasContent);
+  hasUnsavedContent.current = hasContent && !sending;
+  useEffect(
+    () => () => {
+      if (hasUnsavedContent.current) void autoSaveRef.current(true);
+    },
+    []
+  );
   useEffect(() => {
     if (!organizationId || !hasContent || sending) {
       return;
@@ -864,7 +904,7 @@ export function EmailStudio() {
     bccEmails,
     selectedListIds,
     smtpConnectionId,
-    templateId
+    templateId,
   ]);
 
   /*
@@ -937,27 +977,42 @@ export function EmailStudio() {
     });
   }, [online, organizationId, pendingLocally]);
 
-  const applyDraft = useCallback((draft: EmailDraft) => {
-    setDraftId(draft.id);
-    setSubject(draft.subject ?? "");
-    setHtml(draft.html ?? "");
-    setToEmails(draft.to ?? []);
-    setCcEmails(draft.cc ?? []);
-    setBccEmails(draft.bcc ?? []);
-    setReplyTo(draft.replyTo ?? "");
-    setSelectedListIds(draft.listIds ?? []);
-    setAttachments(draft.attachments ?? []);
-    setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
-    setTemplateId(draft.templateId ?? NO_TEMPLATE);
-    setLastSavedAt(draft.updatedAt);
-    setDeliveryStatus(null);
-    setDraftsOpen(false);
-    // A different message is on screen now, so it gets its own queue key — and
-    // it arrived from the server, so nothing is pending locally.
-    localDraftId.current = newLocalDraftId();
-    setPendingLocally(false);
-    toast.success("Draft loaded.");
-  }, []);
+  const applyDraft = useCallback(
+    (draft: EmailDraft) => {
+      if (draft.organizationId && draft.organizationId !== organizationId) {
+        toast.error(
+          "This draft belongs to another organization. Switch to that organization to open it."
+        );
+        return;
+      }
+      if (draft.inboundMessageId) {
+        navigate(
+          `/inbox?message=${encodeURIComponent(draft.inboundMessageId)}&replyDraft=${encodeURIComponent(draft.id)}`
+        );
+        return;
+      }
+      setDraftId(draft.id);
+      setSubject(draft.subject ?? "");
+      setHtml(draft.html ?? "");
+      setToEmails(draft.to ?? []);
+      setCcEmails(draft.cc ?? []);
+      setBccEmails(draft.bcc ?? []);
+      setReplyTo(draft.replyTo ?? "");
+      setSelectedListIds(draft.listIds ?? []);
+      setAttachments(draft.attachments ?? []);
+      setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
+      setTemplateId(draft.templateId ?? NO_TEMPLATE);
+      setLastSavedAt(draft.updatedAt);
+      setDeliveryStatus(null);
+      setDraftsOpen(false);
+      // A different message is on screen now, so it gets its own queue key — and
+      // it arrived from the server, so nothing is pending locally.
+      localDraftId.current = newLocalDraftId();
+      setPendingLocally(false);
+      toast.success("Draft loaded.");
+    },
+    [navigate, organizationId]
+  );
 
   async function loadDraft(summary: EmailDraft) {
     // The drafts list omits attachments; fetch the full draft so resuming
@@ -966,7 +1021,10 @@ export function EmailStudio() {
     try {
       draft = await api.getEmailDraft(summary.id);
     } catch {
-      // Use the summary as-is; attachments simply won't be restored.
+      toast.error(
+        "Couldn't restore this draft's attachments. Try opening it again."
+      );
+      return;
     }
     applyDraft(draft);
   }
@@ -1040,7 +1098,7 @@ export function EmailStudio() {
           to: toEmails,
           cc: ccEmails,
           bcc: bccEmails,
-          listIds: selectedListIds
+          listIds: selectedListIds,
         })
       );
     } catch (error) {
@@ -1106,7 +1164,7 @@ export function EmailStudio() {
           subject,
           html,
           cronExpression: cron,
-          timezone: recurrence.timezone
+          timezone: recurrence.timezone,
         });
         if (draftId) {
           await api.deleteEmailDraft(draftId).catch(() => undefined);
@@ -1116,8 +1174,8 @@ export function EmailStudio() {
         toast.success(`Recurring send created: ${describeCron(cron)}.`, {
           action: {
             label: "View schedules",
-            onClick: () => navigate("/campaigns/recurring")
-          }
+            onClick: () => navigate("/campaigns/recurring"),
+          },
         });
         resetComposer();
         setDrafts(await api.listEmailDrafts(organizationId));
@@ -1148,14 +1206,21 @@ export function EmailStudio() {
 
     // Captured before the composer resets, so the confirmation can say who it
     // went to rather than quoting a job id.
-    const recipientSummary = listMemberEstimate > 0
-      ? `about ${totalRecipients} people`
-      : describeRecipientCount(totalRecipients);
+    const recipientSummary =
+      listMemberEstimate > 0
+        ? `about ${totalRecipients} people`
+        : describeRecipientCount(totalRecipients);
 
     setSending(true);
     try {
+      const sendDraftId = draftId ?? (await saveDraft(true));
+      if (!sendDraftId)
+        throw new Error(
+          "Couldn't save this email before sending. Your message has been kept; try again."
+        );
       const result = await api.sendManualEmail({
         organizationId,
+        idempotencyKey: sendDraftId,
         to: toEmails,
         cc: ccEmails.length ? ccEmails : undefined,
         bcc: bccEmails.length ? bccEmails : undefined,
@@ -1171,20 +1236,18 @@ export function EmailStudio() {
         attachmentIds: attachments.length
           ? attachments.map((item) => item.id)
           : undefined,
-        scheduledAt: scheduledAtIso
+        scheduledAt: scheduledAtIso,
       });
       // The send was accepted — discard the working draft so it doesn't linger.
-      if (draftId) {
-        await api.deleteEmailDraft(draftId).catch(() => undefined);
-      }
+      await api.deleteEmailDraft(sendDraftId).catch(() => undefined);
       if (scheduledAtIso) {
         toast.success(
           `Scheduled — sends ${formatSendTime(scheduledAtIso)} to ${recipientSummary}.`,
           {
             action: {
               label: "View outbox",
-              onClick: () => navigate("/outbox")
-            }
+              onClick: () => navigate("/outbox"),
+            },
           }
         );
       } else {
@@ -1194,8 +1257,8 @@ export function EmailStudio() {
         toast.success(`Queued — sending to ${recipientSummary}.`, {
           action: {
             label: "View outbox",
-            onClick: () => navigate("/outbox")
-          }
+            onClick: () => navigate("/outbox"),
+          },
         });
       }
       resetComposer();
@@ -1206,7 +1269,7 @@ export function EmailStudio() {
       // so the form unlocks right away; a failed poll is non-fatal.
       void pollDeliveryStatus(result.id, organizationId, {
         follow: !scheduledAtIso,
-        recipientSummary
+        recipientSummary,
       });
     } catch (error) {
       toast.error(
@@ -1332,7 +1395,10 @@ export function EmailStudio() {
                             <span className="flex items-center gap-2">
                               {describeConnection(connection)}
                               {connection.isDefault ? (
-                                <Badge variant="secondary" className="font-normal">
+                                <Badge
+                                  variant="secondary"
+                                  className="font-normal"
+                                >
                                   Default
                                 </Badge>
                               ) : null}
@@ -1354,7 +1420,11 @@ export function EmailStudio() {
                   {selectedLists.length > 0 ? (
                     <div className="flex flex-wrap gap-field">
                       {selectedLists.map((list) => (
-                        <Badge key={list.id} variant="outline" className="gap-1 pr-1">
+                        <Badge
+                          key={list.id}
+                          variant="outline"
+                          className="gap-1 pr-1"
+                        >
                           {list.name} ({list._count?.contacts ?? 0})
                           <button
                             type="button"
@@ -1490,7 +1560,9 @@ export function EmailStudio() {
                           <SelectValue placeholder="Start from a template" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={NO_TEMPLATE}>No template</SelectItem>
+                          <SelectItem value={NO_TEMPLATE}>
+                            No template
+                          </SelectItem>
                           {templates.map((template) => (
                             <SelectItem key={template.id} value={template.id}>
                               {template.name}
@@ -1515,6 +1587,7 @@ export function EmailStudio() {
                     {/* The editor is the one control that legitimately fills
                         the form column — prose has no natural width. */}
                     <BodyEditor
+                      disabled={sending}
                       value={html}
                       onChange={setHtml}
                       placeholder="Write your email…"
@@ -1689,7 +1762,7 @@ export function EmailStudio() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={sending || noSmtp || !organizationId}
+                  disabled={sending || uploading || noSmtp || !organizationId}
                 >
                   {sending ? <Spinner /> : <Send className="h-4 w-4" />}
                   {recurring
@@ -1713,7 +1786,6 @@ export function EmailStudio() {
                     Draft saved
                   </p>
                 ) : null}
-
               </Card>
 
               {deliveryStatus ? (
@@ -1823,8 +1895,8 @@ export function EmailStudio() {
           <DialogHeader>
             <DialogTitle>Preview</DialogTitle>
             <DialogDescription>
-              Rendered by the send pipeline — this is the message your recipients
-              receive, with tracked links in place.
+              Rendered by the send pipeline — this is the message your
+              recipients receive, with tracked links in place.
             </DialogDescription>
           </DialogHeader>
           {previewing ? (
@@ -1877,7 +1949,7 @@ const DELIVERY_BADGE: Record<
   pending: "secondary",
   rejected: "destructive",
   failed: "destructive",
-  suppressed: "outline"
+  suppressed: "outline",
 };
 
 // Per-recipient delivery status shown after a send. A manual send is one
@@ -1885,7 +1957,7 @@ const DELIVERY_BADGE: Record<
 // job's outcome; engagement counts aggregate across the whole send.
 function DeliveryStatusCard({
   status,
-  onDismiss
+  onDismiss,
 }: {
   status: ManualEmailDeliveryStatus;
   onDismiss: () => void;
@@ -1893,7 +1965,9 @@ function DeliveryStatusCard({
   return (
     <Card className="space-y-4 p-card" data-testid="delivery-status">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-section font-semibold text-text">Delivery status</h2>
+        <h2 className="text-section font-semibold text-text">
+          Delivery status
+        </h2>
         <IconButton
           label="Dismiss delivery status"
           size="sm"
@@ -1961,7 +2035,7 @@ function ContactPickerDialog({
   open,
   onOpenChange,
   contacts,
-  onAdd
+  onAdd,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -2059,8 +2133,13 @@ function ContactPickerDialog({
           >
             Cancel
           </Button>
-          <Button type="button" onClick={confirm} disabled={selected.length === 0}>
-            Add {selected.length || ""} contact{selected.length === 1 ? "" : "s"}
+          <Button
+            type="button"
+            onClick={confirm}
+            disabled={selected.length === 0}
+          >
+            Add {selected.length || ""} contact
+            {selected.length === 1 ? "" : "s"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2073,7 +2152,7 @@ function ListPickerDialog({
   onOpenChange,
   lists,
   selectedIds,
-  onChange
+  onChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;

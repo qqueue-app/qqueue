@@ -9,6 +9,7 @@ import type { LucideIcon } from "lucide-react";
  * enough to need its own scrollbar. Adding one back would reintroduce that.
  */
 export interface NavItem {
+  advanced?: boolean;
   to: string;
   label: string;
   icon: LucideIcon;

@@ -18,15 +18,18 @@ const queueStub = vi.hoisted(() => () => ({
   upsertJobScheduler: vi.fn().mockResolvedValue(undefined),
   removeJobScheduler: vi.fn().mockResolvedValue(undefined),
   remove: vi.fn().mockResolvedValue(undefined),
-  close: vi.fn().mockResolvedValue(undefined)
+  close: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../queues/email-sending.queue.js", () => ({
-  emailSendingQueue: queueStub()
+  emailSendingQueue: queueStub(),
 }));
 vi.mock("../queues/campaign-processing.queue.js", () => ({
-  campaignProcessingQueue: queueStub()
+  campaignProcessingQueue: queueStub(),
 }));
 vi.mock("../queues/webhook-delivery.queue.js", () => ({
-  webhookDeliveryQueue: queueStub()
+  webhookDeliveryQueue: queueStub(),
+}));
+vi.mock("../queues/inbox-sync.queue.js", () => ({
+  inboxSyncQueue: queueStub(),
 }));

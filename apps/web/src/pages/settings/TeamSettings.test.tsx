@@ -35,6 +35,7 @@ vi.mock("../../lib/api.js", () => ({
     revokeInvite: vi.fn(),
     updateMemberRole: vi.fn(),
     removeMember: vi.fn(),
+    requestPasswordReset: vi.fn(),
   },
 }));
 
@@ -88,6 +89,21 @@ beforeEach(() => {
 });
 
 describe("TeamSettings", () => {
+  it("lets an administrator request a sign-in reset email for a teammate", async () => {
+    mockedApi.requestPasswordReset.mockResolvedValue({ message: "Requested" });
+    renderWithProviders(<TeamSettings />);
+    const email = await screen.findByText("teammate@x.com");
+    await userEvent.click(
+      within(email.closest("li")!).getByRole("button", {
+        name: "Send sign-in reset link",
+      })
+    );
+    await waitFor(() =>
+      expect(mockedApi.requestPasswordReset).toHaveBeenCalledWith({
+        email: "teammate@x.com",
+      })
+    );
+  });
   it("tells a member why the page is empty rather than rendering nothing", () => {
     sessionRef.current = {
       ...sessionRef.current,

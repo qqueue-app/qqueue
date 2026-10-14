@@ -51,8 +51,12 @@ vi.mock("../lib/api.js", () => ({
     pauseRecurringSend: vi.fn(),
     resumeRecurringSend: vi.fn(),
     deleteRecurringSend: vi.fn(),
-    createEmailDraft: vi.fn(),
-    updateEmailDraft: vi.fn(),
+    createEmailDraft: vi
+      .fn()
+      .mockResolvedValue({ id: "draft_mobile", updatedAt: "now" }),
+    updateEmailDraft: vi
+      .fn()
+      .mockResolvedValue({ id: "draft_mobile", updatedAt: "now" }),
   },
 }));
 
@@ -188,7 +192,9 @@ describe("Compose on a phone", () => {
       screen.queryByRole("button", { name: /Add files/i })
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
+    await user.click(
+      screen.getByRole("button", { name: "Cc / Bcc / Reply-To" })
+    );
     expect(screen.getByLabelText("Cc")).toBeInTheDocument();
   });
 });
@@ -210,7 +216,9 @@ describe("Recurring sends on a phone", () => {
     ).not.toBeInTheDocument();
 
     // The row's content survives the transform.
-    expect(screen.getByText(/At 09:00 AM, only on Monday/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/At 09:00 AM, only on Monday/i)
+    ).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Europe/London")).toBeInTheDocument();
   });

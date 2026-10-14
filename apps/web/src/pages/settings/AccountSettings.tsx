@@ -7,7 +7,6 @@ import {
 } from "../../components/settings/FormLayout.js";
 import { SettingsLinkRow } from "../../components/settings/SettingsLinkRow.js";
 import { Button } from "../../components/ui/button.js";
-import { apiBaseUrl } from "../../lib/api.js";
 import { useSession } from "../../lib/session-context.js";
 
 /**
@@ -53,12 +52,6 @@ export function AccountSettings() {
                 <dt className="text-ui text-text">Email</dt>
                 <dd className="min-w-0 break-all text-right text-ui text-text-secondary">
                   {user?.email ?? "Not signed in"}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-4 border-b border-border py-3">
-                <dt className="text-ui text-text">API base URL</dt>
-                <dd className="min-w-0 break-all text-right font-mono text-meta text-text-secondary">
-                  {apiBaseUrl || window.location.origin}
                 </dd>
               </div>
             </dl>

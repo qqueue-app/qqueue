@@ -224,6 +224,7 @@ export interface InboxAccount {
   status: "ACTIVE" | "DISABLED";
   lastSyncedAt?: string | null;
   lastSeenUid?: number | null;
+  lastSyncError?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -238,6 +239,7 @@ export interface InboundMessage {
   references: string[];
   fromEmail: string;
   fromName?: string | null;
+  replyTo?: string[];
   to: string[];
   cc: string[];
   subject: string;
@@ -266,6 +268,25 @@ export interface InboundAttachment {
   isInline: boolean;
   /** MIME Content-ID, as referenced by `cid:` URLs in the body HTML. */
   contentId?: string | null;
+}
+
+export interface InboxConversation {
+  messages: InboundMessage[];
+  outgoing: {
+    id: string;
+    subject: string;
+    html: string | null;
+    text: string | null;
+    toEmail: string;
+    cc: string[];
+    status: string;
+    sentAt: string | null;
+    createdAt: string;
+    messageId: string | null;
+    smtpConnection: { fromEmail: string; fromName: string | null } | null;
+    sentByName: string;
+    attachments?: InboundAttachment[];
+  }[];
 }
 
 export interface RecurringSend {
@@ -520,6 +541,7 @@ export interface ImageAsset {
 }
 
 export interface EmailDraft {
+  inboundMessageId?: string | null;
   id: string;
   organizationId: string;
   createdByUserId: string;
@@ -1288,6 +1310,8 @@ async function performRefresh(): Promise<RefreshOutcome> {
     return "unavailable";
   }
 
+  if (getSession().refreshToken !== refreshToken) return "unavailable";
+
   updateTokens(tokens);
   return "refreshed";
 }
@@ -1325,7 +1349,7 @@ async function request<T>(
   options: RequestInit = {},
   retryOnUnauthorized = true
 ): Promise<T> {
-  const { accessToken } = getSession();
+  const { accessToken, user: actingUser } = getSession();
   // FormData (file uploads) must set its own multipart boundary — never force a
   // JSON content type for it.
   const isFormData =
@@ -1351,7 +1375,11 @@ async function request<T>(
     retryOnUnauthorized &&
     !path.startsWith(AUTH_PREFIX)
   ) {
+    if (actingUser?.id !== getSession().user?.id)
+      throw new ApiError("The signed-in account changed. Try again.", 401);
     const outcome = await refreshTokens();
+    if (actingUser?.id !== getSession().user?.id)
+      throw new ApiError("The signed-in account changed. Try again.", 401);
     if (outcome === "refreshed") {
       return request<T>(path, options, false);
     }
@@ -2430,6 +2458,7 @@ export const api = {
     q?: string;
     read?: "read" | "unread" | "all";
     cursor?: string;
+    inboxAccountId?: string;
   }) {
     const params = new URLSearchParams({
       organizationId: input.organizationId,
@@ -2437,6 +2466,8 @@ export const api = {
     if (input.q) params.set("q", input.q);
     if (input.read) params.set("read", input.read);
     if (input.cursor) params.set("cursor", input.cursor);
+    if (input.inboxAccountId)
+      params.set("inboxAccountId", input.inboxAccountId);
     return request<InboundMessageList>(
       `/api/v1/inbox/messages?${params.toString()}`
     );
@@ -2446,6 +2477,29 @@ export const api = {
     return request<{ count: number; hasMore: boolean }>(
       `/api/v1/inbox/messages/unread-count?organizationId=${encodeURIComponent(organizationId)}`
     );
+  },
+
+  getInboxConversation(id: string, organizationId: string) {
+    return request<InboxConversation>(
+      `/api/v1/inbox/messages/${encodeURIComponent(id)}/conversation?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+  syncInbox(organizationId: string, inboxAccountId?: string) {
+    return request<{ queued: number }>("/api/v1/inbox/sync", {
+      method: "POST",
+      body: JSON.stringify({ organizationId, inboxAccountId }),
+    });
+  },
+
+  markInboundMessagesRead(
+    organizationId: string,
+    messageIds: string[],
+    read: boolean
+  ) {
+    return request<{ updated: number }>("/api/v1/inbox/messages/read", {
+      method: "PATCH",
+      body: JSON.stringify({ organizationId, messageIds, read }),
+    });
   },
 
   markInboundMessageRead(
@@ -2532,10 +2586,13 @@ export const api = {
     id: string,
     input: {
       organizationId: string;
+      idempotencyKey?: string;
       smtpConnectionId?: string;
       subject: string;
       html?: string;
       text?: string;
+      attachmentIds?: string[];
+      replyAll?: boolean;
     }
   ) {
     return request<{ id: string; status: string }>(

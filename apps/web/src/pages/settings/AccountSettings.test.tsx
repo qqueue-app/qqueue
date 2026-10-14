@@ -34,7 +34,7 @@ describe("AccountSettings", () => {
   it("shows who is signed in", () => {
     renderWithProviders(<AccountSettings />);
     expect(screen.getByText("me@x.com")).toBeInTheDocument();
-    expect(screen.getByText("API base URL")).toBeInTheDocument();
+    expect(screen.queryByText("API base URL")).not.toBeInTheDocument();
   });
 
   it("signs out and redirects", async () => {

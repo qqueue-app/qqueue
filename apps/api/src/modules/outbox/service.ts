@@ -2,7 +2,7 @@ import type { OutboxEmail } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
-  resolveMailboxAccess
+  resolveMailboxAccess,
 } from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { emailSendingQueue } from "../../queues/email-sending.queue.js";
@@ -25,8 +25,9 @@ export const outboxService = {
     const jobs = await prisma.emailJob.findMany({
       where: {
         organizationId,
+        NOT: { origin: "SYSTEM" },
         status: { in: [...PENDING_STATUSES] },
-        ...emailJobScope(access)
+        ...emailJobScope(access),
       },
       orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
       take: OUTBOX_LIMIT,
@@ -42,9 +43,9 @@ export const outboxService = {
         createdAt: true,
         campaign: { select: { name: true } },
         smtpConnection: {
-          select: { name: true, fromEmail: true, fromName: true }
-        }
-      }
+          select: { name: true, fromEmail: true, fromName: true },
+        },
+      },
     });
 
     return jobs.map((job) => ({
@@ -66,9 +67,9 @@ export const outboxService = {
         ? {
             name: job.smtpConnection.name,
             fromEmail: job.smtpConnection.fromEmail,
-            fromName: job.smtpConnection.fromName
+            fromName: job.smtpConnection.fromName,
           }
-        : null
+        : null,
     }));
   },
 
@@ -86,8 +87,13 @@ export const outboxService = {
   async cancel(id: string, organizationId: string, userId: string) {
     const access = await resolveMailboxAccess(userId, organizationId);
     const job = await prisma.emailJob.findFirst({
-      where: { id, organizationId, ...emailJobScope(access) },
-      select: { id: true, status: true }
+      where: {
+        id,
+        organizationId,
+        NOT: { origin: "SYSTEM" },
+        ...emailJobScope(access),
+      },
+      select: { id: true, status: true },
     });
 
     if (!job) {
@@ -106,7 +112,7 @@ export const outboxService = {
 
     const cancelled = await prisma.emailJob.update({
       where: { id: job.id },
-      data: { status: "CANCELLED" }
+      data: { status: "CANCELLED" },
     });
 
     // Matches the jobId both enqueue sites use (transactional-email service and
@@ -114,5 +120,5 @@ export const outboxService = {
     await emailSendingQueue.remove(`email-${job.id}`).catch(() => undefined);
 
     return { id: cancelled.id, status: cancelled.status };
-  }
+  },
 };

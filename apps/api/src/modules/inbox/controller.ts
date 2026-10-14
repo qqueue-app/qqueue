@@ -5,6 +5,7 @@ import {
   inboundMessageQuerySchema,
   inboundMessageReplySchema,
   inboundMessageStoreSchema,
+  inboundBulkReadSchema,
 } from "@qqueue/shared";
 import { z } from "zod";
 import { inboxService } from "./service.js";
@@ -19,6 +20,27 @@ const markReadSchema = z.object({
 });
 
 export const inboxController = {
+  async requestSync(req: Request, res: Response) {
+    const input = z
+      .object({ inboxAccountId: z.string().min(1).optional() })
+      .parse(req.body);
+    res.status(202).json({
+      data: await inboxService.requestSync(
+        req.organizationId!,
+        req.userId!,
+        input.inboxAccountId
+      ),
+    });
+  },
+  async getConversation(req: Request, res: Response) {
+    res.json({
+      data: await inboxService.getConversation(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!
+      ),
+    });
+  },
   async listAccounts(req: Request, res: Response) {
     const accounts = await inboxService.listAccounts(
       req.organizationId!,
@@ -38,13 +60,18 @@ export const inboxController = {
     const account = await inboxService.updateAccount(
       String(req.params.id),
       req.userId!,
-      input
+      input,
+      req.organizationId!
     );
     res.json({ data: account });
   },
 
   async deleteAccount(req: Request, res: Response) {
-    await inboxService.deleteAccount(String(req.params.id), req.userId!);
+    await inboxService.deleteAccount(
+      String(req.params.id),
+      req.userId!,
+      req.organizationId!
+    );
     res.status(204).send();
   },
 
@@ -84,6 +111,21 @@ export const inboxController = {
       input.read
     );
     res.json({ data: message });
+  },
+
+  async markManyRead(req: Request, res: Response) {
+    const input = inboundBulkReadSchema.parse({
+      ...req.body,
+      organizationId: req.organizationId!,
+    });
+    res.json({
+      data: await inboxService.markManyRead(
+        input.organizationId,
+        req.userId!,
+        input.messageIds,
+        input.read
+      ),
+    });
   },
 
   async downloadAttachment(req: Request, res: Response) {

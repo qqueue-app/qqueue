@@ -204,7 +204,13 @@ export function DataGrid<TData>({
     data,
     columns: resolvedColumns,
     getRowId: (row) => getRowId(row),
-    state: { sorting, columnFilters, columnVisibility, rowSelection, globalFilter },
+    state: {
+      sorting,
+      columnFilters,
+      columnVisibility,
+      rowSelection,
+      globalFilter,
+    },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
@@ -305,6 +311,21 @@ export function DataGrid<TData>({
         </div>
       ) : null}
 
+      {enableSelection && isMobile && rows.length > 0 ? (
+        <label className="flex min-h-touch items-center gap-2 text-ui">
+          <Checkbox
+            aria-label="Select all rows on this page"
+            checked={
+              table.getIsAllPageRowsSelected() ||
+              (table.getIsSomePageRowsSelected() && "indeterminate")
+            }
+            onCheckedChange={(checked) =>
+              table.toggleAllPageRowsSelected(Boolean(checked))
+            }
+          />
+          Select all on this page
+        </label>
+      ) : null}
       {enableSelection && selectedRows.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-accent px-3 py-2">
           <span className="text-ui font-medium text-accent-foreground">
@@ -339,6 +360,18 @@ export function DataGrid<TData>({
             <ul className="flex flex-col gap-2">
               {rows.map((row) => (
                 <li key={row.id}>
+                  {enableSelection ? (
+                    <label className="mb-1 flex min-h-touch items-center gap-2 text-meta">
+                      <Checkbox
+                        aria-label={`Select ${getRowLabel?.(row.original) ?? "row"}`}
+                        checked={row.getIsSelected()}
+                        onCheckedChange={(checked) =>
+                          row.toggleSelected(Boolean(checked))
+                        }
+                      />
+                      Select
+                    </label>
+                  ) : null}
                   {onRowClick ? (
                     /*
                       The card is a div with a stretched hit area behind it, not
@@ -376,7 +409,7 @@ export function DataGrid<TData>({
           ) : null}
 
           {renderMobileRow && isMobile ? null : (
-          /*
+            /*
             No `overflow-x-auto` here, and that is load-bearing rather than an
             omission. A box with `overflow-x: auto` has its `overflow-y: visible`
             computed to `auto` as well, which makes it a scroll container — and a
@@ -387,58 +420,58 @@ export function DataGrid<TData>({
             dropping out at `md`/`lg` and truncating (§3), not by pushing a
             second scrollbar into a page that is only allowed one.
           */
-          <div className="relative rounded-card border border-border">
-            {/*
+            <div className="relative rounded-card border border-border">
+              {/*
               `border-separate` because a sticky header cannot keep a collapsed
               border: with `border-collapse: collapse` the bottom hairline
               belongs to the table's border grid rather than to the header, and
               it is left behind the moment the header lifts. Row rules therefore
               live on the cells, which is also why the backgrounds below do.
             */}
-            <table
-              className="w-full caption-bottom border-separate border-spacing-0 text-ui"
-              aria-label={label}
-            >
-              {/* Sticky against the *document* now that main no longer
+              <table
+                className="w-full caption-bottom border-separate border-spacing-0 text-ui"
+                aria-label={label}
+              >
+                {/* Sticky against the *document* now that main no longer
                   scrolls, so it has to clear whatever the shell has parked at
                   the top of the viewport at this width. */}
-              <thead className="sticky top-sticky-top z-10">
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => {
-                      const meta = header.column.columnDef.meta as
-                        | DataGridColumnMeta
-                        | undefined;
-                      const sortable = header.column.getCanSort();
-                      const sorted = header.column.getIsSorted();
-                      return (
-                        <th
-                          key={header.id}
-                          scope="col"
-                          aria-sort={
-                            sorted === "asc"
-                              ? "ascending"
-                              : sorted === "desc"
-                                ? "descending"
-                                : sortable
-                                  ? "none"
-                                  : undefined
-                          }
-                          className={cn(
-                            "h-10 whitespace-nowrap border-b border-border bg-surface-sunken px-3 align-middle text-meta font-medium uppercase tracking-eyebrow text-text-tertiary",
-                            // Nothing clips this wrapper any more, so the
-                            // header paints its own top corners.
-                            "first:rounded-tl-card last:rounded-tr-card",
-                            alignmentClass(meta),
-                            responsiveClass(meta),
-                            meta?.headerClassName
-                          )}
-                        >
-                          {header.isPlaceholder ? null : sortable ? (
-                            <button
-                              type="button"
-                              onClick={header.column.getToggleSortingHandler()}
-                              /*
+                <thead className="sticky top-sticky-top z-10">
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <tr key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => {
+                        const meta = header.column.columnDef.meta as
+                          | DataGridColumnMeta
+                          | undefined;
+                        const sortable = header.column.getCanSort();
+                        const sorted = header.column.getIsSorted();
+                        return (
+                          <th
+                            key={header.id}
+                            scope="col"
+                            aria-sort={
+                              sorted === "asc"
+                                ? "ascending"
+                                : sorted === "desc"
+                                  ? "descending"
+                                  : sortable
+                                    ? "none"
+                                    : undefined
+                            }
+                            className={cn(
+                              "h-10 whitespace-nowrap border-b border-border bg-surface-sunken px-3 align-middle text-meta font-medium uppercase tracking-eyebrow text-text-tertiary",
+                              // Nothing clips this wrapper any more, so the
+                              // header paints its own top corners.
+                              "first:rounded-tl-card last:rounded-tr-card",
+                              alignmentClass(meta),
+                              responsiveClass(meta),
+                              meta?.headerClassName
+                            )}
+                          >
+                            {header.isPlaceholder ? null : sortable ? (
+                              <button
+                                type="button"
+                                onClick={header.column.getToggleSortingHandler()}
+                                /*
                                 `uppercase` is repeated from the <th> rather
                                 than inherited: preflight resets buttons to
                                 `text-transform: none`, which is more specific
@@ -448,48 +481,48 @@ export function DataGrid<TData>({
                                 each other depending on whether you could sort
                                 by them.
                               */
-                              className="inline-flex items-center gap-1 rounded-control uppercase tracking-eyebrow transition-colors duration-fast ease-out hover:text-text"
-                            >
-                              {flexRender(
+                                className="inline-flex items-center gap-1 rounded-control uppercase tracking-eyebrow transition-colors duration-fast ease-out hover:text-text"
+                              >
+                                {flexRender(
+                                  header.column.columnDef.header,
+                                  header.getContext()
+                                )}
+                                {sorted === "asc" ? (
+                                  <ArrowUp className="h-3 w-3" />
+                                ) : sorted === "desc" ? (
+                                  <ArrowDown className="h-3 w-3" />
+                                ) : (
+                                  <ChevronsUpDown className="h-3 w-3 opacity-40" />
+                                )}
+                              </button>
+                            ) : (
+                              flexRender(
                                 header.column.columnDef.header,
                                 header.getContext()
-                              )}
-                              {sorted === "asc" ? (
-                                <ArrowUp className="h-3 w-3" />
-                              ) : sorted === "desc" ? (
-                                <ArrowDown className="h-3 w-3" />
-                              ) : (
-                                <ChevronsUpDown className="h-3 w-3 opacity-40" />
-                              )}
-                            </button>
-                          ) : (
-                            flexRender(
-                              header.column.columnDef.header,
-                              header.getContext()
-                            )
-                          )}
-                        </th>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </thead>
-              {/*
+                              )
+                            )}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </thead>
+                {/*
                 The last row loses its rule and rounds into the wrapper's
                 corners. Both belong to the cells: `border-separate` does not
                 paint a `<tr>`'s own border, and a row-level background would
                 square off the two corners now that nothing clips it.
               */}
-              <tbody className="[&>tr:last-child>td:first-child]:rounded-bl-card [&>tr:last-child>td:last-child]:rounded-br-card [&>tr:last-child>td]:border-0">
-                {rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    data-state={row.getIsSelected() ? "selected" : undefined}
-                    onClick={
-                      onRowClick ? () => onRowClick(row.original) : undefined
-                    }
-                    className={cn(
-                      /*
+                <tbody className="[&>tr:last-child>td:first-child]:rounded-bl-card [&>tr:last-child>td:last-child]:rounded-br-card [&>tr:last-child>td]:border-0">
+                  {rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      data-state={row.getIsSelected() ? "selected" : undefined}
+                      onClick={
+                        onRowClick ? () => onRowClick(row.original) : undefined
+                      }
+                      className={cn(
+                        /*
                         The hover and selected selectors are written out in
                         full rather than stacked as `hover:[&>td]:…`, which
                         Tailwind composes to `>td:hover` — that tints the one
@@ -497,39 +530,39 @@ export function DataGrid<TData>({
                         selected variant lands on `>td[data-state=selected]`,
                         an attribute that only ever sits on the `<tr>`.
                       */
-                      "[&>td]:transition-colors [&>td]:duration-fast [&>td]:ease-out",
-                      "[&:hover>td]:bg-surface-sunken",
-                      "[&[data-state=selected]>td]:bg-accent",
-                      onRowClick && "cursor-pointer"
-                    )}
-                  >
-                    {row.getVisibleCells().map((cell) => {
-                      const meta = cell.column.columnDef.meta as
-                        | DataGridColumnMeta
-                        | undefined;
-                      return (
-                        <td
-                          key={cell.id}
-                          className={cn(
-                            "border-b border-border px-3 py-3 align-middle",
-                            meta?.align === "right" && "tabular-nums",
-                            alignmentClass(meta),
-                            responsiveClass(meta),
-                            meta?.cellClassName
-                          )}
-                        >
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext()
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        "[&>td]:transition-colors [&>td]:duration-fast [&>td]:ease-out",
+                        "[&:hover>td]:bg-surface-sunken",
+                        "[&[data-state=selected]>td]:bg-accent",
+                        onRowClick && "cursor-pointer"
+                      )}
+                    >
+                      {row.getVisibleCells().map((cell) => {
+                        const meta = cell.column.columnDef.meta as
+                          | DataGridColumnMeta
+                          | undefined;
+                        return (
+                          <td
+                            key={cell.id}
+                            className={cn(
+                              "border-b border-border px-3 py-3 align-middle",
+                              meta?.align === "right" && "tabular-nums",
+                              alignmentClass(meta),
+                              responsiveClass(meta),
+                              meta?.cellClassName
+                            )}
+                          >
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

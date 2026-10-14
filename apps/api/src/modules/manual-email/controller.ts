@@ -13,7 +13,7 @@ export const manualEmailController = {
         reqId: req.id,
         organizationId: req.organizationId,
         userId: req.userId,
-        emailJobId: result.id
+        emailJobId: result.id,
       },
       "manual send accepted"
     );
@@ -29,7 +29,8 @@ export const manualEmailController = {
   async recipientSuggestions(req: Request, res: Response) {
     // organizationId is verified and pinned by requireOrgMembership (query).
     const suggestions = await manualEmailService.recentRecipients(
-      req.organizationId!
+      req.organizationId!,
+      req.userId!
     );
     res.json({ data: suggestions });
   },
@@ -38,8 +39,9 @@ export const manualEmailController = {
     // organizationId is verified and pinned by requireOrgMembership (query).
     const result = await manualEmailService.deliveryStatus(
       String(req.params.emailJobId),
-      req.organizationId!
+      req.organizationId!,
+      req.userId!
     );
     res.json({ data: result });
-  }
+  },
 };

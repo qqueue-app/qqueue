@@ -4,7 +4,7 @@ import { HttpError } from "../../lib/http-error.js";
 
 const queue = vi.hoisted(() => ({ remove: vi.fn() }));
 vi.mock("../../queues/email-sending.queue.js", () => ({
-  emailSendingQueue: queue
+  emailSendingQueue: queue,
 }));
 
 const { outboxService } = await import("./service.js");
@@ -12,7 +12,7 @@ const { outboxService } = await import("./service.js");
 beforeEach(() => {
   // OWNER: the outbox is unscoped, which is what most of these cases assert.
   prismaMock.organizationMember.findUnique.mockResolvedValue({
-    role: "OWNER"
+    role: "OWNER",
   } as never);
   queue.remove.mockReset();
   queue.remove.mockResolvedValue(1);
@@ -26,12 +26,13 @@ describe("outboxService.list", () => {
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where).toEqual({
+      NOT: { origin: "SYSTEM" },
       organizationId: "org_1",
-      status: { in: ["PENDING", "QUEUED", "PROCESSING"] }
+      status: { in: ["PENDING", "QUEUED", "PROCESSING"] },
     });
     expect(args.orderBy).toEqual([
       { scheduledAt: "asc" },
-      { createdAt: "asc" }
+      { createdAt: "asc" },
     ]);
   });
 
@@ -52,9 +53,9 @@ describe("outboxService.list", () => {
         smtpConnection: {
           name: "Primary",
           fromEmail: "hi@acme.com",
-          fromName: "Acme"
-        }
-      }
+          fromName: "Acme",
+        },
+      },
     ] as never);
 
     const [email] = await outboxService.list("org_1", "user_1");
@@ -65,7 +66,7 @@ describe("outboxService.list", () => {
     expect(email.sendingAccount).toEqual({
       name: "Primary",
       fromEmail: "hi@acme.com",
-      fromName: "Acme"
+      fromName: "Acme",
     });
     expect(email.scheduledAt).toBe("2026-07-22T09:00:00.000Z");
   });
@@ -83,8 +84,8 @@ describe("outboxService.list", () => {
         scheduledAt: null,
         createdAt: new Date("2026-07-21T09:00:00.000Z"),
         campaign: { name: "July newsletter" },
-        smtpConnection: null
-      }
+        smtpConnection: null,
+      },
     ] as never);
 
     const [email] = await outboxService.list("org_1", "user_1");
@@ -97,10 +98,10 @@ describe("outboxService.list", () => {
 describe("outboxService mailbox scope", () => {
   beforeEach(() => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
-      { smtpConnectionId: "smtp_1" }
+      { smtpConnectionId: "smtp_1" },
     ] as never);
     prismaMock.inboxAccountGrant.findMany.mockResolvedValue([] as never);
   });
@@ -112,12 +113,13 @@ describe("outboxService mailbox scope", () => {
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where).toEqual({
+      NOT: { origin: "SYSTEM" },
       organizationId: "org_1",
       status: { in: ["PENDING", "QUEUED", "PROCESSING"] },
       OR: [
         { smtpConnectionId: { in: ["smtp_1"] } },
-        { createdByUserId: "user_1" }
-      ]
+        { createdByUserId: "user_1" },
+      ],
     });
   });
 
@@ -134,8 +136,8 @@ describe("outboxService mailbox scope", () => {
     expect(args.where).toMatchObject({
       OR: [
         { smtpConnectionId: { in: ["smtp_1"] } },
-        { createdByUserId: "user_1" }
-      ]
+        { createdByUserId: "user_1" },
+      ],
     });
     expect(prismaMock.emailJob.update).not.toHaveBeenCalled();
   });
@@ -145,22 +147,26 @@ describe("outboxService.cancel", () => {
   it("marks the job cancelled and drops the delayed queue job", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
     prismaMock.emailJob.update.mockResolvedValue({
       id: "job_1",
-      status: "CANCELLED"
+      status: "CANCELLED",
     } as never);
 
     const result = await outboxService.cancel("job_1", "org_1", "user_1");
 
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
-      where: { id: "job_1", organizationId: "org_1" },
-      select: { id: true, status: true }
+      where: {
+        id: "job_1",
+        organizationId: "org_1",
+        NOT: { origin: "SYSTEM" },
+      },
+      select: { id: true, status: true },
     });
     expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
       where: { id: "job_1" },
-      data: { status: "CANCELLED" }
+      data: { status: "CANCELLED" },
     });
     // Must match the jobId both enqueue sites use.
     expect(queue.remove).toHaveBeenCalledWith("email-job_1");
@@ -170,43 +176,45 @@ describe("outboxService.cancel", () => {
   it("still cancels when the queue job is already gone", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue({
       id: "job_1",
-      status: "PENDING"
+      status: "PENDING",
     } as never);
     prismaMock.emailJob.update.mockResolvedValue({
       id: "job_1",
-      status: "CANCELLED"
+      status: "CANCELLED",
     } as never);
     queue.remove.mockRejectedValue(new Error("job is locked"));
 
     // Postgres is the source of truth: the send worker re-reads the row and
     // skips CANCELLED jobs, so a failed removal is not an error.
-    await expect(outboxService.cancel("job_1", "org_1", "user_1")).resolves.toEqual({
+    await expect(
+      outboxService.cancel("job_1", "org_1", "user_1")
+    ).resolves.toEqual({
       id: "job_1",
-      status: "CANCELLED"
+      status: "CANCELLED",
     });
   });
 
   it("404s for an email in another organization", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue(null as never);
 
-    await expect(outboxService.cancel("job_1", "org_1", "user_1")).rejects.toThrow(
-      new HttpError(404, "Email not found", "not_found")
-    );
+    await expect(
+      outboxService.cancel("job_1", "org_1", "user_1")
+    ).rejects.toThrow(new HttpError(404, "Email not found", "not_found"));
     expect(prismaMock.emailJob.update).not.toHaveBeenCalled();
   });
 
   it.each([
     ["SENT", "This email has already been sent"],
-    ["PROCESSING", "This email is already being sent"]
+    ["PROCESSING", "This email is already being sent"],
   ])("refuses to cancel a %s email", async (status, message) => {
     prismaMock.emailJob.findFirst.mockResolvedValue({
       id: "job_1",
-      status
+      status,
     } as never);
 
-    await expect(outboxService.cancel("job_1", "org_1", "user_1")).rejects.toThrow(
-      new HttpError(409, message, "conflict")
-    );
+    await expect(
+      outboxService.cancel("job_1", "org_1", "user_1")
+    ).rejects.toThrow(new HttpError(409, message, "conflict"));
     expect(queue.remove).not.toHaveBeenCalled();
   });
 });

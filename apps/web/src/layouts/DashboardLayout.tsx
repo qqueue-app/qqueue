@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import { useUnreadCount } from "../lib/use-unread-count.js";
 import { BrandWordmark } from "../components/BrandWordmark.js";
-import { DashboardSplash } from "../components/DashboardSplash.js";
 import { OfflineBanner } from "../components/OfflineBanner.js";
 import { IconButton } from "../components/ui/icon-button.js";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet.js";
@@ -42,13 +41,25 @@ const navSections: NavSection[] = [
     items: [
       // Daily mail comes first. The index route "/" is the inbox, so it
       // lights this destination up too.
-      { to: "/inbox", label: "Inbox", icon: Inbox, badge: "unread", activePaths: ["/"] },
+      {
+        to: "/inbox",
+        label: "Inbox",
+        icon: Inbox,
+        badge: "unread",
+        activePaths: ["/"],
+      },
       { to: "/email-studio", label: "Compose", icon: PenSquare },
       { to: "/sent", label: "Sent", icon: MailCheck },
       { to: "/drafts", label: "Drafts", icon: FileEdit },
       { to: "/outbox", label: "Outbox", icon: Send },
       // Statistics are useful, but this is a report rather than the mail home.
-      { to: "/insights", label: "Insights", icon: BarChart3, end: true },
+      {
+        to: "/insights",
+        label: "Insights",
+        icon: BarChart3,
+        end: true,
+        advanced: true,
+      },
     ],
   },
   {
@@ -57,16 +68,17 @@ const navSections: NavSection[] = [
       { to: "/contacts", label: "Contacts", icon: Users },
       // Not `end`: the Smart tab lives at /campaigns/lists/smart and has to
       // keep this item lit.
-      { to: "/campaigns/lists", label: "Lists", icon: List },
+      { to: "/campaigns/lists", label: "Lists", icon: List, advanced: true },
     ],
   },
   {
     heading: "Campaigns",
     items: [
-      { to: "/templates", label: "Templates", icon: FileText },
+      { to: "/templates", label: "Templates", icon: FileText, advanced: true },
       {
         to: "/campaigns",
         label: "Campaigns",
+        advanced: true,
         icon: Megaphone,
         // `end`, or /campaigns/lists lights up Campaigns and Lists at once.
         end: true,
@@ -105,16 +117,19 @@ const navSections: NavSection[] = [
   up on a phone without a second edit here.
 */
 const mobileTabs: MobileTab[] = [
-  { to: "/inbox", label: "Inbox", icon: Inbox, badge: "unread", activePaths: ["/"] },
+  {
+    to: "/inbox",
+    label: "Inbox",
+    icon: Inbox,
+    badge: "unread",
+    activePaths: ["/"],
+  },
   { to: "/email-studio", label: "Compose", icon: PenSquare, emphasis: true },
   { to: "/sent", label: "Sent", icon: MailCheck },
   { to: "/contacts", label: "Contacts", icon: Users },
 ];
 
 const tabBarPaths = mobileTabs.map((tab) => tab.to);
-
-const SPLASH_STORAGE_KEY = "qqueue.dashboard-splash-seen";
-const SPLASH_DURATION_MS = 3000;
 
 /**
  * The app shell.
@@ -135,17 +150,21 @@ const SPLASH_DURATION_MS = 3000;
 export function DashboardLayout() {
   const unread = useUnreadCount();
   const location = useLocation();
-  const [showSplash, setShowSplash] = useState(() => {
-    if (import.meta.env.MODE === "test") {
-      return false;
-    }
-
-    try {
-      return window.sessionStorage.getItem(SPLASH_STORAGE_KEY) !== "true";
-    } catch {
-      return true;
-    }
-  });
+  const [moreTools, setMoreTools] = useState(false);
+  const advancedRoute = navSections.some((section) =>
+    section.items.some(
+      (item) => item.advanced && location.pathname.startsWith(item.to)
+    )
+  );
+  const visibleSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.advanced || moreTools),
+    }))
+    .filter((section) => section.items.length);
+  useEffect(() => {
+    if (advancedRoute) setMoreTools(true);
+  }, [advancedRoute, location.pathname]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -155,27 +174,8 @@ export function DashboardLayout() {
     setMoreOpen(false);
   }, [location.pathname]);
 
-  useEffect(() => {
-    if (!showSplash) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      try {
-        window.sessionStorage.setItem(SPLASH_STORAGE_KEY, "true");
-      } catch {
-        // Private browsing or strict storage settings can block sessionStorage.
-      }
-      setShowSplash(false);
-    }, SPLASH_DURATION_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [showSplash]);
-
   return (
     <div className="min-h-screen bg-bg">
-      {showSplash ? <DashboardSplash /> : null}
-
       {/*
         Skip link.
 
@@ -210,7 +210,12 @@ export function DashboardLayout() {
         inset by the same token that sets this width so the two can't drift.
       */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-sidebar flex-col border-r border-border bg-surface pb-safe-b pl-safe-l pt-safe-t lg:flex">
-        <SidebarNav sections={navSections} unread={unread} />
+        <SidebarNav
+          sections={visibleSections}
+          unread={unread}
+          moreTools={moreTools}
+          onToggleMoreTools={() => setMoreTools((value) => !value)}
+        />
       </aside>
 
       {/* -------------------------------------------------------- tablet bar */}
@@ -246,7 +251,9 @@ export function DashboardLayout() {
             </IconButton>
           </div>
           <SidebarNav
-            sections={navSections}
+            sections={visibleSections}
+            moreTools={moreTools}
+            onToggleMoreTools={() => setMoreTools((value) => !value)}
             unread={unread}
             showBrand={false}
           />

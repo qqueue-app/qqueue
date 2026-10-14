@@ -6,7 +6,11 @@ import { prismaMock } from "../test/prisma-mock.js";
 // assert on the recorded connect/close calls and captured config.
 const h = vi.hoisted(() => {
   const state = {
-    mailbox: { exists: 0, uidNext: 1 } as { exists: number; uidNext: number },
+    mailbox: { exists: 0, uidNext: 1 } as {
+      exists: number;
+      uidNext: number;
+      uidValidity?: bigint;
+    },
     messages: [] as Array<{
       uid: number;
       flags?: Set<string>;
@@ -16,7 +20,7 @@ const h = vi.hoisted(() => {
     connectCalls: 0,
     closeCalls: 0,
     connectError: null as Error | null,
-    lastConfig: undefined as unknown
+    lastConfig: undefined as unknown,
   };
   const simpleParser = vi.fn();
   const storage = { putObject: vi.fn(), getObject: vi.fn() };
@@ -50,12 +54,12 @@ vi.mock("mailparser", () => ({ simpleParser: h.simpleParser }));
 vi.mock("./crypto.js", () => ({ decryptSecret: (v: string) => `dec:${v}` }));
 vi.mock("./storage.js", () => ({ storage: h.storage }));
 vi.mock("./logger.js", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 // dsn.ts runs for real; only its webhook fan-out (which would pull in BullMQ)
 // is stubbed.
 vi.mock("./outbound-webhooks.js", () => ({
-  enqueueLatestWebhookDeliveries: vi.fn()
+  enqueueLatestWebhookDeliveries: vi.fn(),
 }));
 
 const { syncInboxAccount, syncInboxAccounts } = await import("./inbox-sync.js");
@@ -77,9 +81,11 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     status: "ACTIVE",
     lastSyncedAt: null,
     lastSeenUid: 0,
+    uidValidity: null,
+    lastSyncError: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -106,22 +112,26 @@ describe("syncInboxAccounts", () => {
     await syncInboxAccounts();
 
     expect(prismaMock.inboxAccount.findMany).toHaveBeenCalledWith({
-      where: { status: "ACTIVE" }
+      where: { status: "ACTIVE" },
     });
     expect(h.state.connectCalls).toBe(0);
   });
 
   it("scopes the query by id and syncs each returned account", async () => {
-    prismaMock.inboxAccount.findMany.mockResolvedValue([makeAccount()] as never);
+    prismaMock.inboxAccount.findMany.mockResolvedValue([
+      makeAccount(),
+    ] as never);
     prismaMock.emailJob.findFirst.mockResolvedValue(null);
     h.state.mailbox = { exists: 1, uidNext: 6 };
     h.state.messages = [{ uid: 5, source: Buffer.from("raw") }];
-    h.simpleParser.mockResolvedValue({ from: { value: [{ address: "a@b.co" }] } });
+    h.simpleParser.mockResolvedValue({
+      from: { value: [{ address: "a@b.co" }] },
+    });
 
     await syncInboxAccounts("acc-1");
 
     expect(prismaMock.inboxAccount.findMany).toHaveBeenCalledWith({
-      where: { status: "ACTIVE", id: "acc-1" }
+      where: { status: "ACTIVE", id: "acc-1" },
     });
     expect(h.state.connectCalls).toBe(1);
     expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledTimes(1);
@@ -129,6 +139,28 @@ describe("syncInboxAccounts", () => {
 });
 
 describe("syncInboxAccount", () => {
+  it("resets the UID cursor when the mailbox identity changes, including the first sync after upgrade", async () => {
+    h.state.mailbox = { exists: 1, uidNext: 6, uidValidity: 99n };
+    h.state.messages = [{ uid: 5, source: "raw" }];
+    h.simpleParser.mockResolvedValue({
+      messageId: "<after-reset>",
+      from: { value: [{ address: "sender@example.com" }] },
+      attachments: [],
+    });
+    await syncInboxAccount(
+      makeAccount({ lastSeenUid: 500, uidValidity: null })
+    );
+    expect(h.simpleParser).toHaveBeenCalledWith("raw");
+    expect(prismaMock.inboxAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastSeenUid: 5,
+          uidValidity: "99",
+          lastSyncError: null,
+        }),
+      })
+    );
+  });
   it("builds the client from decrypted credentials", async () => {
     h.state.mailbox = { exists: 0, uidNext: 1 };
 
@@ -138,7 +170,7 @@ describe("syncInboxAccount", () => {
       host: "imap.acme.test",
       port: 993,
       secure: true,
-      auth: { user: "dec:enc-user", pass: "dec:enc-pass" }
+      auth: { user: "dec:enc-user", pass: "dec:enc-pass" },
     });
   });
 
@@ -150,8 +182,8 @@ describe("syncInboxAccount", () => {
         uid: 7,
         flags: new Set(["\\Seen"]),
         internalDate: new Date("2026-02-01T09:00:00.000Z"),
-        source: Buffer.from("raw")
-      }
+        source: Buffer.from("raw"),
+      },
     ];
     h.simpleParser.mockResolvedValue({
       messageId: "<msg-7@example.com>",
@@ -163,7 +195,7 @@ describe("syncInboxAccount", () => {
       subject: "Re: Hello",
       text: "hi",
       html: "<p>hi</p>",
-      date: new Date("2026-02-01T10:00:00.000Z")
+      date: new Date("2026-02-01T10:00:00.000Z"),
     });
 
     await syncInboxAccount(makeAccount({ lastSeenUid: 0 }));
@@ -171,17 +203,19 @@ describe("syncInboxAccount", () => {
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
       where: {
         organizationId: "org-1",
-        messageId: { in: ["<orig@example.com>", "<a@x>", "<orig@example.com>"] }
+        messageId: {
+          in: ["<orig@example.com>", "<a@x>", "<orig@example.com>"],
+        },
       },
-      select: { id: true }
+      select: { id: true },
     });
 
     const upsertArg = prismaMock.inboundMessage.upsert.mock.calls[0][0];
     expect(upsertArg.where).toEqual({
       inboxAccountId_messageId: {
         inboxAccountId: "acc-1",
-        messageId: "<msg-7@example.com>"
-      }
+        messageId: "<msg-7@example.com>",
+      },
     });
     expect(upsertArg.create).toMatchObject({
       organizationId: "org-1",
@@ -197,12 +231,12 @@ describe("syncInboxAccount", () => {
       html: "<p>hi</p>",
       receivedAt: new Date("2026-02-01T10:00:00.000Z"),
       readAt: new Date("2026-02-01T10:00:00.000Z"),
-      imapUid: 7
+      imapUid: 7,
     });
 
     expect(prismaMock.inboxAccount.update).toHaveBeenCalledWith({
       where: { id: "acc-1" },
-      data: expect.objectContaining({ lastSeenUid: 7 })
+      data: expect.objectContaining({ lastSeenUid: 7 }),
     });
     expect(h.state.closeCalls).toBe(1);
   });
@@ -211,12 +245,16 @@ describe("syncInboxAccount", () => {
     h.state.mailbox = { exists: 2, uidNext: 21 };
     h.state.messages = [
       { uid: 18 }, // no source -> skipped, simpleParser never called for it
-      { uid: 19, internalDate: new Date("2026-03-01T00:00:00.000Z"), source: "raw" }
+      {
+        uid: 19,
+        internalDate: new Date("2026-03-01T00:00:00.000Z"),
+        source: "raw",
+      },
     ];
     h.simpleParser.mockResolvedValue({
       // no messageId, from, to, cc, references, inReplyTo, date; html not a string
       html: false,
-      subject: undefined
+      subject: undefined,
     });
 
     await syncInboxAccount(makeAccount({ lastSeenUid: 10 }));
@@ -237,7 +275,7 @@ describe("syncInboxAccount", () => {
       html: undefined,
       receivedAt: new Date("2026-03-01T00:00:00.000Z"), // from internalDate
       readAt: undefined, // no \Seen flag
-      imapUid: 19
+      imapUid: 19,
     });
   });
 
@@ -247,7 +285,7 @@ describe("syncInboxAccount", () => {
     h.state.messages = [{ uid: 3, source: "raw" }];
     h.simpleParser.mockResolvedValue({
       references: "<solo@example.com>",
-      from: { value: [{ address: "x@y.co" }] }
+      from: { value: [{ address: "x@y.co" }] },
     });
 
     await syncInboxAccount(makeAccount());
@@ -255,8 +293,8 @@ describe("syncInboxAccount", () => {
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          messageId: { in: ["<solo@example.com>"] }
-        })
+          messageId: { in: ["<solo@example.com>"] },
+        }),
       })
     );
     const upsertArg = prismaMock.inboundMessage.upsert.mock.calls[0][0];
@@ -282,7 +320,9 @@ describe("syncInboxAccount", () => {
       "connection refused"
     );
     expect(h.state.closeCalls).toBe(1);
-    expect(prismaMock.inboxAccount.update).not.toHaveBeenCalled();
+    expect(prismaMock.inboxAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { lastSyncError: expect.any(String) } })
+    );
   });
 });
 
@@ -294,7 +334,7 @@ describe("inbound attachments", () => {
     h.state.messages = [{ uid: 5, source: "raw" }];
     h.simpleParser.mockResolvedValue({
       from: { value: [{ address: "a@b.co" }] },
-      attachments
+      attachments,
     });
   }
 
@@ -305,8 +345,8 @@ describe("inbound attachments", () => {
         contentType: "application/pdf",
         content: Buffer.from("pdf-bytes"),
         cid: "cid-1",
-        contentDisposition: "attachment"
-      }
+        contentDisposition: "attachment",
+      },
     ]);
 
     await syncInboxAccount(makeAccount());
@@ -325,7 +365,7 @@ describe("inbound attachments", () => {
       contentType: "application/pdf",
       size: Buffer.from("pdf-bytes").length,
       contentId: "cid-1",
-      isInline: false
+      isInline: false,
     });
   });
 
@@ -336,8 +376,8 @@ describe("inbound attachments", () => {
         contentType: "image/png",
         content: Buffer.from("png"),
         cid: "logo",
-        contentDisposition: "inline"
-      }
+        contentDisposition: "inline",
+      },
     ]);
 
     await syncInboxAccount(makeAccount());
@@ -352,8 +392,8 @@ describe("inbound attachments", () => {
       {
         filename: "../../etc/passwd",
         contentType: "text/plain",
-        content: Buffer.from("x")
-      }
+        content: Buffer.from("x"),
+      },
     ]);
 
     await syncInboxAccount(makeAccount());
@@ -369,8 +409,8 @@ describe("inbound attachments", () => {
         filename: "huge.bin",
         contentType: "application/octet-stream",
         // env default ceiling is 25MB.
-        content: Buffer.alloc(26 * 1024 * 1024)
-      }
+        content: Buffer.alloc(26 * 1024 * 1024),
+      },
     ]);
 
     await syncInboxAccount(makeAccount());
@@ -387,8 +427,8 @@ describe("inbound attachments", () => {
       {
         filename: "a.txt",
         contentType: "text/plain",
-        content: Buffer.from("x")
-      }
+        content: Buffer.from("x"),
+      },
     ]);
     h.storage.putObject.mockRejectedValue(new Error("s3 down"));
 
@@ -403,11 +443,11 @@ describe("inbound attachments", () => {
       {
         filename: "a.txt",
         contentType: "text/plain",
-        content: Buffer.from("x")
-      }
+        content: Buffer.from("x"),
+      },
     ]);
     prismaMock.inboundAttachment.findMany.mockResolvedValue([
-      { id: "existing" }
+      { id: "existing" },
     ] as never);
 
     await syncInboxAccount(makeAccount());
@@ -431,8 +471,11 @@ describe("DSN handling", () => {
     messageId: "<dsn-1@mx.example.test>",
     from: {
       value: [
-        { address: "mailer-daemon@mx.example.test", name: "Mail Delivery System" }
-      ]
+        {
+          address: "mailer-daemon@mx.example.test",
+          name: "Mail Delivery System",
+        },
+      ],
     },
     subject: "Delivery Status Notification (Failure)",
     text: [
@@ -442,8 +485,8 @@ describe("DSN handling", () => {
       "Action: failed",
       "Status: 5.1.1",
       "Diagnostic-Code: smtp; 550 5.1.1 user unknown",
-      ""
-    ].join("\n")
+      "",
+    ].join("\n"),
   };
 
   it("flags a first-seen DSN, fails the SENT job, and suppresses the recipient", async () => {
@@ -453,7 +496,7 @@ describe("DSN handling", () => {
     prismaMock.emailJob.findFirst.mockResolvedValue({
       id: "job-9",
       status: "SENT",
-      campaignRunId: null
+      campaignRunId: null,
     } as never);
 
     await syncInboxAccount(makeAccount());
@@ -469,20 +512,20 @@ describe("DSN handling", () => {
           source: "dsn",
           correlation: "recipient-recency",
           finalRecipient: "bob@example.com",
-          bounceType: "HARD"
-        })
-      })
+          bounceType: "HARD",
+        }),
+      }),
     });
     expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
       where: { id: "job-9", status: "SENT" },
-      data: { status: "FAILED" }
+      data: { status: "FAILED" },
     });
     expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
           email: "bob@example.com",
-          reason: "BOUNCE"
-        })
+          reason: "BOUNCE",
+        }),
       })
     );
     // The sync itself still completes normally.
@@ -492,7 +535,7 @@ describe("DSN handling", () => {
   it("re-syncing the same DSN stores the row but repeats no bounce side effects", async () => {
     syncWithParsedMail(dsnMail);
     prismaMock.inboundMessage.findUnique.mockResolvedValue({
-      id: "msg-1"
+      id: "msg-1",
     } as never);
 
     await syncInboxAccount(makeAccount());
@@ -509,7 +552,7 @@ describe("DSN handling", () => {
       messageId: "<reply-1@example.com>",
       from: { value: [{ address: "human@example.com" }] },
       subject: "Re: Hello",
-      text: "Sounds good!"
+      text: "Sounds good!",
     });
 
     await syncInboxAccount(makeAccount());

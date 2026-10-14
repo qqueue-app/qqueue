@@ -5,13 +5,13 @@ import type {
   SentEmailDetail,
   SentEmailEvent,
   SentEmailPage,
-  SentEmailQueryInput
+  SentEmailQueryInput,
 } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
   resolveMailboxAccess,
-  type MailboxAccess
+  type MailboxAccess,
 } from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 
@@ -35,7 +35,7 @@ const OUTCOME_EVENT = {
   opened: "OPENED",
   clicked: "CLICKED",
   bounced: "BOUNCED",
-  complained: "COMPLAINED"
+  complained: "COMPLAINED",
 } as const;
 
 function buildWhere(
@@ -44,10 +44,9 @@ function buildWhere(
 ): Prisma.EmailJobWhereInput {
   const where: Prisma.EmailJobWhereInput = {
     organizationId: query.organizationId,
+    NOT: { origin: "SYSTEM" },
     status:
-      query.outcome === "failed"
-        ? "FAILED"
-        : { in: [...ARCHIVED_STATUSES] },
+      query.outcome === "failed" ? "FAILED" : { in: [...ARCHIVED_STATUSES] },
     /*
       Mailbox scope goes in `AND`, not spread into this object: it is itself an
       OR, and the free-text search below sets `OR` too. A single object would
@@ -57,7 +56,7 @@ function buildWhere(
       Omitted entirely for OWNER/ADMIN rather than added as an empty clause, so
       the unrestricted query stays exactly the query it was.
     */
-    ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] })
+    ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] }),
   };
 
   if (query.origin !== "all") {
@@ -92,7 +91,7 @@ function buildWhere(
       // toEmail is the comma-joined To set for multi-recipient manual sends, so
       // a substring match finds an address wherever it sits in the list.
       { toEmail: { contains: query.q, mode: "insensitive" } },
-      { campaign: { name: { contains: query.q, mode: "insensitive" } } }
+      { campaign: { name: { contains: query.q, mode: "insensitive" } } },
     ];
   }
 
@@ -177,17 +176,16 @@ function toSentEmail(job: ArchivedJob): SentEmail {
       ? {
           name: job.smtpConnection.name,
           fromEmail: job.smtpConnection.fromEmail,
-          fromName: job.smtpConnection.fromName
+          fromName: job.smtpConnection.fromName,
         }
       : null,
     delivered,
     bounced,
     complained,
     opens,
-    clicks
+    clicks,
   };
 }
-
 
 /*
   The readable half of an event's metadata.
@@ -265,7 +263,7 @@ function foldEvents(events: ArchivedEvent[]): SentEmailEvent[] {
         detail,
         count: 1,
         lastOccurredAt: null,
-        automatedCount: automated
+        automatedCount: automated,
       });
       continue;
     }
@@ -307,7 +305,6 @@ function failureReasonOf(
 }
 
 export const sentService = {
-
   /**
    * One archived message in full, body included.
    *
@@ -329,8 +326,9 @@ export const sentService = {
       where: {
         id,
         organizationId,
+        NOT: { origin: "SYSTEM" },
         status: { in: [...ARCHIVED_STATUSES] },
-        ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] })
+        ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] }),
       },
       select: {
         id: true,
@@ -347,7 +345,7 @@ export const sentService = {
         campaignId: true,
         campaign: { select: { name: true } },
         smtpConnection: {
-          select: { name: true, fromEmail: true, fromName: true }
+          select: { name: true, fromEmail: true, fromName: true },
         },
         html: true,
         text: true,
@@ -357,9 +355,9 @@ export const sentService = {
             filename: true,
             contentType: true,
             size: true,
-            cid: true
+            cid: true,
           },
-          orderBy: { createdAt: "asc" }
+          orderBy: { createdAt: "asc" },
         },
         // Oldest first: this is read top-to-bottom as the message's history.
         events: {
@@ -367,11 +365,11 @@ export const sentService = {
             id: true,
             type: true,
             occurredAt: true,
-            metadata: true
+            metadata: true,
           },
-          orderBy: { occurredAt: "asc" }
-        }
-      }
+          orderBy: { occurredAt: "asc" },
+        },
+      },
     });
 
     if (!job) {
@@ -393,7 +391,7 @@ export const sentService = {
         // A Content-ID is what makes a part inline: the body references it with
         // `cid:` and renders it in place instead of offering a download.
         isInline: Boolean(attachment.cid),
-        contentId: attachment.cid
+        contentId: attachment.cid,
       })
     );
 
@@ -407,7 +405,7 @@ export const sentService = {
       messageId: job.messageId,
       attachments,
       events,
-      failureReason: failureReasonOf(job.status, recorded)
+      failureReason: failureReasonOf(job.status, recorded),
     };
   },
 
@@ -423,7 +421,10 @@ export const sentService = {
    * the whole organization's mail log, but a MEMBER sees only what went out
    * from a mailbox they hold, plus their own sends.
    */
-  async list(query: SentEmailQueryInput, userId: string): Promise<SentEmailPage> {
+  async list(
+    query: SentEmailQueryInput,
+    userId: string
+  ): Promise<SentEmailPage> {
     const access = await resolveMailboxAccess(userId, query.organizationId);
     const where = buildWhere(query, access);
 
@@ -438,7 +439,7 @@ export const sentService = {
         */
         orderBy: [
           { sentAt: { sort: "desc", nulls: "last" } },
-          { createdAt: "desc" }
+          { createdAt: "desc" },
         ],
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
@@ -455,23 +456,23 @@ export const sentService = {
           campaignId: true,
           campaign: { select: { name: true } },
           smtpConnection: {
-            select: { name: true, fromEmail: true, fromName: true }
+            select: { name: true, fromEmail: true, fromName: true },
           },
           // Folded into counts and flags below. The metadata comes along
           // because an automated open (a scanner, a privacy proxy) must not be
           // counted as engagement — it is a small JSON blob per event, and the
           // alternative is a second query per row.
-          events: { select: { type: true, metadata: true } }
-        }
+          events: { select: { type: true, metadata: true } },
+        },
       }),
-      prisma.emailJob.count({ where })
+      prisma.emailJob.count({ where }),
     ]);
 
     return {
       rows: (jobs as unknown as ArchivedJob[]).map(toSentEmail),
       total,
       page: query.page,
-      pageSize: query.pageSize
+      pageSize: query.pageSize,
     };
-  }
+  },
 };

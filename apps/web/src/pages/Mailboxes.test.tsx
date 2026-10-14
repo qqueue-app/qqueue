@@ -13,7 +13,7 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
   // Used by actions that report progress before their result.
   loading: vi.fn(),
-  message: vi.fn()
+  message: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast }));
 
@@ -238,9 +238,7 @@ describe("Mailboxes", () => {
       error: "connect timeout",
     });
     renderWithProviders(<Mailboxes />);
-    expect(
-      await screen.findByText(/couldn't reach it/i)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/couldn't reach it/i)).toBeInTheDocument();
   });
 
   // Answering it at creation saves an immediate follow-up edit on the very
@@ -249,7 +247,9 @@ describe("Mailboxes", () => {
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
 
-    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
+    await user.click(
+      await screen.findByRole("button", { name: "New mailbox" })
+    );
     await user.type(await screen.findByLabelText("Address"), "noreply");
     await user.type(
       screen.getByLabelText("Reply-To (optional)"),
@@ -268,11 +268,11 @@ describe("Mailboxes", () => {
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
 
-    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
-    await user.type(await screen.findByLabelText("Address"), "new");
     await user.click(
-      screen.getByRole("button", { name: /Create mailbox/i })
+      await screen.findByRole("button", { name: "New mailbox" })
     );
+    await user.type(await screen.findByLabelText("Address"), "new");
+    await user.click(screen.getByRole("button", { name: /Create mailbox/i }));
 
     await waitFor(() =>
       expect(mockedApi.provisionMailbox).toHaveBeenCalledWith({
@@ -288,7 +288,9 @@ describe("Mailboxes", () => {
     expect(
       await screen.findByText("generated-password-123")
     ).toBeInTheDocument();
-    expect(screen.getByText(/shown once and\s+never again/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/shown once and\s+never again/i)
+    ).toBeInTheDocument();
     // Verified provisioning shows no credential warning.
     expect(screen.queryByText(/haven't verified yet/i)).not.toBeInTheDocument();
   });
@@ -304,11 +306,11 @@ describe("Mailboxes", () => {
     });
     renderWithProviders(<Mailboxes />);
 
-    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
-    await user.type(await screen.findByLabelText("Address"), "new");
     await user.click(
-      screen.getByRole("button", { name: /Create mailbox/i })
+      await screen.findByRole("button", { name: "New mailbox" })
     );
+    await user.type(await screen.findByLabelText("Address"), "new");
+    await user.click(screen.getByRole("button", { name: /Create mailbox/i }));
 
     // The password dialog still opens (provisioning succeeded)...
     expect(
@@ -379,7 +381,9 @@ describe("Mailboxes", () => {
     expect(within(people).getByText("owner@acme.test")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Search people"), "ama");
-    expect(within(people).queryByText("owner@acme.test")).not.toBeInTheDocument();
+    expect(
+      within(people).queryByText("owner@acme.test")
+    ).not.toBeInTheDocument();
     expect(within(people).getByText("ama@acme.test")).toBeInTheDocument();
   });
 
@@ -497,7 +501,9 @@ describe("Mailboxes", () => {
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
     expect(screen.getByText("billing@other.test")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: "Filter by domain" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "Filter by domain" })
+    );
     await user.click(
       await screen.findByRole("option", { name: "other.test (1)" })
     );
@@ -541,7 +547,9 @@ describe("Mailboxes", () => {
     renderWithProviders(<Mailboxes />);
 
     expect(await screen.findByText("support@acme.test")).toBeInTheDocument();
-    await user.click(screen.getByRole("combobox", { name: "Filter by domain" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "Filter by domain" })
+    );
     await user.click(
       await screen.findByRole("option", { name: "other.test (0)" })
     );
@@ -572,9 +580,7 @@ describe("Mailboxes", () => {
     // resolution remounts the rows. Wait for it, or the menu trigger is a
     // detached node by the time it gets clicked.
     await screen.findByText("+1");
-    await user.click(
-      screen.getByRole("button", { name: "Connect to QQueue" })
-    );
+    await user.click(screen.getByRole("button", { name: "Connect to QQueue" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(
       within(dialog).getByRole("button", { name: /Connect mailbox/i })
@@ -600,7 +606,9 @@ describe("Mailboxes", () => {
 
     await screen.findByText("support@acme.test");
     await screen.findByText("+1");
-    await user.click(screen.getByRole("button", { name: "Edit mailbox" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit sender details" })
+    );
 
     const dialog = await screen.findByRole("dialog");
     await user.type(
@@ -608,7 +616,7 @@ describe("Mailboxes", () => {
       "replies@acme.test"
     );
     await user.click(
-      within(dialog).getByRole("button", { name: /Save mailbox/i })
+      within(dialog).getByRole("button", { name: /Save sender details/i })
     );
 
     await waitFor(() =>
@@ -629,12 +637,14 @@ describe("Mailboxes", () => {
 
     await screen.findByText("support@acme.test");
     await screen.findByText("+1");
-    await user.click(screen.getByRole("button", { name: "Edit mailbox" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit sender details" })
+    );
 
     const dialog = await screen.findByRole("dialog");
     await user.clear(within(dialog).getByLabelText("Reply-To (optional)"));
     await user.click(
-      within(dialog).getByRole("button", { name: /Save mailbox/i })
+      within(dialog).getByRole("button", { name: /Save sender details/i })
     );
 
     // "" and not an omitted key: the API reads a missing field as "unchanged".
@@ -656,7 +666,7 @@ describe("Mailboxes", () => {
     await openRowMenu(user, "hello@acme.test");
 
     expect(
-      screen.queryByRole("menuitem", { name: "Edit mailbox" })
+      screen.queryByRole("menuitem", { name: "Edit sender details" })
     ).not.toBeInTheDocument();
   });
 
@@ -797,7 +807,9 @@ describe("Mailboxes", () => {
     });
     const user = userEvent.setup();
     renderWithProviders(<Mailboxes />);
-    await user.click(await screen.findByRole("button", { name: "New mailbox" }));
+    await user.click(
+      await screen.findByRole("button", { name: "New mailbox" })
+    );
     expect(
       await screen.findByText(/don't have access to any domains/i)
     ).toBeInTheDocument();

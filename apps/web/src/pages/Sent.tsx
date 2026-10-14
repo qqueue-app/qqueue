@@ -17,11 +17,7 @@ import { EmptyState } from "../components/EmptyState.js";
 import { api, type SentEmail, type SentEmailOutcome } from "../lib/api.js";
 import { formatFullDate, formatTimestamp } from "../lib/format.js";
 import { qk } from "../lib/query-client.js";
-import {
-  ORIGIN_LABEL,
-  engagementLabel,
-  outcomeOf,
-} from "../lib/sent-email.js";
+import { ORIGIN_LABEL, engagementLabel, outcomeOf } from "../lib/sent-email.js";
 import { useOrgQuery } from "../lib/use-api.js";
 import { useSession } from "../lib/session-context.js";
 import { cn } from "../lib/utils.js";
@@ -74,7 +70,6 @@ const ORIGIN_OPTIONS: { value: OriginFilter; label: string }[] = [
   { value: "MANUAL", label: ORIGIN_LABEL.MANUAL },
   { value: "CAMPAIGN", label: ORIGIN_LABEL.CAMPAIGN },
   { value: "TRANSACTIONAL", label: ORIGIN_LABEL.TRANSACTIONAL },
-  { value: "SYSTEM", label: ORIGIN_LABEL.SYSTEM },
 ];
 
 const OUTCOME_OPTIONS: { value: SentEmailOutcome; label: string }[] = [
@@ -525,7 +520,10 @@ export function Sent() {
               >
                 <div className="flex flex-col gap-field">
                   <Label htmlFor="sent-outcome">Outcome</Label>
-                  <Select value={outcome} onValueChange={onFilterChange("outcome")}>
+                  <Select
+                    value={outcome}
+                    onValueChange={onFilterChange("outcome")}
+                  >
                     <SelectTrigger id="sent-outcome" width="choice">
                       <SelectValue />
                     </SelectTrigger>
@@ -541,7 +539,10 @@ export function Sent() {
 
                 <div className="flex flex-col gap-field">
                   <Label htmlFor="sent-type">Type</Label>
-                  <Select value={origin} onValueChange={onFilterChange("origin")}>
+                  <Select
+                    value={origin}
+                    onValueChange={onFilterChange("origin")}
+                  >
                     <SelectTrigger id="sent-type" width="choice">
                       <SelectValue />
                     </SelectTrigger>
@@ -557,7 +558,10 @@ export function Sent() {
 
                 <div className="flex flex-col gap-field">
                   <Label htmlFor="sent-account">Sent from</Label>
-                  <Select value={accountId} onValueChange={onFilterChange("account")}>
+                  <Select
+                    value={accountId}
+                    onValueChange={onFilterChange("account")}
+                  >
                     <SelectTrigger id="sent-account" width="choice">
                       <SelectValue />
                     </SelectTrigger>
@@ -642,7 +646,9 @@ export function Sent() {
               <IconButton
                 label="Previous page"
                 variant="outline"
-                onClick={() => setParam({ page: String(Math.max(1, page - 1)) })}
+                onClick={() =>
+                  setParam({ page: String(Math.max(1, page - 1)) })
+                }
                 disabled={page <= 1}
               >
                 <ChevronLeft />

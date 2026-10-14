@@ -18,6 +18,9 @@ interface BodyEditorProps {
   /** Notified whenever the active mode changes, for callers that adapt around it. */
   onModeChange?: (mode: BodyEditorMode) => void;
   className?: string;
+  allowSource?: boolean;
+  ariaLabel?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -46,7 +49,10 @@ export function BodyEditor({
   showVariables,
   onUploadImage,
   onModeChange,
-  className
+  className,
+  allowSource = true,
+  ariaLabel,
+  disabled = false,
 }: BodyEditorProps) {
   const [mode, setMode] = useState<BodyEditorMode>("rich");
   const [prepared, setPrepared] = useState(() => toEditorHtml(value));
@@ -89,57 +95,59 @@ export function BodyEditor({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex items-center gap-1 rounded-control border bg-muted/40 p-1">
-          <button
-            type="button"
-            onClick={() => setMode("rich")}
-            title="Rich text"
-            className={cn(
-              // 24px tall was under half §5's touch minimum, on the control
-              // that switches the whole authoring surface. Full height on a
-              // phone; unchanged from the tablet breakpoint up.
-              "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
-              mode === "rich" && "bg-background text-foreground shadow-sm"
-            )}
-          >
-            <Pencil />
-            Rich text
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("html")}
-            title="Edit the raw HTML"
-            className={cn(
-              // 24px tall was under half §5's touch minimum, on the control
-              // that switches the whole authoring surface. Full height on a
-              // phone; unchanged from the tablet breakpoint up.
-              "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
-              mode === "html" && "bg-background text-foreground shadow-sm"
-            )}
-          >
-            <Code2 />
-            HTML
-          </button>
-        </div>
+      {allowSource ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-1 rounded-control border bg-muted/40 p-1">
+            <button
+              type="button"
+              onClick={() => setMode("rich")}
+              title="Rich text"
+              className={cn(
+                // 24px tall was under half §5's touch minimum, on the control
+                // that switches the whole authoring surface. Full height on a
+                // phone; unchanged from the tablet breakpoint up.
+                "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
+                mode === "rich" && "bg-background text-foreground shadow-sm"
+              )}
+            >
+              <Pencil />
+              Rich text
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("html")}
+              title="Edit the raw HTML"
+              className={cn(
+                // 24px tall was under half §5's touch minimum, on the control
+                // that switches the whole authoring surface. Full height on a
+                // phone; unchanged from the tablet breakpoint up.
+                "inline-flex min-h-touch items-center gap-field rounded px-3 py-1 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-2 [&_svg]:size-3.5",
+                mode === "html" && "bg-background text-foreground shadow-sm"
+              )}
+            >
+              <Code2 />
+              HTML
+            </button>
+          </div>
 
-        {fullDocument ? (
-          <Badge variant="warning" title="No MJML wrapper is applied.">
-            Full HTML document — sent as-is
-          </Badge>
-        ) : null}
+          {fullDocument ? (
+            <Badge variant="warning" title="No MJML wrapper is applied.">
+              Full HTML document — sent as-is
+            </Badge>
+          ) : null}
 
-        {/* Says what rich text is doing with markup it has no formatting for,
+          {/* Says what rich text is doing with markup it has no formatting for,
             so the framed blocks in the editor aren't a surprise. */}
-        {mode === "rich" && frozen > 0 ? (
-          <span className="text-meta text-muted-foreground">
-            {frozen === 1
-              ? "1 part is kept as HTML"
-              : `${frozen} parts are kept as HTML`}{" "}
-            — edit those in place, or switch to HTML for the whole email.
-          </span>
-        ) : null}
-      </div>
+          {mode === "rich" && frozen > 0 ? (
+            <span className="text-meta text-muted-foreground">
+              {frozen === 1
+                ? "1 part is kept as HTML"
+                : `${frozen} parts are kept as HTML`}{" "}
+              — edit those in place, or switch to HTML for the whole email.
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {mode === "rich" ? (
         <RichTextEditor
@@ -149,10 +157,13 @@ export function BodyEditor({
           variables={variables}
           showVariables={showVariables}
           onUploadImage={onUploadImage}
+          ariaLabel={ariaLabel}
+          disabled={disabled}
         />
       ) : (
         <div className="space-y-field">
           <textarea
+            disabled={disabled}
             value={value}
             onChange={(event) => {
               // Not this component's own output, so the next switch back to
@@ -163,7 +174,8 @@ export function BodyEditor({
             spellCheck={false}
             aria-label="HTML source"
             placeholder={
-              placeholder ?? "Paste your HTML here — the preview updates as you type."
+              placeholder ??
+              "Paste your HTML here — the preview updates as you type."
             }
             className="min-h-pane-lg w-full rounded-control border bg-background px-3 py-2 font-mono text-meta leading-relaxed text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />

@@ -1,4 +1,5 @@
 import { ApiError, api, type EmailDraft } from "./api.js";
+import { getSession } from "./session.js";
 
 /**
  * Composer drafts that haven't reached the server yet.
@@ -44,6 +45,7 @@ export type PendingDraftPayload = {
 };
 
 export interface PendingDraft {
+  userId: string;
   /**
    * Stable across the life of one composed message, and generated on the
    * client. The server id can't be the key: a draft written while offline has
@@ -120,12 +122,16 @@ export async function listPendingDrafts(
   organizationId?: string
 ): Promise<PendingDraft[]> {
   try {
+    const userId = getSession().user?.id;
+    if (!userId) return [];
     const all = await run<PendingDraft[]>("readonly", (store) =>
       store.getAll()
     );
-    return organizationId
-      ? all.filter((draft) => draft.organizationId === organizationId)
-      : all;
+    return all.filter(
+      (draft) =>
+        draft.userId === userId &&
+        (!organizationId || draft.organizationId === organizationId)
+    );
   } catch {
     return [];
   }
@@ -150,6 +156,7 @@ export async function flushPendingDrafts(
   const synced: Array<{ localId: string; draft: EmailDraft }> = [];
 
   for (const record of pending) {
+    if (getSession().user?.id !== record.userId) break;
     try {
       const draft = record.draftId
         ? await api.updateEmailDraft(record.draftId, record.payload)
@@ -160,12 +167,21 @@ export async function flushPendingDrafts(
       await deletePendingDraft(record.localId);
       synced.push({ localId: record.localId, draft });
     } catch (error) {
+      if (
+        error instanceof ApiError &&
+        (error.status === 401 || error.status === 403)
+      )
+        break;
       /*
         Still unreachable — stop. Every remaining record will fail the same
         way, and walking the whole queue to collect identical failures wastes a
         phone's radio. They keep for the next attempt.
       */
-      if (!(error instanceof ApiError) || error.status === 0 || error.status >= 500) {
+      if (
+        !(error instanceof ApiError) ||
+        error.status === 0 ||
+        error.status >= 500
+      ) {
         break;
       }
 

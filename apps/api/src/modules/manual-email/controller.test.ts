@@ -14,8 +14,8 @@ vi.mock("./service.js", () => ({
   manualEmailService: {
     send: vi.fn(),
     preview: vi.fn(),
-    deliveryStatus: vi.fn()
-  }
+    deliveryStatus: vi.fn(),
+  },
 }));
 
 const { manualEmailController } = await import("./controller.js");
@@ -43,13 +43,10 @@ describe("manualEmailController.send", () => {
       organizationId: "org_1",
       to: ["recipient@example.com"],
       subject: "Release notes",
-      html: "<p>Hello</p>"
+      html: "<p>Hello</p>",
     };
 
-    await manualEmailController.send(
-      { body, userId: "usr_1" } as Request,
-      res
-    );
+    await manualEmailController.send({ body, userId: "usr_1" } as Request, res);
 
     // userId comes from requireAuth, not the body — it is passed separately so
     // the resulting EmailJob records createdByUserId.
@@ -71,9 +68,9 @@ describe("manualEmailController.send", () => {
           contactIds: ["con_1"],
           subject: "Hi",
           text: "Hello",
-          smtpConnectionId: "smtp_2"
+          smtpConnectionId: "smtp_2",
         },
-        userId: "usr_1"
+        userId: "usr_1",
       } as Request,
       mockRes()
     );
@@ -93,9 +90,9 @@ describe("manualEmailController.send", () => {
           body: {
             organizationId: "org_1",
             subject: "Nobody",
-            html: "<p>Hi</p>"
+            html: "<p>Hi</p>",
           },
-          userId: "usr_1"
+          userId: "usr_1",
         } as Request,
         mockRes()
       )
@@ -110,9 +107,9 @@ describe("manualEmailController.send", () => {
           body: {
             organizationId: "org_1",
             to: ["recipient@example.com"],
-            subject: "Empty"
+            subject: "Empty",
           },
-          userId: "usr_1"
+          userId: "usr_1",
         } as Request,
         mockRes()
       )
@@ -126,7 +123,7 @@ describe("manualEmailController.preview", () => {
     const result = {
       subject: "Release notes",
       html: "<p>Hello</p>",
-      recipients: { to: ["a@example.com"], cc: [], bcc: [], total: 1 }
+      recipients: { to: ["a@example.com"], cc: [], bcc: [], total: 1 },
     };
     vi.mocked(manualEmailService.preview).mockResolvedValue(result as never);
     const res = mockRes();
@@ -137,8 +134,8 @@ describe("manualEmailController.preview", () => {
           organizationId: "org_1",
           subject: "Release notes",
           html: "<p>Hello</p>",
-          to: ["a@example.com"]
-        }
+          to: ["a@example.com"],
+        },
       } as Request,
       res
     );
@@ -158,7 +155,7 @@ describe("manualEmailController.preview", () => {
     );
 
     expect(manualEmailService.preview).toHaveBeenCalledWith({
-      organizationId: "org_1"
+      organizationId: "org_1",
     });
   });
 
@@ -172,19 +169,28 @@ describe("manualEmailController.preview", () => {
 
 describe("manualEmailController.status", () => {
   it("returns per-recipient delivery status scoped to the pinned org", async () => {
-    const result = { recipients: [{ email: "a@example.com", status: "delivered" }] };
-    vi.mocked(manualEmailService.deliveryStatus).mockResolvedValue(result as never);
+    const result = {
+      recipients: [{ email: "a@example.com", status: "delivered" }],
+    };
+    vi.mocked(manualEmailService.deliveryStatus).mockResolvedValue(
+      result as never
+    );
     const res = mockRes();
 
     await manualEmailController.status(
       {
         params: { emailJobId: "job_1" },
-        organizationId: "org_1"
+        userId: "usr_1",
+        organizationId: "org_1",
       } as unknown as Request,
       res
     );
 
-    expect(manualEmailService.deliveryStatus).toHaveBeenCalledWith("job_1", "org_1");
+    expect(manualEmailService.deliveryStatus).toHaveBeenCalledWith(
+      "job_1",
+      "org_1",
+      "usr_1"
+    );
     expect(res.json).toHaveBeenCalledWith({ data: result });
   });
 });

@@ -20,7 +20,7 @@ function run(command: string, args: string[]) {
     stdio: "inherit",
     env: process.env,
     // pnpm is a .cmd shim on Windows, which Node refuses to spawn shell-less.
-    shell: process.platform === "win32"
+    shell: process.platform === "win32",
   });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed`);
@@ -68,7 +68,9 @@ function startFakeSmtp(): Promise<{
 
         const upper = line.toUpperCase();
         if (upper.startsWith("EHLO") || upper.startsWith("HELO")) {
-          socket.write("250-qqueue-smoke\r\n250-AUTH PLAIN LOGIN\r\n250 OK\r\n");
+          socket.write(
+            "250-qqueue-smoke\r\n250-AUTH PLAIN LOGIN\r\n250 OK\r\n"
+          );
         } else if (upper.startsWith("AUTH PLAIN")) {
           socket.write("235 authenticated\r\n");
         } else if (upper.startsWith("AUTH LOGIN")) {
@@ -132,7 +134,7 @@ async function main() {
     "prisma",
     "generate",
     "--schema",
-    "apps/api/prisma/schema"
+    "apps/api/prisma/schema",
   ]);
 
   run("pnpm", [
@@ -141,7 +143,7 @@ async function main() {
     "migrate",
     "deploy",
     "--schema",
-    "apps/api/prisma/schema"
+    "apps/api/prisma/schema",
   ]);
 
   const [
@@ -150,22 +152,23 @@ async function main() {
     { startEmailSendingWorker },
     { emailSendingQueue },
     { campaignProcessingQueue },
-    { webhookDeliveryQueue }
-  ] =
-    await Promise.all([
-      import("../apps/api/src/app.js"),
-      import("../apps/api/src/lib/prisma.js"),
-      import("../apps/worker/src/workers/email-sending.worker.js"),
-      import("../apps/api/src/queues/email-sending.queue.js"),
-      import("../apps/api/src/queues/campaign-processing.queue.js"),
-      import("../apps/api/src/queues/webhook-delivery.queue.js")
-    ]);
+    { webhookDeliveryQueue },
+    { inboxSyncQueue },
+  ] = await Promise.all([
+    import("../apps/api/src/app.js"),
+    import("../apps/api/src/lib/prisma.js"),
+    import("../apps/worker/src/workers/email-sending.worker.js"),
+    import("../apps/api/src/queues/email-sending.queue.js"),
+    import("../apps/api/src/queues/campaign-processing.queue.js"),
+    import("../apps/api/src/queues/webhook-delivery.queue.js"),
+    import("../apps/api/src/queues/inbox-sync.queue.js"),
+  ]);
 
   const {
     server: smtpServer,
     port: smtpPort,
     sockets: smtpSockets,
-    messages: smtpMessages
+    messages: smtpMessages,
   } = await startFakeSmtp();
   const worker = startEmailSendingWorker();
   const app = createApp();
@@ -177,7 +180,7 @@ async function main() {
       .send({
         email,
         password: "password123",
-        organizationName: "Smoke Test"
+        organizationName: "Smoke Test",
       })
       .expect(201);
 
@@ -190,7 +193,10 @@ async function main() {
     // second walk-up signup must be rejected.
     await request(app)
       .post("/api/v1/auth/register")
-      .send({ email: `second-${Date.now()}@example.com`, password: "password123" })
+      .send({
+        email: `second-${Date.now()}@example.com`,
+        password: "password123",
+      })
       .expect(403);
 
     const midSetup = await request(app).get("/api/v1/setup/status").expect(200);
@@ -211,7 +217,9 @@ async function main() {
       .send({ allowPublicRegistration: false })
       .expect(201);
 
-    const completed = await request(app).get("/api/v1/setup/status").expect(200);
+    const completed = await request(app)
+      .get("/api/v1/setup/status")
+      .expect(200);
     if (completed.body.data.setupCompleted !== true) {
       throw new Error(
         `Setup completion not reflected: ${JSON.stringify(completed.body.data)}`
@@ -231,7 +239,7 @@ async function main() {
         password: "smtp-password",
         fromEmail: "sender@example.com",
         fromName: "QQueue Smoke",
-        isDefault: true
+        isDefault: true,
       })
       .expect(201);
 
@@ -247,9 +255,9 @@ async function main() {
         isBulk: true,
         headers: {
           "List-Unsubscribe": "<https://example.com/unsubscribe/signed-token>",
-          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         },
-        scheduledAt
+        scheduledAt,
       })
       .expect(202);
 
@@ -257,28 +265,178 @@ async function main() {
     const sentJob = await eventually(() =>
       prisma.emailJob.findFirst({
         where: { id: emailJobId, status: "SENT" },
-        select: { id: true, status: true, messageId: true }
+        select: { id: true, status: true, messageId: true },
       })
     );
 
     const rawMessage = smtpMessages[0] ?? "";
     const rawBody = rawMessage.split("\r\n\r\n").slice(1).join("\r\n\r\n");
     if (
-      !rawMessage.includes("List-Unsubscribe: <https://example.com/unsubscribe/signed-token>") ||
-      !rawMessage.includes("List-Unsubscribe-Post: List-Unsubscribe=One-Click") ||
+      !rawMessage.includes(
+        "List-Unsubscribe: <https://example.com/unsubscribe/signed-token>"
+      ) ||
+      !rawMessage.includes(
+        "List-Unsubscribe-Post: List-Unsubscribe=One-Click"
+      ) ||
       !rawBody.includes("https://example.com/unsubscribe/signed-token")
     ) {
-      throw new Error("Smoke SMTP message is missing the one-click headers or footer");
+      throw new Error(
+        "Smoke SMTP message is missing the one-click headers or footer"
+      );
     }
 
-    console.log(`Smoke test passed: ${sentJob.id} ${sentJob.status}`);
+    // Exercise the mailbox flows against real Postgres, not only query mocks.
+    const connection = await prisma.sMTPConnection.findFirstOrThrow({
+      where: { organizationId },
+    });
+    const system = await prisma.emailJob.create({
+      data: {
+        organizationId,
+        smtpConnectionId: connection.id,
+        origin: "SYSTEM",
+        subject: "Private reset",
+        html: "<p>private-reset-token</p>",
+        toEmail: email,
+        status: "SENT",
+      },
+    });
+    await request(app)
+      .get(`/api/v1/sent/${system.id}?organizationId=${organizationId}`)
+      .set("Authorization", auth)
+      .expect(404);
+    const archive = await request(app)
+      .get(`/api/v1/sent?organizationId=${organizationId}&origin=SYSTEM`)
+      .set("Authorization", auth)
+      .expect(200);
+    if (archive.body.data.rows.length !== 0)
+      throw new Error("System email appeared in the shared archive");
+    const mailbox = await prisma.inboxAccount.create({
+      data: {
+        organizationId,
+        name: "Smoke inbox",
+        email: "sender@example.com",
+        host: "localhost",
+        port: 993,
+        secure: true,
+        usernameEncrypted: "unused",
+        passwordEncrypted: "unused",
+        mailbox: "INBOX",
+      },
+    });
+    const inbound = [];
+    for (let index = 0; index < 3; index++) {
+      inbound.push(
+        await prisma.inboundMessage.create({
+          data: {
+            organizationId,
+            inboxAccountId: mailbox.id,
+            messageId: `<smoke-inbound-${index}>`,
+            references: ["<smoke-root>"],
+            fromEmail: "customer@example.com",
+            replyTo: ["answers@example.com"],
+            to: ["sender@example.com"],
+            subject: "Question",
+            text: `Message ${index}`,
+            receivedAt: new Date(Date.now() + index),
+          },
+        })
+      );
+    }
+    const firstPage = await request(app)
+      .get(`/api/v1/inbox/messages?organizationId=${organizationId}&limit=2`)
+      .set("Authorization", auth)
+      .expect(200);
+    const secondPage = await request(app)
+      .get(
+        `/api/v1/inbox/messages?organizationId=${organizationId}&limit=2&cursor=${firstPage.body.data.nextCursor}`
+      )
+      .set("Authorization", auth)
+      .expect(200);
+    if (secondPage.body.data.data.length !== 1)
+      throw new Error("Inbox pagination skipped a message");
+    await request(app)
+      .patch("/api/v1/inbox/messages/read")
+      .set("Authorization", auth)
+      .send({
+        organizationId,
+        messageIds: inbound.map((message) => message.id),
+        read: true,
+      })
+      .expect(200);
+    const conversation = await request(app)
+      .get(
+        `/api/v1/inbox/messages/${inbound[0].id}/conversation?organizationId=${organizationId}`
+      )
+      .set("Authorization", auth)
+      .expect(200);
+    if (conversation.body.data.messages.length !== 3)
+      throw new Error("Conversation omitted received messages");
+    const reply = await request(app)
+      .post(`/api/v1/inbox/messages/${inbound[0].id}/reply`)
+      .set("Authorization", auth)
+      .send({
+        organizationId,
+        subject: "Question",
+        html: "<p>A reply through the shared pipeline</p>",
+        idempotencyKey: "smoke-reply",
+      })
+      .expect(202);
+    const replay = await request(app)
+      .post(`/api/v1/inbox/messages/${inbound[0].id}/reply`)
+      .set("Authorization", auth)
+      .send({
+        organizationId,
+        subject: "Question",
+        html: "<p>A reply through the shared pipeline</p>",
+        idempotencyKey: "smoke-reply",
+      })
+      .expect(202);
+    if (reply.body.data.id !== replay.body.data.id)
+      throw new Error("Reply retry created a duplicate send");
+    await eventually(() =>
+      prisma.emailJob.findFirst({
+        where: {
+          id: reply.body.data.id,
+          status: "SENT",
+          toEmail: "answers@example.com",
+          smtpConnectionId: connection.id,
+        },
+      })
+    );
+    await request(app)
+      .delete(
+        `/api/v1/inbox/accounts/${mailbox.id}?organizationId=${organizationId}`
+      )
+      .set("Authorization", auth)
+      .expect(204);
+    if (
+      (await prisma.inboundMessage.count({
+        where: { inboxAccountId: mailbox.id },
+      })) !== 3
+    )
+      throw new Error("Disconnect destroyed mail history");
+    run("pnpm", [
+      "exec",
+      "prisma",
+      "migrate",
+      "diff",
+      "--from-url",
+      process.env.DATABASE_URL!,
+      "--to-schema-datamodel",
+      "apps/api/prisma/schema",
+      "--exit-code",
+    ]);
+    console.log(
+      `Smoke test passed: ${sentJob.id} ${sentJob.status}; mailbox privacy, pagination, replies, disconnect, and migration drift verified`
+    );
     process.exit(0);
   } finally {
     await worker.close(true);
     await Promise.allSettled([
       emailSendingQueue.disconnect(),
       campaignProcessingQueue.disconnect(),
-      webhookDeliveryQueue.disconnect()
+      webhookDeliveryQueue.disconnect(),
+      inboxSyncQueue.disconnect(),
     ]);
     await prisma.$disconnect();
     for (const socket of smtpSockets) {

@@ -14,8 +14,8 @@ vi.mock("./service.js", () => ({
     listMessages: vi.fn(),
     storeInboundMessage: vi.fn(),
     markRead: vi.fn(),
-    replyToMessage: vi.fn()
-  }
+    replyToMessage: vi.fn(),
+  },
 }));
 
 const { inboxController } = await import("./controller.js");
@@ -38,7 +38,7 @@ const validAccountBody = {
   secure: true,
   username: "support",
   password: "s3cret",
-  mailbox: "INBOX"
+  mailbox: "INBOX",
 };
 
 beforeEach(() => {
@@ -67,17 +67,25 @@ describe("inboxController.createAccount", () => {
     vi.mocked(inboxService.createAccount).mockResolvedValue(created as never);
     const res = mockRes();
 
-    await inboxController.createAccount({ body: validAccountBody } as Request, res);
+    await inboxController.createAccount(
+      { body: validAccountBody } as Request,
+      res
+    );
 
     expect(inboxService.createAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org_1", host: "imap.example.com" })
+      expect.objectContaining({
+        organizationId: "org_1",
+        host: "imap.example.com",
+      })
     );
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith({ data: created });
   });
 
   it("applies the schema's port/secure/mailbox defaults when omitted", async () => {
-    vi.mocked(inboxService.createAccount).mockResolvedValue({ id: "iba_1" } as never);
+    vi.mocked(inboxService.createAccount).mockResolvedValue({
+      id: "iba_1",
+    } as never);
 
     await inboxController.createAccount(
       {
@@ -87,8 +95,8 @@ describe("inboxController.createAccount", () => {
           email: "support@example.com",
           host: "imap.example.com",
           username: "support",
-          password: "s3cret"
-        }
+          password: "s3cret",
+        },
       } as Request,
       mockRes()
     );
@@ -114,8 +122,13 @@ describe("inboxController.createAccount", () => {
     );
 
     await expect(
-      inboxController.createAccount({ body: validAccountBody } as Request, mockRes())
-    ).rejects.toThrow("Could not connect to the IMAP mailbox with those settings");
+      inboxController.createAccount(
+        { body: validAccountBody } as Request,
+        mockRes()
+      )
+    ).rejects.toThrow(
+      "Could not connect to the IMAP mailbox with those settings"
+    );
   });
 });
 
@@ -129,15 +142,21 @@ describe("inboxController.updateAccount", () => {
       {
         params: { id: "iba_1" },
         userId: "usr_1",
-        body: { name: "Renamed", status: "DISABLED" }
+        organizationId: "org_1",
+        body: { name: "Renamed", status: "DISABLED" },
       } as unknown as Request,
       res
     );
 
-    expect(inboxService.updateAccount).toHaveBeenCalledWith("iba_1", "usr_1", {
-      name: "Renamed",
-      status: "DISABLED"
-    });
+    expect(inboxService.updateAccount).toHaveBeenCalledWith(
+      "iba_1",
+      "usr_1",
+      {
+        name: "Renamed",
+        status: "DISABLED",
+      },
+      "org_1"
+    );
     expect(res.json).toHaveBeenCalledWith({ data: updated });
   });
 
@@ -147,7 +166,7 @@ describe("inboxController.updateAccount", () => {
         {
           params: { id: "iba_1" },
           userId: "usr_1",
-          body: { status: "PAUSED" }
+          body: { status: "PAUSED" },
         } as unknown as Request,
         mockRes()
       )
@@ -162,11 +181,19 @@ describe("inboxController.deleteAccount", () => {
     const res = mockRes();
 
     await inboxController.deleteAccount(
-      { params: { id: "iba_1" }, userId: "usr_1" } as unknown as Request,
+      {
+        params: { id: "iba_1" },
+        userId: "usr_1",
+        organizationId: "org_1",
+      } as unknown as Request,
       res
     );
 
-    expect(inboxService.deleteAccount).toHaveBeenCalledWith("iba_1", "usr_1");
+    expect(inboxService.deleteAccount).toHaveBeenCalledWith(
+      "iba_1",
+      "usr_1",
+      "org_1"
+    );
     expect(res.status).toHaveBeenCalledWith(204);
     expect(res.send).toHaveBeenCalled();
   });
@@ -182,7 +209,12 @@ describe("inboxController.listMessages", () => {
       {
         organizationId: "org_1",
         userId: "usr_1",
-        query: { organizationId: "org_1", read: "unread", q: "invoice", limit: "10" }
+        query: {
+          organizationId: "org_1",
+          read: "unread",
+          q: "invoice",
+          limit: "10",
+        },
       } as unknown as Request,
       res
     );
@@ -193,7 +225,7 @@ describe("inboxController.listMessages", () => {
         organizationId: "org_1",
         read: "unread",
         q: "invoice",
-        limit: 10
+        limit: 10,
       },
       "usr_1"
     );
@@ -205,14 +237,14 @@ describe("inboxController.listMessages", () => {
     // let a member ask for another org's mail by editing the URL.
     vi.mocked(inboxService.listMessages).mockResolvedValue({
       data: [],
-      nextCursor: undefined
+      nextCursor: undefined,
     } as never);
 
     await inboxController.listMessages(
       {
         organizationId: "org_1",
         userId: "usr_1",
-        query: { organizationId: "org_someone_else" }
+        query: { organizationId: "org_someone_else" },
       } as unknown as Request,
       mockRes()
     );
@@ -227,7 +259,9 @@ describe("inboxController.listMessages", () => {
 describe("inboxController.storeInboundMessage", () => {
   it("stores a normalized inbound message and responds 201", async () => {
     const stored = { id: "ibm_1" };
-    vi.mocked(inboxService.storeInboundMessage).mockResolvedValue(stored as never);
+    vi.mocked(inboxService.storeInboundMessage).mockResolvedValue(
+      stored as never
+    );
     const res = mockRes();
 
     await inboxController.storeInboundMessage(
@@ -243,8 +277,8 @@ describe("inboxController.storeInboundMessage", () => {
           to: ["support@example.com"],
           subject: "Re: Invoice",
           text: "Thanks",
-          receivedAt: "2026-07-16T10:00:00.000Z"
-        }
+          receivedAt: "2026-07-16T10:00:00.000Z",
+        },
       } as Request,
       res
     );
@@ -253,7 +287,7 @@ describe("inboxController.storeInboundMessage", () => {
       expect.objectContaining({
         messageId: "<abc@example.com>",
         references: ["<orig@example.com>"],
-        cc: []
+        cc: [],
       })
     );
     expect(res.status).toHaveBeenCalledWith(201);
@@ -269,8 +303,8 @@ describe("inboxController.storeInboundMessage", () => {
             inboxAccountId: "iba_1",
             messageId: "<abc@example.com>",
             fromEmail: "customer@example.com",
-            receivedAt: "yesterday"
-          }
+            receivedAt: "yesterday",
+          },
         } as Request,
         mockRes()
       )
@@ -286,55 +320,91 @@ describe("inboxController.markRead", () => {
     const res = mockRes();
 
     await inboxController.markRead(
-      { params: { id: "ibm_1" }, userId: "usr_1", organizationId: "org_1", body: {} } as unknown as Request,
+      {
+        params: { id: "ibm_1" },
+        userId: "usr_1",
+        organizationId: "org_1",
+        body: {},
+      } as unknown as Request,
       res
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", true);
+    expect(inboxService.markRead).toHaveBeenCalledWith(
+      "ibm_1",
+      "usr_1",
+      "org_1",
+      true
+    );
     expect(res.json).toHaveBeenCalledWith({ data: message });
   });
 
   it("marks unread when read is boolean false", async () => {
-    vi.mocked(inboxService.markRead).mockResolvedValue({ id: "ibm_1" } as never);
+    vi.mocked(inboxService.markRead).mockResolvedValue({
+      id: "ibm_1",
+    } as never);
 
     await inboxController.markRead(
-      { params: { id: "ibm_1" }, userId: "usr_1", organizationId: "org_1", body: { read: false } } as unknown as Request,
+      {
+        params: { id: "ibm_1" },
+        userId: "usr_1",
+        organizationId: "org_1",
+        body: { read: false },
+      } as unknown as Request,
       mockRes()
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", false);
+    expect(inboxService.markRead).toHaveBeenCalledWith(
+      "ibm_1",
+      "usr_1",
+      "org_1",
+      false
+    );
   });
 
   it('coerces the string "false" to a boolean', async () => {
-    vi.mocked(inboxService.markRead).mockResolvedValue({ id: "ibm_1" } as never);
+    vi.mocked(inboxService.markRead).mockResolvedValue({
+      id: "ibm_1",
+    } as never);
 
     await inboxController.markRead(
       {
         params: { id: "ibm_1" },
         userId: "usr_1",
         organizationId: "org_1",
-        body: { read: "false" }
+        body: { read: "false" },
       } as unknown as Request,
       mockRes()
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", false);
+    expect(inboxService.markRead).toHaveBeenCalledWith(
+      "ibm_1",
+      "usr_1",
+      "org_1",
+      false
+    );
   });
 
   it('coerces the string "true" to a boolean', async () => {
-    vi.mocked(inboxService.markRead).mockResolvedValue({ id: "ibm_1" } as never);
+    vi.mocked(inboxService.markRead).mockResolvedValue({
+      id: "ibm_1",
+    } as never);
 
     await inboxController.markRead(
       {
         params: { id: "ibm_1" },
         userId: "usr_1",
         organizationId: "org_1",
-        body: { read: "true" }
+        body: { read: "true" },
       } as unknown as Request,
       mockRes()
     );
 
-    expect(inboxService.markRead).toHaveBeenCalledWith("ibm_1", "usr_1", "org_1", true);
+    expect(inboxService.markRead).toHaveBeenCalledWith(
+      "ibm_1",
+      "usr_1",
+      "org_1",
+      true
+    );
   });
 
   it("rejects a read value that is neither boolean nor a known string", async () => {
@@ -343,7 +413,7 @@ describe("inboxController.markRead", () => {
         {
           params: { id: "ibm_1" },
           userId: "usr_1",
-          body: { read: "maybe" }
+          body: { read: "maybe" },
         } as unknown as Request,
         mockRes()
       )
@@ -366,8 +436,8 @@ describe("inboxController.replyToMessage", () => {
           organizationId: "org_1",
           smtpConnectionId: "smtp_1",
           subject: "Re: Invoice",
-          html: "<p>On it</p>"
-        }
+          html: "<p>On it</p>",
+        },
       } as unknown as Request,
       res
     );
@@ -376,7 +446,7 @@ describe("inboxController.replyToMessage", () => {
       organizationId: "org_1",
       smtpConnectionId: "smtp_1",
       subject: "Re: Invoice",
-      html: "<p>On it</p>"
+      html: "<p>On it</p>",
     });
     expect(res.status).toHaveBeenCalledWith(202);
     expect(res.json).toHaveBeenCalledWith({ data: result });
@@ -388,7 +458,7 @@ describe("inboxController.replyToMessage", () => {
         {
           params: { id: "ibm_1" },
           userId: "usr_1",
-          body: { organizationId: "org_1", subject: "Re: Invoice" }
+          body: { organizationId: "org_1", subject: "Re: Invoice" },
         } as unknown as Request,
         mockRes()
       )
@@ -406,7 +476,7 @@ describe("inboxController.replyToMessage", () => {
         {
           params: { id: "missing" },
           userId: "usr_1",
-          body: { organizationId: "org_1", subject: "Re: Invoice", text: "hi" }
+          body: { organizationId: "org_1", subject: "Re: Invoice", text: "hi" },
         } as unknown as Request,
         mockRes()
       )

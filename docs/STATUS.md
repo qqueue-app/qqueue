@@ -10,6 +10,23 @@ mailbox provisioning, tracking, transactional API keys, outbound webhooks, an
 MIT-licensed SDK package, tests, deployment files, and open-core licensing
 guardrails.
 
+## Organization email client improvements (2026-10-14)
+
+The first implementation set from the primary-email-client audit adds inbox
+pagination and mailbox filtering, desktop/mobile selection and bulk read actions,
+complete received conversations with outgoing history, message-specific rich
+replies with attachments and personal drafts, correct sending-account and
+Reply-To resolution, retry deduplication, actual sync requests, history-preserving
+disconnect/reconnect, team sign-in reset links, and simpler daily navigation.
+Sensitive system mail and ancillary sending APIs now have tighter access scopes.
+
+This does **not** complete primary-client readiness. Full IMAP state/folder sync,
+older-history backfill, normal group-message semantics, forwarding, attachment
+recovery, and live mailbox/browser acceptance remain. See
+[Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
+scope and remaining acceptance work. The historical beta assessments below refer
+to the earlier email-operations scope.
+
 Following the Beta Polish + Launch Prep Sprint, QQueue now includes:
 
 - Authentication

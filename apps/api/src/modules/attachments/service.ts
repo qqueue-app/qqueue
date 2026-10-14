@@ -4,13 +4,13 @@ import type { EmailAttachment } from "@qqueue/email-engine";
 import {
   base64DecodedBytes,
   INLINE_ATTACHMENT_MAX_BYTES,
-  type InlineAttachmentInput
+  type InlineAttachmentInput,
 } from "@qqueue/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
-  resolveMailboxAccess
+  resolveMailboxAccess,
 } from "../../lib/mailbox-access.js";
 import { getMembership } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
@@ -36,7 +36,9 @@ export interface AttachmentMetadata {
 // Strip any path components and characters that don't belong in a stored
 // filename, so a crafted name can't escape the object key or break headers.
 function sanitizeFilename(name: string): string {
-  const base = basename(name).replace(/[^\w.\- ]+/g, "_").trim();
+  const base = basename(name)
+    .replace(/[^\w.\- ]+/g, "_")
+    .trim();
   const cleaned = base.length > 0 ? base : "attachment";
   return cleaned.slice(0, 200);
 }
@@ -51,7 +53,7 @@ function toMetadata(attachment: {
     id: attachment.id,
     filename: attachment.filename,
     contentType: attachment.contentType,
-    size: attachment.size
+    size: attachment.size,
   };
 }
 
@@ -80,9 +82,9 @@ export const attachmentService = {
         where: {
           id: input.emailDraftId,
           organizationId: input.organizationId,
-          createdByUserId: input.userId
+          createdByUserId: input.userId,
         },
-        select: { id: true }
+        select: { id: true },
       });
       emailDraftId = draft?.id;
     }
@@ -93,7 +95,7 @@ export const attachmentService = {
     await storage.putObject({
       key: storageKey,
       body: input.buffer,
-      contentType: input.contentType
+      contentType: input.contentType,
     });
 
     const attachment = await prisma.emailAttachment.create({
@@ -104,8 +106,8 @@ export const attachmentService = {
         contentType: input.contentType,
         size: input.size,
         storageKey,
-        createdByUserId: input.userId
-      }
+        createdByUserId: input.userId,
+      },
     });
 
     return toMetadata(attachment);
@@ -131,7 +133,7 @@ export const attachmentService = {
    */
   async download(id: string, userId: string) {
     const attachment = await prisma.emailAttachment.findFirst({
-      where: { id }
+      where: { id },
     });
     if (!attachment) {
       throw new HttpError(404, "Attachment not found", "not_found");
@@ -161,9 +163,10 @@ export const attachmentService = {
         where: {
           id: attachment.emailJobId,
           organizationId: attachment.organizationId,
-          ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] })
+          NOT: { origin: "SYSTEM" },
+          ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] }),
         },
-        select: { id: true }
+        select: { id: true },
       });
       if (!readable) {
         throw new HttpError(404, "Attachment not found", "not_found");
@@ -176,7 +179,7 @@ export const attachmentService = {
 
   async delete(id: string, userId: string): Promise<void> {
     const attachment = await prisma.emailAttachment.findFirst({
-      where: { id, createdByUserId: userId }
+      where: { id, createdByUserId: userId },
     });
     if (!attachment) {
       throw new HttpError(404, "Attachment not found", "not_found");
@@ -204,7 +207,7 @@ export const attachmentService = {
     const unique = Array.from(new Set(attachmentIds));
     const { count } = await prisma.emailAttachment.updateMany({
       where: { id: { in: unique }, organizationId, emailJobId: null },
-      data: { emailJobId }
+      data: { emailJobId },
     });
 
     // The scoping above silently drops ids that are unknown, already consumed
@@ -239,7 +242,7 @@ export const attachmentService = {
     }
     const unique = Array.from(new Set(attachmentIds));
     const rows = await prisma.emailAttachment.findMany({
-      where: { id: { in: unique }, organizationId }
+      where: { id: { in: unique }, organizationId },
     });
     if (rows.length !== unique.length) {
       throw new HttpError(
@@ -257,8 +260,8 @@ export const attachmentService = {
         size: row.size,
         storageKey: row.storageKey,
         cid: row.cid,
-        createdByUserId: row.createdByUserId
-      }))
+        createdByUserId: row.createdByUserId,
+      })),
     });
   },
 
@@ -297,7 +300,7 @@ export const attachmentService = {
       await storage.putObject({
         key: storageKey,
         body: Buffer.from(inline.contentBase64, "base64"),
-        contentType
+        contentType,
       });
 
       await prisma.emailAttachment.create({
@@ -309,8 +312,8 @@ export const attachmentService = {
           size,
           storageKey,
           cid: inline.cid,
-          createdByUserId: createdByUserId ?? undefined
-        }
+          createdByUserId: createdByUserId ?? undefined,
+        },
       });
     }
   },
@@ -322,7 +325,7 @@ export const attachmentService = {
    */
   async loadForJob(emailJobId: string): Promise<EmailAttachment[] | undefined> {
     const rows = await prisma.emailAttachment.findMany({
-      where: { emailJobId }
+      where: { emailJobId },
     });
     if (rows.length === 0) {
       return undefined;
@@ -335,9 +338,9 @@ export const attachmentService = {
         filename: row.filename,
         content,
         contentType: row.contentType,
-        cid: row.cid ?? undefined
+        cid: row.cid ?? undefined,
       });
     }
     return attachments;
-  }
+  },
 };

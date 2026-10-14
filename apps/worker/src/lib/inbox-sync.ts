@@ -63,7 +63,9 @@ async function findOutboundThread(input: {
 // anything outside a conservative charset, so a hostile sender can't influence
 // the storage key or a later Content-Disposition header.
 function sanitizeFilename(name: string): string {
-  const base = basename(name).replace(/[^\w.\- ]+/g, "_").trim();
+  const base = basename(name)
+    .replace(/[^\w.\- ]+/g, "_")
+    .trim();
   const cleaned = base.length > 0 ? base : "attachment";
   return cleaned.slice(0, 200);
 }
@@ -89,7 +91,7 @@ async function storeAttachments(input: {
 
   const existing = await prisma.inboundAttachment.findMany({
     where: { inboundMessageId },
-    select: { id: true }
+    select: { id: true },
   });
   if (existing.length > 0) {
     return;
@@ -120,7 +122,7 @@ async function storeAttachments(input: {
       await storage.putObject({
         key: storageKey,
         body: content,
-        contentType: part.contentType || "application/octet-stream"
+        contentType: part.contentType || "application/octet-stream",
       });
     } catch (error) {
       // Storage is best-effort here; losing one blob shouldn't cost us the
@@ -143,8 +145,8 @@ async function storeAttachments(input: {
         contentId: part.cid ?? null,
         // mailparser reports "inline" for parts the sender meant to render
         // (usually cid: images) rather than list as downloads.
-        isInline: part.contentDisposition === "inline"
-      }
+        isInline: part.contentDisposition === "inline",
+      },
     });
   }
 }
@@ -165,7 +167,8 @@ async function storeParsedMessage(input: {
     references,
   });
   const from = firstAddress(mail.from);
-  const receivedAt = mail.date ?? (internalDate ? new Date(internalDate) : new Date());
+  const receivedAt =
+    mail.date ?? (internalDate ? new Date(internalDate) : new Date());
   const seen = flags?.has("\\Seen") ?? false;
 
   // Bounce reports (DSNs) are still stored as inbound messages — they should
@@ -173,7 +176,7 @@ async function storeParsedMessage(input: {
   // account's own address and the daemon sender are excluded so the body-scan
   // fallback can't mistake them for the failed recipient.
   const dsn = parseDsn(mail, {
-    excludeAddresses: [account.email, from.email]
+    excludeAddresses: [account.email, from.email],
   });
 
   // The upsert makes re-syncing a UID safe; the bounce side effects below must
@@ -205,6 +208,7 @@ async function storeParsedMessage(input: {
       references,
       fromEmail: from.email,
       fromName: from.name,
+      replyTo: addressList(mail.replyTo),
       to: addressList(mail.to),
       cc: addressList(mail.cc),
       subject: mail.subject ?? "",
@@ -221,6 +225,7 @@ async function storeParsedMessage(input: {
       references,
       fromEmail: from.email,
       fromName: from.name,
+      replyTo: addressList(mail.replyTo),
       to: addressList(mail.to),
       cc: addressList(mail.cc),
       subject: mail.subject ?? "",
@@ -321,9 +326,12 @@ export async function syncInboxAccount(account: InboxAccount) {
     const mailbox = await client.mailboxOpen(account.mailbox, {
       readOnly: true,
     });
+    const uidValidity = mailbox.uidValidity?.toString();
+    const reset = Boolean(uidValidity && account.uidValidity !== uidValidity);
+    if (reset) maxSeenUid = 0;
 
     const startUid =
-      account.lastSeenUid && account.lastSeenUid > 0
+      !reset && account.lastSeenUid && account.lastSeenUid > 0
         ? account.lastSeenUid + 1
         : Math.max(1, mailbox.uidNext - env.INBOX_SYNC_MAX_MESSAGES);
 
@@ -358,9 +366,20 @@ export async function syncInboxAccount(account: InboxAccount) {
       where: { id: account.id },
       data: {
         lastSyncedAt: new Date(),
-        lastSeenUid: maxSeenUid || account.lastSeenUid,
+        lastSeenUid: reset ? maxSeenUid : maxSeenUid || account.lastSeenUid,
+        uidValidity,
+        lastSyncError: null,
       },
     });
+  } catch (error) {
+    await prisma.inboxAccount.update({
+      where: { id: account.id },
+      data: {
+        lastSyncError:
+          "Could not check this mailbox. Ask an administrator to test the connection.",
+      },
+    });
+    throw error;
   } finally {
     client.close();
   }
@@ -369,6 +388,14 @@ export async function syncInboxAccount(account: InboxAccount) {
 export async function syncInboxAccounts(inboxAccountId?: string) {
   const accounts = await getActiveInboxAccounts(inboxAccountId);
   for (const account of accounts) {
-    await syncInboxAccount(account);
+    try {
+      await syncInboxAccount(account);
+    } catch (error) {
+      logger.error(
+        { inboxAccountId: account.id, err: error },
+        "mailbox sync failed"
+      );
+      if (inboxAccountId) throw error;
+    }
   }
 }

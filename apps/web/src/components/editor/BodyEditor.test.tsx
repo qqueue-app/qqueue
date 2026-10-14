@@ -7,7 +7,7 @@ import { BodyEditor } from "./BodyEditor.js";
 /** BodyEditor is controlled, so typing needs a parent that holds the value. */
 function ControlledBodyEditor({
   initial = "",
-  onChange
+  onChange,
 }: {
   initial?: string;
   onChange?: (html: string) => void;
@@ -25,7 +25,35 @@ function ControlledBodyEditor({
 }
 
 describe("BodyEditor", () => {
-  it("starts in rich text with the editor toolbar available", async () => { renderWithProviders(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
+  it("locks the editor while a message is sending without changing its content", async () => {
+    const onChange = vi.fn();
+    const rendered = renderWithProviders(
+      <BodyEditor
+        value="<p>Keep this answer</p>"
+        onChange={onChange}
+        ariaLabel="Reply body"
+        disabled
+      />
+    );
+    expect(screen.getByRole("textbox", { name: "Reply body" })).toHaveAttribute(
+      "contenteditable",
+      "false"
+    );
+    rendered.rerender(
+      <BodyEditor
+        value="<p>Keep this answer</p>"
+        onChange={onChange}
+        ariaLabel="Reply body"
+      />
+    );
+    expect(screen.getByRole("textbox", { name: "Reply body" })).toHaveAttribute(
+      "contenteditable",
+      "true"
+    );
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it("starts in rich text with the editor toolbar available", async () => {
+    renderWithProviders(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
 
     expect(await screen.findByLabelText("Bold")).toBeInTheDocument();
     expect(screen.queryByLabelText("HTML source")).not.toBeInTheDocument();
@@ -63,7 +91,8 @@ describe("BodyEditor", () => {
   // document locked rich text off entirely; a hand-written fragment defaulted
   // to source and warned before letting you leave. Neither is destructive any
   // more, so neither is refused.
-  it("opens a complete HTML document in rich text", async () => { renderWithProviders(
+  it("opens a complete HTML document in rich text", async () => {
+    renderWithProviders(
       <BodyEditor
         value="<!doctype html><html><head><style>.x{}</style></head><body><p>Pasted</p></body></html>"
         onChange={() => {}}
@@ -77,7 +106,8 @@ describe("BodyEditor", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens a hand-written HTML fragment in rich text", async () => { renderWithProviders(
+  it("opens a hand-written HTML fragment in rich text", async () => {
+    renderWithProviders(
       <BodyEditor
         value={'<div style="padding:24px"><p>Hi</p></div>'}
         onChange={() => {}}
@@ -125,7 +155,8 @@ describe("BodyEditor", () => {
     );
   });
 
-  it("reports nothing kept as HTML when everything is editable", async () => { renderWithProviders(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
+  it("reports nothing kept as HTML when everything is editable", async () => {
+    renderWithProviders(<BodyEditor value="<p>Hi</p>" onChange={() => {}} />);
     await screen.findByLabelText("Bold");
 
     expect(screen.queryByText(/kept as HTML/)).not.toBeInTheDocument();
@@ -142,16 +173,16 @@ describe("BodyEditor", () => {
       ["a frozen style block", "<style>.x{color:red}</style><p>Hi</p>"],
       [
         "a frozen tag inside a table",
-        '<table><tbody><tr><td><font color="#ff0000">Red</font></td></tr></tbody></table>'
+        '<table><tbody><tr><td><font color="#ff0000">Red</font></td></tr></tbody></table>',
       ],
       [
         "a complete document",
-        "<!doctype html><html><head><style>.x{}</style></head><body><p>Pasted</p></body></html>"
+        "<!doctype html><html><head><style>.x{}</style></head><body><p>Pasted</p></body></html>",
       ],
       [
         "an email layout ending in a table",
-        '<div style="padding:24px"><table cellpadding="0" cellspacing="0" width="100%"><tbody><tr><td align="center"><p>Hello</p></td></tr></tbody></table></div>'
-      ]
+        '<div style="padding:24px"><table cellpadding="0" cellspacing="0" width="100%"><tbody><tr><td align="center"><p>Hello</p></td></tr></tbody></table></div>',
+      ],
     ];
 
     for (const [description, html] of documents) {

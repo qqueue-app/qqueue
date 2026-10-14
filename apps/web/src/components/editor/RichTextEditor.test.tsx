@@ -433,11 +433,14 @@ describe("RichTextEditor", () => {
     await user.type(dialog.getByLabelText("Button URL"), "example.com");
     await user.click(dialog.getByRole("button", { name: "Insert button" }));
 
-    await waitFor(() => expect(onChange).toHaveBeenCalled());
-    const html = onChange.mock.calls.at(-1)?.[0] as string;
-    expect(html).toContain("data-qq-button");
-    expect(html).toContain("<table");
-    expect(partitionForSchema(html).frozen).toBe(0);
+    // Dialog focus restoration and the editor's appended transactions can
+    // publish another document after the click; assert on the settled output.
+    await waitFor(() => {
+      const html = onChange.mock.calls.at(-1)?.[0] as string;
+      expect(html).toContain("data-qq-button");
+      expect(html).toContain("<table");
+      expect(partitionForSchema(html).frozen).toBe(0);
+    });
   });
 
   // Class-based styling would be stripped by Gmail and Outlook, so a table

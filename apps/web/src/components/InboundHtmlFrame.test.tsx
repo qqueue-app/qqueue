@@ -6,7 +6,8 @@ function srcdocOf(
   html: string,
   showRemoteContent = false,
   inlineImages?: Record<string, string>
-) { renderWithProviders(
+) {
+  renderWithProviders(
     <InboundHtmlFrame
       html={html}
       showRemoteContent={showRemoteContent}
@@ -18,7 +19,20 @@ function srcdocOf(
 }
 
 describe("InboundHtmlFrame", () => {
-  it("renders the message inside an iframe rather than the page DOM", () => { renderWithProviders(
+  it("makes ordinary link clicks work outside the email sandbox while removing unsafe protocols", () => {
+    const doc = new DOMParser().parseFromString(
+      srcdocOf(
+        '<a href="https://example.com">Website</a><a href="javascript:alert(1)">Unsafe</a>'
+      ),
+      "text/html"
+    );
+    const links = doc.querySelectorAll("a");
+    expect(links[0].getAttribute("target")).toBe("_blank");
+    expect(links[0].getAttribute("rel")).toBe("noopener noreferrer");
+    expect(links[1].hasAttribute("href")).toBe(false);
+  });
+  it("renders the message inside an iframe rather than the page DOM", () => {
+    renderWithProviders(
       <InboundHtmlFrame
         html="<p>hello</p>"
         showRemoteContent={false}
@@ -32,7 +46,8 @@ describe("InboundHtmlFrame", () => {
     expect(screen.queryByText("hello")).not.toBeInTheDocument();
   });
 
-  it("never grants allow-scripts", () => { renderWithProviders(
+  it("never grants allow-scripts", () => {
+    renderWithProviders(
       <InboundHtmlFrame
         html="<p>hi</p>"
         showRemoteContent={false}
@@ -41,7 +56,9 @@ describe("InboundHtmlFrame", () => {
     );
 
     const sandbox = screen.getByTitle("Message body").getAttribute("sandbox");
-    expect(sandbox).toBe("allow-same-origin");
+    expect(sandbox).toBe(
+      "allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+    );
     expect(sandbox).not.toContain("allow-scripts");
   });
 
@@ -73,11 +90,9 @@ describe("InboundHtmlFrame", () => {
   });
 
   it("renders inline cid: images without an opt-in, since they arrived with the message", () => {
-    const srcdoc = srcdocOf(
-      '<p>hi</p><img src="cid:logo@corp">',
-      false,
-      { "logo@corp": "blob:http://localhost/abc" }
-    );
+    const srcdoc = srcdocOf('<p>hi</p><img src="cid:logo@corp">', false, {
+      "logo@corp": "blob:http://localhost/abc",
+    });
 
     expect(srcdoc).toContain('src="blob:http://localhost/abc"');
     expect(srcdoc).not.toContain("cid:logo@corp");
@@ -86,7 +101,7 @@ describe("InboundHtmlFrame", () => {
   it("matches a cid: reference to a Content-ID that arrived in angle brackets", () => {
     // The MIME header is `<logo@corp>`; the body URL is `cid:logo@corp`.
     const srcdoc = srcdocOf('<img src="cid:LOGO@corp">', false, {
-      "logo@corp": "blob:http://localhost/abc"
+      "logo@corp": "blob:http://localhost/abc",
     });
 
     expect(srcdoc).toContain('src="blob:http://localhost/abc"');
@@ -101,7 +116,7 @@ describe("InboundHtmlFrame", () => {
 
   it("keeps head styles when a full document is rewritten for images", () => {
     const srcdoc = srcdocOf(
-      "<html><head><style>.brand{color:red}</style></head><body><img src=\"cid:x\"><p>inner</p></body></html>"
+      '<html><head><style>.brand{color:red}</style></head><body><img src="cid:x"><p>inner</p></body></html>'
     );
 
     expect(srcdoc).toContain(".brand{color:red}");
@@ -109,9 +124,7 @@ describe("InboundHtmlFrame", () => {
   });
 
   it("preserves table markup and gives it legible defaults", () => {
-    const srcdoc = srcdocOf(
-      "<table><tr><th>Q</th><td>42</td></tr></table>"
-    );
+    const srcdoc = srcdocOf("<table><tr><th>Q</th><td>42</td></tr></table>");
 
     expect(srcdoc).toContain("<table><tr><th>Q</th><td>42</td></tr></table>");
     expect(srcdoc).toContain("border-collapse:collapse");

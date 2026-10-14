@@ -1,6 +1,6 @@
 import { PageContainer } from "../../components/PageContainer.js";
 import { FormEvent, useEffect, useState } from "react";
-import { Mail, Trash2 } from "lucide-react";
+import { KeyRound, Mail, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../../components/PageHeader.js";
 import { CopyableSecret } from "../../components/settings/CopyableSecret.js";
@@ -30,6 +30,7 @@ import {
   type OrganizationMember,
 } from "../../lib/api.js";
 import { useSession } from "../../lib/session-context.js";
+import { useApiMutation } from "../../lib/use-api.js";
 
 type InviteRole = "OWNER" | "ADMIN" | "MEMBER";
 
@@ -60,6 +61,14 @@ export function TeamSettings() {
   const actorRole = currentOrganization?.role;
   const canManage = actorRole === "OWNER" || actorRole === "ADMIN";
   const isOwner = actorRole === "OWNER";
+  const resetPassword = useApiMutation(
+    (email: string) => api.requestPasswordReset({ email }),
+    {
+      successMessage:
+        "Sign-in reset email requested. The link expires in one hour.",
+      errorMessage: "Couldn't request a reset email.",
+    }
+  );
 
   const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [invites, setInvites] = useState<OrganizationInvite[]>([]);
@@ -337,7 +346,9 @@ export function TeamSettings() {
                         <Select
                           value={member.role}
                           disabled={savingRoleFor === member.userId}
-                          onValueChange={(value) => void changeRole(member, value)}
+                          onValueChange={(value) =>
+                            void changeRole(member, value)
+                          }
                         >
                           <SelectTrigger
                             className="w-28 shrink-0"
@@ -364,6 +375,14 @@ export function TeamSettings() {
                         rowLabel={member.user.email}
                         className="shrink-0"
                         actions={[
+                          {
+                            label: "Send sign-in reset link",
+                            icon: KeyRound,
+                            primary: true,
+                            disabled: !editable || resetPassword.isPending,
+                            onSelect: () =>
+                              resetPassword.mutate(member.user.email),
+                          },
                           {
                             label: `Remove ${member.user.email}`,
                             icon: Trash2,
