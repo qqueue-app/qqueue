@@ -5,6 +5,7 @@ import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { env } from "../config/env.js";
 import { decryptSecret } from "./crypto.js";
 import { applyDsnBounce, parseDsn } from "./dsn.js";
+import { synchronizeReadState } from "./inbox-read-state.js";
 import { logger } from "./logger.js";
 import { prisma } from "./prisma.js";
 import { notifyNewInboundMessage } from "./push.js";
@@ -54,6 +55,7 @@ async function findOutboundThread(input: {
     where: {
       organizationId: input.organizationId,
       messageId: { in: candidates },
+      NOT: { origin: "SYSTEM" },
     },
     select: { id: true },
   });
@@ -217,6 +219,7 @@ async function storeParsedMessage(input: {
       receivedAt,
       readAt: seen ? receivedAt : undefined,
       imapUid: uid,
+      imapUidValidity: account.uidValidity,
       isDsn: Boolean(dsn),
     },
     update: {
@@ -232,8 +235,8 @@ async function storeParsedMessage(input: {
       text: mail.text,
       html: typeof mail.html === "string" ? mail.html : undefined,
       receivedAt,
-      readAt: seen ? receivedAt : undefined,
       imapUid: uid,
+      imapUidValidity: account.uidValidity,
       isDsn: Boolean(dsn),
     },
   });
@@ -308,6 +311,25 @@ async function getActiveInboxAccounts(id?: string) {
 }
 
 export async function syncInboxAccount(account: InboxAccount) {
+  // Serialize account sync across workers, including scheduler/manual overlap.
+  // Bounded imports and flag scans finish within this transaction's lock lease.
+  return prisma.$transaction(
+    async (db) => {
+      const locks = await db.$queryRaw<
+        Array<{ locked: boolean }>
+      >`SELECT pg_try_advisory_xact_lock(hashtextextended(${"inbox-sync:" + account.id}, 0)) AS locked`;
+      if (!locks[0]?.locked) return;
+      // Re-read cursors after acquiring the lock, not from an old scheduler snapshot.
+      const current = await prisma.inboxAccount.findFirst({
+        where: { id: account.id, status: "ACTIVE" },
+      });
+      if (current) await syncLockedInboxAccount(current);
+    },
+    { timeout: 600_000 }
+  );
+}
+
+async function syncLockedInboxAccount(account: InboxAccount) {
   const client = new ImapFlow({
     host: account.host,
     port: account.port,
@@ -317,6 +339,8 @@ export async function syncInboxAccount(account: InboxAccount) {
       pass: decryptSecret(account.passwordEncrypted),
     },
     logger: false,
+    connectionTimeout: 15_000,
+    socketTimeout: 30_000,
   });
 
   let maxSeenUid = account.lastSeenUid ?? 0;
@@ -324,11 +348,16 @@ export async function syncInboxAccount(account: InboxAccount) {
   try {
     await client.connect();
     const mailbox = await client.mailboxOpen(account.mailbox, {
-      readOnly: true,
+      readOnly: false,
     });
     const uidValidity = mailbox.uidValidity?.toString();
     const reset = Boolean(uidValidity && account.uidValidity !== uidValidity);
     if (reset) maxSeenUid = 0;
+    const currentAccount = {
+      ...account,
+      uidValidity: uidValidity ?? account.uidValidity,
+      flagsCursor: reset ? 0 : account.flagsCursor,
+    };
 
     const startUid =
       !reset && account.lastSeenUid && account.lastSeenUid > 0
@@ -352,7 +381,7 @@ export async function syncInboxAccount(account: InboxAccount) {
 
         const mail = await simpleParser(message.source);
         await storeParsedMessage({
-          account,
+          account: currentAccount,
           uid: message.uid,
           flags: message.flags,
           internalDate: message.internalDate,
@@ -360,6 +389,10 @@ export async function syncInboxAccount(account: InboxAccount) {
         });
         maxSeenUid = Math.max(maxSeenUid, message.uid);
       }
+    }
+
+    for (let round = 0; round < 3; round++) {
+      if (!(await synchronizeReadState(client, currentAccount))) break;
     }
 
     await prisma.inboxAccount.update({

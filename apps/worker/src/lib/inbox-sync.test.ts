@@ -50,6 +50,10 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("imapflow", () => ({ ImapFlow: h.ImapFlow }));
+vi.mock("./inbox-read-state.js", () => ({
+  synchronizeReadState: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("mailparser", () => ({ simpleParser: h.simpleParser }));
 vi.mock("./crypto.js", () => ({ decryptSecret: (v: string) => `dec:${v}` }));
 vi.mock("./storage.js", () => ({ storage: h.storage }));
@@ -67,7 +71,7 @@ const { syncInboxAccount, syncInboxAccounts } = await import("./inbox-sync.js");
 type Account = Parameters<typeof syncInboxAccount>[0];
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
-  return {
+  const account = {
     id: "acc-1",
     organizationId: "org-1",
     name: "Support",
@@ -83,13 +87,17 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     lastSeenUid: 0,
     uidValidity: null,
     lastSyncError: null,
+    flagsCursor: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     ...overrides,
-  };
+  } as Account;
+  prismaMock.inboxAccount.findFirst.mockResolvedValue(account);
+  return account;
 }
 
 beforeEach(() => {
+  prismaMock.$queryRaw.mockResolvedValue([{ locked: true }]);
   h.state.mailbox = { exists: 0, uidNext: 1 };
   h.state.messages = [];
   h.state.connectCalls = 0;
@@ -162,6 +170,7 @@ describe("syncInboxAccount", () => {
     );
   });
   it("builds the client from decrypted credentials", async () => {
+    prismaMock.$queryRaw.mockResolvedValue([{ locked: true }]);
     h.state.mailbox = { exists: 0, uidNext: 1 };
 
     await syncInboxAccount(makeAccount());
@@ -203,6 +212,7 @@ describe("syncInboxAccount", () => {
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
       where: {
         organizationId: "org-1",
+        NOT: { origin: "SYSTEM" },
         messageId: {
           in: ["<orig@example.com>", "<a@x>", "<orig@example.com>"],
         },
@@ -495,6 +505,12 @@ describe("DSN handling", () => {
     // on the most recent SENT job to the failed address.
     prismaMock.emailJob.findFirst.mockResolvedValue({
       id: "job-9",
+      toEmail: "bob@example.com",
+      cc: [],
+      bcc: [],
+      sendGroupId: null,
+      organizationId: "org-1",
+      origin: "MANUAL",
       status: "SENT",
       campaignRunId: null,
     } as never);

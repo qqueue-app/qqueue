@@ -1,4 +1,4 @@
-import type { OutboxEmail } from "@qqueue/shared";
+import { aggregateDeliveryStatus, type OutboxEmail } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
@@ -26,8 +26,16 @@ export const outboxService = {
       where: {
         organizationId,
         NOT: { origin: "SYSTEM" },
-        status: { in: [...PENDING_STATUSES] },
-        ...emailJobScope(access),
+        groupPrimary: true,
+        AND: [
+          {
+            OR: [
+              { groupStatus: null, status: { in: [...PENDING_STATUSES] } },
+              { groupStatus: { in: [...PENDING_STATUSES] } },
+            ],
+          },
+          emailJobScope(access),
+        ],
       },
       orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
       take: OUTBOX_LIMIT,
@@ -38,6 +46,10 @@ export const outboxService = {
         cc: true,
         bcc: true,
         status: true,
+        groupStatus: true,
+        visibleTo: true,
+        visibleCc: true,
+        visibleBcc: true,
         origin: true,
         scheduledAt: true,
         createdAt: true,
@@ -52,13 +64,13 @@ export const outboxService = {
       id: job.id,
       subject: job.subject,
       // toEmail is the comma-joined To set for multi-recipient manual sends.
-      to: job.toEmail
+      to: (job.visibleTo?.length ? job.visibleTo.join(",") : job.toEmail)
         .split(",")
         .map((email) => email.trim())
         .filter(Boolean),
-      ccCount: job.cc.length,
-      bccCount: job.bcc.length,
-      status: job.status,
+      ccCount: job.visibleCc?.length ?? job.cc.length,
+      bccCount: job.visibleBcc?.length || job.bcc.length,
+      status: job.groupStatus ?? job.status,
       origin: job.origin,
       scheduledAt: job.scheduledAt ? job.scheduledAt.toISOString() : null,
       createdAt: job.createdAt.toISOString(),
@@ -93,14 +105,14 @@ export const outboxService = {
         NOT: { origin: "SYSTEM" },
         ...emailJobScope(access),
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, groupStatus: true, sendGroupId: true },
     });
 
     if (!job) {
       throw new HttpError(404, "Email not found", "not_found");
     }
 
-    if (!CANCELLABLE_STATUSES.has(job.status)) {
+    if (!CANCELLABLE_STATUSES.has(job.groupStatus ?? job.status)) {
       throw new HttpError(
         409,
         job.status === "PROCESSING"
@@ -110,15 +122,45 @@ export const outboxService = {
       );
     }
 
-    const cancelled = await prisma.emailJob.update({
-      where: { id: job.id },
+    const result = await prisma.emailJob.updateMany({
+      where: {
+        organizationId,
+        ...(job.sendGroupId
+          ? { sendGroupId: job.sendGroupId }
+          : { id: job.id }),
+        status: { in: ["PENDING", "QUEUED"] },
+        ...emailJobScope(access),
+      },
       data: { status: "CANCELLED" },
     });
-
-    // Matches the jobId both enqueue sites use (transactional-email service and
-    // the campaign fan-out worker).
+    if (!result.count)
+      throw new HttpError(409, "This email is already being sent", "conflict");
+    // Delivery claims use the same conditional write, so cancellation cannot
+    // overwrite PROCESSING after a worker has taken ownership.
+    let status = "CANCELLED";
+    if (job.sendGroupId) {
+      status = await prisma.$transaction(async (db) => {
+        await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId + ":group:" + job.sendGroupId}, 0))`;
+        const deliveries = await db.emailJob.findMany({
+          where: { organizationId, sendGroupId: job.sendGroupId },
+          select: { status: true },
+        });
+        const groupStatus =
+          aggregateDeliveryStatus(
+            deliveries.map((delivery) => delivery.status)
+          ) ?? "CANCELLED";
+        await db.emailJob.updateMany({
+          where: {
+            organizationId,
+            sendGroupId: job.sendGroupId,
+            groupPrimary: true,
+          },
+          data: { groupStatus },
+        });
+        return groupStatus;
+      });
+    }
     await emailSendingQueue.remove(`email-${job.id}`).catch(() => undefined);
-
-    return { id: cancelled.id, status: cancelled.status };
+    return { id: job.id, status };
   },
 };

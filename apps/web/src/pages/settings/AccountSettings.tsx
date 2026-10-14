@@ -1,3 +1,7 @@
+import {
+  useReadingPreference,
+  setReadingPreference,
+} from "../../lib/reading-preference.js";
 import { PageContainer } from "../../components/PageContainer.js";
 import { LogOut } from "lucide-react";
 import { PageHeader } from "../../components/PageHeader.js";
@@ -28,6 +32,8 @@ import { useSession } from "../../lib/session-context.js";
 export function AccountSettings() {
   const { user, signOut: clearSessionState } = useSession();
 
+  const reading = useReadingPreference(user?.id ?? "signed-out");
+
   function signOut() {
     clearSessionState();
     // A full navigation rather than a router push: it drops the in-memory query
@@ -55,6 +61,37 @@ export function AccountSettings() {
                 </dd>
               </div>
             </dl>
+          </FormSection>
+
+          <FormSection
+            title="Appearance"
+            description="A preference for this account on this device. Phones always open one conversation at a time."
+          >
+            <fieldset className="space-y-3">
+              <legend className="text-ui font-medium">Reading layout</legend>
+              <label className="flex min-h-touch items-center gap-3 text-ui">
+                <input
+                  type="radio"
+                  name="reading-layout"
+                  checked={reading === "pane"}
+                  onChange={() =>
+                    setReadingPreference(user?.id ?? "signed-out", "pane")
+                  }
+                />
+                Reading pane — list and message side by side
+              </label>
+              <label className="flex min-h-touch items-center gap-3 text-ui">
+                <input
+                  type="radio"
+                  name="reading-layout"
+                  checked={reading === "focused"}
+                  onChange={() =>
+                    setReadingPreference(user?.id ?? "signed-out", "focused")
+                  }
+                />
+                Focused mail — one screen at a time
+              </label>
+            </fieldset>
           </FormSection>
 
           <FormSection title="Notifications">

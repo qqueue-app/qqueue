@@ -11,8 +11,8 @@ vi.mock("./service.js", () => ({
     get: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
-    delete: vi.fn()
-  }
+    delete: vi.fn(),
+  },
 }));
 
 const { emailDraftController } = await import("./controller.js");
@@ -73,7 +73,7 @@ describe("emailDraftController.get", () => {
 
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.json).toHaveBeenCalledWith({
-      error: { message: "Draft not found" }
+      error: { message: "Draft not found" },
     });
   });
 });
@@ -95,7 +95,7 @@ describe("emailDraftController.create", () => {
       listIds: ["lst_1"],
       smtpConnectionId: "smtp_1",
       templateId: "tpl_1",
-      variables: { firstName: "Ada" }
+      variables: { firstName: "Ada" },
     };
 
     await emailDraftController.create(
@@ -114,7 +114,7 @@ describe("emailDraftController.create", () => {
 
   it("accepts a near-empty draft — only organizationId is required", async () => {
     vi.mocked(emailDraftService.create).mockResolvedValue({
-      id: "drf_2"
+      id: "drf_2",
     } as never);
     const res = mockRes();
 
@@ -151,13 +151,15 @@ describe("emailDraftController.update", () => {
       {
         params: { id: "drf_1" },
         userId: "usr_1",
-        body: { subject: "Revised" }
+        body: { subject: "Revised", expectedRevision: 1, mutationId: "m1" },
       } as unknown as Request,
       res
     );
 
     expect(emailDraftService.update).toHaveBeenCalledWith("drf_1", "usr_1", {
-      subject: "Revised"
+      subject: "Revised",
+      expectedRevision: 1,
+      mutationId: "m1",
     });
     expect(res.json).toHaveBeenCalledWith({ data: updated });
   });
@@ -169,7 +171,7 @@ describe("emailDraftController.update", () => {
           params: { id: "drf_1" },
           userId: "usr_1",
           // `to` is an array of strings; a bare string must not pass.
-          body: { to: "someone@example.com" }
+          body: { to: "someone@example.com" },
         } as unknown as Request,
         mockRes()
       )

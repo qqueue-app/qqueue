@@ -7,6 +7,7 @@ import type {
   SentEmailPage,
   SentEmailQueryInput,
 } from "@qqueue/shared";
+import { manualEmailService } from "../manual-email/service.js";
 import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
@@ -25,7 +26,7 @@ import { prisma } from "../../lib/prisma.js";
   outbox) and SUPPRESSED was never attempted (it belongs to Suppressions), so
   neither appears here.
 */
-const ARCHIVED_STATUSES = ["SENT", "FAILED"] as const;
+const ARCHIVED_STATUSES = ["SENT", "FAILED", "UNCERTAIN"] as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,8 +46,27 @@ function buildWhere(
   const where: Prisma.EmailJobWhereInput = {
     organizationId: query.organizationId,
     NOT: { origin: "SYSTEM" },
-    status:
-      query.outcome === "failed" ? "FAILED" : { in: [...ARCHIVED_STATUSES] },
+    groupPrimary: true,
+    AND: [
+      {
+        OR: [
+          {
+            groupStatus: null,
+            status:
+              query.outcome === "failed"
+                ? "FAILED"
+                : { in: [...ARCHIVED_STATUSES] },
+          },
+          {
+            groupStatus:
+              query.outcome === "failed"
+                ? "FAILED"
+                : { in: [...ARCHIVED_STATUSES] },
+          },
+        ],
+      },
+      ...(access.unrestricted ? [] : [emailJobScope(access)]),
+    ],
     /*
       Mailbox scope goes in `AND`, not spread into this object: it is itself an
       OR, and the free-text search below sets `OR` too. A single object would
@@ -56,7 +76,6 @@ function buildWhere(
       Omitted entirely for OWNER/ADMIN rather than added as an empty clause, so
       the unrestricted query stays exactly the query it was.
     */
-    ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] }),
   };
 
   if (query.origin !== "all") {
@@ -105,6 +124,10 @@ type ArchivedJob = {
   cc: string[];
   bcc: string[];
   status: string;
+  groupStatus?: string | null;
+  visibleTo?: string[];
+  visibleCc?: string[];
+  visibleBcc?: string[];
   origin: string;
   sentAt: Date | null;
   createdAt: Date;
@@ -160,13 +183,13 @@ function toSentEmail(job: ArchivedJob): SentEmail {
   return {
     id: job.id,
     subject: job.subject,
-    to: job.toEmail
+    to: (job.visibleTo?.length ? job.visibleTo.join(",") : job.toEmail)
       .split(",")
       .map((email) => email.trim())
       .filter(Boolean),
-    ccCount: job.cc.length,
-    bccCount: job.bcc.length,
-    status: job.status as SentEmail["status"],
+    ccCount: job.visibleCc?.length ?? job.cc.length,
+    bccCount: job.visibleBcc?.length || job.bcc.length,
+    status: (job.groupStatus ?? job.status) as SentEmail["status"],
     origin: job.origin as SentEmail["origin"],
     sentAt: job.sentAt ? job.sentAt.toISOString() : null,
     createdAt: job.createdAt.toISOString(),
@@ -327,8 +350,11 @@ export const sentService = {
         id,
         organizationId,
         NOT: { origin: "SYSTEM" },
-        status: { in: [...ARCHIVED_STATUSES] },
-        ...(access.unrestricted ? {} : { AND: [emailJobScope(access)] }),
+        OR: [
+          { groupStatus: null, status: { in: [...ARCHIVED_STATUSES] } },
+          { groupStatus: { in: [...ARCHIVED_STATUSES] } },
+        ],
+        AND: [emailJobScope(access)],
       },
       select: {
         id: true,
@@ -338,6 +364,11 @@ export const sentService = {
         bcc: true,
         replyTo: true,
         status: true,
+        groupStatus: true,
+        visibleTo: true,
+        visibleCc: true,
+        visibleBcc: true,
+        sendGroupId: true,
         origin: true,
         sentAt: true,
         createdAt: true,
@@ -378,8 +409,37 @@ export const sentService = {
 
     // toSentEmail folds the events into counts and flags, and only reads
     // `type` — so the same rows serve both the summary and the timeline below.
-    const summary = toSentEmail(job as unknown as ArchivedJob);
-    const recorded = job.events as unknown as ArchivedEvent[];
+    const siblings = job.sendGroupId
+      ? await prisma.emailJob.findMany({
+          where: {
+            organizationId,
+            sendGroupId: job.sendGroupId,
+            NOT: { origin: "SYSTEM" },
+            AND: [emailJobScope(access)],
+          },
+          select: {
+            sentAt: true,
+            events: {
+              select: {
+                id: true,
+                type: true,
+                occurredAt: true,
+                metadata: true,
+              },
+            },
+          },
+        })
+      : [];
+    const allEvents = siblings.length
+      ? siblings
+          .flatMap((row) => row.events)
+          .sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime())
+      : job.events;
+    const summary = toSentEmail({
+      ...job,
+      events: allEvents,
+    } as unknown as ArchivedJob);
+    const recorded = allEvents as unknown as ArchivedEvent[];
     const events = foldEvents(recorded);
 
     const attachments: SentEmailAttachment[] = job.attachments.map(
@@ -399,13 +459,26 @@ export const sentService = {
       ...summary,
       html: job.html,
       text: job.text,
-      cc: job.cc,
-      bcc: job.bcc,
+      cc: job.visibleTo?.length ? job.visibleCc : job.cc,
+      bcc: job.visibleBcc?.length ? job.visibleBcc : job.bcc,
       replyTo: job.replyTo,
       messageId: job.messageId,
       attachments,
       events,
-      failureReason: failureReasonOf(job.status, recorded),
+      failureReason:
+        job.groupStatus === "UNCERTAIN" || job.status === "UNCERTAIN"
+          ? "Delivery could not be confirmed. Check the recipient or mail server before sending again."
+          : failureReasonOf(job.groupStatus ?? job.status, recorded),
+      recipients:
+        job.origin === "MANUAL" && job.sendGroupId
+          ? (
+              await manualEmailService.deliveryStatus(
+                job.id,
+                organizationId,
+                userId
+              )
+            ).recipients
+          : undefined,
     };
   },
 
@@ -450,6 +523,11 @@ export const sentService = {
           cc: true,
           bcc: true,
           status: true,
+          groupStatus: true,
+          visibleTo: true,
+          visibleCc: true,
+          visibleBcc: true,
+          sendGroupId: true,
           origin: true,
           sentAt: true,
           createdAt: true,

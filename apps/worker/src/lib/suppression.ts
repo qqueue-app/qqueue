@@ -1,8 +1,8 @@
-import type { SuppressionReason } from "@prisma/client";
+import { Prisma, type SuppressionReason } from "@prisma/client";
 import type { BounceType } from "@qqueue/email-engine";
 import {
   resolveSuppressionPolicy,
-  shouldSuppressBounce as decideSuppressBounce
+  shouldSuppressBounce as decideSuppressBounce,
 } from "@qqueue/shared";
 import { env } from "../config/env.js";
 import { prisma } from "./prisma.js";
@@ -17,9 +17,9 @@ function normalizeEmail(email: string) {
 export async function isSuppressed(organizationId: string, email: string) {
   const hit = await prisma.suppression.findUnique({
     where: {
-      organizationId_email: { organizationId, email: normalizeEmail(email) }
+      organizationId_email: { organizationId, email: normalizeEmail(email) },
     },
-    select: { id: true }
+    select: { id: true },
   });
   return Boolean(hit);
 }
@@ -37,7 +37,7 @@ export async function suppressedAmong(
   }
   const rows = await prisma.suppression.findMany({
     where: { organizationId, email: { in: emails.map(normalizeEmail) } },
-    select: { email: true }
+    select: { email: true },
   });
   return new Set(rows.map((row) => row.email.toLowerCase()));
 }
@@ -58,7 +58,7 @@ export function addSuppression(input: {
   return prisma.suppression.upsert({
     where: { organizationId_email: { organizationId, email } },
     create: { organizationId, email, reason, source },
-    update: { reason, source }
+    update: { reason, source },
   });
 }
 
@@ -80,11 +80,11 @@ export async function shouldSuppressBounce(input: {
 
   const policy = resolveSuppressionPolicy(
     await prisma.suppressionPolicy.findUnique({
-      where: { organizationId: input.organizationId }
+      where: { organizationId: input.organizationId },
     }),
     {
       softBounceThreshold: env.SOFT_BOUNCE_THRESHOLD,
-      softBounceWindowDays: env.SOFT_BOUNCE_WINDOW_DAYS
+      softBounceWindowDays: env.SOFT_BOUNCE_WINDOW_DAYS,
     }
   );
 
@@ -97,9 +97,26 @@ export async function shouldSuppressBounce(input: {
           organizationId: input.organizationId,
           type: "BOUNCED",
           occurredAt: { gte: windowStart },
-          emailJob: { toEmail: normalizeEmail(input.email) },
-          metadata: { path: ["bounceType"], equals: "SOFT" }
-        }
-      })
+          OR: [
+            {
+              metadata: {
+                path: ["recipient"],
+                equals: normalizeEmail(input.email),
+              },
+            },
+            {
+              AND: [
+                { emailJob: { toEmail: normalizeEmail(input.email) } },
+                {
+                  NOT: {
+                    metadata: { path: ["recipient"], not: Prisma.AnyNull },
+                  },
+                },
+              ],
+            },
+          ],
+          metadata: { path: ["bounceType"], equals: "SOFT" },
+        },
+      }),
   });
 }

@@ -2,6 +2,9 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+// jsdom has no layout/scroll engine. Individual navigation tests may spy on it.
+window.scrollTo = () => {};
+
 // --- jsdom polyfills for Radix UI (dialog, select, dropdown-menu, etc.) ---
 // jsdom does not implement these APIs that Radix relies on.
 if (!("ResizeObserver" in globalThis)) {
@@ -10,7 +13,8 @@ if (!("ResizeObserver" in globalThis)) {
     unobserve() {}
     disconnect() {}
   }
-  globalThis.ResizeObserver = ResizeObserver as unknown as typeof globalThis.ResizeObserver;
+  globalThis.ResizeObserver =
+    ResizeObserver as unknown as typeof globalThis.ResizeObserver;
 }
 
 /*
@@ -32,7 +36,7 @@ if (!window.matchMedia) {
     removeListener: () => {},
     addEventListener: () => {},
     removeEventListener: () => {},
-    dispatchEvent: () => false
+    dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
 }
 
@@ -55,12 +59,18 @@ if (!document.elementFromPoint) {
 }
 if (!Range.prototype.getClientRects) {
   Range.prototype.getClientRects = vi.fn(
-    () => ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as unknown as DOMRectList
+    () =>
+      ({
+        length: 0,
+        item: () => null,
+        [Symbol.iterator]: function* () {},
+      }) as unknown as DOMRectList
   );
 }
 if (!Range.prototype.getBoundingClientRect) {
   Range.prototype.getBoundingClientRect = vi.fn(
-    () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }) as DOMRect
+    () =>
+      ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }) as DOMRect
   );
 }
 

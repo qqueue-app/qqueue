@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
 import { MailCheck, RefreshCw, X } from "lucide-react";
 import { PageContainer } from "../components/PageContainer.js";
@@ -83,10 +84,16 @@ export function Outbox() {
     (email: OutboxEmail) =>
       api.cancelOutboxEmail(email.id, organizationId as string),
     {
-      successMessage: "Cancelled — that email won't be sent.",
       errorMessage: "Couldn't cancel that email.",
       invalidates: [qk.outbox(organizationId ?? "")],
-      onSuccess: () => setCancelTarget(null),
+      onSuccess: (result) => {
+        setCancelTarget(null);
+        toast.success(
+          result.status === "CANCELLED"
+            ? "Cancelled — that email won't be sent."
+            : "Remaining deliveries cancelled. Some recipients had already started sending; check Sent for outcomes."
+        );
+      },
       onError: () => {
         setCancelTarget(null);
         // A failure here almost always means the email just went out. Refresh
@@ -288,7 +295,7 @@ export function Outbox() {
         title="Cancel this email?"
         description={
           cancelTarget
-            ? `"${cancelTarget.subject || "(no subject)"}" won't be sent. This can't be undone.`
+            ? `Cancel deliveries of "${cancelTarget.subject || "(no subject)"}" that have not started. A recipient already handed to the mail server cannot be recalled.`
             : ""
         }
         confirmLabel="Cancel email"

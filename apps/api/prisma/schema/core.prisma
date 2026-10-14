@@ -97,6 +97,7 @@ enum CampaignStatus {
 }
 
 enum EmailJobStatus {
+  UNCERTAIN
   PENDING
   QUEUED
   PROCESSING
@@ -775,6 +776,7 @@ model EmailJob {
   // Empty for older jobs and non-manual sends (use toEmail/cc as before).
   visibleTo        String[]          @default([])
   visibleCc        String[]          @default([])
+  visibleBcc       String[]          @default([])
   cc               String[]          @default([])
   bcc              String[]          @default([])
   replyTo          String?
@@ -797,6 +799,10 @@ model EmailJob {
   // so the composer's delivery panel can aggregate them. NULL for single-job
   // sends (campaign jobs group via campaignRunId instead).
   sendGroupId      String?
+  groupPrimary     Boolean           @default(true)
+  groupStatus      EmailJobStatus?
+  recipientField   String?
+  requestHash      String?
   status           EmailJobStatus    @default(PENDING)
   // Threading metadata (RFC 5322). `messageId` is the Message-ID assigned to the
   // sent message; `inReplyTo`/`references` let a reply thread correctly in the
@@ -843,8 +849,15 @@ model EmailJob {
 // draft is a snapshot of the in-progress composer state (recipients, body,
 // template/SMTP selection); it is intentionally permissive so an unfinished
 // message can always be saved. On send it produces an EmailJob (origin = MANUAL)
-// through the shared pipeline and the draft is removed by the client.
+// through the shared pipeline. Acceptance atomically completes the draft;
+// its tombstone retains the accepted job identity for lost-response recovery.
 model EmailDraft {
+  clientId         String?
+  revision         Int               @default(1)
+  lastMutationId   String?
+  creationHash     String?
+  deletedAt        DateTime?
+  completedSendId  String?
   id               String            @id @default(cuid())
   organizationId   String
   createdByUserId  String
@@ -866,6 +879,7 @@ model EmailDraft {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
+  @@unique([organizationId, createdByUserId, clientId])
   @@index([organizationId, createdByUserId])
 }
 
@@ -876,6 +890,8 @@ model EmailDraft {
 // are SetNull so deleting a draft/job leaves the row harmlessly orphaned until
 // cleaned up. See docs/DECISIONS.md ("Object Storage (S3/MinIO) for Attachments").
 model EmailAttachment {
+  uploadId        String?
+  contentHash     String?
   id              String       @id @default(cuid())
   organizationId  String
   emailJobId      String?
@@ -896,6 +912,7 @@ model EmailAttachment {
 
   @@index([organizationId])
   @@index([emailJobId])
+  @@unique([organizationId, createdByUserId, uploadId])
   @@index([emailDraftId])
 }
 
@@ -956,6 +973,7 @@ model InboxAccount {
   lastSeenUid       Int?
   uidValidity       String?
   lastSyncError     String?
+  flagsCursor       Int?
   organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboundMessages   InboundMessage[]
   grants            InboxAccountGrant[]
@@ -1061,6 +1079,11 @@ model InboundMessage {
   html                   String?
   receivedAt             DateTime
   readAt                 DateTime?
+  readRevision           Int                    @default(1)
+  readPending            Boolean                @default(false)
+  readSyncError          String?
+  readAttemptedAt        DateTime?
+  imapUidValidity        String?
   imapUid                Int?
   /// True when the sync worker recognized this message as a delivery status
   /// notification (bounce report) and fed it into bounce accounting. Lets the
@@ -1075,6 +1098,7 @@ model InboundMessage {
   @@unique([inboxAccountId, messageId])
   @@index([organizationId, receivedAt])
   @@index([organizationId, readAt])
+  @@index([inboxAccountId, readPending, readAttemptedAt])
   @@index([emailJobId])
   @@index([inReplyTo])
 }

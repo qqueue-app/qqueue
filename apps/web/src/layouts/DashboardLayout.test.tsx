@@ -94,7 +94,7 @@ describe("DashboardLayout", () => {
       screen.queryByRole("link", { name: "Insights" })
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Show more tools" })
+      screen.getByRole("button", { name: "More tools" })
     ).toBeInTheDocument();
     expect(screen.getByText("Inbox page")).toBeInTheDocument();
   });
@@ -105,9 +105,11 @@ describe("DashboardLayout", () => {
     expect(
       screen.queryByRole("link", { name: "Campaigns" })
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show more tools" }));
-    expect(screen.getByRole("link", { name: "Campaigns" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Hide extra tools" }));
+    await user.click(screen.getByRole("button", { name: "More tools" }));
+    expect(
+      screen.getByRole("menuitem", { name: "Campaigns" })
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(
       screen.queryByRole("link", { name: "Campaigns" })
     ).not.toBeInTheDocument();
@@ -185,22 +187,26 @@ describe("DashboardLayout", () => {
       );
     });
 
-    it("merges smart lists into Lists rather than listing it separately", () => {
+    it("merges smart lists into Lists rather than listing it separately", async () => {
+      const user = userEvent.setup();
       renderLayout("/campaigns/lists/smart");
+      await user.click(screen.getByRole("button", { name: "More tools" }));
       expect(
         screen.queryByRole("link", { name: "Smart lists" })
       ).not.toBeInTheDocument();
       // Lists stays lit on the Smart tab's route.
-      expect(screen.getByRole("link", { name: "Lists" })).toHaveAttribute(
+      expect(screen.getByRole("menuitem", { name: "Lists" })).toHaveAttribute(
         "aria-current",
         "page"
       );
     });
 
-    it("does not light up Campaigns when the route is a Lists sub-path", () => {
+    it("does not light up Campaigns when the route is a Lists sub-path", async () => {
+      const user = userEvent.setup();
       renderLayout("/campaigns/lists");
+      await user.click(screen.getByRole("button", { name: "More tools" }));
       expect(
-        screen.getByRole("link", { name: "Campaigns" })
+        screen.getByRole("menuitem", { name: "Campaigns" })
       ).not.toHaveAttribute("aria-current");
     });
 

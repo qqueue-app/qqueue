@@ -12,7 +12,7 @@ export const ORIGIN_LABEL: Record<SentEmail["origin"], string> = {
   MANUAL: "Written by you",
   CAMPAIGN: "Campaign",
   TRANSACTIONAL: "App or API",
-  SYSTEM: "Account email"
+  SYSTEM: "Account email",
 };
 
 export interface SentOutcome {
@@ -29,6 +29,8 @@ export interface SentOutcome {
  * a row has one line to say it and "Bounced" matters more than "Delivered".
  */
 export function outcomeOf(email: SentEmail): SentOutcome {
+  if (email.status === "UNCERTAIN")
+    return { label: "Delivery unconfirmed", variant: "err" };
   if (email.status === "FAILED") return { label: "Failed", variant: "err" };
   if (email.complained) return { label: "Marked as spam", variant: "err" };
   if (email.bounced) return { label: "Bounced", variant: "err" };

@@ -36,16 +36,37 @@ beforeEach(() => {
       fn.mockReset().mockResolvedValue(undefined);
     }
   }
+  prismaMock.emailJob.updateMany.mockResolvedValue({ count: 0 } as never);
   noWork();
 });
 
 describe("recoverQueuedWork", () => {
+  it("repairs a stale Outbox summary after SMTP acceptance was recorded", async () => {
+    prismaMock.emailJob.findMany.mockImplementation(async (args: unknown) => {
+      const where = (
+        args as { where?: { groupPrimary?: boolean; sendGroupId?: unknown } }
+      ).where;
+      if (where?.groupPrimary)
+        return [{ organizationId: "o1", sendGroupId: "g1" }] as never;
+      if (where?.sendGroupId === "g1")
+        return [{ status: "SENT" }, { status: "FAILED" }] as never;
+      return [] as never;
+    });
+    await recoverQueuedWork();
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "o1", sendGroupId: "g1", groupPrimary: true },
+      data: { groupStatus: "SENT" },
+    });
+    expect(h.emailQueue.addBulk).not.toHaveBeenCalled();
+  });
   it("touches no queue when there is nothing to recover", async () => {
     await recoverQueuedWork();
     expect(h.emailQueue.addBulk).not.toHaveBeenCalled();
     expect(h.campaignQueue.addBulk).not.toHaveBeenCalled();
     expect(h.webhookQueue.addBulk).not.toHaveBeenCalled();
-    expect(prismaMock.emailJob.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "UNCERTAIN" } })
+    );
   });
 
   it("re-enqueues QUEUED jobs, preserving a future scheduledAt as delay", async () => {
@@ -64,36 +85,14 @@ describe("recoverQueuedWork", () => {
     expect(batch[0].opts.delay).toBeGreaterThan(0);
   });
 
-  // Phase 5: PROCESSING rows a crashed worker never finished used to stay
-  // stranded forever — startup recovery only looked at QUEUED.
-  it("re-queues jobs stranded in PROCESSING past the grace period", async () => {
-    prismaMock.emailJob.findMany.mockImplementation(async (args: unknown) =>
-      (args as { where?: { status?: string } })?.where?.status === "PROCESSING"
-        ? ([{ id: "stuck1" }, { id: "stuck2" }] as never)
-        : ([] as never)
-    );
+  it("marks interrupted SMTP attempts uncertain without resending them", async () => {
     prismaMock.emailJob.updateMany.mockResolvedValue({ count: 2 } as never);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     await recoverQueuedWork();
-
-    // The grace period is part of the query, not post-filtering.
-    const stuckQuery = prismaMock.emailJob.findMany.mock.calls.find(
-      (call) =>
-        (call[0] as { where?: { status?: string } })?.where?.status ===
-        "PROCESSING"
-    )?.[0] as { where: { updatedAt: { lt: Date } } };
-    expect(stuckQuery.where.updatedAt.lt).toBeInstanceOf(Date);
-
     expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["stuck1", "stuck2"] } },
-      data: { status: "QUEUED" },
+      where: { status: "PROCESSING", updatedAt: { lt: expect.any(Date) } },
+      data: { status: "UNCERTAIN" },
     });
-    const batch = h.emailQueue.addBulk.mock.calls[0][0];
-    expect(
-      batch.map((job: { opts: { jobId: string } }) => job.opts.jobId)
-    ).toEqual(["email-stuck1", "email-stuck2"]);
-    warn.mockRestore();
+    expect(h.emailQueue.addBulk).not.toHaveBeenCalled();
   });
 
   it("re-registers schedulers for recurring campaigns and sends", async () => {

@@ -3,7 +3,7 @@ import { prismaMock } from "../../test/prisma-mock.js";
 
 const queueAdd = vi.fn();
 vi.mock("../../queues/email-sending.queue.js", () => ({
-  emailSendingQueue: { add: queueAdd }
+  emailSendingQueue: { add: queueAdd },
 }));
 
 const storageGetObject = vi.fn();
@@ -11,8 +11,8 @@ vi.mock("../../lib/storage.js", () => ({
   storage: {
     getObject: storageGetObject,
     putObject: vi.fn(),
-    deleteObject: vi.fn()
-  }
+    deleteObject: vi.fn(),
+  },
 }));
 
 const { transactionalEmailService } = await import("./service.js");
@@ -21,19 +21,37 @@ const smtpConnection = {
   id: "smtp_1",
   organizationId: "org_1",
   fromEmail: "from@b.com",
-  fromName: "Sender"
+  fromName: "Sender",
 };
 
 beforeEach(() => {
+  prismaMock.emailJob.findUnique.mockImplementation(async (args) => {
+    if ("id" in args.where) {
+      const result =
+        await prismaMock.emailJob.create.mock.results.at(-1)?.value;
+      return result
+        ? {
+            ...result,
+            organizationId: "org_1",
+            scheduledAt:
+              prismaMock.emailJob.create.mock.calls.at(-1)?.[0].data
+                .scheduledAt ?? null,
+          }
+        : null;
+    }
+    return null;
+  });
   queueAdd.mockReset().mockResolvedValue(undefined);
   // Default: no attachments. Individual tests override findMany to attach files.
   prismaMock.emailAttachment.findMany.mockResolvedValue([] as never);
-  prismaMock.emailAttachment.updateMany.mockResolvedValue({ count: 0 } as never);
+  prismaMock.emailAttachment.updateMany.mockResolvedValue({
+    count: 0,
+  } as never);
   storageGetObject.mockReset();
   // Send-as enforcement (Phase 4) runs when a send carries an acting user;
   // the default actor here is an OWNER.
   prismaMock.organizationMember.findUnique.mockResolvedValue({
-    role: "OWNER"
+    role: "OWNER",
   } as never);
 });
 
@@ -49,16 +67,18 @@ describe("transactionalEmailService.send", () => {
         organizationId: "org_1",
         to: "x@y.com",
         subject: "Hi",
-        html: "<p>Hi</p>"
+        html: "<p>Hi</p>",
       })
     ).rejects.toThrow("SMTP connection not found");
   });
 
   it("resolves the sending account by from address", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
@@ -66,7 +86,7 @@ describe("transactionalEmailService.send", () => {
       to: "x@y.com",
       from: "Support@Acme.com ",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     const where = prismaMock.sMTPConnection.findFirst.mock.calls[0][0].where;
@@ -74,17 +94,19 @@ describe("transactionalEmailService.send", () => {
     // case-insensitively so a differently-cased stored value still resolves.
     expect(where.fromEmail).toEqual({
       equals: "support@acme.com",
-      mode: "insensitive"
+      mode: "insensitive",
     });
     expect(where.isDefault).toBeUndefined();
     expect(where.id).toBeUndefined();
   });
 
   it("prefers the default account when a from address matches several", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
@@ -92,22 +114,23 @@ describe("transactionalEmailService.send", () => {
       to: "x@y.com",
       from: "support@acme.com",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     // fromEmail is not unique within an org, so the tiebreak has to be
     // deterministic or the same send could go out as a different account.
-    expect(prismaMock.sMTPConnection.findFirst.mock.calls[0][0].orderBy).toEqual([
-      { isDefault: "desc" },
-      { createdAt: "asc" }
-    ]);
+    expect(
+      prismaMock.sMTPConnection.findFirst.mock.calls[0][0].orderBy
+    ).toEqual([{ isDefault: "desc" }, { createdAt: "asc" }]);
   });
 
   it("lets an explicit smtpConnectionId win over from", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
@@ -116,7 +139,7 @@ describe("transactionalEmailService.send", () => {
       from: "support@acme.com",
       smtpConnectionId: "smtp_9",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     const where = prismaMock.sMTPConnection.findFirst.mock.calls[0][0].where;
@@ -134,24 +157,26 @@ describe("transactionalEmailService.send", () => {
         to: "x@y.com",
         from: "typo@acme.com",
         subject: "Hi",
-        html: "<p>Hi</p>"
+        html: "<p>Hi</p>",
       })
     ).rejects.toThrow("No sending account sends as typo@acme.com");
     expect(prismaMock.emailJob.create).not.toHaveBeenCalled();
   });
 
   it("falls back to the org default when neither selector is given", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
       organizationId: "org_1",
       to: "x@y.com",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     const where = prismaMock.sMTPConnection.findFirst.mock.calls[0][0].where;
@@ -160,54 +185,62 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("throws 404 when the referenced template is missing", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.template.findFirst.mockResolvedValue(null);
     await expect(
       transactionalEmailService.send({
         organizationId: "org_1",
         to: "x@y.com",
-        templateId: "tpl_1"
+        templateId: "tpl_1",
       })
     ).rejects.toThrow("Template not found");
   });
 
   it("throws 400 when there is no subject or body", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     await expect(
       transactionalEmailService.send({ organizationId: "org_1", to: "x@y.com" })
     ).rejects.toThrow("Provide a subject and html/text body, or a templateId");
   });
 
   it("records a SUPPRESSED job and does not enqueue a suppressed recipient", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_sup",
-      status: "SUPPRESSED"
+      status: "SUPPRESSED",
     } as never);
 
     const result = await transactionalEmailService.send({
       organizationId: "org_1",
       to: "blocked@y.com",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     expect(result).toEqual({ id: "job_sup", status: "SUPPRESSED" });
     expect(prismaMock.emailJob.create.mock.calls[0][0].data).toMatchObject({
       status: "SUPPRESSED",
-      toEmail: "blocked@y.com"
+      toEmail: "blocked@y.com",
     });
     expect(queueAdd).not.toHaveBeenCalled();
   });
 
   it("bypasses the suppression check for SYSTEM mail", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     // Even a suppressed recipient must receive account mail.
     prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_sys",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     const result = await transactionalEmailService.send({
@@ -216,7 +249,7 @@ describe("transactionalEmailService.send", () => {
       subject: "Reset your password",
       html: "<p>Reset</p>",
       origin: "SYSTEM",
-      createdByUserId: "user_1"
+      createdByUserId: "user_1",
     });
 
     expect(result).toEqual({ id: "job_sys", status: "QUEUED" });
@@ -229,17 +262,19 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("queues an immediate send with no delay instead of sending inline", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     const result = await transactionalEmailService.send({
       organizationId: "org_1",
       to: "x@y.com",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     expect(result).toEqual({ id: "job_1", status: "QUEUED" });
@@ -259,11 +294,11 @@ describe("transactionalEmailService.send", () => {
     );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
     const headers = {
       "List-Unsubscribe": "<https://example.com/u/signed>",
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     };
     await transactionalEmailService.send({
       organizationId: "org_1",
@@ -271,7 +306,7 @@ describe("transactionalEmailService.send", () => {
       subject: "Newsletter",
       html: "<p>Hi</p>",
       headers,
-      isBulk: true
+      isBulk: true,
     });
     expect(prismaMock.emailJob.create.mock.calls[0][0].data.headers).toEqual(
       headers
@@ -283,10 +318,12 @@ describe("transactionalEmailService.send", () => {
   it("queues a future email with the schedule delay", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     const result = await transactionalEmailService.send({
@@ -294,23 +331,27 @@ describe("transactionalEmailService.send", () => {
       to: "x@y.com",
       subject: "Hi",
       text: "Body",
-      scheduledAt: "2026-01-01T01:00:00.000Z"
+      scheduledAt: "2026-01-01T01:00:00.000Z",
     });
 
     expect(result).toEqual({ id: "job_1", status: "QUEUED" });
     expect(queueAdd).toHaveBeenCalledOnce();
     expect(queueAdd.mock.calls[0][2]).toMatchObject({
       delay: 60 * 60 * 1000,
-      jobId: "email-job_1"
+      jobId: "email-job_1",
     });
     const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
-    expect(createData.scheduledAt).toEqual(new Date("2026-01-01T01:00:00.000Z"));
+    expect(createData.scheduledAt).toEqual(
+      new Date("2026-01-01T01:00:00.000Z")
+    );
   });
 
   it("rejects scheduledAt values that are not in the future", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
 
     await expect(
       transactionalEmailService.send({
@@ -318,7 +359,7 @@ describe("transactionalEmailService.send", () => {
         to: "x@y.com",
         subject: "Hi",
         text: "Body",
-        scheduledAt: "2025-01-01T00:00:00.000Z"
+        scheduledAt: "2025-01-01T00:00:00.000Z",
       })
     ).rejects.toThrow("scheduledAt must be in the future");
 
@@ -326,7 +367,9 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("rejects invalid scheduledAt values", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
 
     await expect(
       transactionalEmailService.send({
@@ -334,7 +377,7 @@ describe("transactionalEmailService.send", () => {
         to: "x@y.com",
         subject: "Hi",
         text: "Body",
-        scheduledAt: "not-a-date"
+        scheduledAt: "not-a-date",
       })
     ).rejects.toThrow("scheduledAt must be a valid ISO date");
 
@@ -342,23 +385,25 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("renders template variables into the queued job", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.template.findFirst.mockResolvedValue({
       id: "tpl_1",
       subject: "Hi {{ name }}",
       html: "<p>Hello {{ name }}</p>",
-      text: "Hello {{ missing }}"
+      text: "Hello {{ missing }}",
     } as never);
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     const result = await transactionalEmailService.send({
       organizationId: "org_1",
       to: "x@y.com",
       templateId: "tpl_1",
-      variables: { name: "World" }
+      variables: { name: "World" },
     });
 
     expect(result).toEqual({ id: "job_1", status: "QUEUED" });
@@ -371,10 +416,12 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("normalizes recipient casing and stores the send group", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
@@ -384,7 +431,7 @@ describe("transactionalEmailService.send", () => {
       bcc: ["BCC@Y.com"],
       subject: "Hi",
       html: "<p>Hi</p>",
-      sendGroupId: "grp_1"
+      sendGroupId: "grp_1",
     });
 
     const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
@@ -395,10 +442,12 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("persists cc, bcc, replyTo and origin on the queued job", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
@@ -408,7 +457,7 @@ describe("transactionalEmailService.send", () => {
       bcc: ["bcc@y.com"],
       replyTo: "reply@y.com",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
@@ -420,10 +469,12 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("sets origin MANUAL and createdByUserId on the manual path", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
@@ -432,7 +483,7 @@ describe("transactionalEmailService.send", () => {
       subject: "Hi",
       html: "<p>Hi</p>",
       origin: "MANUAL",
-      createdByUserId: "user_1"
+      createdByUserId: "user_1",
     });
 
     const createData = prismaMock.emailJob.create.mock.calls[0][0].data;
@@ -443,9 +494,11 @@ describe("transactionalEmailService.send", () => {
   // Phase 4 acceptance: a MEMBER without a grant cannot send as the account,
   // on any surface that funnels through this service (API JWT sends, manual).
   it("blocks a MEMBER without a grant from sending as the connection", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
 
@@ -456,7 +509,7 @@ describe("transactionalEmailService.send", () => {
         subject: "Hi",
         html: "<p>Hi</p>",
         origin: "MANUAL",
-        createdByUserId: "user_1"
+        createdByUserId: "user_1",
       })
     ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
     expect(prismaMock.emailJob.create).not.toHaveBeenCalled();
@@ -466,9 +519,11 @@ describe("transactionalEmailService.send", () => {
   // `from` resolves to a connection before the grant check, so naming an
   // account by address is not a way around one a MEMBER was never granted.
   it("blocks an ungranted MEMBER who names the account by from address", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
 
@@ -480,7 +535,7 @@ describe("transactionalEmailService.send", () => {
         subject: "Hi",
         html: "<p>Hi</p>",
         origin: "MANUAL",
-        createdByUserId: "user_1"
+        createdByUserId: "user_1",
       })
     ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
     expect(prismaMock.emailJob.create).not.toHaveBeenCalled();
@@ -488,16 +543,18 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("lets a MEMBER with a grant send as the connection", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
-      id: "g1"
+      id: "g1",
     } as never);
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await expect(
@@ -507,41 +564,51 @@ describe("transactionalEmailService.send", () => {
         subject: "Hi",
         html: "<p>Hi</p>",
         origin: "MANUAL",
-        createdByUserId: "user_1"
+        createdByUserId: "user_1",
       })
     ).resolves.toMatchObject({ status: "QUEUED" });
   });
 
   it("links attachments to the queued job without loading their blobs", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
-    prismaMock.emailAttachment.updateMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.emailAttachment.updateMany.mockResolvedValue({
+      count: 1,
+    } as never);
 
     await transactionalEmailService.send({
       organizationId: "org_1",
       to: "x@y.com",
       subject: "Hi",
       html: "<p>Hi</p>",
-      attachmentIds: ["att_1"]
+      attachmentIds: ["att_1"],
     });
 
     // Links only unlinked rows in this org to the new job.
     expect(prismaMock.emailAttachment.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["att_1"] }, organizationId: "org_1", emailJobId: null },
-      data: { emailJobId: "job_1" }
+      where: {
+        id: { in: ["att_1"] },
+        organizationId: "org_1",
+        emailJobId: null,
+      },
+      data: { emailJobId: "job_1" },
     });
     // Blobs are loaded by the worker at send time, never at enqueue time.
     expect(storageGetObject).not.toHaveBeenCalled();
   });
 
   it("stores inline attachments on the job, cid included, before enqueuing", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
     const createOrder: string[] = [];
     prismaMock.emailAttachment.create.mockImplementation((() => {
@@ -563,9 +630,9 @@ describe("transactionalEmailService.send", () => {
           filename: "qr.png",
           contentBase64: Buffer.from("png-bytes").toString("base64"),
           contentType: "image/png",
-          cid: "ticket-qr"
-        }
-      ]
+          cid: "ticket-qr",
+        },
+      ],
     });
 
     const data = prismaMock.emailAttachment.create.mock.calls[0][0].data;
@@ -578,7 +645,7 @@ describe("transactionalEmailService.send", () => {
   it("replays a prior job for a repeated idempotency key without enqueuing again", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       id: "job_existing",
-      status: "SENT"
+      status: "SENT",
     } as never);
 
     const result = await transactionalEmailService.send({
@@ -586,7 +653,7 @@ describe("transactionalEmailService.send", () => {
       to: "x@y.com",
       subject: "Hi",
       html: "<p>Hi</p>",
-      idempotencyKey: "key-1"
+      idempotencyKey: "key-1",
     });
 
     expect(result).toEqual({ id: "job_existing", status: "SENT" });
@@ -597,11 +664,13 @@ describe("transactionalEmailService.send", () => {
   });
 
   it("stores the idempotency key on a first-time send", async () => {
-    prismaMock.emailJob.findUnique.mockResolvedValue(null as never);
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.emailJob.findUnique.mockResolvedValueOnce(null as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     await transactionalEmailService.send({
@@ -609,12 +678,12 @@ describe("transactionalEmailService.send", () => {
       to: "x@y.com",
       subject: "Hi",
       html: "<p>Hi</p>",
-      idempotencyKey: "key-1"
+      idempotencyKey: "key-1",
     });
 
-    expect(prismaMock.emailJob.create.mock.calls[0][0].data.idempotencyKey).toBe(
-      "key-1"
-    );
+    expect(
+      prismaMock.emailJob.create.mock.calls[0][0].data.idempotencyKey
+    ).toBe("key-1");
     expect(queueAdd).toHaveBeenCalledOnce();
   });
 
@@ -623,9 +692,16 @@ describe("transactionalEmailService.send", () => {
       .mockResolvedValueOnce(null as never) // pre-check: key not seen yet
       .mockResolvedValueOnce({
         id: "job_race",
-        status: "QUEUED"
-      } as never); // lookup after the unique-constraint conflict
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+        status: "QUEUED",
+      } as never)
+      .mockResolvedValueOnce({
+        id: "job_race",
+        status: "QUEUED",
+        organizationId: "org_1",
+      } as never); // repair dispatch after replay
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
     // Shaped like the error the generated client actually throws: it comes from
     // the client's CJS copy of the runtime and so fails `instanceof` against the
     // class imported here (see lib/prisma-error.ts).
@@ -634,7 +710,10 @@ describe("transactionalEmailService.send", () => {
         name: "PrismaClientKnownRequestError",
         code: "P2002",
         clientVersion: "6.x",
-        meta: { modelName: "EmailJob", target: ["organizationId", "idempotencyKey"] }
+        meta: {
+          modelName: "EmailJob",
+          target: ["organizationId", "idempotencyKey"],
+        },
       })
     );
 
@@ -643,10 +722,11 @@ describe("transactionalEmailService.send", () => {
       to: "x@y.com",
       subject: "Hi",
       html: "<p>Hi</p>",
-      idempotencyKey: "key-1"
+      idempotencyKey: "key-1",
     });
 
     expect(result).toEqual({ id: "job_race", status: "QUEUED" });
-    expect(queueAdd).not.toHaveBeenCalled();
+    expect(queueAdd).toHaveBeenCalledOnce();
+    expect(queueAdd.mock.calls[0][2].jobId).toBe("email-job_race");
   });
 });

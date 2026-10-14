@@ -7,15 +7,15 @@ const createTransport = vi.fn(() => ({ verify, sendMail }));
 
 vi.mock("nodemailer", () => ({
   default: {
-    createTransport: (...args: unknown[]) => createTransport(...args)
-  }
+    createTransport: (...args: unknown[]) => createTransport(...args),
+  },
 }));
 
 const options = {
   host: "smtp.example.com",
   port: 587,
   secure: false,
-  auth: { user: "user", pass: "pass" }
+  auth: { user: "user", pass: "pass" },
 };
 
 describe("SMTPProvider", () => {
@@ -41,7 +41,7 @@ describe("SMTPProvider", () => {
     sendMail.mockResolvedValue({
       messageId: "<abc@smtp>",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
     const provider = new SMTPProvider(options);
 
@@ -49,20 +49,20 @@ describe("SMTPProvider", () => {
       from: "from@example.com",
       to: "to@example.com",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
 
     expect(sendMail).toHaveBeenCalledWith({
       from: "from@example.com",
       to: "to@example.com",
       subject: "Hi",
-      html: "<p>Hi</p>"
+      html: "<p>Hi</p>",
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       messageId: "<abc@smtp>",
       accepted: ["to@example.com"],
       rejected: [],
-      provider: "smtp"
+      provider: "smtp",
     });
   });
 
@@ -70,7 +70,7 @@ describe("SMTPProvider", () => {
     sendMail.mockResolvedValue({
       messageId: "<id>",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
     const provider = new SMTPProvider(options);
 
@@ -84,7 +84,7 @@ describe("SMTPProvider", () => {
       references: ["<root@mail>", "<parent@mail>"],
       subject: "Hi",
       html: "<p>Hi</p>",
-      attachments: [{ filename: "a.txt", content: "aGk=" }]
+      attachments: [{ filename: "a.txt", content: "aGk=" }],
     };
 
     await provider.send(payload);
@@ -96,14 +96,14 @@ describe("SMTPProvider", () => {
     sendMail.mockResolvedValue({
       messageId: "<id>",
       accepted: [{ toString: () => "ok@example.com" }],
-      rejected: [{ toString: () => "no@example.com" }]
+      rejected: [{ toString: () => "no@example.com" }],
     });
     const provider = new SMTPProvider(options);
 
     const result = await provider.send({
       from: "from@example.com",
       to: "no@example.com",
-      subject: "Hi"
+      subject: "Hi",
     });
 
     expect(result.accepted).toEqual(["ok@example.com"]);

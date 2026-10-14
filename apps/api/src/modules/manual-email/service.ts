@@ -21,7 +21,7 @@ import {
   emailJobScope,
   resolveMailboxAccess,
 } from "../../lib/mailbox-access.js";
-import { suppressionService } from "../suppressions/service.js";
+
 import { transactionalEmailService } from "../transactional-email/service.js";
 
 interface RecipientSource {
@@ -265,99 +265,219 @@ export const manualEmailService = {
     suggestionCache.clear();
   },
 
-  /**
-   * Send a manually composed email. Recipients are resolved + deduplicated, the
-   * body is rendered through MJML, and the message becomes **one EmailJob per
-   * To recipient** in the shared send pipeline (`origin: "MANUAL"`), so
-   * suppression checks, per-domain throttling, and bounce accounting apply to
-   * each recipient individually — a comma-joined To defeated all three.
-   *
-   * CC/BCC ride exactly one job (the "carrier": the first To recipient not
-   * already suppressed), so copy-recipients get one copy of the message, not
-   * one per To. If every To recipient is suppressed, nothing is sent — copies
-   * included. See docs/DECISIONS.md ("Manual sends fan out per recipient").
-   *
-   * Returns the carrier job: it's the one whose delivery status the composer
-   * polls, and `deliveryStatus` aggregates its siblings via `sendGroupId`.
-   */
+  /** One logical message, with one independently protected delivery per address. */
   async send(
     input: ManualEmailSendInput,
     userId: string
   ): Promise<TransactionalSendResponse> {
-    const recipients = await resolveRecipients(input);
-
-    if (recipients.to.length === 0) {
-      throw new HttpError(
-        400,
-        "At least one recipient is required",
-        "validation_error"
-      );
-    }
-
-    const html = await renderBody(input.html, input.organizationId);
-
-    // The carrier must be a recipient that will actually send, or the CC/BCC
-    // copies would silently die with a suppressed To. (Recipients suppressed
-    // *after* this check are handled by the worker; that race is accepted.)
-    const suppressed = await suppressionService.suppressedAmong(
-      input.organizationId,
-      recipients.to
-    );
-    const firstDeliverable = recipients.to.findIndex(
-      (email) => !suppressed.has(email)
-    );
-    const carrierIndex = Math.max(0, firstDeliverable);
-
-    // A retry keeps the same RFC Message-ID across all To/Cc/Bcc copies.
-    // Keep job identity per recipient for suppression and delivery outcomes.
-    const messageIdentity = input.idempotencyKey
-      ? createHash("sha256")
-          .update(`${userId}:${input.organizationId}:${input.idempotencyKey}`)
-          .digest("hex")
-      : randomUUID();
-    const sendGroupId = recipients.to.length > 1 ? messageIdentity : null;
-
-    const base = {
-      organizationId: input.organizationId,
-      replyTo: input.replyTo,
-      smtpConnectionId: input.smtpConnectionId,
-      templateId: input.templateId,
-      subject: input.subject,
-      html,
-      text: input.text,
-      variables: input.variables,
-      inReplyTo: input.inReplyTo,
-      references: input.references,
-      scheduledAt: input.scheduledAt,
-      origin: "MANUAL" as const,
-      createdByUserId: userId,
-      sendGroupId,
-      messageId: `<${messageIdentity}@qqueue.invalid>`,
-      visibleTo: recipients.to,
-      visibleCc: recipients.cc,
-    };
-
-    const results: TransactionalSendResponse[] = [];
-    for (const [index, recipient] of recipients.to.entries()) {
-      const isCarrier = index === carrierIndex;
-      results.push(
-        await transactionalEmailService.send({
-          ...base,
-          idempotencyKey: input.idempotencyKey
-            ? `manual:${createHash("sha256").update(`${userId}:${input.idempotencyKey}:${recipient}`).digest("hex")}`
-            : undefined,
-          to: recipient,
-          cc: isCarrier && recipients.cc.length ? recipients.cc : undefined,
-          bcc: isCarrier && recipients.bcc.length ? recipients.bcc : undefined,
+    // The draft identity is stronger than an arbitrary request key: two tabs
+    // sending the same draft must converge even if their retry keys differ.
+    const identity = createHash("sha256")
+      .update(
+        `${userId}:${input.organizationId}:${input.draftId ?? input.idempotencyKey ?? randomUUID()}`
+      )
+      .digest("hex");
+    const key = `manual:${identity}`;
+    const requestHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          to: input.to,
+          cc: input.cc,
+          bcc: input.bcc,
+          contactIds: input.contactIds,
+          listIds: input.listIds,
+          subject: input.subject,
+          html: input.html,
+          text: input.text,
+          replyTo: input.replyTo,
+          smtpConnectionId: input.smtpConnectionId,
+          templateId: input.templateId,
+          variables: input.variables,
+          inReplyTo: input.inReplyTo,
+          references: input.references,
+          scheduledAt: input.scheduledAt,
           attachmentIds: input.attachmentIds,
-          // The first job claims the uploaded attachment rows; siblings get
-          // metadata copies pointing at the same stored blobs.
-          attachmentMode: index === 0 ? "link" : "copy",
         })
-      );
-    }
-
-    return results[carrierIndex];
+      )
+      .digest("hex");
+    const accepted = await prisma.$transaction(
+      async (db) => {
+        await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.organizationId + ":" + key}, 0))`;
+        const existing = await db.emailJob.findUnique({
+          where: {
+            organizationId_idempotencyKey: {
+              organizationId: input.organizationId,
+              idempotencyKey: key,
+            },
+          },
+        });
+        if (existing) {
+          if (existing.requestHash !== requestHash)
+            throw new HttpError(
+              409,
+              "This message was already accepted with different content. Check Sent or Outbox before composing a new message.",
+              "send_conflict"
+            );
+          return {
+            id: existing.id,
+            status: existing.groupStatus ?? existing.status,
+          };
+        }
+        // Upgrade replay compatibility: the previous fan-out used recipient
+        // keys but persisted this same RFC Message-ID before accepting SMTP.
+        const legacy = await db.emailJob.findFirst({
+          where: {
+            organizationId: input.organizationId,
+            createdByUserId: userId,
+            origin: "MANUAL",
+            messageId: `<${identity}@qqueue.invalid>`,
+            requestHash: null,
+          },
+          orderBy: [{ groupPrimary: "desc" }, { createdAt: "asc" }],
+        });
+        if (legacy)
+          return { id: legacy.id, status: legacy.groupStatus ?? legacy.status };
+        if (input.draftId) {
+          await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"draft:" + input.draftId}, 0))`;
+          const draft = await db.emailDraft.findFirst({
+            where: {
+              id: input.draftId,
+              organizationId: input.organizationId,
+              createdByUserId: userId,
+              deletedAt: null,
+            },
+          });
+          if (!draft) throw new HttpError(404, "Draft not found", "not_found");
+          const files = await db.emailAttachment.findMany({
+            where: {
+              emailDraftId: input.draftId,
+              createdByUserId: userId,
+              emailJobId: null,
+            },
+            select: { id: true },
+          });
+          const requested = new Set(input.attachmentIds ?? []);
+          if (
+            files.length !== requested.size ||
+            files.some((file) => !requested.has(file.id))
+          )
+            throw new HttpError(
+              409,
+              "This draft's attachments changed on another tab or device. Reopen the draft to restore its files before sending.",
+              "attachment_conflict"
+            );
+          if (
+            !input.expectedRevision ||
+            draft.revision !== input.expectedRevision ||
+            draft.completedSendId
+          ) {
+            throw new HttpError(
+              409,
+              "This draft changed or was already sent. Your writing has been kept; reopen the saved draft before sending.",
+              "draft_conflict"
+            );
+          }
+        }
+        const recipients = await resolveRecipients(input);
+        const deliveries = [
+          ...recipients.to.map((to) => ({ to, field: "to" as const })),
+          ...recipients.cc.map((to) => ({ to, field: "cc" as const })),
+          ...recipients.bcc.map((to) => ({ to, field: "bcc" as const })),
+        ];
+        if (!deliveries.length)
+          throw new HttpError(
+            400,
+            "At least one recipient is required",
+            "validation_error"
+          );
+        const html = await renderBody(input.html, input.organizationId);
+        let first: TransactionalSendResponse | undefined;
+        let hasQueued = false;
+        for (const [index, delivery] of deliveries.entries()) {
+          const result = await transactionalEmailService.send(
+            {
+              ...input,
+              html,
+              to: delivery.to,
+              cc: [],
+              bcc: [],
+              origin: "MANUAL",
+              createdByUserId: userId,
+              sendGroupId: identity,
+              groupPrimary: index === 0,
+              recipientField: delivery.field,
+              requestHash,
+              idempotencyKey: index === 0 ? key : `${key}:${index}`,
+              messageId: `<${identity}@qqueue.invalid>`,
+              visibleTo: recipients.to,
+              visibleCc: recipients.cc,
+              visibleBcc: recipients.bcc,
+              attachmentMode: "copy",
+            },
+            db
+          );
+          first ??= result;
+          hasQueued ||= result.status === "QUEUED";
+        }
+        // Copying metadata keeps draft files available until every job exists.
+        // Claim originals only after all copies succeed, in this same transaction.
+        if (input.attachmentIds?.length) {
+          const ids = [...new Set(input.attachmentIds)];
+          const claimed = await db.emailAttachment.updateMany({
+            where: {
+              id: { in: ids },
+              organizationId: input.organizationId,
+              createdByUserId: userId,
+              emailJobId: null,
+            },
+            data: { emailJobId: first!.id, emailDraftId: null },
+          });
+          if (claimed.count !== ids.length)
+            throw new HttpError(
+              409,
+              "Some attachments are unavailable. Restore them before sending.",
+              "attachment_conflict"
+            );
+          // First delivery already has its own copies; originals are retained as
+          // the durable references from a lost-response replay, without duplicating MIME parts.
+          await db.emailAttachment.deleteMany({
+            where: { emailJobId: first!.id, id: { notIn: ids } },
+          });
+        }
+        if (input.draftId) {
+          const completed = await db.emailDraft.updateMany({
+            where: {
+              id: input.draftId,
+              createdByUserId: userId,
+              revision: input.expectedRevision,
+              completedSendId: null,
+            },
+            data: { completedSendId: first!.id, revision: { increment: 1 } },
+          });
+          if (completed.count !== 1)
+            throw new HttpError(
+              409,
+              "This draft changed before sending. Reopen it to review the changes.",
+              "draft_conflict"
+            );
+        }
+        await db.emailJob.update({
+          where: { id: first!.id },
+          data: { groupStatus: hasQueued ? "QUEUED" : "SUPPRESSED" },
+        });
+        return {
+          ...first!,
+          status: hasQueued ? ("QUEUED" as const) : ("SUPPRESSED" as const),
+        };
+      },
+      { timeout: 60_000 }
+    );
+    const jobs = await prisma.emailJob.findMany({
+      where: { organizationId: input.organizationId, sendGroupId: identity },
+      select: { id: true },
+    });
+    for (const job of jobs) await transactionalEmailService.enqueue(job.id);
+    return accepted;
   },
 
   /**
@@ -406,8 +526,12 @@ export const manualEmailService = {
       cc: true,
       bcc: true,
       sendGroupId: true,
+      recipientField: true,
       createdAt: true,
-      events: { select: { type: true, metadata: true } },
+      events: {
+        select: { type: true, metadata: true },
+        orderBy: { occurredAt: "asc" as const },
+      },
     } as const;
 
     const job = await prisma.emailJob.findFirst({
@@ -446,11 +570,14 @@ export const manualEmailService = {
     for (const groupJob of jobs) {
       const accepted = new Set<string>();
       const rejected = new Set<string>();
+      const bounced = new Set<string>();
 
       for (const event of groupJob.events) {
         const metadata = (event.metadata ?? {}) as {
           accepted?: unknown;
           rejected?: unknown;
+          finalRecipient?: unknown;
+          recipient?: unknown;
         };
         if (Array.isArray(metadata.accepted)) {
           for (const address of metadata.accepted) {
@@ -461,6 +588,10 @@ export const manualEmailService = {
           for (const address of metadata.rejected) {
             rejected.add(String(address).toLowerCase());
           }
+        }
+        if (event.type === "BOUNCED") {
+          const failed = metadata.finalRecipient ?? metadata.recipient;
+          if (typeof failed === "string") bounced.add(failed.toLowerCase());
         }
         if (event.type === "OPENED") opens += 1;
         else if (event.type === "CLICKED") clicks += 1;
@@ -473,8 +604,10 @@ export const manualEmailService = {
       // cancelled) or produced no per-address result (failed).
       const statusFor = (email: string): RecipientDeliveryStatus => {
         const key = email.toLowerCase();
-        if (rejected.has(key)) return "rejected";
+        if (bounced.has(key)) return "failed";
         if (accepted.has(key)) return "delivered";
+        if (rejected.has(key)) return "rejected";
+        if (groupJob.status === "UNCERTAIN") return "uncertain";
         if (groupJob.status === "SUPPRESSED") return "suppressed";
         if (groupJob.status === "FAILED" || groupJob.status === "CANCELLED") {
           return "failed";
@@ -492,7 +625,7 @@ export const manualEmailService = {
       recipients.push(
         ...toList.map((email) => ({
           email,
-          field: "to" as const,
+          field: (groupJob.recipientField ?? "to") as "to" | "cc" | "bcc",
           status: statusFor(email),
         })),
         ...groupJob.cc.map((email) => ({
@@ -511,19 +644,27 @@ export const manualEmailService = {
     // One aggregate status for the group, chosen so the composer's poll
     // terminates correctly: stay non-terminal while any job is still moving,
     // then prefer reporting a send over a failure over a suppression.
-    const TERMINAL = new Set(["SENT", "FAILED", "SUPPRESSED", "CANCELLED"]);
+    const TERMINAL = new Set([
+      "SENT",
+      "FAILED",
+      "SUPPRESSED",
+      "CANCELLED",
+      "UNCERTAIN",
+    ]);
     const allTerminal = jobs.every((groupJob) => TERMINAL.has(groupJob.status));
     const aggregateStatus = !allTerminal
       ? jobs.some((groupJob) => groupJob.status === "PROCESSING")
         ? "PROCESSING"
         : "QUEUED"
-      : jobs.some((groupJob) => groupJob.status === "SENT")
-        ? "SENT"
-        : jobs.some((groupJob) => groupJob.status === "FAILED")
-          ? "FAILED"
-          : jobs.some((groupJob) => groupJob.status === "CANCELLED")
-            ? "CANCELLED"
-            : "SUPPRESSED";
+      : jobs.some((groupJob) => groupJob.status === "UNCERTAIN")
+        ? "UNCERTAIN"
+        : jobs.some((groupJob) => groupJob.status === "SENT")
+          ? "SENT"
+          : jobs.some((groupJob) => groupJob.status === "FAILED")
+            ? "FAILED"
+            : jobs.some((groupJob) => groupJob.status === "CANCELLED")
+              ? "CANCELLED"
+              : "SUPPRESSED";
 
     const sentAtTimes = jobs
       .map((groupJob) => groupJob.sentAt)

@@ -6,5 +6,9 @@ export interface EmailSendingJob {
 }
 
 export const emailSendingQueue = new Queue<EmailSendingJob>("email-sending", {
-  connection: redisConnection
+  connection: {
+    ...redisConnection,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+  },
 });

@@ -313,7 +313,13 @@ describe("inboxService", () => {
 
     expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
       where: { id: "msg_1", organizationId: "org_1" },
-      data: { readAt: expect.any(Date) },
+      data: {
+        readAt: expect.any(Date),
+        readRevision: { increment: 1 },
+        readPending: true,
+        readAttemptedAt: null,
+        readSyncError: null,
+      },
     });
   });
 });

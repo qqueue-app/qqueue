@@ -42,6 +42,7 @@ export interface SendEmailResult {
    * Used to classify the bounce (hard vs soft) for auto-suppression.
    */
   rejectionResponse?: string;
+  rejections?: Array<{ email: string; response?: string }>;
 }
 
 export interface EmailProvider {

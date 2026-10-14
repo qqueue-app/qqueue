@@ -4,10 +4,14 @@ import { BrandWordmark } from "../BrandWordmark.js";
 import { AccountMenu } from "./AccountMenu.js";
 import { OrgSwitcher } from "./OrgSwitcher.js";
 import { isNavItemActive, type NavSection } from "./nav-types.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu.js";
 
 interface SidebarNavProps {
-  moreTools?: boolean;
-  onToggleMoreTools?: () => void;
   sections: NavSection[];
   unread: number;
   /** The drawer draws its own header with a close button, so it hides this one. */
@@ -27,10 +31,18 @@ export function SidebarNav({
   sections,
   unread,
   showBrand = true,
-  moreTools,
-  onToggleMoreTools,
 }: SidebarNavProps) {
   const { pathname } = useLocation();
+  const tools = sections.flatMap((section) =>
+    section.items.filter((item) => item.advanced)
+  );
+  const dailySections = sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.advanced),
+    }))
+    .filter((section) => section.items.length);
+  const toolActive = tools.some((item) => isNavItemActive(item, pathname));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -45,7 +57,7 @@ export function SidebarNav({
       </div>
 
       <nav aria-label="Main" className="flex flex-col gap-3 px-3">
-        {sections.map((section, index) => (
+        {dailySections.map((section, index) => (
           <div
             key={section.heading ?? `section-${index}`}
             className={cn(
@@ -93,15 +105,37 @@ export function SidebarNav({
           </div>
         ))}
       </nav>
-      {onToggleMoreTools ? (
-        <button
-          type="button"
-          aria-expanded={Boolean(moreTools)}
-          onClick={onToggleMoreTools}
-          className="mx-3 mt-2 min-h-touch rounded-control px-2 text-left text-ui text-text-secondary hover:bg-surface-sunken"
-        >
-          {moreTools ? "Hide extra tools" : "Show more tools"}
-        </button>
+      {tools.length ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              "mx-3 mt-2 min-h-touch rounded-control px-2 text-left text-ui hover:bg-surface-sunken",
+              toolActive
+                ? "bg-accent text-accent-foreground"
+                : "text-text-secondary"
+            )}
+          >
+            More tools
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="end">
+            {tools.map((item) => {
+              const Icon = item.icon;
+              return (
+                <DropdownMenuItem key={item.to} asChild>
+                  <Link
+                    to={item.to}
+                    aria-current={
+                      isNavItemActive(item, pathname) ? "page" : undefined
+                    }
+                  >
+                    <Icon />
+                    {item.label}
+                  </Link>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
 
       {/* Pushes the account block to the bottom without making anything scroll. */}

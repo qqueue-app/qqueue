@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import type { EmailDraftInput, EmailDraftUpdateInput } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
@@ -9,14 +11,19 @@ import { assertMayUseConnection } from "../../lib/send-as.js";
 export const emailDraftService = {
   list(organizationId: string, userId: string) {
     return prisma.emailDraft.findMany({
-      where: { organizationId, createdByUserId: userId },
+      where: {
+        organizationId,
+        createdByUserId: userId,
+        completedSendId: null,
+        deletedAt: null,
+      },
       orderBy: { updatedAt: "desc" },
     });
   },
 
   get(id: string, userId: string) {
     return prisma.emailDraft.findFirst({
-      where: { id, createdByUserId: userId },
+      where: { id, createdByUserId: userId, deletedAt: null },
       // Include attachment metadata so resuming a draft restores its files.
       include: {
         attachments: {
@@ -37,67 +44,137 @@ export const emailDraftService = {
         smtpConnectionId: input.smtpConnectionId,
       });
     }
-    return prisma.emailDraft.create({
-      data: {
-        organizationId: input.organizationId,
-        createdByUserId: userId,
-        inboundMessageId: input.inboundMessageId,
-        subject: input.subject ?? "",
-        html: input.html,
-        text: input.text,
-        to: input.to ?? [],
-        cc: input.cc ?? [],
-        bcc: input.bcc ?? [],
-        contactIds: input.contactIds ?? [],
-        listIds: input.listIds ?? [],
-        replyTo: input.replyTo,
-        smtpConnectionId: input.smtpConnectionId,
-        templateId: input.templateId,
-        variables: input.variables as InputJsonValue | undefined,
-      },
-    });
+    const creationHash = createHash("sha256")
+      .update(JSON.stringify(input))
+      .digest("hex");
+    try {
+      return await prisma.emailDraft.create({
+        data: {
+          clientId: input.clientId,
+          creationHash,
+          organizationId: input.organizationId,
+          createdByUserId: userId,
+          inboundMessageId: input.inboundMessageId,
+          subject: input.subject ?? "",
+          html: input.html,
+          text: input.text,
+          to: input.to ?? [],
+          cc: input.cc ?? [],
+          bcc: input.bcc ?? [],
+          contactIds: input.contactIds ?? [],
+          listIds: input.listIds ?? [],
+          replyTo: input.replyTo,
+          smtpConnectionId: input.smtpConnectionId,
+          templateId: input.templateId,
+          variables: input.variables as InputJsonValue | undefined,
+        },
+      });
+    } catch (error) {
+      if (input.clientId && isPrismaKnownRequestError(error, "P2002")) {
+        const draft = await prisma.emailDraft.findFirst({
+          where: {
+            organizationId: input.organizationId,
+            createdByUserId: userId,
+            clientId: input.clientId,
+          },
+        });
+        if (draft) {
+          if (
+            draft.deletedAt ||
+            draft.completedSendId ||
+            draft.revision > 1 ||
+            draft.creationHash !== creationHash
+          )
+            throw new HttpError(
+              409,
+              "This draft already exists with different content or has been completed. Your writing has been kept; open Drafts or Outbox to review it.",
+              "draft_conflict"
+            );
+          return draft;
+        }
+      }
+      throw error;
+    }
   },
 
   async update(id: string, userId: string, input: EmailDraftUpdateInput) {
-    const existing = await prisma.emailDraft.findFirst({
-      where: { id, createdByUserId: userId },
-      select: { id: true, organizationId: true },
-    });
-    if (!existing) {
-      throw new HttpError(404, "Draft not found", "not_found");
-    }
-
-    if (input.smtpConnectionId) {
-      await assertMayUseConnection({
-        userId,
-        organizationId: existing.organizationId,
-        smtpConnectionId: input.smtpConnectionId,
+    return prisma.$transaction(async (db) => {
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"draft:" + id}, 0))`;
+      const existing = await db.emailDraft.findFirst({
+        where: { id, createdByUserId: userId, deletedAt: null },
       });
-    }
+      if (!existing) {
+        throw new HttpError(404, "Draft not found", "not_found");
+      }
 
-    return prisma.emailDraft.update({
-      where: { id },
-      data: {
-        subject: input.subject,
-        inboundMessageId: input.inboundMessageId,
-        html: input.html,
-        text: input.text,
-        to: input.to,
-        cc: input.cc,
-        bcc: input.bcc,
-        contactIds: input.contactIds,
-        listIds: input.listIds,
-        replyTo: input.replyTo,
-        smtpConnectionId: input.smtpConnectionId,
-        templateId: input.templateId,
-        variables: input.variables as InputJsonValue | undefined,
-      },
+      if (existing.completedSendId)
+        throw new HttpError(
+          409,
+          "This draft has already been accepted for sending. Check Sent or Outbox.",
+          "draft_completed"
+        );
+      if (existing.lastMutationId === input.mutationId) return existing;
+      if (existing.revision !== input.expectedRevision)
+        throw new HttpError(
+          409,
+          "This draft changed on another tab or device. Your writing has been kept; reopen the saved draft to compare it.",
+          "draft_conflict"
+        );
+      if (input.smtpConnectionId) {
+        await assertMayUseConnection({
+          userId,
+          organizationId: existing.organizationId,
+          smtpConnectionId: input.smtpConnectionId,
+        });
+      }
+
+      const result = await db.emailDraft.updateMany({
+        where: {
+          id,
+          createdByUserId: userId,
+          revision: input.expectedRevision,
+          completedSendId: null,
+          deletedAt: null,
+        },
+        data: {
+          revision: { increment: 1 },
+          lastMutationId: input.mutationId,
+          subject: input.subject,
+          inboundMessageId: input.inboundMessageId,
+          html: input.html,
+          text: input.text,
+          to: input.to,
+          cc: input.cc,
+          bcc: input.bcc,
+          contactIds: input.contactIds,
+          listIds: input.listIds,
+          replyTo: input.replyTo,
+          smtpConnectionId: input.smtpConnectionId,
+          templateId: input.templateId,
+          variables: input.variables as InputJsonValue | undefined,
+        },
+      });
+      if (result.count !== 1)
+        throw new HttpError(
+          409,
+          "This draft changed before saving. Your writing has been kept.",
+          "draft_conflict"
+        );
+      return db.emailDraft.findFirstOrThrow({
+        where: { id, createdByUserId: userId },
+      });
     });
   },
 
   async delete(id: string, userId: string) {
-    const { count } = await prisma.emailDraft.deleteMany({
-      where: { id, createdByUserId: userId },
+    const { count } = await prisma.emailDraft.updateMany({
+      where: {
+        id,
+        createdByUserId: userId,
+        completedSendId: null,
+        deletedAt: null,
+      },
+      data: { deletedAt: new Date(), revision: { increment: 1 } },
     });
     if (count === 0) {
       throw new HttpError(404, "Draft not found", "not_found");

@@ -330,6 +330,33 @@ export function SentMessage() {
       />
 
       <PageContainer className="space-y-6">
+        {email.recipients?.length ? (
+          <section
+            className="rounded-card border border-border bg-surface p-4"
+            aria-label="Recipient delivery outcomes"
+          >
+            <h2 className="font-semibold text-ui">Delivery outcomes</h2>
+            <ul className="mt-2 space-y-2">
+              {email.recipients.map((recipient) => (
+                <li
+                  key={recipient.email}
+                  className="flex flex-wrap justify-between gap-2 text-ui"
+                >
+                  <span className="break-all">
+                    {recipient.field.toUpperCase()}: {recipient.email}
+                  </span>
+                  <span>
+                    {recipient.status === "uncertain"
+                      ? "Delivery unconfirmed"
+                      : recipient.status === "delivered"
+                        ? "Sent to mail server"
+                        : recipient.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {/* ------------------------------------------------------- envelope */}
         <section className="rounded-card border border-border bg-surface p-4 shadow-card sm:p-5">
           <div className="flex flex-wrap items-center gap-2">

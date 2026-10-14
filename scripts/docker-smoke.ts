@@ -33,7 +33,9 @@ function startFakeSmtp(): Promise<{
   sockets: Set<Socket>;
   messages: string[];
   envelopes: string[][];
+  controls: { rejectRecipient: string; dropDataResponse: boolean };
 }> {
+  const controls = { rejectRecipient: "", dropDataResponse: false };
   const sockets = new Set<Socket>();
   const messages: string[] = [];
   const envelopes: string[][] = [];
@@ -61,7 +63,8 @@ function startFakeSmtp(): Promise<{
             messages.push(messageLines.join("\r\n"));
             envelopes.push([...recipients]);
             messageLines = [];
-            socket.write("250 queued\r\n");
+            if (controls.dropDataResponse) socket.destroy();
+            else socket.write("250 queued\r\n");
           } else {
             messageLines.push(rawLine);
           }
@@ -90,8 +93,13 @@ function startFakeSmtp(): Promise<{
           recipients = [];
           socket.write("250 OK\r\n");
         } else if (upper.startsWith("RCPT TO")) {
-          recipients.push(/<([^>]+)>/.exec(line)?.[1] ?? "");
-          socket.write("250 OK\r\n");
+          const recipient = /<([^>]+)>/.exec(line)?.[1] ?? "";
+          if (recipient === controls.rejectRecipient)
+            socket.write("550 5.1.1 No such mailbox\r\n");
+          else {
+            recipients.push(recipient);
+            socket.write("250 OK\r\n");
+          }
         } else if (upper === "NOOP") {
           socket.write("250 OK\r\n");
         } else if (upper === "DATA") {
@@ -113,7 +121,14 @@ function startFakeSmtp(): Promise<{
       if (!address || typeof address === "string") {
         throw new Error("Fake SMTP server did not bind to a TCP port");
       }
-      resolve({ server, port: address.port, sockets, messages, envelopes });
+      resolve({
+        server,
+        port: address.port,
+        sockets,
+        messages,
+        envelopes,
+        controls,
+      });
     });
   });
 }
@@ -175,6 +190,7 @@ async function main() {
     sockets: smtpSockets,
     messages: smtpMessages,
     envelopes: smtpEnvelopes,
+    controls: smtpControls,
   } = await startFakeSmtp();
   const worker = startEmailSendingWorker();
   const app = createApp();
@@ -322,7 +338,7 @@ async function main() {
       const jobs = await prisma.emailJob.findMany({
         where: { organizationId, sendGroupId: carrier.sendGroupId },
       });
-      return jobs.length === 2 && jobs.every((job) => job.status === "SENT")
+      return jobs.length === 4 && jobs.every((job) => job.status === "SENT")
         ? jobs
         : null;
     });
@@ -336,7 +352,7 @@ async function main() {
           line.toLowerCase().startsWith(`${name.toLowerCase()}:`)
         );
     if (
-      groupMessages.length !== 2 ||
+      groupMessages.length !== 4 ||
       groupMessages.some(
         (raw) =>
           header(raw, "To") !==
@@ -361,6 +377,197 @@ async function main() {
       ])
     )
       throw new Error("Group SMTP envelope duplicated or omitted a recipient");
+
+    // Exercise actual competing requests, tombstones and rolled-back attachments.
+    const draftPayload = {
+      organizationId,
+      clientId: "durable-draft",
+      subject: "Safe draft",
+      text: "Draft body",
+      to: ["draft@example.com"],
+    };
+    const creates = await Promise.all(
+      [1, 2].map(() =>
+        request(app)
+          .post("/api/v1/email-drafts")
+          .set("Authorization", auth)
+          .send(draftPayload)
+          .expect(201)
+      )
+    );
+    if (creates[0].body.data.id !== creates[1].body.data.id)
+      throw new Error("Lost create responses duplicate drafts");
+    const draft = creates[0].body.data;
+    const competing = await Promise.all(
+      ["edit-a", "edit-b"].map((mutationId) =>
+        request(app)
+          .put(`/api/v1/email-drafts/${draft.id}`)
+          .set("Authorization", auth)
+          .send({
+            subject: "Safe updated draft",
+            expectedRevision: 1,
+            mutationId,
+          })
+      )
+    );
+    if (
+      competing
+        .map((res) => res.status)
+        .sort()
+        .join(",") !== "200,409"
+    )
+      throw new Error("Concurrent draft edits overwrote each other");
+    const updatedDraft = competing.find((res) => res.status === 200)!.body.data;
+    const scheduledSend = {
+      organizationId,
+      draftId: draft.id,
+      expectedRevision: updatedDraft.revision,
+      idempotencyKey: draft.id,
+      subject: "Safe updated draft",
+      text: "Draft body",
+      to: ["draft@example.com"],
+      cc: ["draft-copy@example.com"],
+      scheduledAt: new Date(Date.now() + 3_600_000).toISOString(),
+    };
+    await request(app)
+      .post("/api/v1/manual-email/send")
+      .set("Authorization", auth)
+      .send({ ...scheduledSend, attachmentIds: ["unavailable"] })
+      .expect(409);
+    if (
+      await prisma.emailJob.count({
+        where: { organizationId, subject: scheduledSend.subject },
+      })
+    )
+      throw new Error("Failed attachment preparation left sendable jobs");
+    const acceptedDraft = await request(app)
+      .post("/api/v1/manual-email/send")
+      .set("Authorization", auth)
+      .send(scheduledSend)
+      .expect(202);
+    const acceptedReplay = await request(app)
+      .post("/api/v1/manual-email/send")
+      .set("Authorization", auth)
+      .send(scheduledSend)
+      .expect(202);
+    if (acceptedDraft.body.data.id !== acceptedReplay.body.data.id)
+      throw new Error("Lost send responses duplicate accepted mail");
+    await request(app)
+      .post("/api/v1/manual-email/send")
+      .set("Authorization", auth)
+      .send({ ...scheduledSend, to: ["another@example.com"] })
+      .expect(409);
+    await request(app)
+      .put(`/api/v1/email-drafts/${draft.id}`)
+      .set("Authorization", auth)
+      .send({
+        subject: "Late stale edit",
+        expectedRevision: updatedDraft.revision,
+        mutationId: "late",
+      })
+      .expect(409);
+    const draftsAfterSend = await request(app)
+      .get(`/api/v1/email-drafts?organizationId=${organizationId}`)
+      .set("Authorization", auth)
+      .expect(200);
+    if (
+      draftsAfterSend.body.data.some(
+        (row: { id: string }) => row.id === draft.id
+      )
+    )
+      throw new Error("Completed draft remained editable");
+    const draftJobs = await prisma.emailJob.findMany({
+      where: { organizationId, subject: scheduledSend.subject },
+    });
+    if (draftJobs.length !== 2)
+      throw new Error("Draft retries changed accepted recipient set");
+    await request(app)
+      .post(
+        `/api/v1/outbox/${acceptedDraft.body.data.id}/cancel?organizationId=${organizationId}`
+      )
+      .set("Authorization", auth)
+      .expect(200);
+    if (
+      await prisma.emailJob.count({
+        where: {
+          organizationId,
+          subject: scheduledSend.subject,
+          status: { not: "CANCELLED" },
+        },
+      })
+    )
+      throw new Error("Cancellation left sibling deliveries queued");
+
+    // Partial acceptance must not poison the accepted recipient's suppression.
+    smtpControls.rejectRecipient = "reject@example.com";
+    const partial = await request(app)
+      .post("/api/v1/transactional-email/send")
+      .set("Authorization", auth)
+      .send({
+        organizationId,
+        to: "accepted@example.com",
+        cc: [smtpControls.rejectRecipient],
+        subject: "Partial SMTP",
+        text: "Partial outcome",
+      })
+      .expect(202);
+    await eventually(async () => {
+      const row = await prisma.emailJob.findUnique({
+        where: { id: partial.body.data.id },
+      });
+      return row?.status === "SENT" ? row : null;
+    });
+    await eventually(() =>
+      prisma.suppression.findUnique({
+        where: {
+          organizationId_email: {
+            organizationId,
+            email: smtpControls.rejectRecipient,
+          },
+        },
+      })
+    );
+    if (
+      await prisma.suppression.findUnique({
+        where: {
+          organizationId_email: {
+            organizationId,
+            email: "accepted@example.com",
+          },
+        },
+      })
+    )
+      throw new Error("Partial rejection suppressed an accepted recipient");
+    smtpControls.rejectRecipient = "";
+
+    // The server receives DATA but drops its response: a wire-level ambiguity.
+    smtpControls.dropDataResponse = true;
+    const uncertainStart = smtpMessages.length;
+    const uncertain = await request(app)
+      .post("/api/v1/transactional-email/send")
+      .set("Authorization", auth)
+      .send({
+        organizationId,
+        to: "uncertain@example.com",
+        subject: "Lost DATA response",
+        text: "Uncertain outcome",
+      })
+      .expect(202);
+    await eventually(async () => {
+      const row = await prisma.emailJob.findUnique({
+        where: { id: uncertain.body.data.id },
+      });
+      return row?.status === "UNCERTAIN" ? row : null;
+    });
+    await emailSendingQueue.add(
+      "send-email",
+      { emailJobId: uncertain.body.data.id },
+      { jobId: `uncertain-replay-${uncertain.body.data.id}` }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    if (smtpMessages.length !== uncertainStart + 1)
+      throw new Error("Uncertain SMTP outcome was automatically resent");
+    smtpControls.dropDataResponse = false;
 
     // Exercise the mailbox flows against real Postgres, not only query mocks.
     const connection = await prisma.sMTPConnection.findFirstOrThrow({
@@ -525,5 +732,5 @@ async function main() {
 
 main().catch((error) => {
   console.error(error);
-  process.exitCode = 1;
+  process.exit(1);
 });

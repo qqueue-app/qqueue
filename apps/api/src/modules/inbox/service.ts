@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import type {
   InboxAccountInput,
   InboxAccountUpdateInput,
@@ -137,7 +138,9 @@ export const inboxService = {
           "sync-inbox",
           { inboxAccountId: account.id },
           {
-            jobId: `inbox-sync-${account.id}`,
+            // A request arriving at the end of an active sync must get a new
+            // pass. Reusing its job ID would silently discard that request.
+            jobId: `inbox-sync-${account.id}-${randomUUID()}`,
             removeOnComplete: true,
             removeOnFail: true,
             attempts: 3,
@@ -207,6 +210,7 @@ export const inboxService = {
       where: {
         organizationId,
         NOT: { origin: "SYSTEM" },
+        groupPrimary: true,
         AND: [
           emailJobScope(access),
           {
@@ -226,6 +230,9 @@ export const inboxService = {
         toEmail: true,
         cc: true,
         status: true,
+        groupStatus: true,
+        visibleTo: true,
+        visibleCc: true,
         sentAt: true,
         createdAt: true,
         messageId: true,
@@ -262,17 +269,29 @@ export const inboxService = {
           (a, b) => a.receivedAt.getTime() - b.receivedAt.getTime()
         )
       ),
-      outgoing: outgoing.map((job) => ({
-        ...job,
-        attachments: job.attachments.map((file) => ({
-          ...file,
-          isInline: Boolean(file.cid),
-          contentId: file.cid,
+      outgoing: outgoing
+        .filter(
+          (job) =>
+            ![...messages.values()].some(
+              (message) => message.messageId === job.messageId
+            )
+        )
+        .map((job) => ({
+          ...job,
+          status: job.groupStatus ?? job.status,
+          toEmail: job.visibleTo?.length
+            ? job.visibleTo.join(", ")
+            : job.toEmail,
+          cc: job.visibleCc?.length ? job.visibleCc : job.cc,
+          attachments: job.attachments.map((file) => ({
+            ...file,
+            isInline: Boolean(file.cid),
+            contentId: file.cid,
+          })),
+          sentByName:
+            authors.find((user) => user.id === job.createdByUserId)?.name ??
+            "Team",
         })),
-        sentByName:
-          authors.find((user) => user.id === job.createdByUserId)?.name ??
-          "Team",
-      })),
     };
   },
   /**
@@ -678,8 +697,11 @@ export const inboxService = {
     const result = await manualEmailService.send(
       {
         organizationId: input.organizationId,
-        to,
-        cc,
+        to: input.to ?? to,
+        cc: input.cc ?? cc,
+        bcc: input.bcc,
+        draftId: input.draftId,
+        expectedRevision: input.expectedRevision,
         smtpConnectionId: connection.id,
         subject: replySubject(input.subject),
         html: input.html,
@@ -694,7 +716,13 @@ export const inboxService = {
 
     await prisma.inboundMessage.update({
       where: { id: messageId },
-      data: { readAt: message.readAt ?? new Date() },
+      data: {
+        readAt: message.readAt ?? new Date(),
+        readRevision: { increment: 1 },
+        readPending: true,
+        readAttemptedAt: null,
+        readSyncError: null,
+      },
     });
 
     return result;
@@ -713,8 +741,16 @@ export const inboxService = {
         id: { in: messageIds },
         ...inboundMessageScope(access),
       },
-      data: { readAt: read ? new Date() : null },
+      data: {
+        readAt: read ? new Date() : null,
+        readRevision: { increment: 1 },
+        readPending: true,
+        readAttemptedAt: null,
+        readSyncError: null,
+      },
     });
+    if (result.count)
+      await this.requestSync(organizationId, userId).catch(() => undefined);
     return { updated: result.count };
   },
 
@@ -731,15 +767,27 @@ export const inboxService = {
         organizationId,
         ...inboundMessageScope(access),
       },
-      data: { readAt: read ? new Date() : null },
+      data: {
+        readAt: read ? new Date() : null,
+        readRevision: { increment: 1 },
+        readPending: true,
+        readAttemptedAt: null,
+        readSyncError: null,
+      },
     });
     if (count === 0) {
       throw new HttpError(404, "Inbound message not found", "not_found");
     }
-    return prisma.inboundMessage.findUniqueOrThrow({
+    const message = await prisma.inboundMessage.findUniqueOrThrow({
       where: { id },
       include: messageInclude,
     });
+    await this.requestSync(
+      organizationId,
+      userId,
+      message.inboxAccountId
+    ).catch(() => undefined);
+    return message;
   },
 
   /**

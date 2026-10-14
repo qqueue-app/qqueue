@@ -200,6 +200,22 @@ describe("offline drafts (§5)", () => {
     expect(db.rows.size).toBe(1);
   });
 
+  it("never downgrades a newer device revision when an older save returns late", async () => {
+    const original = draft({ draftId: "server-1", revision: 2 });
+    await savePendingDraft(
+      draft({
+        ...original,
+        revision: 5,
+        payload: { ...original.payload, html: "<p>Latest writing</p>" },
+      })
+    );
+    await acknowledgePendingDraft(original, "server-1", 3);
+    expect((await listPendingDrafts())[0]).toMatchObject({
+      revision: 5,
+      payload: { html: "<p>Latest writing</p>" },
+    });
+  });
+
   it("serializes simultaneous reconnect flushes so they create only one server draft", async () => {
     const create = vi
       .spyOn(api, "createEmailDraft")

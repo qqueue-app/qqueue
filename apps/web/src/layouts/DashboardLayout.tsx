@@ -138,33 +138,15 @@ const tabBarPaths = mobileTabs.map((tab) => tab.to);
  *
  *   <640px    no sidebar; a bottom tab bar plus a full-screen More sheet
  *   640–1023  a top bar whose menu button opens the sidebar as a drawer
- *   ≥1024px   the sidebar, fixed at 240px, always there
+ *   ≥1024px   the sidebar, fixed at 200px, always there
  *
- * **The document is the only scroll container at every one of them.** Nothing
- * in here sets `overflow`, and nothing sets a height that would make it need
- * to: the sidebar is fixed and short enough to fit, main flows, and the page
- * scrolls. The overlays (drawer, More sheet) scroll inside themselves, which is
- * allowed precisely because Radix freezes the document while they are open —
- * so there is still only ever one scrollbar on screen.
+ * The shell never scrolls independently. Ordinary pages use document scrolling;
+ * the desktop Inbox owns its adjacent list and reader scroll regions. Extra
+ * tools open in a menu so they never lengthen the fixed folder navigation.
  */
 export function DashboardLayout() {
   const unread = useUnreadCount();
   const location = useLocation();
-  const [moreTools, setMoreTools] = useState(false);
-  const advancedRoute = navSections.some((section) =>
-    section.items.some(
-      (item) => item.advanced && location.pathname.startsWith(item.to)
-    )
-  );
-  const visibleSections = navSections
-    .map((section) => ({
-      ...section,
-      items: section.items.filter((item) => !item.advanced || moreTools),
-    }))
-    .filter((section) => section.items.length);
-  useEffect(() => {
-    if (advancedRoute) setMoreTools(true);
-  }, [advancedRoute, location.pathname]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -210,12 +192,7 @@ export function DashboardLayout() {
         inset by the same token that sets this width so the two can't drift.
       */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-sidebar flex-col border-r border-border bg-surface pb-safe-b pl-safe-l pt-safe-t lg:flex">
-        <SidebarNav
-          sections={visibleSections}
-          unread={unread}
-          moreTools={moreTools}
-          onToggleMoreTools={() => setMoreTools((value) => !value)}
-        />
+        <SidebarNav sections={navSections} unread={unread} />
       </aside>
 
       {/* -------------------------------------------------------- tablet bar */}
@@ -251,9 +228,7 @@ export function DashboardLayout() {
             </IconButton>
           </div>
           <SidebarNav
-            sections={visibleSections}
-            moreTools={moreTools}
-            onToggleMoreTools={() => setMoreTools((value) => !value)}
+            sections={navSections}
             unread={unread}
             showBrand={false}
           />

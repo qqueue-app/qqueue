@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Request, Response } from "express";
 import { HttpError } from "../../lib/http-error.js";
 import { attachmentService } from "./service.js";
@@ -21,7 +22,8 @@ export const attachmentController = {
       contentType: req.file.mimetype || "application/octet-stream",
       size: req.file.size,
       buffer: req.file.buffer,
-      emailDraftId
+      emailDraftId,
+      uploadId: z.string().min(1).max(128).optional().parse(req.body?.uploadId),
     });
 
     res.status(201).json({ data: attachment });
@@ -44,5 +46,5 @@ export const attachmentController = {
   async delete(req: Request, res: Response) {
     await attachmentService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
-  }
+  },
 };

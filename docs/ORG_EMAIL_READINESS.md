@@ -28,8 +28,8 @@ not an acceptance test for that target.
 - Route replies through the existing manual/transactional pipeline, choosing the
   receiving mailbox's authorized sending account instead of silently using the
   organization default. Retain and respect incoming Reply-To headers.
-- Provide Reply all recipient resolution. The group-header limitation below
-  still applies and must be resolved before general rollout.
+- Provide Reply all recipient resolution. The group-header limitation of this
+  initial implementation is addressed by the delivery-safety batch below.
 - Give manual sends and replies stable retry keys through the existing
   transactional idempotency mechanism. Confirm queue acceptance separately from
   actual sending. Keep drafts on failure and block sends during attachment upload.
@@ -64,24 +64,16 @@ Verified in code and automated checks:
   sync. Reconnect/visibility flushes serialize within a tab. Editing Reply-To
   now triggers autosave as well.
 
-This is a bounded improvement, **not** full draft or group-send acceptance.
-Cc/Bcc still use a single carrier job: suppressing that To recipient after
-creation can lose the copies, and all suppressed To recipients still prevent
-copy delivery. Partial SMTP acceptance needs correct per-address bounce handling.
-Sent/conversation views still expose per-recipient delivery jobs. Draft create
-requests lack server-side retry identity; simultaneous tabs/devices lack revision
-conflict protection, and retrying a changed recipient set can add deliveries.
-Attachment preparation and enqueue are not an atomic operation. An SMTP server
-accepting DATA followed by a lost response remains an ambiguous delivery outcome;
-a stable Message-ID alone does not guarantee exactly-once SMTP delivery.
+Those original limitations are superseded by the next implementation batch.
+The initial verification did not establish complete primary-client readiness.
 
 ### Read-state decision
 
 The organization selected **shared read state per mailbox**. Every authorized
 teammate sees the same read/unread state, and the IMAP `\Seen` flag must converge
-with it across other mail apps. Future writeback needs durable pending operations
-and reconciliation so an old sync result cannot undo a newer local action. No
-IMAP writeback or personal unread overlay was added in this batch.
+with it across other mail apps. The initial batch recorded this decision without writeback. The newer batch
+below implements durable pending operations and reconciliation so an old sync
+result cannot undo a newer local action; there is no personal unread overlay.
 
 ### Verification of this batch
 
@@ -95,34 +87,85 @@ handled with a temporary explicit smoke-only subnet, removed by teardown.
 No live mail-provider, interrupted-network browser, mobile-device, or assistive
 technology acceptance is implied by these checks.
 
+## Delivery safety, shared read state and reading pane (2026-10-14)
+
+Implemented:
+
+- Independent To/Cc/Bcc jobs in the existing pipeline, with complete visible
+  headers and one Message-ID. No To-recipient carrier dependency; suppressed
+  recipients do not prevent other recipients from receiving the message.
+- One logical Sent/Outbox/conversation entry, individual delivery outcomes,
+  recipient-scoped SMTP rejections and asynchronous DSNs, and honest aggregate
+  status when cancellation races an already-started delivery.
+- SMTP outcomes that may have accepted DATA become UNCERTAIN and are not
+  automatically resent. Durable queued jobs and pending group summaries recover
+  through periodic worker dispatch/reconciliation.
+- Draft creation retry identities, revision conflicts, serialized in-tab saves,
+  atomic send/attachment preparation/draft completion, completed-draft tombstones,
+  payload-conflict rejection on send retries, and device backups retained after
+  rejected saves. Lost send responses can recover the accepted delivery identity.
+- Private attachment upload identities deduplicate unchanged retries and reject
+  changed files. Upload completion checks that the draft is still editable.
+  Composer file bytes and retry identities are backed up on the device when
+  IndexedDB is available; failed pending files have retry/remove controls and
+  block sending. Attachment ownership and exact draft attachment sets are checked
+  before send acceptance.
+- Shared read/unread state writes back to IMAP, checking UID-validity and remote
+  message identity. Revision-conditional acknowledgement/reconciliation protects
+  newer teammate actions. Pending failures remain visible and rotate behind
+  untouched work. Flag scans are bounded and rotate through imported history.
+- Desktop Inbox defaults to an adjacent reading pane. The 200px folder sidebar
+  stays fixed; More tools opens an overlay instead of lengthening navigation.
+  The message list is 360px (400px on wide screens), leaving more space for the
+  reader. List and reader scroll independently. Focused mail is an account/device
+  preference; phones retain a single-screen list/conversation flow. Conversation
+  selection has a URL, browser-history ownership and list scroll restoration.
+
+Acceptance evidence:
+
+- Disposable PostgreSQL/Redis Docker smoke passed all migrations with no Prisma
+  drift. Actual SMTP wire checks cover recipient counts, To/Cc headers, Bcc
+  omission, draft-create retries, competing revisions, changed-send conflicts,
+  rollback on missing attachments, group cancellation, partial acceptance,
+  rejected-recipient suppression, and disconnect after DATA acceptance without
+  duplicate delivery on queue replay.
+- A controlled self-addressed message composed in the browser passed server
+  draft acceptance, real SMTP delivery, one logical Sent row, real IMAP import,
+  and private attachment byte-for-byte download. Shared read/unread changes
+  reached IMAP, and an independent IMAP client's Seen/unseen changes reconciled
+  back into QQueue. These checks exercised only the synthetic acceptance message.
+- Chrome desktop rendering confirmed the smaller fixed sidebar, adjacent reader,
+  independent list scrolling, and the synthetic message/attachment. Chrome's 440px phone viewport confirmed the single-screen list/conversation
+  flow and bottom navigation. This was browser emulation, not a physical-device
+  keyboard/safe-area test. Component tests cover completed-draft recovery after
+  a lost HTTP send response.
+- Full typecheck, lint, build, tests and unmodified coverage gates passed, as
+  did dependency license audit and the cloud boundary check.
+
 ## Required before calling the primary-client goal complete
 
-1. **IMAP state and history:** durable read/unread writeback and reconciliation,
-   complete older-history backfill, folder discovery, Archive, Trash/restore,
-   move and flags, plus mail sent/drafted in another client. Today read state is
-   shared inside QQueue and receiving sync still imports one configured folder.
-2. **Normal group messages:** visible To/Cc and shared identity now reach SMTP.
-   Replace the single copy-recipient carrier and reconcile partial acceptance,
-   suppression, job presentation and per-recipient outcomes inside the one
-   delivery pipeline.
-3. **Composer completion:** forwarding with original attachments, signatures,
-   editable reply recipients, and simpler advanced-editor controls. Check draft
-   recovery across devices, concurrent tabs, interrupted uploads and lost send
-   responses.
-4. **Attachment recovery:** show unavailable/oversized inbound parts, retry
-   storage failures without duplicates, and recover missing inline content.
-5. **Team coordination:** shared mailbox unread state was selected above; show
-   concurrent replies; streamline invitation, mailbox assignment, resend and
-   recovery-address workflows. Mailbox-password reset links are distinct from
-   QQueue sign-in reset links and are not implemented by the Team action.
-6. **Navigation and search:** stable conversation URLs, browser Back and scroll
-   restoration, global received/sent search, and useful empty/error states on
-   every mail surface.
-7. **Acceptance testing:** real IMAP/SMTP accounts, attachments/object storage,
-   slow and interrupted networks, browser keyboard navigation, phone keyboard
-   and safe areas, long threads, assistive technology, and multiple teammates
-   with different mailbox grants. No browser acceptance result is implied by
-   component tests.
+1. **IMAP folders and history:** complete older-history backfill, folder discovery,
+   Archive, Trash/restore, move and flags, external Sent and external Drafts. The
+   current importer still reads one configured folder. Validate UID-validity
+   replacement, large mailboxes and interrupted import against real services.
+2. **Draft/composer recovery:** editable reply recipients, forwarding with original
+   attachments, per-account signatures, simpler advanced-editor controls, a clear
+   recovery workflow for conflicting versions, and reply upload recovery. Verify
+   concurrent tabs/devices, interrupted uploads and device storage failures.
+3. **Inbound attachment recovery:** show unavailable/oversized parts and retry
+   storage failures without duplicates, including missing inline content.
+4. **Team coordination:** concurrent reply presence; streamline invitations,
+   mailbox assignment, resend and recovery-address workflows. Mailbox-password
+   recovery remains distinct from QQueue sign-in reset links.
+5. **Navigation/search:** unified received/sent search with mailbox scope, URL-owned
+   search/filter state and acceptance of Back/scroll/deep links across all mail
+   surfaces, including long conversations and failed loads.
+6. **Broader acceptance:** distinct controlled To/Cc/Bcc recipient mailboxes,
+   slow/interrupted browser networks and lost responses, actual phone keyboards
+   and safe areas, accessibility/assistive technology, large histories and multiple
+   teammates with different read/send grants and administrator roles. The live
+   check above used one provided mailbox and a self-addressed synthetic message;
+   it does not prove these other scenarios.
 
 ## Verification
 

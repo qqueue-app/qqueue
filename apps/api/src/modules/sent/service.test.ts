@@ -60,6 +60,7 @@ describe("sentService.list mailbox scope", () => {
     expect(args.where).toMatchObject({
       organizationId: "org_1",
       AND: [
+        expect.anything(),
         {
           OR: [
             { smtpConnectionId: { in: ["smtp_1"] } },
@@ -78,6 +79,7 @@ describe("sentService.list mailbox scope", () => {
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where.AND).toEqual([
+      expect.anything(),
       {
         OR: [
           { smtpConnectionId: { in: ["smtp_1"] } },
@@ -95,6 +97,7 @@ describe("sentService.list mailbox scope", () => {
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
     expect(args.where.AND).toEqual([
+      expect.anything(),
       { OR: [{ smtpConnectionId: { in: [] } }, { createdByUserId: "user_1" }] },
     ]);
   });
@@ -108,7 +111,18 @@ describe("sentService.list", () => {
     expect(args.where).toEqual({
       NOT: { origin: "SYSTEM" },
       organizationId: "org_1",
-      status: { in: ["SENT", "FAILED"] },
+      groupPrimary: true,
+      AND: [
+        {
+          OR: [
+            {
+              groupStatus: null,
+              status: { in: ["SENT", "FAILED", "UNCERTAIN"] },
+            },
+            { groupStatus: { in: ["SENT", "FAILED", "UNCERTAIN"] } },
+          ],
+        },
+      ],
     });
     // Failures have no sentAt, and Postgres would otherwise sort those NULLs
     // to the very top of the archive.
@@ -165,7 +179,15 @@ describe("sentService.list", () => {
 
       const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
       expect(args.where?.events).toEqual({ some: { type } });
-      expect(args.where?.status).toEqual({ in: ["SENT", "FAILED"] });
+      expect(args.where?.AND[0]).toEqual({
+        OR: [
+          {
+            groupStatus: null,
+            status: { in: ["SENT", "FAILED", "UNCERTAIN"] },
+          },
+          { groupStatus: { in: ["SENT", "FAILED", "UNCERTAIN"] } },
+        ],
+      });
     }
   );
 
@@ -173,7 +195,9 @@ describe("sentService.list", () => {
     await sentService.list(query({ outcome: "failed" }), "user_1");
 
     const args = prismaMock.emailJob.findMany.mock.calls[0][0]!;
-    expect(args.where?.status).toBe("FAILED");
+    expect(args.where?.AND[0]).toEqual({
+      OR: [{ groupStatus: null, status: "FAILED" }, { groupStatus: "FAILED" }],
+    });
     expect(args.where?.events).toBeUndefined();
   });
 
@@ -450,7 +474,13 @@ describe("sentService.get", () => {
       {
         id: "job_1",
         organizationId: "org_1",
-        status: { in: ["SENT", "FAILED"] },
+        OR: [
+          {
+            groupStatus: null,
+            status: { in: ["SENT", "FAILED", "UNCERTAIN"] },
+          },
+          { groupStatus: { in: ["SENT", "FAILED", "UNCERTAIN"] } },
+        ],
       }
     );
   });

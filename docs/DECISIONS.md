@@ -62,7 +62,7 @@ share one delivery substrate:
 4. **Inbox module** — an IMAP capability for viewing replies to sent mail.
 
 QQueue must **not** become a Gmail/Outlook/Zoho clone. The product is about
-email *delivery and operations* — sending, campaigns, transactional messaging,
+email _delivery and operations_ — sending, campaigns, transactional messaging,
 contact management, and analytics. Any inbox functionality exists to support
 those goals (e.g. seeing replies to mail you sent), not to become a primary
 mailbox/inbox-management product.
@@ -211,7 +211,7 @@ additively without reworking the foundation laid here.
 The threading metadata (`messageId`, `inReplyTo`, `references`) lives on
 `EmailJob`, not on `EmailEvent` and not (yet) in a dedicated message table.
 
-`EmailJob` *is* the outbound message, so the RFC 5322 threading headers belong
+`EmailJob` _is_ the outbound message, so the RFC 5322 threading headers belong
 on it: `messageId` already existed; `inReplyTo` and `references` were added so a
 manual reply (Phase B/F) can set headers that thread correctly in the
 recipient's client, and so a future inbox can anchor inbound replies to the
@@ -309,7 +309,7 @@ A per-contact status cannot cover every case: transactional API sends, manual
 rows, yet a bounce, complaint, or unsubscribe for any of them must stop future
 mail. The registry is the canonical "never send to this address" check;
 `Contact.status` remains the per-contact display state. Bounces and complaints
-write to **both** (status → BOUNCED *and* a `Suppression` row), and unsubscribes
+write to **both** (status → BOUNCED _and_ a `Suppression` row), and unsubscribes
 set status → UNSUBSCRIBED plus a row.
 
 Enforcement is defense-in-depth: campaign fan-out excludes suppressed addresses,
@@ -370,7 +370,7 @@ Thresholds live in an optional per-org `SuppressionPolicy` row, falling back to
 the `SOFT_BOUNCE_THRESHOLD` / `SOFT_BOUNCE_WINDOW_DAYS` env defaults (3 / 30).
 
 An **unclassifiable** bounce defaults to `HARD` — deliberately conservative, so
-the change can only make suppression *less* aggressive for clearly-transient
+the change can only make suppression _less_ aggressive for clearly-transient
 failures and never silently keeps sending to a genuinely dead address. Complaints
 always suppress immediately regardless of classification. The same classify-then-
 decide logic runs in both bounce paths (worker `lib/suppression.ts` and API
@@ -380,7 +380,7 @@ decide logic runs in both bounce paths (worker `lib/suppression.ts` and API
 ## Per-Domain Throttling Is Worker-Side, Not a BullMQ Limiter (Phase D2)
 
 BullMQ OSS only offers a single global queue rate limiter, not a per-key one, so
-throttling sends *per recipient domain* is enforced in the send worker
+throttling sends _per recipient domain_ is enforced in the send worker
 (`lib/throttle.ts`) with a Redis fixed-window counter — the same INCR+EXPIRE
 pattern the API already uses for HTTP rate limiting. When a domain is over its
 per-minute cap, the job is `moveToDelayed`'d to the next window and re-checked
@@ -462,7 +462,7 @@ and engagement, but always counted as **distinct jobs**, never as rows.
 **Delivery is reported only by sources that observe it.** `recordOpen` used to
 synthesize a one-time `DELIVERED` alongside the first open, reasoning that an
 open implies delivery. It does — but with no ESP webhook configured, which is
-the normal self-hosted case, that line was the *only* author of `DELIVERED` in
+the normal self-hosted case, that line was the _only_ author of `DELIVERED` in
 the entire system. "Delivery rate" was the open rate wearing another label, and
 a healthy server reporting 24% read as though three quarters of its mail had
 failed. The pixel no longer claims delivery; consumers who want the open signal
@@ -561,8 +561,8 @@ or panels in the core inbox.
 ## Decouple the From Identity from the SMTP Credential (Sender Identities + Sending Domains, Phase F)
 
 Until Phase F, a send's From address came straight from the chosen
-`SMTPConnection` (`fromEmail`/`fromName`), tightly coupling *who the mail appears
-to be from* to *which credential authenticates the transport*. Phase F splits
+`SMTPConnection` (`fromEmail`/`fromName`), tightly coupling _who the mail appears
+to be from_ to _which credential authenticates the transport_. Phase F splits
 these into two models:
 
 - **`SendingDomain`** — a domain the org sends from, carrying a DKIM mode:
@@ -628,7 +628,7 @@ CC/BCC attach to exactly one job — the **carrier**, the first To recipient not
 already suppressed at send time — so copy-recipients receive one copy of the
 message rather than one per To. If every To recipient is suppressed, nothing is
 sent, copies included (an email has no To to carry them). A recipient
-suppressed *between* carrier selection and the worker's send loses the copies
+suppressed _between_ carrier selection and the worker's send loses the copies
 with the job; that race is accepted. Uploaded attachments are claimed by the
 first job and metadata-copied onto siblings (same stored blob).
 
@@ -677,7 +677,7 @@ badge on Inbox, and its "Home" entry now points at `/insights`.
 
 One trap worth recording, because it is invisible until it bites: **do not wrap
 a `NavLink` in a Radix `asChild` trigger** such as `<Hint>`. Radix's slot merges
-`className` by string-joining, and `NavLink` accepts a *function* there — so the
+`className` by string-joining, and `NavLink` accepts a _function_ there — so the
 function is stringified into the class attribute, the element silently loses
 every style, and Tailwind's preflight (`svg { display: block }`) drops the icon
 onto its own line above the label.
@@ -695,7 +695,7 @@ The inbox listed conversations in a 22rem rail with a permanently-open reader
 beside it. That is the desktop-mail-client layout, and it was wrong here for two
 reasons. The rail was too narrow to show a sender, a subject and a preview on
 one line, so every row stacked into four; and the reader got whatever was left,
-which on a laptop is *narrower* than the same message on a phone. It also
+which on a laptop is _narrower_ than the same message on a phone. It also
 auto-selected the first conversation, which meant arriving at the inbox marked
 mail read without anyone touching it.
 
@@ -764,13 +764,13 @@ installed client to one organization. Three failures fell out of that, none of
 them visible in the UI: switching orgs did not re-register, so the toggle read
 "on" while the device was still bound to the org you left; the upsert keys on
 endpoint, so turning notifications off and on again while in another org
-silently *moved* the device there and ended the first org's alerts; and somebody
+silently _moved_ the device there and ended the first org's alerts; and somebody
 in two orgs could never be notified about both on one phone.
 
 A device belongs to a person. Which organization's mail may reach them is
 `OrganizationMember.notifyLevel` — one answer per (user, org) that holds on every
 device they own and survives adding or losing one. Delivery inverts accordingly:
-the worker resolves *who* should hear about a message, then sends to all of their
+the worker resolves _who_ should hear about a message, then sends to all of their
 devices, building a payload per recipient rather than one for the whole org.
 
 The levels are `ALL`, `ADDRESSED_TO_ME`, and `NONE`. `ALL` is the default because
@@ -798,7 +798,7 @@ person's existing reach exactly. New memberships take the `ALL` default.
 Browsers replace a push subscription on their own schedule, and almost always
 with no tab open. Merely posting a message to open clients, as this once did,
 therefore reached nobody — and the damage was silent: the next time the app
-opened it saw a valid *local* subscription, reported notifications as on, and the
+opened it saw a valid _local_ subscription, reported notifications as on, and the
 server still held the endpoint that had been rotated away. The device was mute
 and the settings page said it was fine.
 
@@ -825,7 +825,7 @@ our server. Any one can change without the others knowing. The toggle originally
 consulted only the browser, which made it lie in exactly the case above — a
 perfectly valid local registration whose endpoint the server has never heard of.
 
-It now confirms the server holds *this* endpoint before reading "on". A failed
+It now confirms the server holds _this_ endpoint before reading "on". A failed
 check leaves the last known answer rather than reporting a device switched off
 that probably isn't: the request failing says something about the network, not
 about the subscription.
@@ -845,7 +845,7 @@ and lose its prototype while still carrying everything we read off it.
 
 Mailcow domains are instance-global: one API key, one mail server, shared by
 every organization on the install. They were gated on `requireOrgRole("OWNER")`,
-and an unclaimed domain was visible to *every* org as a pool to claim from — the
+and an unclaimed domain was visible to _every_ org as a pool to claim from — the
 mechanism that kept a single-org instance working unchanged when `OrgMailDomain`
 was introduced.
 
@@ -855,7 +855,7 @@ a workspace could create their own, and from there list the unclaimed pool,
 claim from it, create domains on the shared mail server, and delete them.
 
 `POST /organizations` was later restricted to owners and admins (see "Only
-owners and admins may create organizations" below), which narrows *who* can do
+owners and admins may create organizations" below), which narrows _who_ can do
 this but does not restore the gate: registration still creates an organization
 with the registrant as OWNER, so anyone who signs up is an owner somewhere and
 can create more from there. Anything install-wide stays on `isInstanceAdmin`.
@@ -870,8 +870,8 @@ looks first wins" is not an access control.
 
 `OrgMailDomain.domain` was globally unique, so a domain reached exactly one
 organization. That was a side effect of closing the hole above, not the fix
-itself: what made the old model unsafe was *who* could claim a domain, not *how
-many* orgs could hold one. Assignment is an instance-admin act either way, and
+itself: what made the old model unsafe was _who_ could claim a domain, not _how
+many_ orgs could hold one. Assignment is an instance-admin act either way, and
 one company running several orgs on a single domain is ordinary.
 
 Uniqueness therefore moved to the `(domain, organizationId)` pair, and the
@@ -887,12 +887,12 @@ Two consequences are deliberate:
   each other's. The assignment dialog says so, because discovering it from a
   deleted mailbox is not acceptable.
 - **The write diffs rather than clearing and rewriting.** Orgs dropped from the
-  set lose their `MailDomainGrant` rows (a grant is delegation *within* an
+  set lose their `MailDomainGrant` rows (a grant is delegation _within_ an
   assignment and cannot outlive one); orgs that stay keep theirs. Clearing and
   rewriting would make a no-op re-save silently revoke every delegation under
   the domain.
 
-`assertDomainAccess` asks whether the *caller's* org holds the domain rather
+`assertDomainAccess` asks whether the _caller's_ org holds the domain rather
 than who owns it, and still separates "assigned to nobody" from "assigned to
 someone else" — different problems for whoever has to fix them.
 
@@ -931,7 +931,7 @@ away.
 Tightening the gate revokes access an org already had unless the assignments it
 was relying on are written first. `20260809000000` already derived them once —
 but mailbox provisioning (`connectMailbox`) writes an `SMTPConnection` and an
-`InboxAccount` and *never* an `OrgMailDomain` row, so any mailbox provisioned
+`InboxAccount` and _never_ an `OrgMailDomain` row, so any mailbox provisioned
 onto an unclaimed domain since then works today with no ownership record.
 `20260810000000` re-derives from the same three sources (sending accounts,
 synced inboxes, existing grants), idempotently. Domains with none of that
@@ -1024,8 +1024,8 @@ became the wrong grain. A single `OrganizationMember.notifyLevel` column
 offered everything or silence, and somebody who reads a busy support@ and a
 quiet alias wants one of them to buzz.
 
-`InboxNotifyRule` answers *which mailbox*; `notifyLevel` survives unchanged and
-answers *which mail within it*. The two are orthogonal, and keeping both is why
+`InboxNotifyRule` answers _which mailbox_; `notifyLevel` survives unchanged and
+answers _which mail within it_. The two are orthogonal, and keeping both is why
 this migration needs no data change at all.
 
 **The default is on, and the table stores only the exceptions.** An allow-list
@@ -1067,7 +1067,7 @@ a switch — a switch has two positions and this has three.
 
 The attachment/image boundary (private auth-scoped `EmailAttachment` vs public
 `ImageAsset`) left no room for a third case: an asset generated per message at
-send time — a ticket QR code, a barcode — that belongs *inside* the message.
+send time — a ticket QR code, a barcode — that belongs _inside_ the message.
 Uploaded attachments need a dashboard session to create (API keys cannot reach
 `POST /attachments`) and always ride as regular downloadable parts; `ImageAsset`
 URLs are hidden whenever a mail client blocks remote images, which is exactly
@@ -1170,4 +1170,36 @@ The organization chose shared read state per mailbox: reading mail changes the
 mailbox for everyone with access, including other mail clients. Future IMAP
 writeback will reconcile QQueue state with `\Seen`, using durable pending
 operations to preserve newer user actions. A personal unread overlay is not part
-of this decision. This batch records the policy without implementing writeback.
+of this decision. This batch recorded the policy; the implementation below now
+adds writeback.
+
+## Durable Manual Delivery and Draft Acceptance (2026-10-14)
+
+Every To, Cc and Bcc recipient now receives an independent job in the existing
+delivery pipeline. A suppressed To recipient cannot prevent copies from going
+out. A primary job caches the logical message state; its own delivery status
+remains separate. Complete visible headers and a shared Message-ID survive all
+copies, while Bcc stays out of wire headers. Partial SMTP acceptance and later
+DSNs are attributed to the actual recipient, preserving accepted recipients.
+
+Draft create identities and optimistic revisions protect retries and concurrent
+editing. Send acceptance, attachment metadata preparation and draft completion
+commit together before queue dispatch. A completed draft remains a tombstone
+with its accepted job ID, so losing an HTTP response does not create another
+send. Periodic worker recovery dispatches durable queued work after Redis loss.
+An interrupted SMTP attempt that may have accepted DATA becomes UNCERTAIN and
+is not automatically resent. Stable Message-ID is useful for reconciliation,
+but does not make SMTP delivery exactly once.
+
+Shared read state uses durable pending actions and per-message revisions. IMAP
+writeback verifies UID-validity and message identity; acknowledgements and
+external flag reconciliation only update the unchanged local revision. A failed
+action remains pending with a visible error. Bounded flag scans rotate through
+imported mail, and failed writebacks rotate behind unattempted actions.
+
+Desktop Inbox uses a fixed 200px folder sidebar with extra tools in an overlay,
+a 360px conversation list (400px on wide screens), and a larger adjacent reader.
+List and reader scroll independently. Focused mail is a personal preference
+stored per signed-in account on the current device. Phones show one screen at
+a time. This scope follows the approved prototype and the narrower, fixed
+sidebar requested in the Outlook reference.

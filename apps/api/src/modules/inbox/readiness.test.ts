@@ -183,7 +183,13 @@ describe("safe mailbox operations", () => {
     expect(inboxSyncQueue.add).toHaveBeenCalledWith(
       "sync-inbox",
       { inboxAccountId: "inbox_1" },
-      expect.objectContaining({ jobId: "inbox-sync-inbox_1" })
+      expect.objectContaining({
+        jobId: expect.stringMatching(/^inbox-sync-inbox_1-/),
+      })
+    );
+    await inboxService.requestSync("org_1", "user_1", "inbox_1");
+    expect(inboxSyncQueue.add.mock.calls[0][2]?.jobId).not.toBe(
+      inboxSyncQueue.add.mock.calls[1][2]?.jobId
     );
   });
 });

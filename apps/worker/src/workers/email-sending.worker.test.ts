@@ -35,7 +35,7 @@ const h = vi.hoisted(() => {
     ),
     listUnsubscribeHeadersForUrl: vi.fn((url: string) => ({
       "List-Unsubscribe": `<${url}>`,
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     })),
     appendUnsubscribeFooter: vi.fn(
       (html: string | null) => `${html}+unsub-footer`
@@ -46,7 +46,7 @@ const h = vi.hoisted(() => {
     decryptSecret: vi.fn((v: string) => `dec:${v}`),
     settleRunIfComplete: vi.fn(),
     loadAttachmentsForJob: vi.fn(),
-    reserveDomainSlot: vi.fn(async () => ({ allowed: true }))
+    reserveDomainSlot: vi.fn(async () => ({ allowed: true })),
   };
 });
 
@@ -58,7 +58,7 @@ const {
   injectTracking,
   decryptSecret,
   settleRunIfComplete,
-  reserveDomainSlot
+  reserveDomainSlot,
 } = h;
 
 vi.mock("bullmq", () => ({
@@ -67,7 +67,7 @@ vi.mock("bullmq", () => ({
     h.setProcessor(processor);
     return { name: _name };
   }),
-  DelayedError: h.DelayedError
+  DelayedError: h.DelayedError,
 }));
 
 vi.mock("../config/redis.js", () => ({ redisConnection: {} }));
@@ -79,21 +79,21 @@ vi.mock("@qqueue/email-engine", () => ({
   buildUnsubscribeUrl: h.buildUnsubscribeUrl,
   listUnsubscribeHeadersForUrl: h.listUnsubscribeHeadersForUrl,
   appendUnsubscribeFooter: h.appendUnsubscribeFooter,
-  appendUnsubscribeFooterText: h.appendUnsubscribeFooterText
+  appendUnsubscribeFooterText: h.appendUnsubscribeFooterText,
 }));
 
 vi.mock("../lib/crypto.js", () => ({ decryptSecret: h.decryptSecret }));
 
 vi.mock("../lib/campaign-run.js", () => ({
-  settleRunIfComplete: h.settleRunIfComplete
+  settleRunIfComplete: h.settleRunIfComplete,
 }));
 
 vi.mock("../lib/attachments.js", () => ({
-  loadAttachmentsForJob: h.loadAttachmentsForJob
+  loadAttachmentsForJob: h.loadAttachmentsForJob,
 }));
 
 vi.mock("../lib/throttle.js", () => ({
-  reserveDomainSlot: h.reserveDomainSlot
+  reserveDomainSlot: h.reserveDomainSlot,
 }));
 
 import { startEmailSendingWorker } from "./email-sending.worker.js";
@@ -109,7 +109,7 @@ function makeJob(
     data: { emailJobId: overrides.emailJobId ?? "ej1" },
     attemptsMade: overrides.attemptsMade ?? 0,
     opts: { attempts: overrides.attempts ?? 3 },
-    moveToDelayed: vi.fn().mockResolvedValue(undefined)
+    moveToDelayed: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -130,7 +130,7 @@ const smtpConnection = {
   fromName: "Sender",
   replyTo: null as string | null,
   usernameEncrypted: "u-enc",
-  passwordEncrypted: "p-enc"
+  passwordEncrypted: "p-enc",
 };
 
 const secretDecryptionMessage =
@@ -151,10 +151,11 @@ const baseEmailJob = {
   html: "<p>Body</p>",
   text: "Body",
   smtpConnection,
-  campaign: { status: "SENDING" }
+  campaign: { status: "SENDING" },
 };
 
 beforeEach(() => {
+  prismaMock.emailJob.updateMany.mockResolvedValue({ count: 1 } as never);
   send.mockReset();
   SMTPProvider.mockClear();
   injectTracking.mockClear();
@@ -188,7 +189,7 @@ describe("email-sending worker", () => {
   it("does nothing for a CANCELLED job", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      status: "CANCELLED"
+      status: "CANCELLED",
     } as never);
     await run(makeJob());
     expect(send).not.toHaveBeenCalled();
@@ -199,7 +200,7 @@ describe("email-sending worker", () => {
     async (status) => {
       prismaMock.emailJob.findUnique.mockResolvedValue({
         ...baseEmailJob,
-        status
+        status,
       } as never);
       await run(makeJob());
       expect(send).not.toHaveBeenCalled();
@@ -213,16 +214,16 @@ describe("email-sending worker", () => {
       visibleCc: ["copy@example.com", "suppressed@example.com"],
       cc: ["copy@example.com", "suppressed@example.com"],
       bcc: ["private@example.com"],
-      messageId: "<stable@qqueue.invalid>"
+      messageId: "<stable@qqueue.invalid>",
     } as never);
     prismaMock.suppression.findMany.mockResolvedValue([
-      { email: "suppressed@example.com" }
+      { email: "suppressed@example.com" },
     ] as never);
     send.mockResolvedValue({
       messageId: "<stable@qqueue.invalid>",
       accepted: ["to@example.com"],
       rejected: [],
-      provider: "smtp"
+      provider: "smtp",
     });
     await run(makeJob());
     expect(send).toHaveBeenCalledWith(
@@ -232,9 +233,9 @@ describe("email-sending worker", () => {
         bcc: undefined,
         envelope: {
           from: "from@example.com",
-          to: ["to@example.com", "copy@example.com", "private@example.com"]
+          to: ["to@example.com", "copy@example.com", "private@example.com"],
         },
-        messageId: "<stable@qqueue.invalid>"
+        messageId: "<stable@qqueue.invalid>",
       })
     );
   });
@@ -245,17 +246,22 @@ describe("email-sending worker", () => {
       messageId: "<ej1@qqueue.invalid>",
       accepted: ["to@example.com"],
       rejected: [],
-      provider: "smtp"
+      provider: "smtp",
     });
     settleRunIfComplete.mockRejectedValueOnce(new Error("Bookkeeping offline"));
     await expect(run(makeJob())).rejects.toThrow("Bookkeeping offline");
     const statuses = prismaMock.emailJob.update.mock.calls.map(
       ([args]) => args.data.status
     );
-    expect(statuses).toEqual(["PROCESSING", "SENT"]);
+    expect(statuses).toEqual(["SENT"]);
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: "PROCESSING", messageId: "<ej1@qqueue.invalid>" },
+      })
+    );
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      status: "SENT"
+      status: "SENT",
     } as never);
     await run(makeJob({ attemptsMade: 1 }));
     expect(send).toHaveBeenCalledTimes(1);
@@ -264,7 +270,7 @@ describe("email-sending worker", () => {
   it("delays the job and throws DelayedError when the campaign is PAUSED", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      campaign: { status: "PAUSED" }
+      campaign: { status: "PAUSED" },
     } as never);
     const job = makeJob();
 
@@ -276,7 +282,7 @@ describe("email-sending worker", () => {
   it("throws when the job has no SMTP connection", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      smtpConnection: null
+      smtpConnection: null,
     } as never);
     await expect(run(makeJob())).rejects.toThrow(
       "Email job requires an SMTP connection"
@@ -292,12 +298,12 @@ describe("email-sending worker", () => {
     expect(send).not.toHaveBeenCalled();
     expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
       where: { id: "ej1" },
-      data: { status: "SUPPRESSED" }
+      data: { status: "SUPPRESSED" },
     });
     // Never transitions to PROCESSING.
     expect(prismaMock.emailJob.update).not.toHaveBeenCalledWith({
       where: { id: "ej1" },
-      data: { status: "PROCESSING" }
+      data: { status: "PROCESSING" },
     });
     expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
   });
@@ -305,7 +311,7 @@ describe("email-sending worker", () => {
   it("matches a suppression case-insensitively (lookup is lowercased)", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      toEmail: "Mixed@Example.com"
+      toEmail: "Mixed@Example.com",
     } as never);
     prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
 
@@ -316,22 +322,22 @@ describe("email-sending worker", () => {
       where: {
         organizationId_email: {
           organizationId: "org1",
-          email: "mixed@example.com"
-        }
+          email: "mixed@example.com",
+        },
       },
-      select: { id: true }
+      select: { id: true },
     });
     expect(send).not.toHaveBeenCalled();
     expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
       where: { id: "ej1" },
-      data: { status: "SUPPRESSED" }
+      data: { status: "SUPPRESSED" },
     });
   });
 
   it("sends SYSTEM mail to a suppressed recipient (suppression bypass)", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      origin: "SYSTEM"
+      origin: "SYSTEM",
     } as never);
     // A suppression row exists, but SYSTEM mail must still go out.
     prismaMock.suppression.findUnique.mockResolvedValue({ id: "s1" } as never);
@@ -339,7 +345,7 @@ describe("email-sending worker", () => {
       provider: "smtp",
       messageId: "mid-sys",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -349,21 +355,21 @@ describe("email-sending worker", () => {
     expect(send).toHaveBeenCalledOnce();
     expect(prismaMock.emailJob.update).not.toHaveBeenCalledWith({
       where: { id: "ej1" },
-      data: { status: "SUPPRESSED" }
+      data: { status: "SUPPRESSED" },
     });
   });
 
   it("does not inject tracking into SYSTEM mail", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
-      origin: "SYSTEM"
+      origin: "SYSTEM",
     } as never);
     prismaMock.suppression.findUnique.mockResolvedValue(null as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid-sys",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -387,7 +393,7 @@ describe("email-sending worker", () => {
     // Never transitions to PROCESSING while held.
     expect(prismaMock.emailJob.update).not.toHaveBeenCalledWith({
       where: { id: "ej1" },
-      data: { status: "PROCESSING" }
+      data: { status: "PROCESSING" },
     });
   });
 
@@ -397,15 +403,15 @@ describe("email-sending worker", () => {
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
 
     // Identity is stored before the SMTP attempt.
-    expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
-      where: { id: "ej1" },
-      data: { status: "PROCESSING", messageId: "<ej1@qqueue.invalid>" }
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "ej1", status: { in: ["PENDING", "QUEUED", "FAILED"] } },
+      data: { status: "PROCESSING", messageId: "<ej1@qqueue.invalid>" },
     });
     // Builds the provider from decrypted creds.
     expect(decryptSecret).toHaveBeenCalledWith("u-enc");
@@ -413,7 +419,7 @@ describe("email-sending worker", () => {
     expect(SMTPProvider).toHaveBeenCalledWith(
       expect.objectContaining({
         host: "smtp.example.com",
-        auth: { user: "dec:u-enc", pass: "dec:p-enc" }
+        auth: { user: "dec:u-enc", pass: "dec:p-enc" },
       })
     );
     // Injects tracking and sends with a formatted From.
@@ -425,7 +431,7 @@ describe("email-sending worker", () => {
       expect.objectContaining({
         from: "Sender <from@example.com>",
         to: "to@example.com",
-        html: "tracked:<p>Body</p>"
+        html: "tracked:<p>Body</p>",
       })
     );
     // Records the SENT status.
@@ -441,13 +447,13 @@ describe("email-sending worker", () => {
       ...baseEmailJob,
       cc: ["cc@example.com"],
       bcc: ["bcc@example.com"],
-      replyTo: "reply@example.com"
+      replyTo: "reply@example.com",
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -456,7 +462,7 @@ describe("email-sending worker", () => {
       expect.objectContaining({
         cc: ["cc@example.com"],
         bcc: ["bcc@example.com"],
-        replyTo: "reply@example.com"
+        replyTo: "reply@example.com",
       })
     );
   });
@@ -468,13 +474,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       replyTo: null,
-      smtpConnection: { ...smtpConnection, replyTo: "support@example.com" }
+      smtpConnection: { ...smtpConnection, replyTo: "support@example.com" },
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -488,13 +494,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       replyTo: "thisone@example.com",
-      smtpConnection: { ...smtpConnection, replyTo: "support@example.com" }
+      smtpConnection: { ...smtpConnection, replyTo: "support@example.com" },
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -508,13 +514,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       inReplyTo: "<parent@mail>",
-      references: ["<root@mail>", "<parent@mail>"]
+      references: ["<root@mail>", "<parent@mail>"],
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -522,7 +528,7 @@ describe("email-sending worker", () => {
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
         inReplyTo: "<parent@mail>",
-        references: ["<root@mail>", "<parent@mail>"]
+        references: ["<root@mail>", "<parent@mail>"],
       })
     );
   });
@@ -533,15 +539,15 @@ describe("email-sending worker", () => {
       {
         filename: "report.pdf",
         content: Buffer.from("PDF"),
-        contentType: "application/pdf"
-      }
+        contentType: "application/pdf",
+      },
     ];
     h.loadAttachmentsForJob.mockResolvedValue(attachments);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -556,7 +562,7 @@ describe("email-sending worker", () => {
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -573,13 +579,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "MANUAL",
-      isBulk: true
+      isBulk: true,
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -592,7 +598,7 @@ describe("email-sending worker", () => {
     );
     const sendArgs = send.mock.calls[0][0];
     expect(sendArgs.headers).toMatchObject({
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     });
   });
 
@@ -600,13 +606,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "TRANSACTIONAL",
-      isBulk: false
+      isBulk: false,
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -618,19 +624,19 @@ describe("email-sending worker", () => {
   it("forwards the sender's one-click headers on a transactional send", async () => {
     const headers = {
       "List-Unsubscribe": "<https://example.com/u/signed>",
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     };
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "TRANSACTIONAL",
       isBulk: false,
-      headers
+      headers,
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -649,14 +655,14 @@ describe("email-sending worker", () => {
       headers: {
         "list-unsubscribe": `<${url}>`,
         "list-unsubscribe-post": "List-Unsubscribe=One-Click",
-        "X-Campaign-Id": "october"
-      }
+        "X-Campaign-Id": "october",
+      },
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -665,7 +671,7 @@ describe("email-sending worker", () => {
     expect(h.listUnsubscribeHeadersForUrl).toHaveBeenCalledWith(url);
     expect(send.mock.calls[0][0].headers).toMatchObject({
       "List-Unsubscribe": `<${url}>`,
-      "X-Campaign-Id": "october"
+      "X-Campaign-Id": "october",
     });
     expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
       expect.anything(),
@@ -678,13 +684,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "CAMPAIGN",
-      isBulk: true
+      isBulk: true,
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -706,13 +712,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "TRANSACTIONAL",
-      isBulk: false
+      isBulk: false,
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -729,13 +735,13 @@ describe("email-sending worker", () => {
       ...baseEmailJob,
       origin: "CAMPAIGN",
       isBulk: true,
-      organization: { footerNote: "Acme Inc, 400 Market St" }
+      organization: { footerNote: "Acme Inc, 400 Market St" },
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -759,18 +765,18 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       cc: ["keep@example.com", "Blocked@example.com"],
-      bcc: ["hidden@example.com"]
+      bcc: ["hidden@example.com"],
     } as never);
     // To recipient is not suppressed; the CC "blocked@example.com" is.
     prismaMock.suppression.findUnique.mockResolvedValue(null as never);
     prismaMock.suppression.findMany.mockResolvedValue([
-      { email: "blocked@example.com" }
+      { email: "blocked@example.com" },
     ] as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -783,8 +789,8 @@ describe("email-sending worker", () => {
     const sentUpdate = prismaMock.emailJob.update.mock.calls.find(
       (call) => call[0].data?.status === "SENT"
     );
-    expect(sentUpdate?.[0].data.events.create.metadata).toMatchObject({
-      strippedCc: ["Blocked@example.com"]
+    expect(sentUpdate?.[0].data.events.create[0].metadata).toMatchObject({
+      strippedCc: ["Blocked@example.com"],
     });
   });
 
@@ -792,13 +798,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "SYSTEM",
-      cc: ["copy@example.com"]
+      cc: ["copy@example.com"],
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -811,13 +817,13 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       smtpConnection: { ...smtpConnection, fromName: null },
-      text: null
+      text: null,
     } as never);
     send.mockResolvedValue({
       provider: "smtp",
       messageId: "mid1",
       accepted: ["to@example.com"],
-      rejected: []
+      rejected: [],
     });
 
     await run(makeJob());
@@ -835,7 +841,7 @@ describe("email-sending worker", () => {
       messageId: "mid1",
       accepted: [],
       rejected: ["to@example.com"],
-      rejectionResponse: "550 5.1.1 No such user"
+      rejectionResponse: "550 5.1.1 No such user",
     });
 
     await run(makeJob());
@@ -850,8 +856,8 @@ describe("email-sending worker", () => {
         create: expect.objectContaining({
           organizationId: "org1",
           email: "to@example.com",
-          reason: "BOUNCE"
-        })
+          reason: "BOUNCE",
+        }),
       })
     );
     expect(prismaMock.emailEvent.count).not.toHaveBeenCalled();
@@ -873,7 +879,7 @@ describe("email-sending worker", () => {
       messageId: "mid1",
       accepted: [],
       rejected: ["to@example.com"],
-      rejectionResponse: "452 4.2.2 Mailbox full"
+      rejectionResponse: "452 4.2.2 Mailbox full",
     });
 
     await run(makeJob());
@@ -899,14 +905,14 @@ describe("email-sending worker", () => {
       messageId: "mid1",
       accepted: [],
       rejected: ["to@example.com"],
-      rejectionResponse: "452 4.2.2 Mailbox full"
+      rejectionResponse: "452 4.2.2 Mailbox full",
     });
 
     await run(makeJob());
 
     expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ reason: "BOUNCE" })
+        create: expect.objectContaining({ reason: "BOUNCE" }),
       })
     );
     expect(prismaMock.contact.updateMany).toHaveBeenCalledWith(
@@ -916,7 +922,12 @@ describe("email-sending worker", () => {
 
   it("requeues (QUEUED) on a non-final failed attempt and rethrows", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
-    send.mockRejectedValue(new Error("connection refused"));
+    send.mockRejectedValue(
+      Object.assign(new Error("connection refused"), {
+        command: "CONN",
+        code: "EDNS",
+      })
+    );
 
     await expect(
       run(makeJob({ attemptsMade: 0, attempts: 3 }))
@@ -959,7 +970,9 @@ describe("email-sending worker", () => {
 
   it("marks FAILED and settles on the final failed attempt", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
-    send.mockRejectedValue(new Error("boom"));
+    send.mockRejectedValue(
+      Object.assign(new Error("boom"), { command: "CONN", code: "EDNS" })
+    );
 
     await expect(
       run(makeJob({ attemptsMade: 2, attempts: 3 }))
@@ -983,7 +996,7 @@ describe("email-sending worker", () => {
 
   it("uses a generic message for a non-Error throw", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
-    send.mockRejectedValue("string failure");
+    h.loadAttachmentsForJob.mockRejectedValueOnce("string failure");
 
     await expect(run(makeJob({ attemptsMade: 2, attempts: 3 }))).rejects.toBe(
       "string failure"
@@ -1003,12 +1016,14 @@ describe("email-sending worker", () => {
 
   it("defaults attempts to 1 when opts.attempts is undefined (final attempt)", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
-    send.mockRejectedValue(new Error("boom"));
+    send.mockRejectedValue(
+      Object.assign(new Error("boom"), { command: "CONN", code: "EDNS" })
+    );
     const job = {
       data: { emailJobId: "ej1" },
       attemptsMade: 0,
       opts: {},
-      moveToDelayed: vi.fn()
+      moveToDelayed: vi.fn(),
     };
 
     startEmailSendingWorker();
@@ -1021,5 +1036,85 @@ describe("email-sending worker", () => {
     );
     expect(failCall).toBeDefined();
     expect(settleRunIfComplete).toHaveBeenCalledWith("run1");
+  });
+});
+
+describe("SMTP acceptance safety", () => {
+  it("records a partial acceptance without suppressing the accepted To", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      cc: ["bad@example.com"],
+    } as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: ["bad@example.com"],
+      rejections: [
+        { email: "bad@example.com", response: "550 5.1.1 No mailbox" },
+      ],
+    });
+    await run(makeJob());
+    expect(prismaMock.emailJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SENT" }),
+      })
+    );
+    expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ email: "bad@example.com" }),
+      })
+    );
+    expect(prismaMock.suppression.upsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ email: "to@example.com" }),
+      })
+    );
+  });
+  it("holds a lost DATA response even when Nodemailer reports command CONN", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    send.mockRejectedValue(
+      Object.assign(new Error("Connection closed unexpectedly"), {
+        command: "CONN",
+        code: "ECONNECTION",
+      })
+    );
+    await run(makeJob());
+    expect(prismaMock.emailJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "UNCERTAIN" }),
+      })
+    );
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      status: "UNCERTAIN",
+    } as never);
+    await run(makeJob({ attemptsMade: 1 }));
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("does not send after a competing cancellation wins the delivery claim", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    prismaMock.emailJob.updateMany.mockResolvedValue({ count: 0 } as never);
+    await run(makeJob());
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("holds an SMTP acceptance if recording the outcome fails", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    send.mockResolvedValue({
+      provider: "smtp",
+      messageId: "mid1",
+      accepted: ["to@example.com"],
+      rejected: [],
+    });
+    prismaMock.emailJob.update.mockRejectedValueOnce(
+      new Error("Database unavailable")
+    );
+    await run(makeJob());
+    expect(prismaMock.emailJob.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "UNCERTAIN" }),
+      })
+    );
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });

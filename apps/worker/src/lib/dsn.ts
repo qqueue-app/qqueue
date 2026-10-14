@@ -1,3 +1,4 @@
+import { settleSendGroup } from "./send-group.js";
 import type { ParsedMail } from "mailparser";
 import {
   type BounceType,
@@ -172,10 +173,38 @@ async function correlateEmailJob(input: {
   threadEmailJobId: string | null;
   originalMessageId?: string;
 }): Promise<{
-  job: { id: string; status: string; campaignRunId: string | null };
+  job: {
+    id: string;
+    status: string;
+    campaignRunId: string | null;
+    toEmail: string;
+    sendGroupId: string | null;
+  };
   method: DsnCorrelation;
 } | null> {
-  const select = { id: true, status: true, campaignRunId: true } as const;
+  const select = {
+    id: true,
+    status: true,
+    campaignRunId: true,
+    toEmail: true,
+    cc: true,
+    bcc: true,
+    messageId: true,
+    sendGroupId: true,
+    organizationId: true,
+    origin: true,
+  } as const;
+  const recipientScope = {
+    OR: [
+      { toEmail: input.recipient },
+      { cc: { has: input.recipient } },
+      { bcc: { has: input.recipient } },
+    ],
+  };
+  const carries = (job: { toEmail: string; cc: string[]; bcc: string[] }) =>
+    [job.toEmail, ...job.cc, ...job.bcc].some(
+      (email) => email.toLowerCase() === input.recipient.toLowerCase()
+    );
 
   // (a) The DSN's In-Reply-To/References matched an outbound messageId — the
   // inbox sync's normal thread anchoring already found this job.
@@ -184,8 +213,24 @@ async function correlateEmailJob(input: {
       where: { id: input.threadEmailJobId },
       select,
     });
-    if (job) {
-      return { job, method: "in-reply-to" };
+    if (
+      job &&
+      job.organizationId === input.organizationId &&
+      job.origin !== "SYSTEM"
+    ) {
+      if (carries(job)) return { job, method: "in-reply-to" };
+      const sibling = await prisma.emailJob.findFirst({
+        where: {
+          organizationId: input.organizationId,
+          NOT: { origin: "SYSTEM" },
+          ...(job.sendGroupId
+            ? { sendGroupId: job.sendGroupId }
+            : { messageId: job.messageId }),
+          ...recipientScope,
+        },
+        select,
+      });
+      if (sibling) return { job: sibling, method: "in-reply-to" };
     }
   }
 
@@ -195,6 +240,8 @@ async function correlateEmailJob(input: {
       where: {
         organizationId: input.organizationId,
         messageId: input.originalMessageId,
+        NOT: { origin: "SYSTEM" },
+        ...recipientScope,
       },
       select,
     });
@@ -207,7 +254,8 @@ async function correlateEmailJob(input: {
   const job = await prisma.emailJob.findFirst({
     where: {
       organizationId: input.organizationId,
-      toEmail: input.recipient,
+      ...recipientScope,
+      NOT: { origin: "SYSTEM" },
       status: "SENT",
       sentAt: { gte: new Date(Date.now() - RECENCY_WINDOW_MS) },
     },
@@ -275,6 +323,7 @@ export async function applyDsnBounce(input: {
               inboundMessageId: input.inboundMessageId,
               correlation: correlated.method,
               finalRecipient: report.recipient,
+              recipient: report.recipient,
               action: report.action,
               ...(report.status ? { status: report.status } : {}),
             },
@@ -313,6 +362,7 @@ export async function applyDsnBounce(input: {
             inboundMessageId: input.inboundMessageId,
             correlation: correlated.method,
             finalRecipient: report.recipient,
+            recipient: report.recipient,
             bounceType,
             ...(report.status ? { status: report.status } : {}),
             ...(report.diagnosticCode ? { reason: report.diagnosticCode } : {}),
@@ -324,11 +374,15 @@ export async function applyDsnBounce(input: {
       // CANCELLED, and in-flight statuses must not be overwritten (the status
       // filter is the compare-and-set guard, same pattern as the worker's
       // CANCELLED re-check).
-      await prisma.emailJob.updateMany({
-        where: { id: correlated.job.id, status: "SENT" },
-        data: { status: "FAILED" },
-      });
+      if (
+        correlated.job.toEmail.toLowerCase() === report.recipient.toLowerCase()
+      )
+        await prisma.emailJob.updateMany({
+          where: { id: correlated.job.id, status: "SENT" },
+          data: { status: "FAILED" },
+        });
 
+      await settleSendGroup(input.organizationId, correlated.job.sendGroupId);
       await enqueueLatestWebhookDeliveries({
         organizationId: input.organizationId,
         emailJobId: correlated.job.id,

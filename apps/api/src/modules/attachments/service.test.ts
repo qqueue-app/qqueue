@@ -58,6 +58,42 @@ describe("attachmentService.upload", () => {
     });
   });
 
+  it("returns the original attachment after a lost response without storing another blob", async () => {
+    const input = { ...baseInput(), uploadId: "upload-1" };
+    prismaMock.emailAttachment.create.mockImplementation(
+      async (args) => ({ id: "att_1", ...args.data }) as never
+    );
+    const original = await attachmentService.upload(input);
+    const saved = {
+      id: "att_1",
+      ...prismaMock.emailAttachment.create.mock.calls[0][0].data,
+    };
+    prismaMock.emailAttachment.findUnique.mockResolvedValue(saved as never);
+    await expect(attachmentService.upload(input)).resolves.toEqual(original);
+    expect(storageMock.putObject).toHaveBeenCalledTimes(1);
+    expect(prismaMock.emailAttachment.create).toHaveBeenCalledTimes(1);
+    await expect(
+      attachmentService.upload({
+        ...input,
+        buffer: Buffer.from("different bytes"),
+      })
+    ).rejects.toMatchObject({ statusCode: 409, code: "attachment_conflict" });
+    expect(storageMock.putObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans the new blob if the draft completes during upload", async () => {
+    prismaMock.emailDraft.findFirst
+      .mockResolvedValueOnce({ id: "d1" } as never)
+      .mockResolvedValueOnce(null);
+    await expect(
+      attachmentService.upload({ ...baseInput(), emailDraftId: "d1" })
+    ).rejects.toMatchObject({ statusCode: 409, code: "attachment_conflict" });
+    expect(prismaMock.emailAttachment.create).not.toHaveBeenCalled();
+    expect(storageMock.deleteObject).toHaveBeenCalledWith(
+      storageMock.putObject.mock.calls[0][0].key
+    );
+  });
+
   it("rejects an empty file without touching storage", async () => {
     await expect(
       attachmentService.upload({ ...baseInput(), size: 0 })
@@ -92,7 +128,7 @@ describe("attachmentService.upload", () => {
     ).toBe("d1");
   });
 
-  it("ignores a draft id the user does not own", async () => {
+  it("rejects a draft id the user does not own", async () => {
     prismaMock.emailDraft.findFirst.mockResolvedValue(null);
     prismaMock.emailAttachment.create.mockResolvedValue({
       id: "att_1",
@@ -101,11 +137,10 @@ describe("attachmentService.upload", () => {
       size: 1024,
     } as never);
 
-    await attachmentService.upload({ ...baseInput(), emailDraftId: "nope" });
-
-    expect(
-      prismaMock.emailAttachment.create.mock.calls[0][0].data.emailDraftId
-    ).toBeUndefined();
+    await expect(
+      attachmentService.upload({ ...baseInput(), emailDraftId: "nope" })
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(prismaMock.emailAttachment.create).not.toHaveBeenCalled();
   });
 
   it("sanitizes path traversal out of the stored filename", async () => {
@@ -280,15 +315,17 @@ describe("attachmentService.delete", () => {
       id: "att_1",
       storageKey: "org/org_1/k-report.pdf",
     } as never);
-    prismaMock.emailAttachment.delete.mockResolvedValue({} as never);
+    prismaMock.emailAttachment.deleteMany.mockResolvedValue({
+      count: 1,
+    } as never);
 
     await attachmentService.delete("att_1", "user_1");
 
     expect(storageMock.deleteObject).toHaveBeenCalledWith(
       "org/org_1/k-report.pdf"
     );
-    expect(prismaMock.emailAttachment.delete).toHaveBeenCalledWith({
-      where: { id: "att_1" },
+    expect(prismaMock.emailAttachment.deleteMany).toHaveBeenCalledWith({
+      where: { id: "att_1", createdByUserId: "user_1", emailJobId: null },
     });
   });
 
@@ -298,11 +335,13 @@ describe("attachmentService.delete", () => {
       storageKey: "k",
     } as never);
     storageMock.deleteObject.mockRejectedValue(new Error("s3 down"));
-    prismaMock.emailAttachment.delete.mockResolvedValue({} as never);
+    prismaMock.emailAttachment.deleteMany.mockResolvedValue({
+      count: 1,
+    } as never);
 
     await attachmentService.delete("att_1", "user_1");
 
-    expect(prismaMock.emailAttachment.delete).toHaveBeenCalled();
+    expect(prismaMock.emailAttachment.deleteMany).toHaveBeenCalled();
   });
 
   it("throws 404 when the attachment is not found", async () => {
@@ -510,5 +549,32 @@ describe("attachmentService.createInlineForJob", () => {
     ).rejects.toThrow(HttpError);
     expect(storageMock.putObject).not.toHaveBeenCalled();
     expect(prismaMock.emailAttachment.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("accepted attachment safety", () => {
+  it("refuses to remove a blob already owned by a delivery job", async () => {
+    prismaMock.emailAttachment.findFirst.mockResolvedValue({
+      id: "a1",
+      emailJobId: "j1",
+      storageKey: "shared",
+    } as never);
+    await expect(attachmentService.delete("a1", "u1")).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    expect(storageMock.deleteObject).not.toHaveBeenCalled();
+  });
+  it("keeps the blob if a sibling still references it", async () => {
+    prismaMock.emailAttachment.findFirst.mockResolvedValue({
+      id: "a1",
+      emailJobId: null,
+      storageKey: "shared",
+    } as never);
+    prismaMock.emailAttachment.deleteMany.mockResolvedValue({
+      count: 1,
+    } as never);
+    prismaMock.emailAttachment.count.mockResolvedValue(1);
+    await attachmentService.delete("a1", "u1");
+    expect(storageMock.deleteObject).not.toHaveBeenCalled();
   });
 });

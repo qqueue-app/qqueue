@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import type { Prisma } from "@prisma/client";
+import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import type { EmailAttachment } from "@qqueue/email-engine";
 import {
@@ -7,6 +8,7 @@ import {
   type InlineAttachmentInput,
 } from "@qqueue/shared";
 import { env } from "../../config/env.js";
+import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
@@ -24,6 +26,7 @@ export interface UploadAttachmentInput {
   size: number;
   buffer: Buffer;
   emailDraftId?: string;
+  uploadId?: string;
 }
 
 export interface AttachmentMetadata {
@@ -75,6 +78,33 @@ export const attachmentService = {
       );
     }
 
+    const contentHash = createHash("sha256")
+      .update(input.buffer)
+      .update(
+        JSON.stringify([input.filename, input.contentType, input.emailDraftId])
+      )
+      .digest("hex");
+    const uploadKey = input.uploadId
+      ? {
+          organizationId: input.organizationId,
+          createdByUserId: input.userId,
+          uploadId: input.uploadId,
+        }
+      : null;
+    if (uploadKey) {
+      const existing = await prisma.emailAttachment.findUnique({
+        where: { organizationId_createdByUserId_uploadId: uploadKey },
+      });
+      if (existing) {
+        if (existing.contentHash !== contentHash)
+          throw new HttpError(
+            409,
+            "This upload identity belongs to a different file.",
+            "attachment_conflict"
+          );
+        return toMetadata(existing);
+      }
+    }
     // A draft id is only honored when it belongs to the same user + org.
     let emailDraftId: string | undefined;
     if (input.emailDraftId) {
@@ -86,7 +116,8 @@ export const attachmentService = {
         },
         select: { id: true },
       });
-      emailDraftId = draft?.id;
+      if (!draft) throw new HttpError(404, "Draft not found", "not_found");
+      emailDraftId = draft.id;
     }
 
     const filename = sanitizeFilename(input.filename);
@@ -98,18 +129,51 @@ export const attachmentService = {
       contentType: input.contentType,
     });
 
-    const attachment = await prisma.emailAttachment.create({
-      data: {
-        organizationId: input.organizationId,
-        emailDraftId,
-        filename,
-        contentType: input.contentType,
-        size: input.size,
-        storageKey,
-        createdByUserId: input.userId,
-      },
-    });
-
+    let attachment;
+    try {
+      attachment = await prisma.$transaction(async (db) => {
+        if (emailDraftId) {
+          await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"draft:" + emailDraftId}, 0))`;
+          const draft = await db.emailDraft.findFirst({
+            where: {
+              id: emailDraftId,
+              organizationId: input.organizationId,
+              createdByUserId: input.userId,
+              completedSendId: null,
+              deletedAt: null,
+            },
+          });
+          if (!draft)
+            throw new HttpError(
+              409,
+              "This draft was completed while the file was uploading. Your file was not added to the accepted message.",
+              "attachment_conflict"
+            );
+        }
+        return db.emailAttachment.create({
+          data: {
+            organizationId: input.organizationId,
+            emailDraftId,
+            uploadId: input.uploadId,
+            contentHash,
+            filename,
+            contentType: input.contentType,
+            size: input.size,
+            storageKey,
+            createdByUserId: input.userId,
+          },
+        });
+      });
+    } catch (error) {
+      await storage.deleteObject(storageKey).catch(() => undefined);
+      if (uploadKey && isPrismaKnownRequestError(error, "P2002")) {
+        const existing = await prisma.emailAttachment.findUnique({
+          where: { organizationId_createdByUserId_uploadId: uploadKey },
+        });
+        if (existing?.contentHash === contentHash) return toMetadata(existing);
+      }
+      throw error;
+    }
     return toMetadata(attachment);
   },
 
@@ -185,10 +249,31 @@ export const attachmentService = {
       throw new HttpError(404, "Attachment not found", "not_found");
     }
 
+    if (attachment.emailJobId)
+      throw new HttpError(
+        409,
+        "This attachment is already part of an accepted email and cannot be removed.",
+        "attachment_conflict"
+      );
+    const removed = await prisma.emailAttachment.deleteMany({
+      where: { id, createdByUserId: userId, emailJobId: null },
+    });
+    if (removed.count !== 1)
+      throw new HttpError(
+        409,
+        "This attachment was accepted for sending while you were removing it.",
+        "attachment_conflict"
+      );
+    // Sibling deliveries share this blob. Metadata deletion must never erase it.
+    if (
+      await prisma.emailAttachment.count({
+        where: { storageKey: attachment.storageKey },
+      })
+    )
+      return;
     // Best-effort blob removal: a storage hiccup must not block clearing the
     // metadata row (an orphaned blob is harmless and reclaimable).
     await storage.deleteObject(attachment.storageKey).catch(() => undefined);
-    await prisma.emailAttachment.delete({ where: { id: attachment.id } });
   },
 
   /**
@@ -199,14 +284,21 @@ export const attachmentService = {
   async linkToJob(
     attachmentIds: string[] | undefined,
     organizationId: string,
-    emailJobId: string
+    emailJobId: string,
+    db: Prisma.TransactionClient = prisma,
+    userId?: string | null
   ): Promise<void> {
     if (!attachmentIds?.length) {
       return;
     }
     const unique = Array.from(new Set(attachmentIds));
-    const { count } = await prisma.emailAttachment.updateMany({
-      where: { id: { in: unique }, organizationId, emailJobId: null },
+    const { count } = await db.emailAttachment.updateMany({
+      where: {
+        id: { in: unique },
+        organizationId,
+        emailJobId: null,
+        ...(userId ? { createdByUserId: userId } : {}),
+      },
       data: { emailJobId },
     });
 
@@ -235,14 +327,20 @@ export const attachmentService = {
   async copyToJob(
     attachmentIds: string[] | undefined,
     organizationId: string,
-    emailJobId: string
+    emailJobId: string,
+    db: Prisma.TransactionClient = prisma,
+    userId?: string | null
   ): Promise<void> {
     if (!attachmentIds?.length) {
       return;
     }
     const unique = Array.from(new Set(attachmentIds));
-    const rows = await prisma.emailAttachment.findMany({
-      where: { id: { in: unique }, organizationId },
+    const rows = await db.emailAttachment.findMany({
+      where: {
+        id: { in: unique },
+        organizationId,
+        ...(userId ? { createdByUserId: userId } : {}),
+      },
     });
     if (rows.length !== unique.length) {
       throw new HttpError(
@@ -251,7 +349,7 @@ export const attachmentService = {
         "validation_error"
       );
     }
-    await prisma.emailAttachment.createMany({
+    await db.emailAttachment.createMany({
       data: rows.map((row) => ({
         organizationId: row.organizationId,
         emailJobId,
@@ -277,7 +375,8 @@ export const attachmentService = {
     attachments: InlineAttachmentInput[] | undefined,
     organizationId: string,
     emailJobId: string,
-    createdByUserId?: string | null
+    createdByUserId?: string | null,
+    db: Prisma.TransactionClient = prisma
   ): Promise<void> {
     if (!attachments?.length) {
       return;
@@ -303,7 +402,7 @@ export const attachmentService = {
         contentType,
       });
 
-      await prisma.emailAttachment.create({
+      await db.emailAttachment.create({
         data: {
           organizationId,
           emailJobId,

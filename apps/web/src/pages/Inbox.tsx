@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { useReadingPreference } from "../lib/reading-preference.js";
+import { useMediaQuery } from "../lib/use-media-query.js";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -175,6 +177,7 @@ export function Inbox() {
 
 function InboxWorkspace() {
   const {
+    user,
     currentOrganizationId: organizationId,
     currentOrganization,
     organizations,
@@ -185,6 +188,21 @@ function InboxWorkspace() {
     currentOrganization?.role === "ADMIN";
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const reading = useReadingPreference(user?.id ?? "signed-out");
+  const desktop = useMediaQuery("(min-width: 1024px)");
+  const readingPane = desktop && reading === "pane";
+  const listScroll = useRef<HTMLDivElement>(null);
+  const scrollPosition = useRef(0);
+  function closeConversation() {
+    setOpenedThread(null);
+    setReplyTarget(null);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("message");
+      next.delete("replyDraft");
+      return next;
+    });
+  }
 
   const [accountFilter, setAccountFilter] = useState("all");
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
@@ -240,11 +258,11 @@ function InboxWorkspace() {
     organizationId,
     qk.inboxConversation(
       organizationId ?? "",
-      openedThread?.latestMessage.id ?? searchParams.get("message") ?? ""
+      searchParams.get("message") ?? openedThread?.latestMessage.id ?? ""
     ),
     (id) =>
       api.getInboxConversation(
-        openedThread?.latestMessage.id ?? searchParams.get("message") ?? "",
+        searchParams.get("message") ?? openedThread?.latestMessage.id ?? "",
         id
       ),
     {
@@ -367,7 +385,15 @@ function InboxWorkspace() {
   );
 
   function openThread(thread: ConversationThread) {
+    scrollPosition.current = readingPane
+      ? (listScroll.current?.scrollTop ?? 0)
+      : window.scrollY;
     setOpenedThread(thread);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("message", thread.latestMessage.id);
+      return next;
+    });
     // Opening a conversation reads every message in it, the way a mail client
     // does — leaving older messages in a thread unread would keep the badge lit
     // with nothing left to click.
@@ -410,27 +436,24 @@ function InboxWorkspace() {
     setSearchParams,
   ]);
 
-  // Deep link from a push notification: /inbox?message=<id>. Open the thread
-  // that message belongs to, then drop the parameter so a later refresh doesn't
-  // yank the reader back to an old message.
+  // The URL owns selection: refresh, shared links and browser Back keep the
+  // same conversation even when it falls out of the current filtered page.
   useEffect(() => {
     const target = searchParams.get("message");
-    if (!target || messages.length === 0) return;
-    const message = messages.find((candidate) => candidate.id === target);
-    if (!message) return;
-    const thread = threads.find(
-      (candidate) => candidate.threadKey === threadKeyForMessage(message)
+    if (!target) {
+      setOpenedThread(null);
+      requestAnimationFrame(() => {
+        if (readingPane && listScroll.current)
+          listScroll.current.scrollTop = scrollPosition.current;
+        else window.scrollTo?.(0, scrollPosition.current);
+      });
+      return;
+    }
+    const thread = threads.find((candidate) =>
+      candidate.messages.some((message) => message.id === target)
     );
-    if (thread) openThread(thread);
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        if (!next.has("replyDraft")) next.delete("message");
-        return next;
-      },
-      { replace: true }
-    );
-  }, [searchParams, messages, threads, setSearchParams]);
+    if (thread) setOpenedThread(thread);
+  }, [searchParams.get("message")]);
 
   useEffect(() => {
     const full = conversationQuery.data?.messages;
@@ -465,7 +488,7 @@ function InboxWorkspace() {
       const target = event.target as HTMLElement | null;
       if (target?.closest?.("input, textarea, [contenteditable='true']"))
         return;
-      setOpenedThread(null);
+      closeConversation();
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -523,7 +546,11 @@ function InboxWorkspace() {
         onClick={() => openThread(thread)}
         className={cn(
           "flex min-h-touch w-full items-start gap-3 rounded-control p-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          unread ? "bg-surface" : "bg-transparent"
+          selectedThread?.threadKey === thread.threadKey
+            ? "bg-brand/10 ring-1 ring-brand/20"
+            : unread
+              ? "bg-surface"
+              : "bg-transparent"
         )}
       >
         {unread ? <span className="sr-only">Unread</span> : null}
@@ -565,225 +592,232 @@ function InboxWorkspace() {
     itself, so every rule and hairline still runs edge to edge while the rows
     and the message sit on the same measure as the rest of the app.
   */
-  return (
-    <div className="flex min-h-0 flex-col">
-      {selectedThread ? (
-        /* ------------------------------------------------------------ reader */
-        <>
-          <header className="sticky top-sticky-top z-10 border-b border-border bg-surface">
-            <div className="mx-auto w-full max-w-page px-4 py-3 sm:px-6">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setOpenedThread(null)}
-                  className="-ml-1 inline-flex min-h-touch items-center gap-field rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Inbox
-                </button>
+  const reader = selectedThread ? (
+    <>
+      <header className="sticky top-sticky-top z-10 border-b border-border bg-surface">
+        <div className="mx-auto w-full max-w-page px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={closeConversation}
+              className="-ml-1 inline-flex min-h-touch items-center gap-field rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Inbox
+            </button>
 
-                <div className="ml-auto flex shrink-0 items-center gap-1">
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <IconButton
+                label="Mark as unread"
+                onClick={() => {
+                  markRead.mutate({
+                    id: selectedThread.latestMessage.id,
+                    read: false,
+                  });
+                  // Back to the list, the way every mail client does it —
+                  // otherwise the conversation you just marked unread is
+                  // still open, and closing it later would mark it read.
+                  closeConversation();
+                }}
+              >
+                <Mail />
+              </IconButton>
+              <IconButton
+                label="Reply"
+                onClick={() => setReplyTarget(selectedThread.latestMessage)}
+              >
+                <Reply />
+              </IconButton>
+            </div>
+          </div>
+
+          <div className="mt-2 min-w-0">
+            <h2 className="text-title font-semibold text-text">
+              {selectedThread.subject}
+            </h2>
+            <p className="mt-1 truncate text-ui text-text-secondary">
+              {selectedThread.senderName} · {selectedThread.senderEmail}
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto w-full max-w-page space-y-4 px-4 py-4 sm:px-6 sm:py-6">
+        {conversationQuery.isError ? (
+          <div
+            role="alert"
+            className="rounded-card border border-err p-4 text-ui"
+          >
+            Couldn't load the complete conversation.{" "}
+            <Button
+              variant="secondary"
+              onClick={() => void conversationQuery.refetch()}
+            >
+              Try again
+            </Button>
+          </div>
+        ) : null}
+        {[
+          ...selectedThread.messages.map((message) => ({
+            kind: "incoming" as const,
+            message,
+            date: message.receivedAt,
+          })),
+          ...(conversationQuery.data?.outgoing ?? []).map((message) => ({
+            kind: "outgoing" as const,
+            message,
+            date: message.sentAt ?? message.createdAt,
+          })),
+        ]
+          .sort(
+            (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+          )
+          .map((entry) => {
+            if (entry.kind === "outgoing") {
+              const message = entry.message;
+              return (
+                <article
+                  key={message.id}
+                  className="rounded-card border border-border bg-surface p-4 shadow-card"
+                >
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-ui font-medium">
+                      {message.sentByName} ·{" "}
+                      {message.smtpConnection?.fromEmail ?? "Your team"}
+                    </p>
+                    <Badge
+                      variant={message.status === "FAILED" ? "warn" : "outline"}
+                    >
+                      {message.status === "SENT"
+                        ? "Sent"
+                        : message.status === "FAILED"
+                          ? "Failed — check Sent for details"
+                          : message.status === "UNCERTAIN"
+                            ? "Delivery unconfirmed — check before sending again"
+                            : message.status === "SUPPRESSED"
+                              ? "Not sent — recipient blocked"
+                              : message.status === "CANCELLED"
+                                ? "Cancelled"
+                                : "Sending…"}
+                    </Badge>
+                  </div>
+                  <p className="mb-2 text-meta text-text-secondary">
+                    To: {message.toEmail} ·{" "}
+                    {formatFullDate(message.sentAt ?? message.createdAt)}
+                  </p>
+                  {message.html ? (
+                    <InboundHtmlFrame
+                      html={message.html}
+                      showRemoteContent
+                      title="Your reply"
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{message.text}</p>
+                  )}
+                  {(message.attachments ?? [])
+                    .filter((file) => !file.isInline)
+                    .map((file) => (
+                      <Button
+                        key={file.id}
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        disabled={openingId === file.id}
+                        onClick={() =>
+                          void openAttachment(message.id, file, true)
+                        }
+                      >
+                        <Paperclip />
+                        {file.filename} · {formatBytes(file.size)}
+                      </Button>
+                    ))}
+                </article>
+              );
+            }
+            const message = entry.message;
+            return (
+              <article
+                key={message.id}
+                className="rounded-card border border-border bg-surface p-4 shadow-card"
+              >
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Avatar name={senderName(message)} size="sm" />
+                    <div className="min-w-0">
+                      <div className="truncate text-ui font-semibold text-text">
+                        {senderLabel(message)}
+                      </div>
+                      <div
+                        className="text-meta text-text-tertiary"
+                        data-numeric
+                      >
+                        {formatFullDate(message.receivedAt)}
+                      </div>
+                    </div>
+                  </div>
                   <IconButton
-                    label="Mark as unread"
-                    onClick={() => {
-                      markRead.mutate({
-                        id: selectedThread.latestMessage.id,
-                        read: false,
-                      });
-                      // Back to the list, the way every mail client does it —
-                      // otherwise the conversation you just marked unread is
-                      // still open, and closing it later would mark it read.
-                      setOpenedThread(null);
-                    }}
-                  >
-                    <Mail />
-                  </IconButton>
-                  <IconButton
-                    label="Reply"
-                    onClick={() => setReplyTarget(selectedThread.latestMessage)}
+                    label={`Reply to this message from ${senderName(message)}`}
+                    onClick={() => setReplyTarget(message)}
                   >
                     <Reply />
                   </IconButton>
-                </div>
-              </div>
-
-              <div className="mt-2 min-w-0">
-                <h2 className="text-title font-semibold text-text">
-                  {selectedThread.subject}
-                </h2>
-                <p className="mt-1 truncate text-ui text-text-secondary">
-                  {selectedThread.senderName} · {selectedThread.senderEmail}
-                </p>
-              </div>
-            </div>
-          </header>
-
-          <div className="mx-auto w-full max-w-page space-y-4 px-4 py-4 sm:px-6 sm:py-6">
-            {conversationQuery.isError ? (
-              <div
-                role="alert"
-                className="rounded-card border border-err p-4 text-ui"
-              >
-                Couldn't load the complete conversation.{" "}
-                <Button
-                  variant="secondary"
-                  onClick={() => void conversationQuery.refetch()}
-                >
-                  Try again
-                </Button>
-              </div>
-            ) : null}
-            {[
-              ...selectedThread.messages.map((message) => ({
-                kind: "incoming" as const,
-                message,
-                date: message.receivedAt,
-              })),
-              ...(conversationQuery.data?.outgoing ?? []).map((message) => ({
-                kind: "outgoing" as const,
-                message,
-                date: message.sentAt ?? message.createdAt,
-              })),
-            ]
-              .sort(
-                (a, b) =>
-                  new Date(a.date).getTime() - new Date(b.date).getTime()
-              )
-              .map((entry) => {
-                if (entry.kind === "outgoing") {
-                  const message = entry.message;
-                  return (
-                    <article
-                      key={message.id}
-                      className="rounded-card border border-border bg-surface p-4 shadow-card"
+                  {message.emailJob ? (
+                    <Hint
+                      label={`This is a reply to the email "${message.emailJob.subject}" that you sent`}
                     >
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-ui font-medium">
-                          {message.sentByName} ·{" "}
-                          {message.smtpConnection?.fromEmail ?? "Your team"}
-                        </p>
-                        <Badge
-                          variant={
-                            message.status === "FAILED" ? "warn" : "outline"
-                          }
-                        >
-                          {message.status === "SENT"
-                            ? "Sent"
-                            : message.status === "FAILED"
-                              ? "Failed — check Sent for details"
-                              : message.status === "SUPPRESSED"
-                                ? "Not sent — recipient blocked"
-                                : message.status === "CANCELLED"
-                                  ? "Cancelled"
-                                  : "Sending…"}
-                        </Badge>
-                      </div>
-                      <p className="mb-2 text-meta text-text-secondary">
-                        To: {message.toEmail} ·{" "}
-                        {formatFullDate(message.sentAt ?? message.createdAt)}
-                      </p>
-                      {message.html ? (
-                        <InboundHtmlFrame
-                          html={message.html}
-                          showRemoteContent
-                          title="Your reply"
-                        />
-                      ) : (
-                        <p className="whitespace-pre-wrap">{message.text}</p>
-                      )}
-                      {(message.attachments ?? [])
-                        .filter((file) => !file.isInline)
-                        .map((file) => (
-                          <Button
-                            key={file.id}
-                            variant="outline"
-                            size="sm"
-                            className="mt-3"
-                            disabled={openingId === file.id}
-                            onClick={() =>
-                              void openAttachment(message.id, file, true)
-                            }
-                          >
-                            <Paperclip />
-                            {file.filename} · {formatBytes(file.size)}
-                          </Button>
-                        ))}
-                    </article>
-                  );
-                }
-                const message = entry.message;
-                return (
-                  <article
-                    key={message.id}
-                    className="rounded-card border border-border bg-surface p-4 shadow-card"
-                  >
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <Avatar name={senderName(message)} size="sm" />
-                        <div className="min-w-0">
-                          <div className="truncate text-ui font-semibold text-text">
-                            {senderLabel(message)}
-                          </div>
-                          <div
-                            className="text-meta text-text-tertiary"
-                            data-numeric
-                          >
-                            {formatFullDate(message.receivedAt)}
-                          </div>
-                        </div>
-                      </div>
-                      <IconButton
-                        label={`Reply to this message from ${senderName(message)}`}
-                        onClick={() => setReplyTarget(message)}
-                      >
-                        <Reply />
-                      </IconButton>
-                      {message.emailJob ? (
-                        <Hint
-                          label={`This is a reply to the email "${message.emailJob.subject}" that you sent`}
-                        >
-                          <Badge variant="outline" className="cursor-help">
-                            Reply to your email
-                          </Badge>
-                        </Hint>
-                      ) : null}
-                      {message.dsnAttribution === "UNATTRIBUTED" ? (
-                        <Hint label="This delivery failure does not match an email sent through QQueue, so it is excluded from bounce analytics.">
-                          <Badge variant="warn" className="cursor-help">
-                            Unattributed bounce
-                          </Badge>
-                        </Hint>
-                      ) : null}
-                    </div>
+                      <Badge variant="outline" className="cursor-help">
+                        Reply to your email
+                      </Badge>
+                    </Hint>
+                  ) : null}
+                  {message.dsnAttribution === "UNATTRIBUTED" ? (
+                    <Hint label="This delivery failure does not match an email sent through QQueue, so it is excluded from bounce analytics.">
+                      <Badge variant="warn" className="cursor-help">
+                        Unattributed bounce
+                      </Badge>
+                    </Hint>
+                  ) : null}
+                </div>
 
-                    <details className="mb-3 text-meta text-text-secondary">
-                      <summary className="cursor-pointer">
-                        Message details
-                      </summary>
-                      <p>To: {message.to.join(", ")}</p>
-                      {message.cc.length ? (
-                        <p>Cc: {message.cc.join(", ")}</p>
-                      ) : null}
-                      {message.replyTo?.length ? (
-                        <p>Reply to: {message.replyTo.join(", ")}</p>
-                      ) : null}
-                      <p>
-                        Mailbox:{" "}
-                        {
-                          accounts.find(
-                            (account) => account.id === message.inboxAccountId
-                          )?.email
-                        }
-                      </p>
-                    </details>
-                    {/*
+                <details className="mb-3 text-meta text-text-secondary">
+                  <summary className="cursor-pointer">Message details</summary>
+                  {message.readPending ? (
+                    <p
+                      role="status"
+                      className={
+                        message.readSyncError
+                          ? "text-err"
+                          : "text-text-secondary"
+                      }
+                    >
+                      {message.readSyncError ??
+                        "Read state saved for your team; waiting to sync with the mail server."}
+                    </p>
+                  ) : null}
+                  <p>To: {message.to.join(", ")}</p>
+                  {message.cc.length ? (
+                    <p>Cc: {message.cc.join(", ")}</p>
+                  ) : null}
+                  {message.replyTo?.length ? (
+                    <p>Reply to: {message.replyTo.join(", ")}</p>
+                  ) : null}
+                  <p>
+                    Mailbox:{" "}
+                    {
+                      accounts.find(
+                        (account) => account.id === message.inboxAccountId
+                      )?.email
+                    }
+                  </p>
+                </details>
+                {/*
                   Prefer the HTML part — formatted mail (tables especially)
                   reads badly as the flattened text/plain alternative.
                 */}
-                    {message.html ? (
-                      <InboundHtmlFrame
-                        html={message.html}
-                        /*
+                {message.html ? (
+                  <InboundHtmlFrame
+                    html={message.html}
+                    /*
                       Remote images load without an opt-in. Most mail is
                       image-heavy and a blocked-image prompt on every message
                       made the inbox unreadable; the tradeoff is that opening
@@ -792,121 +826,122 @@ function InboxWorkspace() {
                       still refuses scripts, frames and network fetches — only
                       img-src is widened.
                     */
-                        showRemoteContent
-                        inlineImages={inlineImages[message.id]}
-                        title={`Message from ${senderLabel(message)}`}
-                      />
-                    ) : (
-                      <div className="whitespace-pre-wrap text-body leading-6 text-text">
-                        {message.text || "This message has no body."}
-                      </div>
-                    )}
+                    showRemoteContent
+                    inlineImages={inlineImages[message.id]}
+                    title={`Message from ${senderLabel(message)}`}
+                  />
+                ) : (
+                  <div className="whitespace-pre-wrap text-body leading-6 text-text">
+                    {message.text || "This message has no body."}
+                  </div>
+                )}
 
-                    {/*
+                {/*
                   Attached parts. Inline parts (cid: images the sender meant
                   to render in the body) are filtered out so a signature logo
                   doesn't look like an attachment.
                 */}
-                    {(message.attachments ?? []).filter(
-                      (file) => !file.isInline
-                    ).length > 0 ? (
-                      <div className="mt-4 border-t border-border pt-3">
-                        <div className="mb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
-                          Attachments
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {(message.attachments ?? [])
-                            .filter((file) => !file.isInline)
-                            .map((file) => (
-                              <Hint
-                                key={file.id}
-                                label={`${
-                                  attachmentPreviewKind(file.contentType)
-                                    ? "Open"
-                                    : "Download"
-                                } ${file.filename} (${formatBytes(file.size)})`}
+                {(message.attachments ?? []).filter((file) => !file.isInline)
+                  .length > 0 ? (
+                  <div className="mt-4 border-t border-border pt-3">
+                    <div className="mb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
+                      Attachments
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(message.attachments ?? [])
+                        .filter((file) => !file.isInline)
+                        .map((file) => (
+                          <Hint
+                            key={file.id}
+                            label={`${
+                              attachmentPreviewKind(file.contentType)
+                                ? "Open"
+                                : "Download"
+                            } ${file.filename} (${formatBytes(file.size)})`}
+                          >
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={openingId === file.id}
+                              onClick={() =>
+                                void openAttachment(message.id, file)
+                              }
+                              className="h-auto gap-2 py-field"
+                            >
+                              {openingId === file.id ? (
+                                <Spinner className="h-3.5 w-3.5" />
+                              ) : (
+                                <Paperclip className="h-3.5 w-3.5" />
+                              )}
+                              <span className="max-w-cell truncate">
+                                {file.filename}
+                              </span>
+                              <span
+                                className="text-meta text-text-tertiary"
+                                data-numeric
                               >
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={openingId === file.id}
-                                  onClick={() =>
-                                    void openAttachment(message.id, file)
-                                  }
-                                  className="h-auto gap-2 py-field"
-                                >
-                                  {openingId === file.id ? (
-                                    <Spinner className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <Paperclip className="h-3.5 w-3.5" />
-                                  )}
-                                  <span className="max-w-cell truncate">
-                                    {file.filename}
-                                  </span>
-                                  <span
-                                    className="text-meta text-text-tertiary"
-                                    data-numeric
-                                  >
-                                    {formatBytes(file.size)}
-                                  </span>
-                                </Button>
-                              </Hint>
-                            ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
+                                {formatBytes(file.size)}
+                              </span>
+                            </Button>
+                          </Hint>
+                        ))}
+                    </div>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
 
-            <Button
-              variant="secondary"
-              onClick={() => setReplyTarget(selectedThread.latestMessage)}
-            >
-              <Reply /> Write a reply
-            </Button>
+        <Button
+          variant="secondary"
+          onClick={() => setReplyTarget(selectedThread.latestMessage)}
+        >
+          <Reply /> Write a reply
+        </Button>
+      </div>
+    </>
+  ) : (
+    <div className="hidden min-h-96 items-center justify-center p-8 text-text-secondary lg:flex">
+      Select a conversation to read it.
+    </div>
+  );
+  const mailList = (
+    <>
+      <header className="sticky top-sticky-top z-10 border-b border-border bg-surface">
+        <div className="mx-auto w-full max-w-page px-4 pb-3 pt-4 sm:px-6">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h1 className="text-section font-semibold text-text">Inbox</h1>
+              <p className="text-meta text-text-tertiary" data-numeric>
+                {unreadCount > 0
+                  ? `${unreadCount} unread of ${filteredMessages.length}`
+                  : `${filteredMessages.length} message${filteredMessages.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <IconButton
+                label="Check for new mail"
+                onClick={() => sync.mutate()}
+                disabled={sync.isPending}
+              >
+                <RefreshCw
+                  className={cn(messagesQuery.isFetching && "animate-spin")}
+                />
+              </IconButton>
+              {canManageMailboxes ? (
+                <IconButton
+                  label="Connect a mailbox"
+                  onClick={() => setConnectOpen(true)}
+                  disabled={!organizationId}
+                >
+                  <MailPlus />
+                </IconButton>
+              ) : null}
+            </div>
           </div>
-        </>
-      ) : (
-        /* -------------------------------------------------------------- list */
-        <>
-          <header className="sticky top-sticky-top z-10 border-b border-border bg-surface">
-            <div className="mx-auto w-full max-w-page px-4 pb-3 pt-4 sm:px-6">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <h1 className="text-section font-semibold text-text">
-                    Inbox
-                  </h1>
-                  <p className="text-meta text-text-tertiary" data-numeric>
-                    {unreadCount > 0
-                      ? `${unreadCount} unread of ${filteredMessages.length}`
-                      : `${filteredMessages.length} message${filteredMessages.length === 1 ? "" : "s"}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <IconButton
-                    label="Check for new mail"
-                    onClick={() => sync.mutate()}
-                    disabled={sync.isPending}
-                  >
-                    <RefreshCw
-                      className={cn(messagesQuery.isFetching && "animate-spin")}
-                    />
-                  </IconButton>
-                  {canManageMailboxes ? (
-                    <IconButton
-                      label="Connect a mailbox"
-                      onClick={() => setConnectOpen(true)}
-                      disabled={!organizationId}
-                    >
-                      <MailPlus />
-                    </IconButton>
-                  ) : null}
-                </div>
-              </div>
 
-              {/*
+          {/*
                 Search, filters and the mailbox status share one wrapping row
                 now that the list owns the full width. In the old 22rem rail
                 they had to stack: a segmented control beside a mailbox picker
@@ -914,261 +949,283 @@ function InboxWorkspace() {
                 their own lines on a phone, where the search box goes full
                 width and the rest follows underneath.
               */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <form
-                  className="w-full sm:w-auto"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setSubmittedSearch(search.trim());
-                  }}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <form
+              className="w-full sm:w-auto"
+              onSubmit={(event) => {
+                event.preventDefault();
+                setSubmittedSearch(search.trim());
+              }}
+            >
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onBlur={() => setSubmittedSearch(search.trim())}
+                identifier
+                placeholder="Search mail"
+                aria-label="Search mail"
+                type="search"
+                width="search"
+              />
+            </form>
+
+            <div className="flex rounded-control border border-border bg-surface-sunken p-1">
+              {(["all", "unread", "read"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setReadFilter(value)}
+                  aria-pressed={readFilter === value}
+                  className={cn(
+                    "min-h-touch rounded-control px-3 text-ui font-medium capitalize transition-colors duration-fast ease-out sm:min-h-0 sm:py-field",
+                    readFilter === value
+                      ? "bg-surface text-text shadow-card"
+                      : "text-text-secondary hover:text-text"
+                  )}
                 >
-                  <Input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    onBlur={() => setSubmittedSearch(search.trim())}
-                    identifier
-                    placeholder="Search mail"
-                    aria-label="Search mail"
-                    type="search"
-                    width="search"
-                  />
-                </form>
-
-                <div className="flex rounded-control border border-border bg-surface-sunken p-1">
-                  {(["all", "unread", "read"] as const).map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setReadFilter(value)}
-                      aria-pressed={readFilter === value}
-                      className={cn(
-                        "min-h-touch rounded-control px-3 text-ui font-medium capitalize transition-colors duration-fast ease-out sm:min-h-0 sm:py-field",
-                        readFilter === value
-                          ? "bg-surface text-text shadow-card"
-                          : "text-text-secondary hover:text-text"
-                      )}
-                    >
-                      {value}
-                    </button>
-                  ))}
-                </div>
-
-                {accounts.length > 1 ? (
-                  <Select
-                    value={accountFilter}
-                    onValueChange={setAccountFilter}
-                  >
-                    <SelectTrigger
-                      aria-label="Filter by mailbox"
-                      className="w-field-choice"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All mailboxes</SelectItem>
-                      {accounts.map((account) => (
-                        <SelectItem key={account.id} value={account.id}>
-                          {account.email}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : null}
-
-                {selectedAccount ? (
-                  <div className="flex min-w-0 items-center gap-2 text-meta text-text-tertiary sm:ml-auto">
-                    <Badge variant="outline" className="text-meta">
-                      {selectedAccount.status === "DISABLED"
-                        ? "Disconnected"
-                        : selectedAccount.lastSyncError
-                          ? "Needs attention"
-                          : "Connected"}
-                    </Badge>
-                    {selectedAccount.lastSyncError ? (
-                      <span role="alert" className="text-err">
-                        {selectedAccount.lastSyncError}
-                      </span>
-                    ) : null}
-                    <span className="truncate">
-                      Last checked{" "}
-                      {formatFullDate(selectedAccount.lastSyncedAt)}
-                    </span>
-                    {canManageMailboxes ? (
-                      <IconButton
-                        label={`Disconnect ${selectedAccount.email}`}
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => setDisconnectTarget(selectedAccount.id)}
-                      >
-                        <Trash2 />
-                      </IconButton>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
+                  {value}
+                </button>
+              ))}
             </div>
-          </header>
 
-          <div className="mx-auto w-full max-w-page">
-            {accountsQuery.isError || messagesQuery.isError ? (
-              <EmptyState
-                title="Couldn't load your mail"
-                description="Your mailbox may still contain messages. Try loading it again."
-                action={
-                  <Button
-                    onClick={() => {
-                      void accountsQuery.refetch();
-                      void messagesQuery.refetch();
-                    }}
-                  >
-                    Try again
-                  </Button>
-                }
-              />
-            ) : loading ? (
-              <div className="flex h-40 items-center justify-center">
-                <Spinner />
-              </div>
-            ) : accounts.length === 0 ? (
-              <EmptyState
-                icon={MailPlus}
-                title={
-                  canManageMailboxes
-                    ? "No mailbox connected"
-                    : "No mailbox assigned yet"
-                }
-                description={
-                  canManageMailboxes
-                    ? "Connect a mailbox to receive mail here."
-                    : "Ask an administrator to assign you a mailbox."
-                }
-                action={
-                  canManageMailboxes ? (
-                    <Button
-                      variant="secondary"
-                      onClick={() => setConnectOpen(true)}
-                    >
-                      <MailPlus className="h-4 w-4" />
-                      Connect a mailbox
-                    </Button>
-                  ) : undefined
-                }
-              />
-            ) : threads.length === 0 ? (
-              <EmptyState
-                icon={InboxIcon}
-                title={
-                  submittedSearch
-                    ? "Nothing matched"
-                    : readFilter === "unread"
-                      ? "You’re all caught up"
-                      : "No conversations yet"
-                }
-                description={
-                  submittedSearch
-                    ? "Try a different search, or clear it to see everything."
-                    : "New mail will appear here after your mailbox is checked."
-                }
-              />
-            ) : (
-              <DataGrid
-                label="Inbox conversations"
-                stickyHeader={false}
-                data={threads}
-                getRowId={(thread) => thread.threadKey}
-                columns={[
-                  {
-                    id: "conversation",
-                    header: "Conversation",
-                    enableSorting: false,
-                    cell: ({ row }) => renderThread(row.original),
-                  },
-                  {
-                    id: "actions",
-                    header: "",
-                    enableSorting: false,
-                    meta: { pinned: true },
-                    cell: ({ row }) => (
-                      <RowActions
-                        rowLabel={row.original.subject}
-                        actions={[
-                          {
-                            label: row.original.unreadCount
-                              ? "Mark as read"
-                              : "Mark as unread",
-                            icon: Mail,
-                            primary: true,
-                            onSelect: () =>
-                              markMany.mutate({
-                                ids: row.original.messages.map(
-                                  (message) => message.id
-                                ),
-                                read: row.original.unreadCount > 0,
-                              }),
-                          },
-                        ]}
-                      />
-                    ),
-                  },
-                ]}
-                searchable={false}
-                enableSelection
-                paginated={false}
-                renderMobileRow={renderThread}
-                bulkActions={(rows, clear) => (
-                  <>
-                    <Button
-                      variant="secondary"
-                      disabled={markMany.isPending}
-                      onClick={() =>
-                        markMany.mutate(
-                          {
-                            ids: rows.flatMap((thread) =>
-                              thread.messages.map((message) => message.id)
-                            ),
-                            read: true,
-                          },
-                          { onSuccess: clear }
-                        )
-                      }
-                    >
-                      Mark selected as read
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={markMany.isPending}
-                      onClick={() =>
-                        markMany.mutate(
-                          {
-                            ids: rows.flatMap((thread) =>
-                              thread.messages.map((message) => message.id)
-                            ),
-                            read: false,
-                          },
-                          { onSuccess: clear }
-                        )
-                      }
-                    >
-                      Mark selected as unread
-                    </Button>
-                  </>
-                )}
-              />
-            )}
-            {messagesQuery.hasNextPage ? (
-              <div className="p-4 text-center">
-                <Button
-                  variant="secondary"
-                  disabled={messagesQuery.isFetchingNextPage}
-                  onClick={() => void messagesQuery.fetchNextPage()}
+            {accounts.length > 1 ? (
+              <Select value={accountFilter} onValueChange={setAccountFilter}>
+                <SelectTrigger
+                  aria-label="Filter by mailbox"
+                  className="w-field-choice"
                 >
-                  {messagesQuery.isFetchingNextPage ? <Spinner /> : null} Load
-                  older mail
-                </Button>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All mailboxes</SelectItem>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+
+            {selectedAccount ? (
+              <div className="flex min-w-0 items-center gap-2 text-meta text-text-tertiary sm:ml-auto">
+                <Badge variant="outline" className="text-meta">
+                  {selectedAccount.status === "DISABLED"
+                    ? "Disconnected"
+                    : selectedAccount.lastSyncError
+                      ? "Needs attention"
+                      : "Connected"}
+                </Badge>
+                {selectedAccount.lastSyncError ? (
+                  <span role="alert" className="text-err">
+                    {selectedAccount.lastSyncError}
+                  </span>
+                ) : null}
+                <span className="truncate">
+                  Last checked {formatFullDate(selectedAccount.lastSyncedAt)}
+                </span>
+                {canManageMailboxes ? (
+                  <IconButton
+                    label={`Disconnect ${selectedAccount.email}`}
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => setDisconnectTarget(selectedAccount.id)}
+                  >
+                    <Trash2 />
+                  </IconButton>
+                ) : null}
               </div>
             ) : null}
           </div>
-        </>
+        </div>
+      </header>
+
+      <div className="mx-auto w-full max-w-page">
+        {accountsQuery.isError || messagesQuery.isError ? (
+          <EmptyState
+            title="Couldn't load your mail"
+            description="Your mailbox may still contain messages. Try loading it again."
+            action={
+              <Button
+                onClick={() => {
+                  void accountsQuery.refetch();
+                  void messagesQuery.refetch();
+                }}
+              >
+                Try again
+              </Button>
+            }
+          />
+        ) : loading ? (
+          <div className="flex h-40 items-center justify-center">
+            <Spinner />
+          </div>
+        ) : accounts.length === 0 ? (
+          <EmptyState
+            icon={MailPlus}
+            title={
+              canManageMailboxes
+                ? "No mailbox connected"
+                : "No mailbox assigned yet"
+            }
+            description={
+              canManageMailboxes
+                ? "Connect a mailbox to receive mail here."
+                : "Ask an administrator to assign you a mailbox."
+            }
+            action={
+              canManageMailboxes ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => setConnectOpen(true)}
+                >
+                  <MailPlus className="h-4 w-4" />
+                  Connect a mailbox
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : threads.length === 0 ? (
+          <EmptyState
+            icon={InboxIcon}
+            title={
+              submittedSearch
+                ? "Nothing matched"
+                : readFilter === "unread"
+                  ? "You’re all caught up"
+                  : "No conversations yet"
+            }
+            description={
+              submittedSearch
+                ? "Try a different search, or clear it to see everything."
+                : "New mail will appear here after your mailbox is checked."
+            }
+          />
+        ) : (
+          <DataGrid
+            label="Inbox conversations"
+            className="[&_table]:table-fixed [&_th:first-child]:w-12 [&_th:last-child]:w-12"
+            stickyHeader={false}
+            data={threads}
+            getRowId={(thread) => thread.threadKey}
+            columns={[
+              {
+                id: "conversation",
+                header: "Conversation",
+                enableSorting: false,
+                cell: ({ row }) => renderThread(row.original),
+              },
+              {
+                id: "actions",
+                header: "",
+                enableSorting: false,
+                meta: { pinned: true },
+                cell: ({ row }) => (
+                  <RowActions
+                    rowLabel={row.original.subject}
+                    actions={[
+                      {
+                        label: row.original.unreadCount
+                          ? "Mark as read"
+                          : "Mark as unread",
+                        icon: Mail,
+                        primary: true,
+                        onSelect: () =>
+                          markMany.mutate({
+                            ids: row.original.messages.map(
+                              (message) => message.id
+                            ),
+                            read: row.original.unreadCount > 0,
+                          }),
+                      },
+                    ]}
+                  />
+                ),
+              },
+            ]}
+            searchable={false}
+            enableSelection
+            paginated={false}
+            renderMobileRow={renderThread}
+            bulkActions={(rows, clear) => (
+              <>
+                <Button
+                  variant="secondary"
+                  disabled={markMany.isPending}
+                  onClick={() =>
+                    markMany.mutate(
+                      {
+                        ids: rows.flatMap((thread) =>
+                          thread.messages.map((message) => message.id)
+                        ),
+                        read: true,
+                      },
+                      { onSuccess: clear }
+                    )
+                  }
+                >
+                  Mark selected as read
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={markMany.isPending}
+                  onClick={() =>
+                    markMany.mutate(
+                      {
+                        ids: rows.flatMap((thread) =>
+                          thread.messages.map((message) => message.id)
+                        ),
+                        read: false,
+                      },
+                      { onSuccess: clear }
+                    )
+                  }
+                >
+                  Mark selected as unread
+                </Button>
+              </>
+            )}
+          />
+        )}
+        {messagesQuery.hasNextPage ? (
+          <div className="p-4 text-center">
+            <Button
+              variant="secondary"
+              disabled={messagesQuery.isFetchingNextPage}
+              onClick={() => void messagesQuery.fetchNextPage()}
+            >
+              {messagesQuery.isFetchingNextPage ? <Spinner /> : null} Load older
+              mail
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+  return (
+    <div className="min-h-0">
+      {readingPane ? (
+        <div className="grid h-dvh grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]">
+          {/* scroll-exception: the approved desktop mail list scrolls independently of the adjacent reader. */}
+          <div
+            ref={listScroll}
+            className="min-h-0 min-w-0 overflow-y-auto border-r border-border"
+            aria-label="Conversation list"
+          >
+            {mailList}
+          </div>
+          {/* scroll-exception: the approved desktop reading pane keeps a long conversation beside the mail list. */}
+          <section
+            className="min-h-0 min-w-0 overflow-y-auto"
+            aria-label="Reading pane"
+          >
+            {reader}
+          </section>
+        </div>
+      ) : selectedThread ? (
+        reader
+      ) : (
+        mailList
       )}
 
       {replyTarget && organizationId ? (

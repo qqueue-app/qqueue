@@ -44,7 +44,14 @@ export type PendingDraftPayload = {
   templateId?: string;
 };
 
+export interface PendingUpload {
+  file: File;
+  uploadId: string;
+  error: string;
+}
+
 export interface PendingDraft {
+  pendingUploads?: PendingUpload[];
   userId: string;
   /**
    * Stable across the life of one composed message, and generated on the
@@ -55,6 +62,8 @@ export interface PendingDraft {
   organizationId: string;
   /** The server draft this updates, or null if the server hasn't seen it. */
   draftId: string | null;
+  revision?: number;
+  mutationId?: string;
   payload: PendingDraftPayload;
   /** When the composer last touched it. Not a server conflict token. */
   updatedAt: string;
@@ -149,7 +158,8 @@ export async function listPendingDrafts(
  */
 export async function acknowledgePendingDraft(
   snapshot: PendingDraft,
-  serverId: string
+  serverId: string,
+  revision?: number
 ): Promise<void> {
   try {
     const db = await openDatabase();
@@ -165,10 +175,20 @@ export async function acknowledgePendingDraft(
           current.organizationId !== snapshot.organizationId
         )
           return;
-        if (JSON.stringify(current) === JSON.stringify(snapshot)) {
+        if (
+          !current.pendingUploads?.length &&
+          JSON.stringify(current) === JSON.stringify(snapshot)
+        ) {
           store.delete(snapshot.localId);
-        } else if (!current.draftId) {
-          store.put({ ...current, draftId: serverId });
+        } else if (current.draftId === snapshot.draftId) {
+          store.put({
+            ...current,
+            draftId: serverId,
+            revision:
+              current.revision === undefined && revision === undefined
+                ? undefined
+                : Math.max(current.revision ?? 1, revision ?? 1),
+          });
         }
       };
       tx.oncomplete = () => {
@@ -221,12 +241,17 @@ async function flushDrafts(
     if (getSession().user?.id !== record.userId) break;
     try {
       const draft = record.draftId
-        ? await api.updateEmailDraft(record.draftId, record.payload)
+        ? await api.updateEmailDraft(record.draftId, {
+            ...record.payload,
+            expectedRevision: record.revision ?? 1,
+            mutationId: record.mutationId ?? record.updatedAt,
+          })
         : await api.createEmailDraft({
+            clientId: record.localId,
             organizationId: record.organizationId,
             ...record.payload,
           });
-      await acknowledgePendingDraft(record, draft.id);
+      await acknowledgePendingDraft(record, draft.id, draft.revision);
       synced.push({ localId: record.localId, draft });
     } catch (error) {
       if (

@@ -20,12 +20,15 @@ Reply-To resolution, retry deduplication, actual sync requests, history-preservi
 disconnect/reconnect, team sign-in reset links, and simpler daily navigation.
 Sensitive system mail and ancillary sending APIs now have tighter access scopes.
 
-This does **not** complete primary-client readiness. Full IMAP state/folder sync,
-older-history backfill, remaining group-delivery edge cases, forwarding,
-attachment recovery, and live mailbox/browser acceptance remain. A follow-up
-batch preserves visible group headers and message identity, guards completed
-send replays, and retains newer or rejected device draft backups. The organization
-selected shared read state per mailbox; IMAP writeback is still pending. See
+This does **not** complete primary-client readiness. The next batch implements
+independent To/Cc/Bcc delivery, recipient outcomes, explicit uncertain SMTP
+outcomes, atomic draft completion and send acceptance, server draft revisions,
+upload retry identities, and shared IMAP read-state writeback/reconciliation.
+Desktop Inbox now has a fixed 200px navigation sidebar, a compact independently
+scrolling conversation list, and an adjacent reader; Focused mail remains an
+account/device preference and phones retain the single-screen flow. Full folder
+sync, older-history backfill, forwarding, signatures, and broader attachment,
+team and device acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer
 to the earlier email-operations scope.
@@ -100,7 +103,7 @@ learning a new vocabulary. What changed:
   `ALL` / `ADDRESSED_TO_ME` / `NONE`).
   Mailboxes are listed **grouped by domain, collapsed**, with a tri-state tick
   per domain and a tick per mailbox underneath. `InboxNotifyRule` is an
-  *exception list*: no rows means every mailbox you can read notifies you, so
+  _exception list_: no rows means every mailbox you can read notifies you, so
   being granted a mailbox never means quietly missing its mail. Rules resolve
   most-specific-first (MAILBOX → DOMAIN → on) and are only written where they
   disagree with the level above, so re-ticking something deletes its row rather
@@ -127,7 +130,7 @@ learning a new vocabulary. What changed:
 - **Mailboxes rebuilt** around two questions — what mailboxes exist and who can
   send as them — with the access question answered by a people × mailboxes
   permission grid (`PermissionMatrix`) instead of a per-mailbox grant form.
-  Which *domains* an org may build on is decided under `/settings/instance`,
+  Which _domains_ an org may build on is decided under `/settings/instance`,
   since a Mailcow domain is instance-global.
 - **Server state moved to TanStack Query** (`lib/query-client.ts`,
   `lib/use-api.ts`). Query keys carry the organization id, so switching orgs
@@ -145,9 +148,9 @@ or connects mailboxes, invites people, and grants each person access to the
 mailboxes they may read and send from. Members then manage their mail in the
 QQueue app without needing the mail server's administration UI.
 
-The foundation already exists: mailbox provisioning and access grants, IMAP
-inbox sync, a responsive installable PWA, new-mail push notifications, compose,
-reply, drafts, and the shared send pipeline. The current inbox is still a
+At the start of this phase, the foundation already existed: mailbox provisioning
+and access grants, IMAP inbox sync, a responsive installable PWA, new-mail push notifications, compose,
+reply, drafts, and the shared send pipeline. The initial inbox was a
 read-only IMAP import: marking a message read changes QQueue's database, not
 the mail server; only one configured folder (normally INBOX) is synced; the
 initial import takes at most `INBOX_SYNC_MAX_MESSAGES`; and the web inbox
@@ -171,11 +174,11 @@ historical and is superseded by this direction.
 QQueue is positioned as an **email operations platform** (not a Gmail/Outlook/
 Zoho clone) built around four capabilities that share one delivery pipeline:
 
-1. **Campaign emails** — bulk marketing/communication. *Implemented.*
+1. **Campaign emails** — bulk marketing/communication. _Implemented._
 2. **Transactional emails** — API/SDK/SMTP application-triggered sends.
-   *Implemented.*
+   _Implemented._
 3. **Manual email sending** — a user-facing composer for individual/small-batch
-   sends. *Implemented as **Email Studio*** (`apps/web/src/pages/EmailStudio.tsx`):
+   sends. \*Implemented as **Email Studio\*** (`apps/web/src/pages/EmailStudio.tsx`):
    multiple `To` recipients, always-visible `CC`/`BCC` with autocomplete over
    contacts and previously-mailed addresses, contact and contact-list pickers,
    template apply, a Tiptap editor with a **raw HTML source view**, MJML-backed
@@ -188,8 +191,8 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    saying "default". Sends run through the shared pipeline with
    `origin = MANUAL`.
 4. **Inbox module** — IMAP reply sync, conversation view, and reply-from-QQueue.
-   *Implemented as a focused email-operations workflow, not a full mailbox or
-   ticketing product.*
+   _Implemented as a focused email-operations workflow, not a full mailbox or
+   ticketing product._
 5. **Outbox** (`apps/web/src/pages/Outbox.tsx`, `outbox` API module) — every
    `EmailJob` still `PENDING`/`QUEUED`/`PROCESSING` for the org, whatever its
    origin, with the sending account it will use and a cancel action for anything
@@ -337,7 +340,7 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] ESLint and Prettier configuration.
 - [x] Local Docker Compose for PostgreSQL and Redis.
 - [x] Root scripts for dev, build, lint, typecheck, test, coverage, Prisma,
-  license audit, cloud boundary checks, and Docker smoke test.
+      license audit, cloud boundary checks, and Docker smoke test.
 - [x] `.env.example` with local and production-oriented settings.
 
 ### Licensing and Legal
@@ -351,12 +354,12 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Signed-off-by/CLA guardrail workflow for pull requests.
 - [~] Legal posture documented but marked as needing qualified legal review.
 - [ ] Lawyer review for commercial license, CLA, Terms, Privacy Policy, and
-  dependency license output.
+      dependency license output.
 
 ### Core Platform
 
 - [x] Express app setup with CORS, JSON body parsing, request logging, health
-  route, v1 router, and error handling.
+      route, v1 router, and error handling.
 - [x] Module structure with route/controller/service separation.
 - [x] Prisma client integration.
 - [x] PostgreSQL schema and migrations.
@@ -372,7 +375,7 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Auth middleware protects dashboard routes.
 - [x] Password reset flow (request, token, confirm).
 - [x] Password reset email delivery (sent via the organization's SMTP
-  connection).
+      connection).
 - [x] Password reset token invalidation.
 - [~] Still lacks email verification, MFA, and session/device management.
 
@@ -404,7 +407,7 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Beta checklist (`docs/BETA_CHECKLIST.md`).
 - [x] Demo script (`docs/DEMO_SCRIPT.md`).
 - [x] Architecture, roadmap, deployment, decisions, cloud boundary,
-  transactional API, licensing, dependency license, contributing, and SDK docs.
+      transactional API, licensing, dependency license, contributing, and SDK docs.
 
 ### Organizations
 
@@ -412,13 +415,13 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Organization CRUD routes/services exist.
 - [x] Access and role helpers exist.
 - [x] Invitations (`OrganizationInvite`): an OWNER/ADMIN invites by email and
-  role; the raw token exists only in the emailed accept link (sha256 hash
-  persisted, same shape as `PasswordResetToken`), valid 7 days, revocable.
-  Public `/accept-invite` page creates the account and membership in one step.
+      role; the raw token exists only in the emailed accept link (sha256 hash
+      persisted, same shape as `PasswordResetToken`), valid 7 days, revocable.
+      Public `/accept-invite` page creates the account and membership in one step.
 - [x] Invitations are the sanctioned exception to closed public registration —
-  an OWNER/ADMIN deliberately vouches for the invitee.
+      an OWNER/ADMIN deliberately vouches for the invitee.
 - [x] Member management (list, role change, remove) under
-  `/organizations/:id/members`, surfaced by the Settings `TeamCard`.
+      `/organizations/:id/members`, surfaced by the Settings `TeamCard`.
 
 ### SMTP Connections
 
@@ -431,217 +434,217 @@ operational and abuse-control gaps from the original audit have been closed.
 
 > **Removed:** Sending Domains, Sender Identities and managed DKIM were part of
 > the product until `bcb3475` and are gone from core. Every send now resolves
-> *who it sends as* from the SMTP connection — an explicit `smtpConnectionId`
+> _who it sends as_ from the SMTP connection — an explicit `smtpConnectionId`
 > on the request, else the org's default. Don't resurrect them without a fresh
 > decision.
 
 ### Mailbox Access (read)
 
 - [x] `InboxAccountGrant` + `apps/api/src/lib/mailbox-access.ts`: OWNER/ADMIN
-  read every mailbox in the org; a MEMBER reads only mailboxes they hold a
-  grant for. Before this, every member read every message in the organization.
+      read every mailbox in the org; a MEMBER reads only mailboxes they hold a
+      grant for. Before this, every member read every message in the organization.
 - [x] Scoped on every read surface, not just the list: inbox messages, the
-  mailbox picker, the unread badge, mark-read, inbound attachments (through the
-  parent message) and reply.
+      mailbox picker, the unread badge, mark-read, inbound attachments (through the
+      parent message) and reply.
 - [x] The **sent archive** and **outbox** are scoped the same way, by granted
-  `smtpConnectionId` — plus anything the person sent themselves, so revoking a
-  mailbox or deleting one never makes someone's own mail look lost. Cancelling
-  from the outbox is scoped like listing; any member could previously cancel
-  any queued job in the org.
+      `smtpConnectionId` — plus anything the person sent themselves, so revoking a
+      mailbox or deleting one never makes someone's own mail look lost. Cancelling
+      from the outbox is scoped like listing; any member could previously cancel
+      any queued job in the org.
 - [x] **Campaigns** are gated on the account each one sends as
-  (`Campaign.smtpConnectionId`, or the org default when it names none), so
-  visibility is per campaign rather than one gate over the whole list. Applies
-  to list (as a where clause, not a post-filter), get, create, the account a
-  draft is moved onto, and every operation through `findOwned`. Enforced once
-  when the campaign is started; the worker deliberately does not re-verify, or a
-  recurring campaign would break the moment its author's grants changed.
+      (`Campaign.smtpConnectionId`, or the org default when it names none), so
+      visibility is per campaign rather than one gate over the whole list. Applies
+      to list (as a where clause, not a post-filter), get, create, the account a
+      draft is moved onto, and every operation through `findOwned`. Enforced once
+      when the campaign is started; the worker deliberately does not re-verify, or a
+      recurring campaign would break the moment its author's grants changed.
 - [x] **Push notifications** carry sender and subject, so they answer to the
-  same rule — only grant holders and OWNER/ADMIN are notified. Otherwise a
-  banner would be a way to read a mailbox you were never given.
+      same rule — only grant holders and OWNER/ADMIN are notified. Otherwise a
+      banner would be a way to read a mailbox you were never given.
 - [x] One product-level toggle grants **read and send together**
-  (`SendAccessEditor`, and mailbox provisioning's "give someone access"). The
-  two tables stay separate because an `InboxAccount` and an `SMTPConnection`
-  are independent rows with no FK between them — a mailbox can be receive-only
-  or send-only. They are paired by address, case-insensitively.
+      (`SendAccessEditor`, and mailbox provisioning's "give someone access"). The
+      two tables stay separate because an `InboxAccount` and an `SMTPConnection`
+      are independent rows with no FK between them — a mailbox can be receive-only
+      or send-only. They are paired by address, case-insensitively.
 - [x] Migration `20260813000000_add_inbox_account_grants` backfills read access
-  from each member's existing send grants. Neither extreme works on upgrade:
-  "nobody reads anything" makes an admin re-tick every box, and "everyone keeps
-  reading everything" is the behaviour the change exists to end.
+      from each member's existing send grants. Neither extreme works on upgrade:
+      "nobody reads anything" makes an admin re-tick every box, and "everyone keeps
+      reading everything" is the behaviour the change exists to end.
 
 ### Send-As Grants
 
 - [x] `SmtpConnectionGrant` + `apps/api/src/lib/send-as.ts`: OWNER/ADMIN may
-  send from any org connection; a MEMBER only from ones they hold a grant for.
+      send from any org connection; a MEMBER only from ones they hold a grant for.
 - [x] Enforced once, at creation time, on every send surface (transactional,
-  manual, drafts, recurring sends, campaign start). Jobs are created after the
-  check, so the worker deliberately does not re-verify.
+      manual, drafts, recurring sends, campaign start). Jobs are created after the
+      check, so the worker deliberately does not re-verify.
 - [x] Sends with no acting user (API-key sends, SYSTEM mail) pass
-  `userId: null` and are not gated — an API key is an org-scoped credential.
+      `userId: null` and are not gated — an API key is an org-scoped credential.
 - [x] Migration `20260806210000_backfill_smtp_connection_grants` grants existing
-  MEMBERs the connections their org already had, so upgrading an instance does
-  not silently revoke their ability to send.
+      MEMBERs the connections their org already had, so upgrading an instance does
+      not silently revoke their ability to send.
 
 ### Mailcow Mailbox Provisioning
 
 - [x] `/mailboxes` page + `modules/mailcow`: one flow creates the Mailcow
-  mailbox, an app password held only by QQueue, the `SMTPConnection`, a
-  sync-enabled `InboxAccount`, and optionally a send-as grant.
+      mailbox, an app password held only by QQueue, the `SMTPConnection`, a
+      sync-enabled `InboxAccount`, and optionally a send-as grant.
 - [x] The `InboxAccount` is mandatory — it is what gives that identity DSN
-  bounce visibility.
+      bounce visibility.
 - [x] "Edit mailbox" (OWNER/ADMIN) sets the display name and an optional
-  default Reply-To. Both live on the `SMTPConnection`, so the editor also
-  covers EXTERNAL rows and keeps working while Mailcow is unreachable. Creating
-  or connecting a mailbox accepts the same Reply-To up front.
+      default Reply-To. Both live on the `SMTPConnection`, so the editor also
+      covers EXTERNAL rows and keeps working while Mailcow is unreachable. Creating
+      or connecting a mailbox accepts the same Reply-To up front.
 - [x] Post-provision SMTP verification retries briefly (Mailcow needs a moment
-  to activate a fresh app password); rollback is reserved for "we couldn't
-  record what we created", never "the handshake didn't work yet".
+      to activate a fresh app password); rollback is reserved for "we couldn't
+      record what we created", never "the handshake didn't work yet".
 - [x] `MailDomainGrant` scopes which domains an admin may provision on —
-  default deny, validated against Mailcow's active domains, stored lowercase.
-  Grant management is **instance-admin-only**.
+      default deny, validated against Mailcow's active domains, stored lowercase.
+      Grant management is **instance-admin-only**.
 - [x] `OrgMailDomain` records which orgs an instance administrator assigned each
-  server domain to. Mailcow domains are instance-global, so without it every
-  org OWNER could see and provision on every other org's domains. A domain with
-  no row reaches **no** org — it is not a pool orgs may claim from, because
-  "org OWNER" is still a role a user can award themselves: registration creates
-  an organization with the registrant as its OWNER, and `POST /organizations`
-  lets any owner or admin create more.
+      server domain to. Mailcow domains are instance-global, so without it every
+      org OWNER could see and provision on every other org's domains. A domain with
+      no row reaches **no** org — it is not a pool orgs may claim from, because
+      "org OWNER" is still a role a user can award themselves: registration creates
+      an organization with the registrant as its OWNER, and `POST /organizations`
+      lets any owner or admin create more.
 - [x] A domain may be assigned to **several** orgs (unique on
-  `(domain, organizationId)`). The assignment endpoint takes the complete set of
-  organizations, chosen from a checkbox dialog, so one write both adds and
-  removes; an empty set hands the domain back to the instance. Co-assignment is
-  co-administration — every holder can provision and delete on the domain.
+      `(domain, organizationId)`). The assignment endpoint takes the complete set of
+      organizations, chosen from a checkbox dialog, so one write both adds and
+      removes; an empty set hands the domain back to the instance. Co-assignment is
+      co-administration — every holder can provision and delete on the domain.
 
 ### Instance Administration (`modules/instance-admin`, instance-admin-only)
 
 - [x] Install-scope surface behind `User.isInstanceAdmin`: every organization on
-  the instance, the mail domains they share, every mailbox on the server, and
-  domain-grant management. Mounted at `/api/v1/instance-admin`.
+      the instance, the mail domains they share, every mailbox on the server, and
+      domain-grant management. Mounted at `/api/v1/instance-admin`.
 - [x] Deliberately the **infrastructure** layer only — orgs, members, domains,
-  mailboxes, sending accounts, send counts. Never message bodies, contacts or
-  campaign content: running the mail server is not the same as being entitled
-  to read everyone's mail.
+      mailboxes, sending accounts, send counts. Never message bodies, contacts or
+      campaign content: running the mail server is not the same as being entitled
+      to read everyone's mail.
 - [x] No superuser bypass in `lib/org-access.ts`. Teaching `getMembership` to
-  wave instance admins through would have widened all 121 `requireOrgMembership`
-  call sites at once, inbox and contacts included. These routes simply are not
-  org-scoped, and never call `requireOrgMembership`.
+      wave instance admins through would have widened all 121 `requireOrgMembership`
+      call sites at once, inbox and contacts included. These routes simply are not
+      org-scoped, and never call `requireOrgMembership`.
 - [x] `PUT /domains/:domain/assignment` assigns a domain to an org or hands it
-  back to the instance, replacing the old self-serve claim. Reassignment drops
-  the losing org's grants — a grant is delegation *within* an assignment and
-  cannot outlive one.
+      back to the instance, replacing the old self-serve claim. Reassignment drops
+      the losing org's grants — a grant is delegation _within_ an assignment and
+      cannot outlive one.
 - [x] `InstanceAdminMute` is a **personal, cosmetic** view filter: it hides an
-  org or domain from one administrator's own lists and changes nothing about
-  who can reach it. Lists report how many rows it hid, so nothing is silently
-  invisible. Kept strictly apart from assignment and grants, which are the
-  access controls.
+      org or domain from one administrator's own lists and changes nothing about
+      who can reach it. Lists report how many rows it hid, so nothing is silently
+      invisible. Kept strictly apart from assignment and grants, which are the
+      access controls.
 - [x] `GET /auth/me` returns the signed-in user including `isInstanceAdmin`,
-  replacing the old workaround of inferring admin-ness from a 403 on
-  `/instance-settings`. The stored session is written at sign-in and never
-  revalidated, so this is the authoritative read.
+      replacing the old workaround of inferring admin-ness from a 403 on
+      `/instance-settings`. The stored session is written at sign-in and never
+      revalidated, so this is the authoritative read.
 - [x] Migration `20260810000000` re-derives `OrgMailDomain` from each org's
-  sending accounts, synced inboxes and existing grants before the gate tightens.
-  Mailbox provisioning writes an `SMTPConnection` and `InboxAccount` but never
-  an ownership row, so orgs that provisioned onto an unclaimed domain would
-  otherwise have lost working mail on upgrade.
+      sending accounts, synced inboxes and existing grants before the gate tightens.
+      Mailbox provisioning writes an `SMTPConnection` and `InboxAccount` but never
+      an ownership row, so orgs that provisioned onto an unclaimed domain would
+      otherwise have lost working mail on upgrade.
 
 ### Mailcow Domain Management (instance-admin-only)
 
 - [x] `/settings/instance/domains`: list, create, edit, assign and delete
-  mail-server domains. Gated on `User.isInstanceAdmin`, not org OWNER —
-  creating or deleting a domain changes the mail server the whole instance
-  shares.
+      mail-server domains. Gated on `User.isInstanceAdmin`, not org OWNER —
+      creating or deleting a domain changes the mail server the whole instance
+      shares.
 - [x] Creating a domain generates its DKIM key in the same flow, so the DNS
-  panel can show the complete record set in one pass.
+      panel can show the complete record set in one pass.
 - [x] DNS panel per domain: the MX / SPF / DKIM / DMARC records to publish,
-  plus optional autodiscover and autoconfig, each checked against live DNS and
-  reported `OK` / `MISSING` / `UNKNOWN`. "Couldn't check" never reads as ready.
+      plus optional autodiscover and autoconfig, each checked against live DNS and
+      reported `OK` / `MISSING` / `UNKNOWN`. "Couldn't check" never reads as ready.
 - [x] The DNS host is detected from the domain's live NS records (Cloudflare,
-  Route 53, GoDaddy, Namecheap, …), so the panel can say where to put them.
+      Route 53, GoDaddy, Namecheap, …), so the panel can say where to put them.
 - [x] Record matching is loose by design — a hand-tightened SPF or a stricter
-  DMARC counts as correct. DKIM is the exception and compares the `p=` key
-  exactly, because a mismatched key fails every signature.
+      DMARC counts as correct. DKIM is the exception and compares the `p=` key
+      exactly, because a mismatched key fails every signature.
 - [x] Deleting a domain is refused while any mailbox still exists on it, and
-  requires retyping the domain name. Mailcow would otherwise destroy every
-  mailbox and message under it in one call.
+      requires retyping the domain name. Mailcow would otherwise destroy every
+      mailbox and message under it in one call.
 - [x] DKIM generation is offered only for a domain with no key: rotating one
-  whose record is already published would break signing until DNS caught up,
-  so rotation stays in Mailcow deliberately.
+      whose record is already published would break signing until DNS caught up,
+      so rotation stays in Mailcow deliberately.
 - [x] Members never touch SMTP credentials or the Mailcow UI; they read mail
-  with the mailbox password in their own client.
+      with the mailbox password in their own client.
 - [x] The `/mailboxes` list is the mail server's inventory merged with QQueue's
-  sending accounts, tagged `MANAGED` / `SERVER_ONLY` / `EXTERNAL` — a mailbox
-  created in the Mailcow UI is visible rather than silently absent.
+      sending accounts, tagged `MANAGED` / `SERVER_ONLY` / `EXTERNAL` — a mailbox
+      created in the Mailcow UI is visible rather than silently absent.
 - [x] Per-mailbox actions: reset password, adopt (connect an existing mailbox,
-  the back half of provisioning with no rollback — a mailbox QQueue did not
-  create is not QQueue's to delete), pause/resume delivery, and delete.
-- [x] Every action re-checks domain access *and* that the mailbox exists on the
-  server, so an address cannot be acted on just because it can be spelled.
-- [x] Deleting removes the mailbox and its `SMTPConnection` but only *disables*
-  the `InboxAccount` — `InboundMessage` cascades from it, so deleting would
-  destroy mail already synced out of a mailbox that no longer exists.
+      the back half of provisioning with no rollback — a mailbox QQueue did not
+      create is not QQueue's to delete), pause/resume delivery, and delete.
+- [x] Every action re-checks domain access _and_ that the mailbox exists on the
+      server, so an address cannot be acted on just because it can be spelled.
+- [x] Deleting removes the mailbox and its `SMTPConnection` but only _disables_
+      the `InboxAccount` — `InboundMessage` cascades from it, so deleting would
+      destroy mail already synced out of a mailbox that no longer exists.
 - [x] Resetting a password never disturbs sending: QQueue holds a separate app
-  password, so the connection and inbox sync are untouched.
+      password, so the connection and inbox sync are untouched.
 
 ### Contacts, Templates, and Campaigns
 
 - [x] A campaign picks the **sending account** it goes out as, rather than
-  always taking the org default. `Campaign.smtpConnectionId` is nullable and is
-  not backfilled: NULL keeps meaning "whatever the default is when this fires",
-  which is what every campaign did before the column existed, and freezing
-  today's answer onto existing rows would change what a recurring campaign does
-  when the default moves. The worker resolves the named account against the org
-  and falls back to the default if it has gone (`ON DELETE SET NULL`).
+      always taking the org default. `Campaign.smtpConnectionId` is nullable and is
+      not backfilled: NULL keeps meaning "whatever the default is when this fires",
+      which is what every campaign did before the column existed, and freezing
+      today's answer onto existing rows would change what a recurring campaign does
+      when the default moves. The worker resolves the named account against the org
+      and falls back to the default if it has gone (`ON DELETE SET NULL`).
 - [x] Contacts CRUD exists, with tags and created date surfaced in the UI.
 - [x] Contact lists CRUD, descriptions, and contact membership exist.
 - [x] Templates CRUD exists, with an in-app preview.
 - [x] Both authoring surfaces (Email Studio, Template Editor) toggle between the
-  rich text editor and a **raw HTML source view**. Source mode writes straight to
-  the body HTML and never mounts Tiptap, so pasted markup the ProseMirror schema
-  has no node for survives instead of being silently dropped; switching back
-  warns and names the tags that would be lost. A complete HTML document (one with
-  `<html>`/`<body>`) locks to source mode and is sent verbatim —
-  `renderHtmlAsEmailSafe` detects it and skips the MJML wrap, which would
-  otherwise nest a second document inside its own.
+      rich text editor and a **raw HTML source view**. Source mode writes straight to
+      the body HTML and never mounts Tiptap, so pasted markup the ProseMirror schema
+      has no node for survives instead of being silently dropped; switching back
+      warns and names the tags that would be lost. A complete HTML document (one with
+      `<html>`/`<body>`) locks to source mode and is sent verbatim —
+      `renderHtmlAsEmailSafe` detects it and skips the MJML wrap, which would
+      otherwise nest a second document inside its own.
 - [x] Contact CSV import is dry-run first (`POST /contacts/import/preview`):
-  the review step shows how many rows are new, which collide with existing
-  contacts, and the before/after for each collision. Duplicates resolve as
-  merge / replace / keep / skip — a bulk default plus per-row overrides and
-  inline field edits — instead of the previous silent merge. Rows repeating one
-  address within a file collapse into a single contact, so the summary counts
-  people rather than lines.
+      the review step shows how many rows are new, which collide with existing
+      contacts, and the before/after for each collision. Duplicates resolve as
+      merge / replace / keep / skip — a bulk default plus per-row overrides and
+      inline field edits — instead of the previous silent merge. Rows repeating one
+      address within a file collapse into a single contact, so the summary counts
+      people rather than lines.
 - [x] Editor link/button/variable dialogs are in-app (no browser `prompt`), and
-  images can be uploaded from the device or linked by URL. Uploads are stored as
-  `ImageAsset` blobs in object storage and embedded via a public URL, since
-  recipients' mail clients fetch images with no session; uploads are limited to
-  content-sniffed PNG/JPEG/GIF/WebP (SVG rejected) and addressed by a random
-  `publicId`.
+      images can be uploaded from the device or linked by URL. Uploads are stored as
+      `ImageAsset` blobs in object storage and embedded via a public URL, since
+      recipients' mail clients fetch images with no session; uploads are limited to
+      content-sniffed PNG/JPEG/GIF/WebP (SVG rejected) and addressed by a random
+      `publicId`.
 - [x] CTA buttons are inline, so they can sit beside text on the same line, and
-  support background and text colour, size, and corner style, with alignment
-  (left/centre/right) applied to the line they sit on. They can be re-edited in
-  place. Styling is stored as `data-qq-*` attributes beside the inline styles so
-  it survives a save/load cycle; buttons saved before this keep rendering as the
-  original centred green.
+      support background and text colour, size, and corner style, with alignment
+      (left/centre/right) applied to the line they sit on. They can be re-edited in
+      place. Styling is stored as `data-qq-*` attributes beside the inline styles so
+      it survives a save/load cycle; buttons saved before this keep rendering as the
+      original centred green.
 - [x] Email Studio manual composer: multiple `To`, `CC`/`BCC`, contact and
-  contact-list pickers, template apply, MJML-backed preview, drafts,
-  attachments (object storage), per-recipient delivery status, and manual send
-  through the shared pipeline (`origin = MANUAL`, `createdByUserId` set).
+      contact-list pickers, template apply, MJML-backed preview, drafts,
+      attachments (object storage), per-recipient delivery status, and manual send
+      through the shared pipeline (`origin = MANUAL`, `createdByUserId` set).
 - [x] Campaign drafts, duplicate, delete, send now, one-shot schedule,
-  recurrence, pause, resume, and analytics exist.
+      recurrence, pause, resume, and analytics exist.
 - [x] Dashboard pages exist for Email Studio, contacts, contact lists,
-  templates, campaigns, and analytics.
+      templates, campaigns, and analytics.
 - [~] Template variables are simple string replacement.
 
 ### Queues and Workers
 
 - [x] Redis/BullMQ queue definitions exist for email sending, campaign
-  processing, and webhook delivery.
+      processing, and webhook delivery.
 - [x] API enqueues sends/campaigns/webhook deliveries.
 - [x] Worker sends email through SMTP and records events.
 - [x] Campaign worker expands active contacts into queued email jobs.
 - [x] Webhook worker delivers signed outbound webhooks.
 - [x] Worker startup recovers queued email jobs, scheduled campaigns,
-  recurring campaigns, and pending/failed webhook deliveries.
+      recurring campaigns, and pending/failed webhook deliveries.
 - [x] Queue operations dashboard and API for queue summaries, failed jobs, and
-  retries.
+      retries.
 
 ### Transactional API
 
@@ -650,14 +653,14 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Dashboard JWT flow can also use transactional send with organization ID.
 - [x] Direct content and template-based sends exist.
 - [x] Transactional sends accept validated per-message headers and a bulk flag
-  through the API and SDK, including recipient-specific one-click unsubscribe
-  headers and a matching visible footer; headers persist through queue retries.
+      through the API and SDK, including recipient-specific one-click unsubscribe
+      headers and a matching visible footer; headers persist through queue retries.
 - [x] Delayed sends with `scheduledAt` exist.
 - [x] Stable `{ id, status }` response and machine-readable error codes exist.
 - [x] Transactional API docs and SDK examples exist.
 - [x] Redis-backed rate limiting on the send endpoint.
 - [x] Idempotency keys (`Idempotency-Key` header) prevent duplicate sends on
-  retry; usage tracking is not yet implemented.
+      retry; usage tracking is not yet implemented.
 
 ### Tracking and Webhooks
 
@@ -665,9 +668,9 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] HMAC-signed tracking tokens exist.
 - [x] Tracking injection rewrites absolute links and appends a pixel.
 - [x] Inbound normalized ESP webhook endpoint exists for delivered, bounced,
-  and complained events.
+      and complained events.
 - [x] Outbound webhook endpoints, signed deliveries, delivery history, and
-  manual retry exist.
+      manual retry exist.
 - [~] Provider-specific inbound webhook adapters are not implemented; docs
   describe mapping provider payloads through a relay/function.
 
@@ -677,7 +680,7 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] `QQueueClient.sendEmail` wraps the transactional send endpoint.
 - [x] SDK error class exposes HTTP status and optional error code.
 - [x] README, changelog, release checklist, npm publish workflow, and package
-  tarball are present.
+      tarball are present.
 - [~] SDK scope is narrow: no clients for templates, contacts, campaigns,
   webhooks, or API keys.
 
@@ -687,7 +690,7 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Operational pages exist for the main self-hosted flows.
 - [x] Queue operations page for OWNER/ADMIN members.
 - [x] Settings page includes organization creation, API keys, and webhook
-  endpoint/delivery management.
+      endpoint/delivery management.
 - [~] Admin capabilities are product-level but not full hosted-operations admin:
   no billing dashboard, tenant ops dashboard, deliverability admin, or abuse
   review tools.
@@ -699,7 +702,7 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Script prevents core packages from depending on `@qqueue/cloud`.
 - [x] CI runs cloud boundary checks.
 - [ ] Billing, usage metering, hosted onboarding, managed sending
-  infrastructure, cloud admin dashboards, and tenant operations are not started.
+      infrastructure, cloud admin dashboards, and tenant operations are not started.
 
 ### Tests
 
@@ -711,17 +714,17 @@ operational and abuse-control gaps from the original audit have been closed.
 - [x] Queues are stubbed in API tests, eliminating Redis noise from the suite.
 - [x] Docker-backed integration smoke test (`pnpm test:smoke:docker`).
 - [x] End-to-end smoke test: register → SMTP → transactional send → worker
-  processing.
+      processing.
 - [x] Coverage thresholds are documented in the README.
 
 ### CI / Scripts
 
 - [x] Coverage workflow runs install, Prisma generate, coverage tests, badge
-  generation, and badge commit on `main`.
+      generation, and badge commit on `main`.
 - [x] Phase 7 guardrail workflow runs cloud boundary, dependency license audit,
-  and Signed-off-by checks.
+      and Signed-off-by checks.
 - [x] SDK publish workflow verifies tag/version alignment and runs SDK checks
-  before npm publish.
+      before npm publish.
 - [x] Coverage badge generation script exists.
 - [x] Dependency license audit script exists.
 - [x] Cloud boundary script exists.
@@ -765,32 +768,32 @@ End-to-end, the app can currently support a self-hosted operator who:
 ### Email Operations Platform (see ROADMAP Phase A+)
 
 - [x] Phase A: send-pipeline refactor (`origin`, `cc`/`bcc`/`replyTo`,
-  attachments, MJML rendering utility)
+      attachments, MJML rendering utility)
 - [x] Phase A.5: foundation domains — `Contact.tags`,
-  `ContactList.description`, explicit `ContactListMember` join, `Template.mjml`,
-  and `EmailJob` threading metadata (`inReplyTo`/`references`). Backend only; no
-  UI. Template versioning evaluated and deferred (see `docs/DECISIONS.md`).
+      `ContactList.description`, explicit `ContactListMember` join, `Template.mjml`,
+      and `EmailJob` threading metadata (`inReplyTo`/`references`). Backend only; no
+      UI. Template versioning evaluated and deferred (see `docs/DECISIONS.md`).
 - [x] Manual composer / Email Studio: multiple `To`, `CC`/`BCC`, contact and
-  list pickers, template apply, preview, drafts, manual send, **attachments**
-  (S3/MinIO object storage), and **per-recipient delivery status**.
+      list pickers, template apply, preview, drafts, manual send, **attachments**
+      (S3/MinIO object storage), and **per-recipient delivery status**.
 - [x] Attachment object storage (Phase A sub-task): `EmailAttachment` metadata
-  table + shared `@qqueue/storage` (S3/MinIO) package + bundled MinIO in both
-  Docker Compose stacks; blobs streamed to SMTP by the send pipeline.
+      table + shared `@qqueue/storage` (S3/MinIO) package + bundled MinIO in both
+      Docker Compose stacks; blobs streamed to SMTP by the send pipeline.
 - [x] MJML wired into the manual composer send + preview path (campaign default
-  send path still sends stored HTML as-is).
+      send path still sends stored HTML as-is).
 - [x] Phase C: contacts & lists — CSV import/export (membership `source`),
-  per-contact activity timeline, org-wide suppression registry + RFC 8058
-  List-Unsubscribe, and basic tag-driven segmentation (preview + materialize to
-  a list).
+      per-contact activity timeline, org-wide suppression registry + RFC 8058
+      List-Unsubscribe, and basic tag-driven segmentation (preview + materialize to
+      a list).
 - [x] Phase D: advanced campaign features — all
-  shipped: bounce-driven auto-suppression (soft/hard threshold), per-domain
-  throttling (worker-side Redis fixed window), dynamic segmentation (`Segment`
-  rule tree resolved at send time), A/B subject testing (test fraction +
-  delayed winner decision), and deliverability tooling (rates, per-domain
-  breakdown, reputation alerts) with Segments and Deliverability web pages.
+      shipped: bounce-driven auto-suppression (soft/hard threshold), per-domain
+      throttling (worker-side Redis fixed window), dynamic segmentation (`Segment`
+      rule tree resolved at send time), A/B subject testing (test fraction +
+      delayed winner decision), and deliverability tooling (rates, per-domain
+      breakdown, reputation alerts) with Segments and Deliverability web pages.
 - [x] IMAP inbox module — inbound message storage anchored to `EmailJob`
-  threading metadata, conversation grouping in the dashboard, reply from
-  QQueue, and a simplified inbox UI without ticketing.
+      threading metadata, conversation grouping in the dashboard, reply from
+      QQueue, and a simplified inbox UI without ticketing.
 - [~] Richer team collaboration on conversations remains out of scope for the
   core inbox.
 - [–] Phase F (sending domains & sender identities, managed DKIM) shipped on
@@ -829,10 +832,10 @@ End-to-end, the app can currently support a self-hosted operator who:
 - [x] Docker-backed integration smoke test (API + Postgres + Redis + worker).
 - [x] Legal docs draft (Terms, Privacy Policy, licenses, trademark notice).
 - [x] Verification suite passing (`lint`, `typecheck`, `build`, `test`,
-  `test:smoke:docker`, `license:audit`, `cloud:boundary`).
+      `test:smoke:docker`, `license:audit`, `cloud:boundary`).
 - [ ] Verify production Docker Compose from a clean checkout on a fresh host.
 - [ ] Review legal docs, CLA, commercial license, trademark notice, and
-  dependency license output with qualified counsel before commercial use.
+      dependency license output with qualified counsel before commercial use.
 
 ## Recommended Next Sprint
 
@@ -903,134 +906,134 @@ shipped:
 > still exists.
 
 - [x] Added the `SendingDomain` and `SenderIdentity` models with the `DkimMode`
-  (`EXTERNAL`/`MANAGED`) and `DkimStatus` (`PENDING`/`VERIFIED`/`FAILED`/`NA`)
-  enums, and a `senderIdentityId` link on `EmailJob` and `Campaign`.
+      (`EXTERNAL`/`MANAGED`) and `DkimStatus` (`PENDING`/`VERIFIED`/`FAILED`/`NA`)
+      enums, and a `senderIdentityId` link on `EmailJob` and `Campaign`.
 - [x] Managed mode generates an RSA-2048 keypair (selector `qqueue`), stores the
-  private key encrypted, signs DKIM in-process, and surfaces the DNS records; the
-  `dkim-verification` worker moves managed domains `PENDING → VERIFIED/FAILED`
-  on demand and on a daily recheck.
+      private key encrypted, signs DKIM in-process, and surfaces the DNS records; the
+      `dkim-verification` worker moves managed domains `PENDING → VERIFIED/FAILED`
+      on demand and on a daily recheck.
 - [x] Send-time From/DKIM resolution is centralized in `resolveSender` /
-  `dkimSignOptionsFor` and re-applied in the send worker, with unit tests for the
-  resolver precedence, the managed+verified DKIM gate, and the verification path.
+      `dkimSignOptionsFor` and re-applied in the send worker, with unit tests for the
+      resolver precedence, the managed+verified DKIM gate, and the verification path.
 - [x] Migrations `20260630000000_phase_f_sending_domains` and
-  `20260630120000_phase_f_sender_identity_links` are additive (new tables/enums
-  and nullable `senderIdentityId` columns).
+      `20260630120000_phase_f_sender_identity_links` are additive (new tables/enums
+      and nullable `senderIdentityId` columns).
 
 ### Inbox simplification (2026-06-17)
 
 - [x] Removed the `INBOX_ENABLED` runtime feature flag. Inbox API routes now
-  mount by default for authenticated organization members, and the worker
-  always starts/schedules inbox sync with the existing cadence and max-message
-  limits.
+      mount by default for authenticated organization members, and the worker
+      always starts/schedules inbox sync with the existing cadence and max-message
+      limits.
 - [x] Removed assignment, workflow, and internal-note inbox features so the UI
-  stays focused on conversations and replies.
+      stays focused on conversations and replies.
 - [x] The dashboard now shows conversation threads instead of the old
-  message-by-message support view.
+      message-by-message support view.
 
 ### Phase D2–D5 advanced campaign features (2026-06-16)
 
 - [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
-  `pnpm license:audit` passed.
+      `pnpm license:audit` passed.
 - [x] `pnpm test` passed across all packages (759 tests): added coverage for the
-  worker domain throttle (`recipientDomain`/`resolveCap`/`reserveDomainSlot` and
-  the send-worker hold), the `domain-throttles` and `segments` and
-  `deliverability` API services, segment rule compilation + campaign target
-  exclusivity, A/B fan-out split + delayed winner decision + `configureAbTest`,
-  per-variant analytics, and the new web Segments + Deliverability pages.
+      worker domain throttle (`recipientDomain`/`resolveCap`/`reserveDomainSlot` and
+      the send-worker hold), the `domain-throttles` and `segments` and
+      `deliverability` API services, segment rule compilation + campaign target
+      exclusivity, A/B fan-out split + delayed winner decision + `configureAbTest`,
+      per-variant analytics, and the new web Segments + Deliverability pages.
 - [x] `pnpm test:smoke:docker` passed with migrations `20260616020000`–
-  `20260616040000` applied (register → SMTP → transactional send → `SENT`).
+      `20260616040000` applied (register → SMTP → transactional send → `SENT`).
 - [x] Migrations `20260616020000_phase_d_throttle`,
-  `20260616030000_phase_d_segments`, and `20260616040000_phase_d_ab_testing`
-  verified against a throwaway PostgreSQL 16: all migrations apply in order
-  (additive `DomainThrottle`/`Segment`/`CampaignVariant` tables, A/B enums,
-  nullable `Campaign.segmentId`/A/B columns, `EmailJob.variantId`) and
-  `prisma migrate diff` reports no drift.
+      `20260616030000_phase_d_segments`, and `20260616040000_phase_d_ab_testing`
+      verified against a throwaway PostgreSQL 16: all migrations apply in order
+      (additive `DomainThrottle`/`Segment`/`CampaignVariant` tables, A/B enums,
+      nullable `Campaign.segmentId`/A/B columns, `EmailJob.variantId`) and
+      `prisma migrate diff` reports no drift.
 
 ### Phase D1 bounce-driven auto-suppression (2026-06-16)
 
 - [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
-  `pnpm license:audit` passed.
+      `pnpm license:audit` passed.
 - [x] `pnpm test` passed across all packages. New/updated coverage: the
-  `email-engine` `classifyBounce` (hard/soft/block codes + phrases, phrasing
-  over numeric class, unknown → hard); `suppressionService` effective-policy
-  defaults/override, policy upsert, and `shouldSuppressBounce` (hard/block skip
-  counting, soft only at/above threshold); the `tracking` webhook (hard
-  suppresses immediately, soft below threshold does not, soft at threshold does,
-  explicit provider `bounceType` overrides the reason text); the
-  `email-sending` worker (hard rejection suppresses without counting, soft below
-  threshold marks `FAILED` without suppressing or flipping `Contact.status`,
-  soft at threshold suppresses); and the shared `suppressionPolicySchema`.
+      `email-engine` `classifyBounce` (hard/soft/block codes + phrases, phrasing
+      over numeric class, unknown → hard); `suppressionService` effective-policy
+      defaults/override, policy upsert, and `shouldSuppressBounce` (hard/block skip
+      counting, soft only at/above threshold); the `tracking` webhook (hard
+      suppresses immediately, soft below threshold does not, soft at threshold does,
+      explicit provider `bounceType` overrides the reason text); the
+      `email-sending` worker (hard rejection suppresses without counting, soft below
+      threshold marks `FAILED` without suppressing or flipping `Contact.status`,
+      soft at threshold suppresses); and the shared `suppressionPolicySchema`.
 - [x] `pnpm test:smoke:docker` passed: register → SMTP → transactional send →
-  worker reached `SENT` with the new `20260616010000_phase_d_bounce_policy`
-  migration applied.
+      worker reached `SENT` with the new `20260616010000_phase_d_bounce_policy`
+      migration applied.
 - [x] Migration `20260616010000_phase_d_bounce_policy` verified against a
-  throwaway PostgreSQL 16: all migrations apply in order (additive `BounceType`
-  enum + `SuppressionPolicy` table) and `prisma migrate diff` reports no drift
-  from the schema.
+      throwaway PostgreSQL 16: all migrations apply in order (additive `BounceType`
+      enum + `SuppressionPolicy` table) and `prisma migrate diff` reports no drift
+      from the schema.
 
 ### Phase C contacts & contact lists (2026-06-15)
 
 - [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
-  `pnpm license:audit` passed (audit clean with the new MIT `csv-parse` /
-  `csv-stringify` dependencies).
+      `pnpm license:audit` passed (audit clean with the new MIT `csv-parse` /
+      `csv-stringify` dependencies).
 - [x] `pnpm test` passed across all packages; new coverage added for the
-  suppression service + pipeline enforcement (campaign fan-out exclusion,
-  synchronous `SUPPRESSED` job, send-worker re-check, bounce/complaint →
-  suppression), the `email-engine` unsubscribe token + List-Unsubscribe headers,
-  the public unsubscribe endpoints, CSV parse/import/export, the contact
-  activity timeline, tag-driven segment preview + list materialization, the
-  shared Zod schemas, and the web Suppressions page + Contacts import/export and
-  activity drawer.
+      suppression service + pipeline enforcement (campaign fan-out exclusion,
+      synchronous `SUPPRESSED` job, send-worker re-check, bounce/complaint →
+      suppression), the `email-engine` unsubscribe token + List-Unsubscribe headers,
+      the public unsubscribe endpoints, CSV parse/import/export, the contact
+      activity timeline, tag-driven segment preview + list materialization, the
+      shared Zod schemas, and the web Suppressions page + Contacts import/export and
+      activity drawer.
 - [x] `pnpm test:smoke:docker` passed: the register → SMTP → transactional send
-  → worker flow reached `SENT` with the new `20260615040000_phase_c_contacts`
-  migration applied.
+      → worker flow reached `SENT` with the new `20260615040000_phase_c_contacts`
+      migration applied.
 - [x] Migration `20260615040000_phase_c_contacts` verified against a throwaway
-  PostgreSQL 16: all migrations apply in order (including the additive
-  `MembershipSource`/`SuppressionReason` enums, `EmailJobStatus.SUPPRESSED`,
-  `ContactListMember.source`, and the `Suppression` table) and `prisma migrate
-  diff` reports no drift from the schema.
+      PostgreSQL 16: all migrations apply in order (including the additive
+      `MembershipSource`/`SuppressionReason` enums, `EmailJobStatus.SUPPRESSED`,
+      `ContactListMember.source`, and the `Suppression` table) and `prisma migrate
+diff` reports no drift from the schema.
 
 ### Phase A attachments storage + Phase B follow-ups (2026-06-15)
 
 - [x] `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm cloud:boundary`, and
-  `pnpm license:audit` passed (audit allowlist updated for `CC0-1.0` and a
-  reviewed exception for `slick`'s non-SPDX `MIT (…)` string, both pulled in
-  transitively by `mjml`).
+      `pnpm license:audit` passed (audit allowlist updated for `CC0-1.0` and a
+      reviewed exception for `slick`'s non-SPDX `MIT (…)` string, both pulled in
+      transitively by `mjml`).
 - [x] `pnpm test` passed across API, web, worker, shared, email-engine, sdk,
-  and the new `@qqueue/storage` package.
+      and the new `@qqueue/storage` package.
 - [x] New coverage: `@qqueue/storage` client (put/get/delete/ensureBucket),
-  `attachments` service (upload size/type guards, org/draft scoping, link/load
-  for the send pipeline), transactional + worker attachment passthrough,
-  `manual-email` delivery-status derivation, shared `attachmentIds` schema, and
-  the Email Studio attachment + delivery-status UI.
+      `attachments` service (upload size/type guards, org/draft scoping, link/load
+      for the send pipeline), transactional + worker attachment passthrough,
+      `manual-email` delivery-status derivation, shared `attachmentIds` schema, and
+      the Email Studio attachment + delivery-status UI.
 - [x] Migration `20260615030000_phase_a_attachments` (additive `EmailAttachment`
-  table) verified against a throwaway PostgreSQL 16: all migrations apply in
-  order and `prisma migrate diff` reports no drift from the schema.
+      table) verified against a throwaway PostgreSQL 16: all migrations apply in
+      order and `prisma migrate diff` reports no drift from the schema.
 
 ### Phase B Email Studio (2026-06-15)
 
 - [x] `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `pnpm cloud:boundary`
-  passed.
+      passed.
 - [x] `pnpm test` passed across API, web, worker, shared, email-engine, and SDK.
 - [x] New coverage added: `manual-email` service (recipient resolution +
-  dedup, MANUAL origin/`createdByUserId`, MJML render, CC/BCC, preview),
-  `email-drafts` service (CRUD + org/user scoping), shared schema validation
-  (`manualEmailSendSchema`, `emailPreviewSchema`, `emailDraft*`), and the
-  Email Studio page (manual recipient entry, contact/list selection, template
-  apply, preview).
+      dedup, MANUAL origin/`createdByUserId`, MJML render, CC/BCC, preview),
+      `email-drafts` service (CRUD + org/user scoping), shared schema validation
+      (`manualEmailSendSchema`, `emailPreviewSchema`, `emailDraft*`), and the
+      Email Studio page (manual recipient entry, contact/list selection, template
+      apply, preview).
 - [x] Migration `20260615020000_phase_b_email_studio` adds the `EmailDraft`
-  table (additive only; no existing table touched).
+      table (additive only; no existing table touched).
 
 ### Phase A.5 foundation domains (2026-06-15)
 
 - [x] `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `pnpm cloud:boundary`
-  passed.
+      passed.
 - [x] `pnpm test` passed across API, web, worker, shared, email-engine, and SDK.
 - [x] Migration `20260615010000_phase_a5_foundation_domains` verified against a
-  throwaway PostgreSQL 16 instance: all migrations apply in order, an existing
-  implicit `_ContactToContactList` membership is copied into
-  `ContactListMember` (with `addedAt`), the implicit join is dropped, and
-  `Contact.tags` defaults to an empty array.
+      throwaway PostgreSQL 16 instance: all migrations apply in order, an existing
+      implicit `_ContactToContactList` membership is copied into
+      `ContactListMember` (with `addedAt`), the implicit join is dropped, and
+      `Contact.tags` defaults to an empty array.
 
 ### Beta polish + launch prep sprint
 
@@ -1040,13 +1043,13 @@ Verified with the following commands on 2026-06-11:
 - [x] `pnpm typecheck` passed.
 - [x] `pnpm build` passed.
 - [x] `pnpm test` passed: 62 test files and 536 tests passed across API, web,
-  worker, shared, email-engine, and SDK packages.
+      worker, shared, email-engine, and SDK packages.
 - [x] `pnpm test:smoke:docker` passed: a throwaway Postgres + Redis stack ran
-  the full register → SMTP connection → transactional send → worker processing
-  flow and confirmed the job reached `SENT`.
+      the full register → SMTP connection → transactional send → worker processing
+      flow and confirmed the job reached `SENT`.
 - [x] `pnpm license:audit` passed. The audit reported reviewed license tokens
-  including MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, CC-BY-4.0,
-  BlueOak-1.0.0, MIT-0, and Python-2.0.
+      including MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, CC-BY-4.0,
+      BlueOak-1.0.0, MIT-0, and Python-2.0.
 - [x] `pnpm cloud:boundary` passed.
 
 Notes:

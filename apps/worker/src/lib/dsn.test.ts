@@ -202,7 +202,18 @@ describe("parseDsn", () => {
 });
 
 describe("applyDsnBounce", () => {
-  const jobRow = { id: "job-1", status: "SENT", campaignRunId: null };
+  const jobRow = {
+    toEmail: "bob@example.com",
+    cc: [],
+    bcc: [],
+    organizationId: "org-1",
+    origin: "MANUAL",
+    sendGroupId: null,
+    messageId: "<original@acme.test>",
+    id: "job-1",
+    status: "SENT",
+    campaignRunId: null,
+  };
 
   function dsn(overrides: Partial<ParsedDsn> = {}): ParsedDsn {
     return {
@@ -220,6 +231,73 @@ describe("applyDsnBounce", () => {
     };
   }
 
+  it("attributes a Cc DSN to its own delivery when thread identity matches a To sibling", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...jobRow,
+      toEmail: "accepted@example.com",
+      sendGroupId: "group-1",
+    } as never);
+    prismaMock.emailJob.findFirst.mockResolvedValue({
+      ...jobRow,
+      id: "copy-job",
+      sendGroupId: "group-1",
+    } as never);
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      { status: "SENT" },
+      { status: "FAILED" },
+    ] as never);
+    await applyDsnBounce({
+      organizationId: "org-1",
+      inboundMessageId: "in-1",
+      threadEmailJobId: "job-1",
+      dsn: dsn(),
+    });
+    expect(prismaMock.emailEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          emailJobId: "copy-job",
+          metadata: expect.objectContaining({ recipient: "bob@example.com" }),
+        }),
+      })
+    );
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "copy-job", status: "SENT" },
+      data: { status: "FAILED" },
+    });
+    expect(prismaMock.emailJob.updateMany).not.toHaveBeenCalledWith({
+      where: { id: "job-1", status: "SENT" },
+      data: { status: "FAILED" },
+    });
+    expect(prismaMock.suppression.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ email: "bob@example.com" }),
+      })
+    );
+  });
+
+  it("keeps a legacy accepted To outcome when only its Cc recipient later bounces", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...jobRow,
+      toEmail: "accepted@example.com",
+      cc: ["bob@example.com"],
+    } as never);
+    await applyDsnBounce({
+      organizationId: "org-1",
+      inboundMessageId: "in-1",
+      threadEmailJobId: "job-1",
+      dsn: dsn(),
+    });
+    expect(prismaMock.emailJob.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.emailEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          emailJobId: "job-1",
+          metadata: expect.objectContaining({ recipient: "bob@example.com" }),
+        }),
+      })
+    );
+  });
+
   it("records the bounce on the thread-correlated job, fails it, and suppresses", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(jobRow as never);
 
@@ -232,7 +310,11 @@ describe("applyDsnBounce", () => {
 
     expect(prismaMock.emailJob.findUnique).toHaveBeenCalledWith({
       where: { id: "job-1" },
-      select: { id: true, status: true, campaignRunId: true },
+      select: expect.objectContaining({
+        id: true,
+        status: true,
+        campaignRunId: true,
+      }),
     });
 
     expect(prismaMock.emailEvent.create).toHaveBeenCalledWith({
@@ -245,6 +327,7 @@ describe("applyDsnBounce", () => {
           inboundMessageId: "in-1",
           correlation: "in-reply-to",
           finalRecipient: "bob@example.com",
+          recipient: "bob@example.com",
           bounceType: "HARD",
           status: "5.1.1",
           reason: "smtp; 550 5.1.1 user unknown",
@@ -299,8 +382,21 @@ describe("applyDsnBounce", () => {
     });
 
     expect(prismaMock.emailJob.findFirst).toHaveBeenCalledWith({
-      where: { organizationId: "org-1", messageId: "<orig-123@acme.test>" },
-      select: { id: true, status: true, campaignRunId: true },
+      where: {
+        organizationId: "org-1",
+        messageId: "<orig-123@acme.test>",
+        NOT: { origin: "SYSTEM" },
+        OR: [
+          { toEmail: "bob@example.com" },
+          { cc: { has: "bob@example.com" } },
+          { bcc: { has: "bob@example.com" } },
+        ],
+      },
+      select: expect.objectContaining({
+        id: true,
+        status: true,
+        campaignRunId: true,
+      }),
     });
     const created = prismaMock.emailEvent.create.mock.calls[0][0];
     expect(created.data.metadata).toMatchObject({
@@ -324,7 +420,11 @@ describe("applyDsnBounce", () => {
     expect(recency).toMatchObject({
       where: {
         organizationId: "org-1",
-        toEmail: "bob@example.com",
+        OR: [
+          { toEmail: "bob@example.com" },
+          { cc: { has: "bob@example.com" } },
+          { bcc: { has: "bob@example.com" } },
+        ],
         status: "SENT",
         sentAt: { gte: expect.any(Date) },
       },
@@ -458,6 +558,7 @@ describe("applyDsnBounce", () => {
             inboundMessageId: "in-1",
             correlation: "in-reply-to",
             finalRecipient: "bob@example.com",
+            recipient: "bob@example.com",
             action,
             status: "2.0.0",
           },

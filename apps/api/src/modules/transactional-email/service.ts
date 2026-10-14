@@ -1,8 +1,9 @@
+import type { Prisma } from "@prisma/client";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
 import type {
   EmailOrigin,
   SendEmailInput,
-  TransactionalSendResponse
+  TransactionalSendResponse,
 } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
@@ -64,16 +65,17 @@ type EmailJobRow = Awaited<ReturnType<typeof prisma.emailJob.create>>;
 async function createEmailJob(
   data: Parameters<typeof prisma.emailJob.create>[0]["data"],
   organizationId: string,
-  idempotencyKey: string | null
+  idempotencyKey: string | null,
+  db: Prisma.TransactionClient
 ): Promise<{ job: EmailJobRow; replayed: boolean }> {
   try {
-    return { job: await prisma.emailJob.create({ data }), replayed: false };
+    return { job: await db.emailJob.create({ data }), replayed: false };
   } catch (error) {
     if (idempotencyKey && isPrismaKnownRequestError(error, "P2002")) {
-      const existing = await prisma.emailJob.findUnique({
+      const existing = await db.emailJob.findUnique({
         where: {
-          organizationId_idempotencyKey: { organizationId, idempotencyKey }
-        }
+          organizationId_idempotencyKey: { organizationId, idempotencyKey },
+        },
       });
       if (existing) {
         return { job: existing, replayed: true };
@@ -99,9 +101,13 @@ export type TransactionalSendInput = SendEmailInput & {
   // Internal: groups the per-recipient jobs of one multi-recipient manual send
   // so delivery status can be aggregated. Set by manualEmailService.send.
   sendGroupId?: string | null;
+  groupPrimary?: boolean;
+  recipientField?: "to" | "cc" | "bcc";
+  requestHash?: string;
   // Internal conversation headers; never accepted from public raw headers.
   visibleTo?: string[];
   visibleCc?: string[];
+  visibleBcc?: string[];
   messageId?: string;
   // Internal: how attachmentIds bind to the created job. "link" (default)
   // claims the uploaded rows for this job; "copy" clones their metadata onto
@@ -120,9 +126,22 @@ function normalizeEmail(email: string) {
 
 export const transactionalEmailService = {
   async send(
-    input: TransactionalSendInput
+    input: TransactionalSendInput,
+    transaction?: Prisma.TransactionClient
   ): Promise<TransactionalSendResponse> {
+    if (!transaction) {
+      const result = await prisma.$transaction(
+        (db) => transactionalEmailService.send(input, db),
+        { timeout: 30_000 }
+      );
+      await transactionalEmailService.enqueue(result.id);
+      return result;
+    }
+    const db = transaction;
     const idempotencyKey = input.idempotencyKey?.trim() || null;
+    if (idempotencyKey) {
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.organizationId + ":" + idempotencyKey}, 0))`;
+    }
 
     const to = normalizeEmail(input.to);
     const cc = (input.cc ?? []).map(normalizeEmail).filter(Boolean);
@@ -131,14 +150,14 @@ export const transactionalEmailService = {
     // Idempotency replay: a retry with a key we've already seen for this org
     // returns the original job without doing any work or sending again.
     if (idempotencyKey) {
-      const existing = await prisma.emailJob.findUnique({
+      const existing = await db.emailJob.findUnique({
         where: {
           organizationId_idempotencyKey: {
             organizationId: input.organizationId,
-            idempotencyKey
-          }
+            idempotencyKey,
+          },
         },
-        select: { id: true, status: true }
+        select: { id: true, status: true },
       });
       if (existing) {
         return { id: existing.id, status: existing.status };
@@ -153,20 +172,20 @@ export const transactionalEmailService = {
     // selector; a caller who sends both has already named the connection.
     const from = input.from ? normalizeEmail(input.from) : null;
 
-    const smtpConnection = await prisma.sMTPConnection.findFirst({
+    const smtpConnection = await db.sMTPConnection.findFirst({
       where: {
         organizationId: input.organizationId,
         ...(input.smtpConnectionId
           ? { id: input.smtpConnectionId }
           : from
             ? { fromEmail: { equals: from, mode: "insensitive" } }
-            : { isDefault: true })
+            : { isDefault: true }),
       },
       // `fromEmail` is not unique within an org — the same mailbox can be
       // configured twice against different SMTP hosts — so an address lookup
       // can match more than one row. Prefer the default, then the oldest, so
       // the same `from` always resolves to the same account.
-      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }]
+      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     });
 
     if (!smtpConnection) {
@@ -187,16 +206,16 @@ export const transactionalEmailService = {
       await assertMayUseConnection({
         userId: input.createdByUserId,
         organizationId: input.organizationId,
-        smtpConnectionId: smtpConnection.id
+        smtpConnectionId: smtpConnection.id,
       });
     }
 
     const template = input.templateId
-      ? await prisma.template.findFirst({
+      ? await db.template.findFirst({
           where: {
             id: input.templateId,
-            organizationId: input.organizationId
-          }
+            organizationId: input.organizationId,
+          },
         })
       : null;
 
@@ -240,6 +259,7 @@ export const transactionalEmailService = {
           toEmail: to,
           visibleTo: input.visibleTo,
           visibleCc: input.visibleCc,
+          visibleBcc: input.visibleBcc,
           messageId: input.messageId,
           cc,
           bcc,
@@ -250,16 +270,20 @@ export const transactionalEmailService = {
           origin,
           createdByUserId: input.createdByUserId,
           sendGroupId: input.sendGroupId,
+          groupPrimary: input.groupPrimary,
+          recipientField: input.recipientField,
+          requestHash: input.requestHash,
           subject,
           html,
           text,
           headers: input.headers as InputJsonValue | undefined,
           isBulk: input.isBulk ?? false,
           variables: input.variables as InputJsonValue | undefined,
-          status: "SUPPRESSED"
+          status: "SUPPRESSED",
         },
         input.organizationId,
-        idempotencyKey
+        idempotencyKey,
+        db
       );
       return { id: suppressed.id, status: suppressed.status };
     }
@@ -278,6 +302,7 @@ export const transactionalEmailService = {
         toEmail: to,
         visibleTo: input.visibleTo,
         visibleCc: input.visibleCc,
+        visibleBcc: input.visibleBcc,
         messageId: input.messageId,
         cc,
         bcc,
@@ -288,6 +313,9 @@ export const transactionalEmailService = {
         origin,
         createdByUserId: input.createdByUserId,
         sendGroupId: input.sendGroupId,
+        groupPrimary: input.groupPrimary,
+        recipientField: input.recipientField,
+        requestHash: input.requestHash,
         subject,
         html,
         text,
@@ -299,12 +327,13 @@ export const transactionalEmailService = {
         events: {
           create: {
             organizationId: input.organizationId,
-            type: "QUEUED"
-          }
-        }
+            type: "QUEUED",
+          },
+        },
       },
       input.organizationId,
-      idempotencyKey
+      idempotencyKey,
+      db
     );
 
     if (replayed) {
@@ -315,13 +344,17 @@ export const transactionalEmailService = {
       await attachmentService.copyToJob(
         input.attachmentIds,
         input.organizationId,
-        queuedJob.id
+        queuedJob.id,
+        db,
+        input.createdByUserId
       );
     } else {
       await attachmentService.linkToJob(
         input.attachmentIds,
         input.organizationId,
-        queuedJob.id
+        queuedJob.id,
+        db,
+        input.createdByUserId
       );
     }
 
@@ -332,28 +365,38 @@ export const transactionalEmailService = {
       input.attachments,
       input.organizationId,
       queuedJob.id,
-      input.createdByUserId
+      input.createdByUserId,
+      db
     );
-
-    await emailSendingQueue.add(
-      "send-email",
-      { emailJobId: queuedJob.id },
-      {
-        delay: scheduledAt
-          ? Math.max(0, scheduledAt.getTime() - Date.now())
-          : 0,
-        jobId: `email-${queuedJob.id}`,
-        attempts: 3,
-        backoff: { type: "exponential", delay: 30_000 }
-      }
-    );
-
-    await webhookEndpointService.enqueueLatestForEmailEvent({
-      organizationId: input.organizationId,
-      emailJobId: queuedJob.id,
-      type: "QUEUED"
-    });
 
     return { id: queuedJob.id, status: queuedJob.status };
-  }
+  },
+
+  // DB acceptance is durable even when Redis is unavailable. Replays and the
+  // worker's dispatcher repair enqueue failures without recreating attachments.
+  async enqueue(id: string) {
+    const job = await prisma.emailJob.findUnique({ where: { id } });
+    if (!job || job.status !== "QUEUED") return;
+    try {
+      await emailSendingQueue.add(
+        "send-email",
+        { emailJobId: id },
+        {
+          delay: job.scheduledAt
+            ? Math.max(0, job.scheduledAt.getTime() - Date.now())
+            : 0,
+          jobId: `email-${id}`,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 30_000 },
+        }
+      );
+      await webhookEndpointService.enqueueLatestForEmailEvent({
+        organizationId: job.organizationId,
+        emailJobId: id,
+        type: "QUEUED",
+      });
+    } catch (error) {
+      console.error("[send] durable queued email awaits dispatch", id, error);
+    }
+  },
 };

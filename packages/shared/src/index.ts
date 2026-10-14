@@ -59,6 +59,7 @@ export type CampaignStatus =
   | "SENT"
   | "CANCELLED";
 export type EmailJobStatus =
+  | "UNCERTAIN"
   | "PENDING"
   | "QUEUED"
   | "PROCESSING"
@@ -66,6 +67,23 @@ export type EmailJobStatus =
   | "FAILED"
   | "CANCELLED"
   | "SUPPRESSED";
+
+/** Logical message state; individual delivery outcomes remain on their jobs. */
+export function aggregateDeliveryStatus(
+  statuses: EmailJobStatus[]
+): EmailJobStatus | undefined {
+  const precedence: EmailJobStatus[] = [
+    "PROCESSING",
+    "QUEUED",
+    "PENDING",
+    "UNCERTAIN",
+    "SENT",
+    "FAILED",
+    "CANCELLED",
+    "SUPPRESSED",
+  ];
+  return precedence.find((status) => statuses.includes(status));
+}
 export type EmailEventType =
   | "QUEUED"
   | "SENT"
@@ -77,6 +95,10 @@ export type EmailEventType =
   | "FAILED";
 export type EmailOrigin = "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
 export type ApiErrorCode =
+  | "draft_completed"
+  | "draft_conflict"
+  | "send_conflict"
+  | "attachment_conflict"
   | "invalid_api_key"
   | "missing_smtp_connection"
   | "invalid_template"
@@ -236,6 +258,8 @@ export interface InboxAccount {
 }
 
 export interface InboundMessage {
+  readPending?: boolean;
+  readSyncError?: string | null;
   id: string;
   organizationId: string;
   inboxAccountId: string;
@@ -1473,12 +1497,17 @@ export const inboundMessageReplySchema = z
   .object({
     organizationId: z.string().min(1),
     idempotencyKey: z.string().min(1).max(128).optional(),
+    draftId: z.string().min(1).optional(),
+    expectedRevision: z.number().int().positive().optional(),
     smtpConnectionId: z.string().min(1).optional(),
     subject: z.string().min(1),
     html: z.string().optional(),
     text: z.string().optional(),
     attachmentIds: z.array(z.string().min(1)).max(50).optional(),
     replyAll: z.boolean().optional(),
+    to: z.array(emailAddressSchema).optional(),
+    cc: z.array(emailAddressSchema).optional(),
+    bcc: z.array(emailAddressSchema).optional(),
   })
   .refine((input) => Boolean(input.html || input.text), {
     message: "Provide an email body",
@@ -2323,6 +2352,8 @@ export const manualEmailSendSchema = z
   .object({
     organizationId: z.string().min(1),
     idempotencyKey: z.string().min(1).max(128).optional(),
+    draftId: z.string().min(1).optional(),
+    expectedRevision: z.number().int().positive().optional(),
     to: z.array(emailAddressSchema).optional(),
     cc: z.array(emailAddressSchema).optional(),
     bcc: z.array(emailAddressSchema).optional(),
@@ -2343,6 +2374,8 @@ export const manualEmailSendSchema = z
   .refine(
     (input) =>
       (input.to?.length ?? 0) +
+        (input.cc?.length ?? 0) +
+        (input.bcc?.length ?? 0) +
         (input.contactIds?.length ?? 0) +
         (input.listIds?.length ?? 0) >
       0,
@@ -2383,6 +2416,8 @@ export const recurringSendCreateSchema = z
   .refine(
     (input) =>
       (input.to?.length ?? 0) +
+        (input.cc?.length ?? 0) +
+        (input.bcc?.length ?? 0) +
         (input.contactIds?.length ?? 0) +
         (input.listIds?.length ?? 0) >
       0,
@@ -2435,11 +2470,10 @@ export interface EmailPreviewResult {
   };
 }
 
-// Per-recipient delivery status for a manual send. A manual send is one EmailJob
-// addressed to many recipients, so granularity is derived from the SMTP
-// accepted/rejected result recorded on the SENT/BOUNCED events plus thread-level
-// engagement events — not separate jobs per recipient.
+// A manual message groups per-recipient delivery jobs under one send identity.
+// Legacy multi-recipient jobs also derive outcomes from SMTP and DSN events.
 export type RecipientDeliveryStatus =
+  | "uncertain"
   | "delivered"
   | "rejected"
   | "pending"
@@ -2632,6 +2666,7 @@ export interface SentEmailEvent {
 }
 
 export interface SentEmailDetail extends SentEmail {
+  recipients?: RecipientDelivery[];
   /**
    * The body as stored, which is the body *before* the send worker injected
    * open/click tracking and appended the unsubscribe footer. That is the honest
@@ -2661,6 +2696,7 @@ export interface SentEmailDetail extends SentEmail {
 // recipient arrays are plain strings, not validated emails) so an in-progress
 // message can always be saved. Validation happens at send time.
 export const emailDraftSchema = z.object({
+  clientId: z.string().min(1).max(128).optional(),
   organizationId: z.string().min(1),
   inboundMessageId: z.string().min(1).optional(),
   subject: z.string().optional(),
@@ -2680,12 +2716,19 @@ export const emailDraftSchema = z.object({
 export type EmailDraftInput = z.infer<typeof emailDraftSchema>;
 
 export const emailDraftUpdateSchema = emailDraftSchema
-  .omit({ organizationId: true })
-  .partial();
+  .omit({ organizationId: true, clientId: true })
+  .partial()
+  .extend({
+    expectedRevision: z.number().int().positive(),
+    mutationId: z.string().min(1).max(128),
+  });
 
 export type EmailDraftUpdateInput = z.infer<typeof emailDraftUpdateSchema>;
 
 export interface EmailDraft {
+  clientId?: string | null;
+  revision: number;
+  completedSendId?: string | null;
   inboundMessageId?: string | null;
   id: string;
   organizationId: string;

@@ -408,6 +408,14 @@ function EmailStudioWorkspace() {
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState<
+    Array<{ file: File; uploadId: string; error: string }>
+  >([]);
+  const uploadBackup = useRef(pendingUploads);
+  function updateUploads(next: typeof pendingUploads) {
+    uploadBackup.current = next;
+    setPendingUploads(next);
+  }
   /*
     Progressive disclosure (§3). Most sends carbon-copy nobody and attach
     nothing, so neither group is on screen until it is asked for — or until
@@ -440,7 +448,13 @@ function EmailStudioWorkspace() {
     orgId: string,
     options: { follow: boolean; recipientSummary: string }
   ) {
-    const TERMINAL = new Set(["SENT", "FAILED", "SUPPRESSED", "CANCELLED"]);
+    const TERMINAL = new Set([
+      "SENT",
+      "FAILED",
+      "SUPPRESSED",
+      "CANCELLED",
+      "UNCERTAIN",
+    ]);
     const MAX_POLLS = 15;
     const POLL_INTERVAL_MS = 1000;
 
@@ -456,7 +470,19 @@ function EmailStudioWorkspace() {
         }
         if (TERMINAL.has(status.status)) {
           if (status.status === "SENT") {
-            toast.success(`Sent to ${options.recipientSummary}.`);
+            toast.success(
+              status.recipients.some((recipient) =>
+                ["failed", "rejected", "suppressed", "uncertain"].includes(
+                  recipient.status
+                )
+              )
+                ? "Sent with recipient issues — check the delivery outcomes."
+                : `Sent to ${options.recipientSummary}.`
+            );
+          } else if (status.status === "UNCERTAIN") {
+            toast.error(
+              "Delivery could not be confirmed. Check the recipient or mail server before sending again."
+            );
           } else if (status.status === "FAILED") {
             toast.error(
               "The email could not be delivered — check the outbox for details."
@@ -494,6 +520,14 @@ function EmailStudioWorkspace() {
 
   // Drafts.
   const [draftId, setDraftId] = useState<string | null>(null);
+  const draftIdentity = useRef<{ id: string | null; revision: number }>({
+    id: null,
+    revision: 1,
+  });
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  const [draftConflict, setDraftConflict] = useState(false);
+  const [acceptedSendId, setAcceptedSendId] = useState<string | null>(null);
+  const acceptedSend = useRef<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   /**
@@ -643,6 +677,7 @@ function EmailStudioWorkspace() {
     setReplyTo("");
     setSelectedListIds([]);
     setAttachments([]);
+    updateUploads([]);
     setCopyRevealed(false);
     setAttachmentsRevealed(false);
     setTemplatePickerOpen(false);
@@ -652,6 +687,10 @@ function EmailStudioWorkspace() {
     setRecurring(false);
     setRecurrence(emptyRecurrence);
     setDraftId(null);
+    draftIdentity.current = { id: null, revision: 1 };
+    setDraftConflict(false);
+    setAcceptedSendId(null);
+    acceptedSend.current = null;
     setLastSavedAt(null);
     // Drop this message's local copy and take a fresh key: the next thing typed
     // here is a different email, and must not overwrite the queued one.
@@ -703,39 +742,82 @@ function EmailStudioWorkspace() {
     setToEmails(next);
   }
 
-  async function handleFileSelect(event: FormEvent<HTMLInputElement>) {
-    const input = event.currentTarget;
-    const files = Array.from(input.files ?? []);
-    // Reset the input so selecting the same file again still fires onChange.
-    input.value = "";
-    if (files.length === 0 || !organizationId) {
-      return;
-    }
-
+  async function processUploads(entries: typeof pendingUploads) {
+    if (!entries.length || !organizationId) return;
+    updateUploads([
+      ...uploadBackup.current,
+      ...entries.filter(
+        (entry) =>
+          !uploadBackup.current.some((old) => old.uploadId === entry.uploadId)
+      ),
+    ]);
     setUploading(true);
     try {
-      // Link uploads to the draft so resuming it restores the attachments. Make
-      // sure a draft exists first (the composer otherwise only auto-saves once
-      // there is content worth keeping).
-      const ensuredDraftId = draftId ?? (await saveDraft(true)) ?? undefined;
-      for (const file of files) {
+      // Save file bytes and retry identities in the same device backup as the
+      // writing before uploading. A lost response can replay the same upload.
+      const ensuredDraftId = await saveDraft(true);
+      if (!ensuredDraftId)
+        throw new Error(
+          "Couldn't save this draft before uploading. Your files are waiting here; try again."
+        );
+      for (const entry of entries) {
         try {
-          const attachment = await api.uploadAttachment(file, {
+          const attachment = await api.uploadAttachment(entry.file, {
             organizationId,
             emailDraftId: ensuredDraftId,
+            uploadId: entry.uploadId,
           });
-          setAttachments((current) => [...current, attachment]);
+          setAttachments((current) =>
+            current.some((item) => item.id === attachment.id)
+              ? current
+              : [...current, attachment]
+          );
+          updateUploads(
+            uploadBackup.current.filter(
+              (item) => item.uploadId !== entry.uploadId
+            )
+          );
         } catch (error) {
-          toast.error(
-            error instanceof Error
-              ? `${file.name}: ${error.message}`
-              : `Unable to upload ${file.name}`
+          updateUploads(
+            uploadBackup.current.map((item) =>
+              item.uploadId === entry.uploadId
+                ? {
+                    ...item,
+                    error:
+                      error instanceof Error
+                        ? error.message
+                        : "Upload interrupted. Try again.",
+                  }
+                : item
+            )
           );
         }
       }
+    } catch (error) {
+      updateUploads(
+        uploadBackup.current.map((item) => ({
+          ...item,
+          error:
+            error instanceof Error ? error.message : "Couldn't prepare files.",
+        }))
+      );
     } finally {
       setUploading(false);
+      void saveDraft(true);
     }
+  }
+
+  async function handleFileSelect(event: FormEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const files = Array.from(input.files ?? []);
+    input.value = "";
+    await processUploads(
+      files.map((file) => ({
+        file,
+        uploadId: newLocalDraftId(),
+        error: "Preparing upload…",
+      }))
+    );
   }
 
   /**
@@ -764,26 +846,32 @@ function EmailStudioWorkspace() {
 
   const saveDraft = useCallback(
     async (silent: boolean): Promise<string | null> => {
-      if (!organizationId) {
-        return null;
-      }
-      setSavingDraft(true);
-      try {
-        const payload = {
-          subject,
-          html,
-          to: toEmails,
-          cc: ccEmails,
-          bcc: bccEmails,
-          // Sent even when blank so clearing it survives the round trip.
-          replyTo,
-          listIds: selectedListIds,
-          smtpConnectionId:
-            smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
-          templateId: templateId === NO_TEMPLATE ? undefined : templateId,
-        };
+      const work = saveChain.current
+        .catch(() => undefined)
+        .then(async (): Promise<string | null> => {
+          if (!organizationId) {
+            return null;
+          }
+          if (acceptedSend.current) return null;
+          setSavingDraft(true);
+          try {
+            const payload = {
+              subject,
+              html,
+              to: toEmails,
+              cc: ccEmails,
+              bcc: bccEmails,
+              // Sent even when blank so clearing it survives the round trip.
+              replyTo,
+              listIds: selectedListIds,
+              smtpConnectionId:
+                smtpConnectionId === DEFAULT_SMTP
+                  ? undefined
+                  : smtpConnectionId,
+              templateId: templateId === NO_TEMPLATE ? undefined : templateId,
+            };
 
-        /*
+            /*
           Local first, network second (§5).
 
           The order is the whole point: this app is installed on phones, and the
@@ -793,34 +881,50 @@ function EmailStudioWorkspace() {
           dead battery — the server copy is then just the version other devices
           can see.
         */
-        const snapshot = {
-          userId: user?.id ?? "",
-          localId: localDraftId.current,
-          organizationId,
-          draftId,
-          payload,
-          updatedAt: new Date().toISOString(),
-        };
-        await savePendingDraft(snapshot);
+            const snapshot = {
+              pendingUploads: uploadBackup.current,
+              userId: user?.id ?? "",
+              localId: localDraftId.current,
+              organizationId,
+              draftId: draftIdentity.current.id,
+              revision: draftIdentity.current.revision,
+              mutationId: newLocalDraftId(),
+              payload,
+              updatedAt: new Date().toISOString(),
+            };
+            await savePendingDraft(snapshot);
 
-        if (user?.id && getSession().user?.id !== user.id) return null;
-        let saved: EmailDraft;
-        if (draftId) {
-          saved = await api.updateEmailDraft(draftId, payload);
-        } else {
-          saved = await api.createEmailDraft({ organizationId, ...payload });
-          setDraftId(saved.id);
-        }
-        // Acknowledged by the server, so the local copy has done its job.
-        await acknowledgePendingDraft(snapshot, saved.id);
-        setLastSavedAt(saved.updatedAt);
-        setPendingLocally(false);
-        if (!silent) {
-          toast.success("Draft saved.");
-        }
-        return saved.id;
-      } catch (error) {
-        /*
+            if (user?.id && getSession().user?.id !== user.id) return null;
+            let saved: EmailDraft;
+            if (snapshot.draftId) {
+              saved = await api.updateEmailDraft(snapshot.draftId, {
+                ...payload,
+                expectedRevision: snapshot.revision,
+                mutationId: snapshot.mutationId,
+              });
+            } else {
+              saved = await api.createEmailDraft({
+                organizationId,
+                clientId: snapshot.localId,
+                ...payload,
+              });
+              setDraftId(saved.id);
+            }
+            // Acknowledged by the server, so the local copy has done its job.
+            draftIdentity.current = {
+              id: saved.id,
+              revision: saved.revision ?? 1,
+            };
+            await acknowledgePendingDraft(snapshot, saved.id, saved.revision);
+            setDraftConflict(false);
+            setLastSavedAt(saved.updatedAt);
+            setPendingLocally(false);
+            if (!silent) {
+              toast.success("Draft saved.");
+            }
+            return saved.id;
+          } catch (error) {
+            /*
           Two very different failures wear the same exception here, and telling
           them apart is what keeps the offline queue honest.
 
@@ -830,38 +934,44 @@ function EmailStudioWorkspace() {
           validation error or a revoked membership. Keep the writing in both
           cases; a refusal needs a visible error when saving explicitly.
         */
-        const status =
-          typeof error === "object" && error !== null && "status" in error
-            ? error.status
-            : undefined;
-        const retryable =
-          typeof status !== "number" ||
-          status === 0 ||
-          status >= 500 ||
-          status === 401 ||
-          status === 403;
+            const status =
+              typeof error === "object" && error !== null && "status" in error
+                ? error.status
+                : undefined;
+            const retryable =
+              typeof status !== "number" ||
+              status === 0 ||
+              status >= 500 ||
+              status === 401 ||
+              status === 403;
 
-        if (retryable) {
-          setPendingLocally(true);
-          if (!silent) {
-            toast.message(
-              "Saved on this device. It'll sync when the connection is back."
-            );
+            if (status === 409) setDraftConflict(true);
+            if (retryable) {
+              setPendingLocally(true);
+              if (!silent) {
+                toast.message(
+                  "Saved on this device. It'll sync when the connection is back."
+                );
+              }
+            } else {
+              // A rejected save is still the user's writing. Preserve its device
+              // backup so validation or a deleted server draft cannot erase it.
+              setPendingLocally(true);
+              if (!silent) {
+                toast.error(
+                  error instanceof Error
+                    ? error.message
+                    : "Unable to save draft"
+                );
+              }
+            }
+            return null;
+          } finally {
+            setSavingDraft(false);
           }
-        } else {
-          // A rejected save is still the user's writing. Preserve its device
-          // backup so validation or a deleted server draft cannot erase it.
-          setPendingLocally(true);
-          if (!silent) {
-            toast.error(
-              error instanceof Error ? error.message : "Unable to save draft"
-            );
-          }
-        }
-        return null;
-      } finally {
-        setSavingDraft(false);
-      }
+        });
+      saveChain.current = work;
+      return work;
     },
     [
       organizationId,
@@ -938,7 +1048,12 @@ function EmailStudioWorkspace() {
       }
 
       localDraftId.current = latest.localId;
+      updateUploads(latest.pendingUploads ?? []);
       setDraftId(latest.draftId);
+      draftIdentity.current = {
+        id: latest.draftId,
+        revision: latest.revision ?? 1,
+      };
       setSubject(latest.payload.subject);
       setHtml(latest.payload.html);
       setToEmails(latest.payload.to);
@@ -975,6 +1090,10 @@ function EmailStudioWorkspace() {
         return;
       }
       setDraftId(mine.draft.id);
+      draftIdentity.current = {
+        id: mine.draft.id,
+        revision: mine.draft.revision ?? 1,
+      };
       setLastSavedAt(mine.draft.updatedAt);
       setPendingLocally(false);
       toast.success("Draft synced.");
@@ -996,6 +1115,10 @@ function EmailStudioWorkspace() {
         return;
       }
       setDraftId(draft.id);
+      draftIdentity.current = { id: draft.id, revision: draft.revision ?? 1 };
+      acceptedSend.current = draft.completedSendId ?? null;
+      setAcceptedSendId(acceptedSend.current);
+      setDraftConflict(false);
       setSubject(draft.subject ?? "");
       setHtml(draft.html ?? "");
       setToEmails(draft.to ?? []);
@@ -1081,6 +1204,12 @@ function EmailStudioWorkspace() {
    * delivered email exactly where it matters (pasted HTML, tracked links).
    */
   async function openPreview() {
+    if (uploadBackup.current.length) {
+      toast.error(
+        "Some files need attention. Retry or remove them before sending."
+      );
+      return;
+    }
     if (!organizationId) {
       toast.error("Select an organization in Settings first.");
       return;
@@ -1117,11 +1246,20 @@ function EmailStudioWorkspace() {
 
   async function send(event: FormEvent) {
     event.preventDefault();
+    if (uploadBackup.current.length) {
+      toast.error(
+        "Some files need attention. Retry or remove them before sending."
+      );
+      return;
+    }
     if (!organizationId) {
       toast.error("Select an organization in Settings first.");
       return;
     }
-    if (toEmails.length === 0 && selectedListIds.length === 0) {
+    if (
+      toEmails.length + ccEmails.length + bccEmails.length === 0 &&
+      selectedListIds.length === 0
+    ) {
       toast.error("Add at least one recipient.");
       return;
     }
@@ -1217,7 +1355,7 @@ function EmailStudioWorkspace() {
 
     setSending(true);
     try {
-      const sendDraftId = draftId ?? (await saveDraft(true));
+      const sendDraftId = await saveDraft(true);
       if (!sendDraftId)
         throw new Error(
           "Couldn't save this email before sending. Your message has been kept; try again."
@@ -1225,6 +1363,8 @@ function EmailStudioWorkspace() {
       const result = await api.sendManualEmail({
         organizationId,
         idempotencyKey: sendDraftId,
+        draftId: sendDraftId,
+        expectedRevision: draftIdentity.current.revision,
         to: toEmails,
         cc: ccEmails.length ? ccEmails : undefined,
         bcc: bccEmails.length ? bccEmails : undefined,
@@ -1243,7 +1383,7 @@ function EmailStudioWorkspace() {
         scheduledAt: scheduledAtIso,
       });
       // The send was accepted — discard the working draft so it doesn't linger.
-      await api.deleteEmailDraft(sendDraftId).catch(() => undefined);
+
       if (scheduledAtIso) {
         toast.success(
           `Scheduled — sends ${formatSendTime(scheduledAtIso)} to ${recipientSummary}.`,
@@ -1276,6 +1416,26 @@ function EmailStudioWorkspace() {
         recipientSummary,
       });
     } catch (error) {
+      // A lost HTTP response must not invite another send. The retained server
+      // draft records the accepted job atomically with all delivery jobs.
+      const recoveryDraftId = draftIdentity.current.id;
+      if (recoveryDraftId) {
+        const recovered = await api
+          .getEmailDraft(recoveryDraftId)
+          .catch(() => null);
+        if (recovered?.completedSendId) {
+          acceptedSend.current = recovered.completedSendId;
+          setAcceptedSendId(recovered.completedSendId);
+          void pollDeliveryStatus(recovered.completedSendId, organizationId, {
+            follow: true,
+            recipientSummary,
+          });
+          toast.message(
+            "This email was already accepted. Your writing is kept here; check its delivery status below."
+          );
+          return;
+        }
+      }
       toast.error(
         error instanceof Error ? error.message : "Couldn't send the email."
       );
@@ -1766,7 +1926,14 @@ function EmailStudioWorkspace() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={sending || uploading || noSmtp || !organizationId}
+                  disabled={
+                    sending ||
+                    uploading ||
+                    pendingUploads.length > 0 ||
+                    Boolean(acceptedSendId) ||
+                    noSmtp ||
+                    !organizationId
+                  }
                 >
                   {sending ? <Spinner /> : <Send className="h-4 w-4" />}
                   {recurring
@@ -1781,6 +1948,76 @@ function EmailStudioWorkspace() {
                   pending state says which, rather than letting an unsynced
                   draft wear the same reassuring line as a synced one.
                 */}
+                {pendingUploads.length ? (
+                  <div role="alert" className="space-y-3 text-ui text-err">
+                    <p>
+                      Some files need attention before this email can be sent.
+                    </p>
+                    {pendingUploads.map((entry) => (
+                      <div key={entry.uploadId} className="space-y-2">
+                        <p className="break-all">
+                          {entry.file.name}: {entry.error}
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            disabled={uploading || sending}
+                            onClick={() => void processUploads([entry])}
+                          >
+                            Retry {entry.file.name}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            disabled={uploading || sending}
+                            onClick={() => {
+                              updateUploads(
+                                uploadBackup.current.filter(
+                                  (item) => item.uploadId !== entry.uploadId
+                                )
+                              );
+                              void saveDraft(true);
+                            }}
+                          >
+                            Remove file
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {acceptedSendId ? (
+                  <div role="status" className="space-y-2 text-ui">
+                    <p>
+                      This email was already accepted for delivery. Your writing
+                      is kept here.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        void pollDeliveryStatus(
+                          acceptedSendId,
+                          organizationId as string,
+                          {
+                            follow: false,
+                            recipientSummary:
+                              describeRecipientCount(totalRecipients),
+                          }
+                        )
+                      }
+                    >
+                      Check delivery status
+                    </Button>
+                  </div>
+                ) : draftConflict ? (
+                  <p role="alert" className="text-ui text-err">
+                    This draft changed on another device or was already sent.
+                    Your writing is kept on this device. Open Drafts or Outbox
+                    to review it before sending again.
+                  </p>
+                ) : null}
                 {pendingLocally ? (
                   <p className="text-center text-meta text-warn">
                     Saved on this device — syncs when you&rsquo;re back online
@@ -1949,6 +2186,7 @@ const DELIVERY_BADGE: Record<
   RecipientDelivery["status"],
   "default" | "secondary" | "outline" | "destructive"
 > = {
+  uncertain: "destructive",
   delivered: "default",
   pending: "secondary",
   rejected: "destructive",
@@ -1997,7 +2235,11 @@ function DeliveryStatusCard({
               variant={DELIVERY_BADGE[recipient.status]}
               className="shrink-0 capitalize"
             >
-              {recipient.status}
+              {recipient.status === "uncertain"
+                ? "Delivery unconfirmed"
+                : recipient.status === "delivered"
+                  ? "Sent to mail server"
+                  : recipient.status}
             </Badge>
           </div>
         ))}

@@ -48,12 +48,23 @@ const workers = [
 // deploy or `docker stop` never kills a send mid-SMTP-conversation and never
 // strands an EmailJob in PROCESSING (that recovery path stays as the backstop
 // for hard crashes).
+let dispatching = false;
+const dispatchTimer = setInterval(() => {
+  if (dispatching || shuttingDown) return;
+  dispatching = true;
+  void recoverQueuedWork()
+    .catch((err) => logger.error({ err }, "queue recovery failed"))
+    .finally(() => {
+      dispatching = false;
+    });
+}, 30_000);
 let shuttingDown = false;
 async function shutdown(signal: string) {
   if (shuttingDown) {
     return;
   }
   shuttingDown = true;
+  clearInterval(dispatchTimer);
   logger.info({ signal }, "shutdown signal received; finishing in-flight jobs");
   await Promise.allSettled(workers.map((worker) => worker.close()));
   await prisma.$disconnect().catch(() => undefined);
@@ -72,7 +83,10 @@ for (const worker of workers) {
   });
 
   worker.on("failed", (job, error) => {
-    logger.error({ queue: worker.name, jobId: job?.id, err: error }, "job failed");
+    logger.error(
+      { queue: worker.name, jobId: job?.id, err: error },
+      "job failed"
+    );
   });
 }
 

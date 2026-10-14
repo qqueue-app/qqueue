@@ -53,7 +53,7 @@ import {
   templateSchema,
   timezoneSchema,
   webhookEndpointSchema,
-  webhookEndpointUpdateSchema
+  webhookEndpointUpdateSchema,
 } from "./index.js";
 
 describe("isValidCron", () => {
@@ -117,7 +117,7 @@ describe("registerSchema", () => {
   it("accepts minimal valid input", () => {
     const result = registerSchema.parse({
       email: "a@b.com",
-      password: "password123"
+      password: "password123",
     });
     expect(result.email).toBe("a@b.com");
   });
@@ -164,7 +164,7 @@ describe("contactSchema", () => {
       email: "a@b.com",
       firstName: "A",
       lastName: "B",
-      metadata: { tier: "gold" }
+      metadata: { tier: "gold" },
     });
     expect(result.organizationId).toBe("org_1");
   });
@@ -179,7 +179,7 @@ describe("contactSchema", () => {
     const result = contactSchema.parse({
       organizationId: "org_1",
       email: "a@b.com",
-      tags: ["vip", "newsletter"]
+      tags: ["vip", "newsletter"],
     });
     expect(result.tags).toEqual(["vip", "newsletter"]);
   });
@@ -192,16 +192,16 @@ describe("contactList schemas", () => {
         organizationId: "org_1",
         name: "List",
         description: "VIP customers",
-        contactIds: ["c1", "c2"]
+        contactIds: ["c1", "c2"],
       }).success
     ).toBe(true);
   });
 
   it("allows partial updates", () => {
     expect(contactListUpdateSchema.safeParse({}).success).toBe(true);
-    expect(
-      contactListUpdateSchema.safeParse({ name: "New" }).success
-    ).toBe(true);
+    expect(contactListUpdateSchema.safeParse({ name: "New" }).success).toBe(
+      true
+    );
   });
 });
 
@@ -212,7 +212,7 @@ describe("templateSchema", () => {
         organizationId: "org_1",
         name: "T",
         subject: "",
-        html: "<p>hi</p>"
+        html: "<p>hi</p>",
       }).success
     ).toBe(false);
   });
@@ -223,7 +223,7 @@ describe("templateSchema", () => {
       name: "T",
       subject: "Hi",
       html: "<p>hi</p>",
-      mjml: "<mjml><mj-body /></mjml>"
+      mjml: "<mjml><mj-body /></mjml>",
     });
     expect(result.mjml).toBe("<mjml><mj-body /></mjml>");
   });
@@ -235,7 +235,7 @@ describe("campaign schemas", () => {
       campaignSchema.safeParse({
         organizationId: "org_1",
         name: "Spring",
-        scheduledAt: "2026-01-01T00:00:00.000Z"
+        scheduledAt: "2026-01-01T00:00:00.000Z",
       }).success
     ).toBe(true);
   });
@@ -245,7 +245,7 @@ describe("campaign schemas", () => {
       campaignSchema.safeParse({
         organizationId: "org_1",
         name: "Spring",
-        scheduledAt: "not-a-date"
+        scheduledAt: "not-a-date",
       }).success
     ).toBe(false);
   });
@@ -277,7 +277,7 @@ describe("cron and timezone schemas", () => {
     expect(
       campaignRecurrenceSchema.safeParse({
         cronExpression: "0 9 * * 1",
-        timezone: "UTC"
+        timezone: "UTC",
       }).success
     ).toBe(true);
   });
@@ -294,8 +294,8 @@ describe("sendEmailSchema", () => {
       headers: {
         "List-Unsubscribe": "<https://example.com/unsubscribe?token=signed>",
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-        "X-Campaign-Id": "october"
-      }
+        "X-Campaign-Id": "october",
+      },
     });
     expect(parsed.headers?.["List-Unsubscribe-Post"]).toBe(
       "List-Unsubscribe=One-Click"
@@ -311,16 +311,16 @@ describe("sendEmailSchema", () => {
     { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
     {
       "List-Unsubscribe": "<http://example.com/u>",
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
     {
       "List-Unsubscribe": "<https://example.com/u>",
-      "List-Unsubscribe-Post": "bad"
+      "List-Unsubscribe-Post": "bad",
     },
     {
       "List-Unsubscribe": "<https://example.com/unsubscribe token>",
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
-    }
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
   ])("rejects unsafe or incomplete message headers: %j", (headers) => {
     expect(
       sendEmailSchema.safeParse({
@@ -328,7 +328,7 @@ describe("sendEmailSchema", () => {
         to: "a@b.com",
         subject: "Hi",
         text: "Body",
-        headers
+        headers,
       }).success
     ).toBe(false);
   });
@@ -339,7 +339,7 @@ describe("sendEmailSchema", () => {
         organizationId: "org_1",
         to: "a@b.com",
         templateId: "tpl_1",
-        variables: { name: "A" }
+        variables: { name: "A" },
       }).success
     ).toBe(true);
   });
@@ -359,7 +359,7 @@ describe("sendEmailSchema", () => {
         bcc: ["b1@b.com"],
         replyTo: "reply@b.com",
         subject: "Hi",
-        text: "Body"
+        text: "Body",
       }).success
     ).toBe(true);
   });
@@ -370,7 +370,7 @@ describe("sendEmailSchema", () => {
         organizationId: "org_1",
         to: "a@b.com",
         subject: "Hi",
-        text: "Body"
+        text: "Body",
       }).success
     ).toBe(true);
   });
@@ -380,7 +380,7 @@ describe("sendEmailSchema", () => {
       sendEmailSchema.safeParse({
         organizationId: "org_1",
         to: "a@b.com",
-        cc: ["nope"]
+        cc: ["nope"],
       }).success
     ).toBe(false);
   });
@@ -390,7 +390,7 @@ describe("sendEmailSchema", () => {
       sendEmailSchema.safeParse({
         organizationId: "org_1",
         to: "a@b.com",
-        bcc: ["also-nope"]
+        bcc: ["also-nope"],
       }).success
     ).toBe(false);
   });
@@ -400,7 +400,7 @@ describe("sendEmailSchema", () => {
       sendEmailSchema.safeParse({
         organizationId: "org_1",
         to: "a@b.com",
-        replyTo: "not-an-email"
+        replyTo: "not-an-email",
       }).success
     ).toBe(false);
   });
@@ -412,7 +412,7 @@ describe("sendEmailSchema", () => {
         to: "a@b.com",
         from: "support@acme.com",
         subject: "Hi",
-        text: "Body"
+        text: "Body",
       }).success
     ).toBe(true);
   });
@@ -422,7 +422,7 @@ describe("sendEmailSchema", () => {
       sendEmailSchema.safeParse({
         organizationId: "org_1",
         to: "a@b.com",
-        from: "Acme Support"
+        from: "Acme Support",
       }).success
     ).toBe(false);
   });
@@ -432,7 +432,7 @@ describe("sendEmailSchema", () => {
       organizationId: "org_1",
       to: "a@b.com",
       subject: "Hi",
-      text: "Body"
+      text: "Body",
     });
     expect(parsed.from).toBeUndefined();
   });
@@ -444,7 +444,7 @@ describe("sendEmailSchema", () => {
         to: "a@b.com",
         subject: "Hi",
         html: "<p>Hi</p>",
-        attachmentIds: ["att_1"]
+        attachmentIds: ["att_1"],
       }).success
     ).toBe(true);
   });
@@ -461,9 +461,9 @@ describe("sendEmailSchema", () => {
             filename: "qr.png",
             contentBase64: Buffer.from("png-bytes").toString("base64"),
             contentType: "image/png",
-            cid: "qr"
-          }
-        ]
+            cid: "qr",
+          },
+        ],
       }).success
     ).toBe(true);
   });
@@ -471,7 +471,7 @@ describe("sendEmailSchema", () => {
   it("rejects more than the inline attachment cap", () => {
     const one = {
       filename: "a.png",
-      contentBase64: Buffer.from("x").toString("base64")
+      contentBase64: Buffer.from("x").toString("base64"),
     };
     expect(
       sendEmailSchema.safeParse({
@@ -479,7 +479,7 @@ describe("sendEmailSchema", () => {
         to: "a@b.com",
         subject: "Hi",
         html: "<p>Hi</p>",
-        attachments: Array.from({ length: 11 }, () => one)
+        attachments: Array.from({ length: 11 }, () => one),
       }).success
     ).toBe(false);
   });
@@ -497,7 +497,7 @@ describe("base64DecodedBytes", () => {
 describe("inlineAttachmentSchema", () => {
   const valid = {
     filename: "qr.png",
-    contentBase64: Buffer.from("png-bytes").toString("base64")
+    contentBase64: Buffer.from("png-bytes").toString("base64"),
   };
 
   it("accepts a minimal attachment without cid or contentType", () => {
@@ -545,9 +545,9 @@ describe("webhook endpoint schemas", () => {
     expect(outboundWebhookEventNameSchema.parse("email.delivered")).toBe(
       "email.delivered"
     );
-    expect(outboundWebhookEventNameSchema.safeParse("email.unknown").success).toBe(
-      false
-    );
+    expect(
+      outboundWebhookEventNameSchema.safeParse("email.unknown").success
+    ).toBe(false);
   });
 
   it("accepts a valid webhook endpoint", () => {
@@ -557,7 +557,7 @@ describe("webhook endpoint schemas", () => {
         name: "Production webhook",
         url: "https://example.com/webhooks/qqueue",
         events: ["email.sent", "email.failed"],
-        enabled: true
+        enabled: true,
       }).success
     ).toBe(true);
   });
@@ -569,7 +569,7 @@ describe("webhook endpoint schemas", () => {
   it("accepts partial webhook endpoint updates", () => {
     expect(
       webhookEndpointUpdateSchema.safeParse({
-        events: ["email.opened"]
+        events: ["email.opened"],
       }).success
     ).toBe(true);
   });
@@ -586,7 +586,7 @@ describe("smtpConnection schemas", () => {
         secure: false,
         username: "user",
         password: "pass",
-        fromEmail: "from@example.com"
+        fromEmail: "from@example.com",
       }).success
     ).toBe(true);
   });
@@ -601,7 +601,7 @@ describe("smtpConnection schemas", () => {
         secure: false,
         username: "user",
         password: "pass",
-        fromEmail: "from@example.com"
+        fromEmail: "from@example.com",
       }).success
     ).toBe(false);
   });
@@ -610,9 +610,9 @@ describe("smtpConnection schemas", () => {
   // "remove the Reply-To" — distinct from omitting the key, which means
   // "leave whatever is stored".
   it("takes an empty Reply-To as a clear, and rejects a malformed one", () => {
-    expect(
-      smtpConnectionUpdateSchema.safeParse({ replyTo: "" }).success
-    ).toBe(true);
+    expect(smtpConnectionUpdateSchema.safeParse({ replyTo: "" }).success).toBe(
+      true
+    );
     expect(
       smtpConnectionUpdateSchema.safeParse({ replyTo: "replies@example.com" })
         .success
@@ -634,7 +634,7 @@ describe("manualEmailSendSchema", () => {
   const base = {
     organizationId: "org_1",
     subject: "Hello",
-    html: "<p>Hi</p>"
+    html: "<p>Hi</p>",
   };
 
   it("accepts manually typed To recipients", () => {
@@ -670,7 +670,7 @@ describe("manualEmailSendSchema", () => {
       manualEmailSendSchema.safeParse({
         organizationId: "org_1",
         subject: "Hi",
-        to: ["a@x.com"]
+        to: ["a@x.com"],
       }).success
     ).toBe(false);
   });
@@ -681,7 +681,7 @@ describe("manualEmailSendSchema", () => {
         ...base,
         to: ["a@x.com"],
         cc: ["cc@x.com"],
-        bcc: ["bcc@x.com"]
+        bcc: ["bcc@x.com"],
       }).success
     ).toBe(true);
   });
@@ -691,7 +691,7 @@ describe("manualEmailSendSchema", () => {
       manualEmailSendSchema.safeParse({
         ...base,
         to: ["a@x.com"],
-        attachmentIds: ["att_1", "att_2"]
+        attachmentIds: ["att_1", "att_2"],
       }).success
     ).toBe(true);
   });
@@ -701,7 +701,7 @@ describe("manualEmailSendSchema", () => {
       manualEmailSendSchema.safeParse({
         ...base,
         to: ["a@x.com"],
-        attachmentIds: [""]
+        attachmentIds: [""],
       }).success
     ).toBe(false);
   });
@@ -719,7 +719,7 @@ describe("segmentFilterSchema", () => {
   it("defaults match to ANY and requires at least one tag", () => {
     const parsed = segmentFilterSchema.safeParse({
       organizationId: "org_1",
-      tags: ["vip"]
+      tags: ["vip"],
     });
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.match).toBe("ANY");
@@ -738,7 +738,7 @@ describe("segmentFilterSchema", () => {
         organizationId: "org_1",
         tags: ["a", "b"],
         match: "ALL",
-        status: "ACTIVE"
+        status: "ACTIVE",
       }).success
     ).toBe(true);
   });
@@ -749,14 +749,14 @@ describe("createListFromSegmentSchema", () => {
     expect(
       createListFromSegmentSchema.safeParse({
         organizationId: "org_1",
-        tags: ["vip"]
+        tags: ["vip"],
       }).success
     ).toBe(false);
     expect(
       createListFromSegmentSchema.safeParse({
         organizationId: "org_1",
         tags: ["vip"],
-        name: "VIPs"
+        name: "VIPs",
       }).success
     ).toBe(true);
   });
@@ -764,13 +764,13 @@ describe("createListFromSegmentSchema", () => {
 
 describe("csvImportSchema", () => {
   it("allows an optional target list", () => {
-    expect(
-      csvImportSchema.safeParse({ organizationId: "org_1" }).success
-    ).toBe(true);
+    expect(csvImportSchema.safeParse({ organizationId: "org_1" }).success).toBe(
+      true
+    );
     expect(
       csvImportSchema.safeParse({
         organizationId: "org_1",
-        contactListId: "list_1"
+        contactListId: "list_1",
       }).success
     ).toBe(true);
   });
@@ -779,7 +779,7 @@ describe("csvImportSchema", () => {
     expect(
       csvImportSchema.safeParse({
         organizationId: "org_1",
-        contactListName: "Newsletter signups"
+        contactListName: "Newsletter signups",
       }).success
     ).toBe(true);
   });
@@ -788,11 +788,11 @@ describe("csvImportSchema", () => {
     const parsed = csvImportSchema.safeParse({
       organizationId: "org_1",
       contactListId: "list_1",
-      contactListName: "Newsletter signups"
+      contactListName: "Newsletter signups",
     });
     expect(parsed.success).toBe(false);
     expect(parsed.success === false && parsed.error.issues[0].path).toEqual([
-      "contactListName"
+      "contactListName",
     ]);
   });
 
@@ -800,7 +800,7 @@ describe("csvImportSchema", () => {
     expect(
       csvImportSchema.safeParse({
         organizationId: "org_1",
-        contactListName: ""
+        contactListName: "",
       }).success
     ).toBe(false);
   });
@@ -811,7 +811,7 @@ describe("contactBulkDeleteSchema", () => {
     expect(
       contactBulkDeleteSchema.safeParse({
         organizationId: "org_1",
-        contactIds: []
+        contactIds: [],
       }).success
     ).toBe(false);
   });
@@ -820,7 +820,7 @@ describe("contactBulkDeleteSchema", () => {
     expect(
       contactBulkDeleteSchema.safeParse({
         organizationId: "org_1",
-        contactIds: ["c_1", "c_2"]
+        contactIds: ["c_1", "c_2"],
       }).success
     ).toBe(true);
   });
@@ -829,7 +829,7 @@ describe("contactBulkDeleteSchema", () => {
     expect(
       contactBulkDeleteSchema.safeParse({
         organizationId: "org_1",
-        contactIds: Array.from({ length: 1001 }, (_, i) => `c_${i}`)
+        contactIds: Array.from({ length: 1001 }, (_, i) => `c_${i}`),
       }).success
     ).toBe(false);
   });
@@ -843,7 +843,7 @@ describe("recurringSendCreateSchema", () => {
     html: "<p>hi</p>",
     to: ["person@example.com"],
     cronExpression: "0 9 * * 1",
-    timezone: "UTC"
+    timezone: "UTC",
   };
 
   it("accepts a valid recurring send", () => {
@@ -855,14 +855,14 @@ describe("recurringSendCreateSchema", () => {
       recurringSendCreateSchema.safeParse({
         ...base,
         to: undefined,
-        listIds: ["list_1"]
+        listIds: ["list_1"],
       }).success
     ).toBe(true);
     expect(
       recurringSendCreateSchema.safeParse({
         ...base,
         to: undefined,
-        contactIds: ["c_1"]
+        contactIds: ["c_1"],
       }).success
     ).toBe(true);
   });
@@ -870,22 +870,22 @@ describe("recurringSendCreateSchema", () => {
   it("rejects a send with no recipients at all", () => {
     const parsed = recurringSendCreateSchema.safeParse({
       ...base,
-      to: undefined
+      to: undefined,
     });
     expect(parsed.success).toBe(false);
     expect(parsed.success === false && parsed.error.issues[0].path).toEqual([
-      "to"
+      "to",
     ]);
   });
 
   it("rejects a send with no body", () => {
     const parsed = recurringSendCreateSchema.safeParse({
       ...base,
-      html: undefined
+      html: undefined,
     });
     expect(parsed.success).toBe(false);
     expect(parsed.success === false && parsed.error.issues[0].path).toEqual([
-      "html"
+      "html",
     ]);
   });
 
@@ -894,7 +894,7 @@ describe("recurringSendCreateSchema", () => {
       recurringSendCreateSchema.safeParse({
         ...base,
         html: undefined,
-        text: "plain"
+        text: "plain",
       }).success
     ).toBe(true);
   });
@@ -903,7 +903,7 @@ describe("recurringSendCreateSchema", () => {
     expect(
       recurringSendCreateSchema.safeParse({
         ...base,
-        cronExpression: "not a cron"
+        cronExpression: "not a cron",
       }).success
     ).toBe(false);
   });
@@ -912,7 +912,7 @@ describe("recurringSendCreateSchema", () => {
     expect(
       recurringSendCreateSchema.safeParse({
         ...base,
-        timezone: "Mars/Olympus_Mons"
+        timezone: "Mars/Olympus_Mons",
       }).success
     ).toBe(false);
   });
@@ -937,14 +937,14 @@ describe("suppressionCreateSchema", () => {
   it("defaults reason to MANUAL and validates the email", () => {
     const parsed = suppressionCreateSchema.safeParse({
       organizationId: "org_1",
-      email: "blocked@example.com"
+      email: "blocked@example.com",
     });
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.reason).toBe("MANUAL");
     expect(
       suppressionCreateSchema.safeParse({
         organizationId: "org_1",
-        email: "not-an-email"
+        email: "not-an-email",
       }).success
     ).toBe(false);
   });
@@ -955,7 +955,7 @@ describe("suppressionPolicySchema", () => {
     const parsed = suppressionPolicySchema.safeParse({
       organizationId: "org_1",
       softBounceThreshold: 3,
-      softBounceWindowDays: 30
+      softBounceWindowDays: 30,
     });
     expect(parsed.success).toBe(true);
   });
@@ -965,14 +965,14 @@ describe("suppressionPolicySchema", () => {
       suppressionPolicySchema.safeParse({
         organizationId: "org_1",
         softBounceThreshold: 0,
-        softBounceWindowDays: 30
+        softBounceWindowDays: 30,
       }).success
     ).toBe(false);
     expect(
       suppressionPolicySchema.safeParse({
         organizationId: "org_1",
         softBounceThreshold: 3,
-        softBounceWindowDays: 400
+        softBounceWindowDays: 400,
       }).success
     ).toBe(false);
   });
@@ -983,7 +983,7 @@ describe("domainThrottleSchema", () => {
     const parsed = domainThrottleSchema.safeParse({
       organizationId: "org_1",
       domain: "Gmail.com",
-      maxPerMinute: 30
+      maxPerMinute: 30,
     });
     expect(parsed.success && parsed.data.domain).toBe("gmail.com");
   });
@@ -991,7 +991,7 @@ describe("domainThrottleSchema", () => {
   it("defaults the domain to '' (the org-wide default cap)", () => {
     const parsed = domainThrottleSchema.safeParse({
       organizationId: "org_1",
-      maxPerMinute: 30
+      maxPerMinute: 30,
     });
     expect(parsed.success && parsed.data.domain).toBe("");
   });
@@ -1001,14 +1001,14 @@ describe("domainThrottleSchema", () => {
       domainThrottleSchema.safeParse({
         organizationId: "org_1",
         domain: "not a domain",
-        maxPerMinute: 30
+        maxPerMinute: 30,
       }).success
     ).toBe(false);
     expect(
       domainThrottleSchema.safeParse({
         organizationId: "org_1",
         domain: "gmail.com",
-        maxPerMinute: 0
+        maxPerMinute: 0,
       }).success
     ).toBe(false);
   });
@@ -1029,7 +1029,7 @@ describe("segmentRuleSchema + compileSegmentRules", () => {
 
   it("compiles status, emailDomain and createdAt leaves", () => {
     expect(compileSegmentRules({ field: "status", eq: "ACTIVE" })).toEqual({
-      status: "ACTIVE"
+      status: "ACTIVE",
     });
     expect(
       compileSegmentRules({ field: "emailDomain", eq: "Gmail.com" })
@@ -1037,7 +1037,7 @@ describe("segmentRuleSchema + compileSegmentRules", () => {
     expect(
       compileSegmentRules({
         field: "createdAt",
-        after: "2026-01-01T00:00:00.000Z"
+        after: "2026-01-01T00:00:00.000Z",
       })
     ).toEqual({ createdAt: { gte: "2026-01-01T00:00:00.000Z" } });
   });
@@ -1051,10 +1051,10 @@ describe("segmentRuleSchema + compileSegmentRules", () => {
           op: "OR",
           rules: [
             { field: "tags", match: "ANY", values: ["vip"] },
-            { field: "emailDomain", eq: "example.com" }
-          ]
-        }
-      ]
+            { field: "emailDomain", eq: "example.com" },
+          ],
+        },
+      ],
     });
     expect(compiled).toEqual({
       AND: [
@@ -1062,10 +1062,10 @@ describe("segmentRuleSchema + compileSegmentRules", () => {
         {
           OR: [
             { tags: { hasSome: ["vip"] } },
-            { email: { endsWith: "@example.com", mode: "insensitive" } }
-          ]
-        }
-      ]
+            { email: { endsWith: "@example.com", mode: "insensitive" } },
+          ],
+        },
+      ],
     });
   });
 
@@ -1074,14 +1074,14 @@ describe("segmentRuleSchema + compileSegmentRules", () => {
       segmentSchema.safeParse({
         organizationId: "org_1",
         name: "VIPs",
-        rules: { field: "tags", match: "ANY", values: ["vip"] }
+        rules: { field: "tags", match: "ANY", values: ["vip"] },
       }).success
     ).toBe(true);
     expect(
       segmentSchema.safeParse({
         organizationId: "org_1",
         name: "Bad",
-        rules: { field: "unknown", eq: "x" }
+        rules: { field: "unknown", eq: "x" },
       }).success
     ).toBe(false);
   });
@@ -1095,7 +1095,7 @@ describe("segmentRuleSchema + compileSegmentRules", () => {
       segmentSchema.safeParse({
         organizationId: "org_1",
         name: "Deep",
-        rules: rule
+        rules: rule,
       }).success
     ).toBe(false);
   });
@@ -1108,7 +1108,7 @@ describe("campaignSchema target exclusivity", () => {
         organizationId: "org_1",
         name: "C",
         contactListId: "l1",
-        segmentId: "s1"
+        segmentId: "s1",
       }).success
     ).toBe(false);
   });
@@ -1118,7 +1118,7 @@ describe("campaignSchema target exclusivity", () => {
       campaignSchema.safeParse({
         organizationId: "org_1",
         name: "C",
-        segmentId: "s1"
+        segmentId: "s1",
       }).success
     ).toBe(true);
   });
@@ -1134,8 +1134,8 @@ describe("abTestConfigSchema", () => {
         windowMin: 60,
         variants: [
           { label: "A", subject: "One" },
-          { label: "B", subject: "Two" }
-        ]
+          { label: "B", subject: "Two" },
+        ],
       }).success
     ).toBe(true);
   });
@@ -1154,7 +1154,7 @@ describe("abTestConfigSchema", () => {
         percent: 20,
         metric: "OPEN",
         windowMin: 60,
-        variants: [{ label: "A", subject: "One" }]
+        variants: [{ label: "A", subject: "One" }],
       }).success
     ).toBe(false);
     // percent capped at 50.
@@ -1166,8 +1166,8 @@ describe("abTestConfigSchema", () => {
         windowMin: 60,
         variants: [
           { label: "A", subject: "One" },
-          { label: "B", subject: "Two" }
-        ]
+          { label: "B", subject: "Two" },
+        ],
       }).success
     ).toBe(false);
   });
@@ -1210,9 +1210,9 @@ describe("applyVariables", () => {
   });
 
   it("substitutes known tokens with their values", () => {
-    expect(applyVariables("Hi {{name}}, order {{id}}", { name: "Ada", id: 42 })).toBe(
-      "Hi Ada, order 42"
-    );
+    expect(
+      applyVariables("Hi {{name}}, order {{id}}", { name: "Ada", id: 42 })
+    ).toBe("Hi Ada, order 42");
   });
 
   it("renders unknown, undefined, or null values as empty strings", () => {
@@ -1225,7 +1225,10 @@ describe("applyVariables", () => {
 describe("resolveVariableData", () => {
   it("seeds the map from declared defaults", () => {
     expect(
-      resolveVariableData([{ name: "greeting", defaultValue: "Hello" }], undefined)
+      resolveVariableData(
+        [{ name: "greeting", defaultValue: "Hello" }],
+        undefined
+      )
     ).toEqual({ greeting: "Hello" });
   });
 
@@ -1235,7 +1238,7 @@ describe("resolveVariableData", () => {
         [
           { name: "a", defaultValue: "" },
           { name: "b", defaultValue: null },
-          { name: "c" }
+          { name: "c" },
         ],
         undefined
       )
@@ -1245,14 +1248,16 @@ describe("resolveVariableData", () => {
   it("lets non-empty caller data override defaults", () => {
     expect(
       resolveVariableData([{ name: "name", defaultValue: "Friend" }], {
-        name: "Ada"
+        name: "Ada",
       })
     ).toEqual({ name: "Ada" });
   });
 
   it("falls back to the default when the override is empty", () => {
     expect(
-      resolveVariableData([{ name: "name", defaultValue: "Friend" }], { name: "" })
+      resolveVariableData([{ name: "name", defaultValue: "Friend" }], {
+        name: "",
+      })
     ).toEqual({ name: "Friend" });
   });
 
@@ -1281,23 +1286,27 @@ describe("contactActivityQuerySchema", () => {
 
 describe("emailDraftSchema", () => {
   it("permits an empty in-progress draft", () => {
-    expect(emailDraftSchema.safeParse({ organizationId: "org_1" }).success).toBe(
-      true
-    );
+    expect(
+      emailDraftSchema.safeParse({ organizationId: "org_1" }).success
+    ).toBe(true);
   });
 
   it("accepts unvalidated recipient strings for partial drafts", () => {
     expect(
       emailDraftSchema.safeParse({
         organizationId: "org_1",
-        to: ["half-typed"]
+        to: ["half-typed"],
       }).success
     ).toBe(true);
   });
 
   it("allows partial updates without an organization id", () => {
     expect(
-      emailDraftUpdateSchema.safeParse({ subject: "Updated" }).success
+      emailDraftUpdateSchema.safeParse({
+        subject: "Updated",
+        expectedRevision: 1,
+        mutationId: "m1",
+      }).success
     ).toBe(true);
   });
 });
@@ -1328,7 +1337,7 @@ describe("suppression policy helpers", () => {
         shouldSuppressBounce({
           bounceType,
           policy: defaults,
-          countSoftBouncesSince
+          countSoftBouncesSince,
         })
       ).resolves.toBe(true);
       expect(countSoftBouncesSince).not.toHaveBeenCalled();
@@ -1343,7 +1352,7 @@ describe("suppression policy helpers", () => {
       shouldSuppressBounce({
         bounceType: "SOFT",
         policy: defaults,
-        countSoftBouncesSince
+        countSoftBouncesSince,
       })
     ).resolves.toBe(false);
 
@@ -1356,7 +1365,7 @@ describe("suppression policy helpers", () => {
       shouldSuppressBounce({
         bounceType: "SOFT",
         policy: defaults,
-        countSoftBouncesSince
+        countSoftBouncesSince,
       })
     ).resolves.toBe(true);
   });
@@ -1365,10 +1374,13 @@ describe("suppression policy helpers", () => {
 describe("deriveReputationAlerts", () => {
   function overview(
     attempted: number,
-    rates: Partial<DeliverabilityOverview["rates"]> = {},
+    rates: Partial<DeliverabilityOverview["rates"]> = {}
   ): DeliverabilityOverview {
     return {
-      window: { from: "2026-01-01T00:00:00.000Z", to: "2026-01-31T00:00:00.000Z" },
+      window: {
+        from: "2026-01-01T00:00:00.000Z",
+        to: "2026-01-31T00:00:00.000Z",
+      },
       deliverySignal: "none",
       totals: {
         attempted,
@@ -1412,27 +1424,29 @@ describe("deriveReputationAlerts", () => {
   });
 
   it("stays quiet exactly at the threshold", () => {
-    expect(deriveReputationAlerts(overview(1000, { bounce: 0.05 }))).toEqual([]);
+    expect(deriveReputationAlerts(overview(1000, { bounce: 0.05 }))).toEqual(
+      []
+    );
     expect(
-      deriveReputationAlerts(overview(1000, { complaint: 0.001 })),
+      deriveReputationAlerts(overview(1000, { complaint: 0.001 }))
     ).toEqual([]);
   });
 
   it("does not cry wolf below the minimum volume", () => {
     // 40% of 5 sends is past every line and means nothing.
     expect(
-      deriveReputationAlerts(overview(5, { bounce: 0.4, complaint: 0.2 })),
+      deriveReputationAlerts(overview(5, { bounce: 0.4, complaint: 0.2 }))
     ).toEqual([]);
     // ...but the same rate on real volume is a genuine emergency.
     expect(
-      deriveReputationAlerts(overview(50, { bounce: 0.4, complaint: 0.2 })),
+      deriveReputationAlerts(overview(50, { bounce: 0.4, complaint: 0.2 }))
     ).toHaveLength(2);
   });
 
   it("treats a null rate as unmeasured, not as zero", () => {
     // A rate with no denominator must never be compared against a threshold.
     expect(
-      deriveReputationAlerts(overview(1000, { bounce: null, complaint: null })),
+      deriveReputationAlerts(overview(1000, { bounce: null, complaint: null }))
     ).toEqual([]);
   });
 });
@@ -1443,7 +1457,7 @@ describe("organizationBrandingSchema", () => {
     logoUrl: "https://cdn.example.com/logo.png",
     accentColor: "#2E7D63",
     footerNote: "Acme Inc, 400 Market St",
-    brandingEnabled: true
+    brandingEnabled: true,
   };
 
   it("accepts a fully populated branding payload", () => {
@@ -1457,14 +1471,14 @@ describe("organizationBrandingSchema", () => {
         logoUrl: "   ",
         accentColor: "",
         footerNote: "",
-        brandingEnabled: false
+        brandingEnabled: false,
       })
     ).toEqual({
       brandName: null,
       logoUrl: null,
       accentColor: null,
       footerNote: null,
-      brandingEnabled: false
+      brandingEnabled: false,
     });
   });
 

@@ -1,4 +1,9 @@
-import { renderWithProviders, screen, waitFor, within } from "../test/render.js";
+import {
+  renderWithProviders,
+  screen,
+  waitFor,
+  within,
+} from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,15 +13,15 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
   // Used by actions that report progress before their result.
   loading: vi.fn(),
-  message: vi.fn()
+  message: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({
-  current: { currentOrganizationId: "org_1" }
+  current: { currentOrganizationId: "org_1" },
 }));
 vi.mock("../lib/session-context.js", () => ({
-  useSession: () => session.current
+  useSession: () => session.current,
 }));
 
 vi.mock("../lib/api.js", () => ({
@@ -40,14 +45,14 @@ vi.mock("../lib/api.js", () => ({
     createRecurringSend: vi.fn(),
     pauseRecurringSend: vi.fn(),
     resumeRecurringSend: vi.fn(),
-    deleteRecurringSend: vi.fn()
-  }
+    deleteRecurringSend: vi.fn(),
+  },
 }));
 
 vi.mock("../components/editor/RichTextEditor.js", () => ({
   RichTextEditor: ({
     value,
-    onChange
+    onChange,
   }: {
     value: string;
     onChange: (html: string) => void;
@@ -57,7 +62,7 @@ vi.mock("../components/editor/RichTextEditor.js", () => ({
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
-  )
+  ),
 }));
 
 import { EmailStudio } from "./EmailStudio.js";
@@ -75,8 +80,8 @@ const smtp = [
     secure: false,
     fromEmail: "from@x.com",
     replyTo: "support@x.com",
-    isDefault: true
-  }
+    isDefault: true,
+  },
 ];
 
 const templates = [
@@ -85,13 +90,13 @@ const templates = [
     organizationId: "org_1",
     name: "Welcome",
     subject: "Welcome aboard",
-    html: "<p>Hello there</p>"
-  }
+    html: "<p>Hello there</p>",
+  },
 ];
 
 const contacts = [
   { id: "c1", organizationId: "org_1", email: "alice@x.com", status: "ACTIVE" },
-  { id: "c2", organizationId: "org_1", email: "bob@x.com", status: "ACTIVE" }
+  { id: "c2", organizationId: "org_1", email: "bob@x.com", status: "ACTIVE" },
 ];
 
 const lists = [
@@ -99,8 +104,8 @@ const lists = [
     id: "list_1",
     organizationId: "org_1",
     name: "VIPs",
-    _count: { contacts: 5, campaigns: 0 }
-  }
+    _count: { contacts: 5, campaigns: 0 },
+  },
 ];
 
 function setup({ withSmtp = true } = {}) {
@@ -116,7 +121,7 @@ function setup({ withSmtp = true } = {}) {
   mockedApi.previewEmail.mockResolvedValue({
     subject: "Hi",
     html: "<p>rendered body</p>",
-    recipients: { to: ["alice@x.com"], cc: [], bcc: [], total: 1 }
+    recipients: { to: ["alice@x.com"], cc: [], bcc: [], total: 1 },
   });
   mockedApi.createEmailDraft.mockResolvedValue({ id: "d1", updatedAt: "now" });
   mockedApi.updateEmailDraft.mockResolvedValue({ id: "d1", updatedAt: "now" });
@@ -129,13 +134,13 @@ function setup({ withSmtp = true } = {}) {
     opens: 0,
     clicks: 0,
     bounces: 0,
-    complaints: 0
+    complaints: 0,
   });
   mockedApi.uploadAttachment.mockResolvedValue({
     id: "att1",
     filename: "doc.pdf",
     contentType: "application/pdf",
-    size: 2048
+    size: 2048,
   });
   mockedApi.deleteAttachment.mockResolvedValue(undefined);
 }
@@ -144,8 +149,9 @@ async function renderStudio() {
   const result = renderWithProviders(
     <MemoryRouter>
       <EmailStudio />
-    </MemoryRouter>
-  , { withRouter: false });
+    </MemoryRouter>,
+    { withRouter: false }
+  );
   // Wait for the initial data load to resolve and the composer form to render.
   // The submit button only exists once `loading` flips to false, so this clears
   // the loading skeleton before the synchronous queries below run — otherwise
@@ -163,7 +169,9 @@ describe("EmailStudio", () => {
   it("warns and disables sending when there is no SMTP connection", async () => {
     setup({ withSmtp: false });
     await renderStudio();
-    expect(await screen.findByText("No sending account yet")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No sending account yet")
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Send email/i })).toBeDisabled();
   });
 
@@ -175,14 +183,24 @@ describe("EmailStudio", () => {
     expect(screen.getByLabelText("To")).toBeInTheDocument();
     expect(screen.getByLabelText("Subject")).toBeInTheDocument();
     expect(screen.getByLabelText("body-editor")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send email" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Template" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Schedule for later")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Send email" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Template" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Schedule for later")
+    ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
+    await user.click(
+      screen.getByRole("button", { name: "Schedule or repeat" })
+    );
     expect(screen.getByLabelText("Schedule for later")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Use a template" }));
-    expect(screen.getByRole("combobox", { name: "Template" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Template" })
+    ).toBeInTheDocument();
   });
 
   it("sends a manually composed email through the manual pipeline", async () => {
@@ -214,6 +232,34 @@ describe("EmailStudio", () => {
     );
   });
 
+  it("recovers a lost send response from the completed draft without inviting a second send", async () => {
+    const user = userEvent.setup();
+    setup();
+    mockedApi.sendManualEmail.mockRejectedValue(
+      new Error("Network response lost")
+    );
+    mockedApi.getEmailDraft.mockResolvedValue({
+      id: "d1",
+      completedSendId: "job1",
+      revision: 2,
+    } as never);
+    await renderStudio();
+    await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
+    await user.type(screen.getByLabelText("Subject"), "Controlled message");
+    await user.type(
+      screen.getByLabelText("body-editor"),
+      "<p>Keep this writing</p>"
+    );
+    await user.click(screen.getByRole("button", { name: "Send email" }));
+    await screen.findByText(
+      "This email was already accepted for delivery. Your writing is kept here."
+    );
+    expect(screen.getByRole("button", { name: "Send email" })).toBeDisabled();
+    expect(screen.getByLabelText("Subject")).toHaveValue("Controlled message");
+    expect(mockedApi.sendManualEmail).toHaveBeenCalledTimes(1);
+    expect(mockedApi.manualEmailStatus).toHaveBeenCalledWith("job1", "org_1");
+  });
+
   it("reports a failed delivery after the send was accepted", async () => {
     const user = userEvent.setup();
     setup();
@@ -225,7 +271,7 @@ describe("EmailStudio", () => {
       opens: 0,
       clicks: 0,
       bounces: 0,
-      complaints: 0
+      complaints: 0,
     });
     await renderStudio();
 
@@ -249,7 +295,9 @@ describe("EmailStudio", () => {
     await user.click(screen.getByRole("button", { name: /Add contacts/i }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByLabelText("Select alice@x.com"));
-    await user.click(within(dialog).getByRole("button", { name: /Add 1 contact/i }));
+    await user.click(
+      within(dialog).getByRole("button", { name: /Add 1 contact/i })
+    );
 
     await user.type(screen.getByLabelText("Subject"), "Hi");
     await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
@@ -277,7 +325,7 @@ describe("EmailStudio", () => {
 
     await waitFor(() => expect(mockedApi.sendManualEmail).toHaveBeenCalled());
     expect(mockedApi.sendManualEmail.mock.calls[0][0].listIds).toEqual([
-      "list_1"
+      "list_1",
     ]);
   });
 
@@ -286,7 +334,9 @@ describe("EmailStudio", () => {
     setup();
     await renderStudio();
 
-    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
+    await user.click(
+      screen.getByRole("button", { name: "Schedule or repeat" })
+    );
     await user.click(screen.getByLabelText("Schedule for later"));
     expect(screen.getByLabelText("Scheduled time")).toBeInTheDocument();
     expect(
@@ -299,14 +349,16 @@ describe("EmailStudio", () => {
     setup();
     mockedApi.createRecurringSend.mockResolvedValue({
       id: "rs-1",
-      status: "ACTIVE"
+      status: "ACTIVE",
     });
     await renderStudio();
 
     await user.type(screen.getByLabelText("To"), "person@example.com{Enter}");
     await user.type(screen.getByLabelText("Subject"), "Weekly digest");
     await user.type(screen.getByLabelText("body-editor"), "<p>Digest</p>");
-    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
+    await user.click(
+      screen.getByRole("button", { name: "Schedule or repeat" })
+    );
     await user.click(screen.getByLabelText("Repeat on a schedule"));
 
     expect(
@@ -326,7 +378,7 @@ describe("EmailStudio", () => {
     const payload = mockedApi.createRecurringSend.mock.calls[0][0];
     expect(payload).toMatchObject({
       subject: "Weekly digest",
-      to: ["person@example.com"]
+      to: ["person@example.com"],
     });
     expect(payload.cronExpression).toBeTruthy();
   });
@@ -355,20 +407,18 @@ describe("EmailStudio", () => {
     await renderStudio();
 
     const file = new File(["pdf-bytes"], "doc.pdf", {
-      type: "application/pdf"
+      type: "application/pdf",
     });
     await user.upload(screen.getByLabelText("Add attachments"), file);
 
     // The uploaded file appears in the attachment list.
     expect(await screen.findByText("doc.pdf")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(mockedApi.uploadAttachment).toHaveBeenCalled()
-    );
+    await waitFor(() => expect(mockedApi.uploadAttachment).toHaveBeenCalled());
     // A draft is ensured first so the attachment links to it.
     expect(mockedApi.createEmailDraft).toHaveBeenCalled();
     expect(mockedApi.uploadAttachment.mock.calls[0][1]).toMatchObject({
       organizationId: "org_1",
-      emailDraftId: "d1"
+      emailDraftId: "d1",
     });
 
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
@@ -378,7 +428,7 @@ describe("EmailStudio", () => {
 
     await waitFor(() => expect(mockedApi.sendManualEmail).toHaveBeenCalled());
     expect(mockedApi.sendManualEmail.mock.calls[0][0].attachmentIds).toEqual([
-      "att1"
+      "att1",
     ]);
   });
 
@@ -388,7 +438,7 @@ describe("EmailStudio", () => {
     await renderStudio();
 
     const file = new File(["pdf-bytes"], "doc.pdf", {
-      type: "application/pdf"
+      type: "application/pdf",
     });
     await user.upload(screen.getByLabelText("Add attachments"), file);
     expect(await screen.findByText("doc.pdf")).toBeInTheDocument();
@@ -407,9 +457,9 @@ describe("EmailStudio", () => {
 
     // "Default sending account" on its own never told anyone which address it
     // would use.
-    expect(
-      screen.getByRole("combobox", { name: "From" })
-    ).toHaveTextContent("Default · from@x.com");
+    expect(screen.getByRole("combobox", { name: "From" })).toHaveTextContent(
+      "Default · from@x.com"
+    );
   });
 
   // Progressive disclosure (§3): most sends copy nobody, so Cc/Bcc start
@@ -424,7 +474,9 @@ describe("EmailStudio", () => {
     expect(screen.queryByLabelText("Bcc")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Reply-To")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
+    await user.click(
+      screen.getByRole("button", { name: "Cc / Bcc / Reply-To" })
+    );
 
     expect(screen.getByLabelText("Cc")).toBeInTheDocument();
     expect(screen.getByLabelText("Bcc")).toBeInTheDocument();
@@ -445,7 +497,9 @@ describe("EmailStudio", () => {
     setup();
     await renderStudio();
 
-    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
+    await user.click(
+      screen.getByRole("button", { name: "Cc / Bcc / Reply-To" })
+    );
 
     expect(screen.getByLabelText("Reply-To")).toHaveAttribute(
       "placeholder",
@@ -477,7 +531,9 @@ describe("EmailStudio", () => {
     setup();
     await renderStudio();
 
-    await user.click(screen.getByRole("button", { name: "Cc / Bcc / Reply-To" }));
+    await user.click(
+      screen.getByRole("button", { name: "Cc / Bcc / Reply-To" })
+    );
     await user.type(screen.getByLabelText("Reply-To"), "just-this-one@x.com");
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
     await user.type(screen.getByLabelText("Subject"), "Hi");
@@ -503,7 +559,7 @@ describe("EmailStudio", () => {
       bcc: [],
       listIds: [],
       attachments: [],
-      updatedAt: "now"
+      updatedAt: "now",
     });
 
     renderWithProviders(
@@ -541,7 +597,9 @@ describe("EmailStudio", () => {
     await renderStudio();
 
     expect(mockedApi.listRecurringSends).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
+    await user.click(
+      screen.getByRole("button", { name: "Schedule or repeat" })
+    );
     expect(
       screen.getByRole("link", { name: /Manage recurring sends/i })
     ).toHaveAttribute("href", "/campaigns/recurring");
@@ -583,7 +641,9 @@ describe("EmailStudio", () => {
     // Now the composer in the state that used to overflow the rail: recipient
     // chips, an open recurrence, and the attachment tray revealed.
     await user.keyboard("{Enter}");
-    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
+    await user.click(
+      screen.getByRole("button", { name: "Schedule or repeat" })
+    );
     await user.click(screen.getByLabelText("Repeat on a schedule"));
     await user.click(screen.getByRole("button", { name: /Attachments/i }));
 
@@ -594,7 +654,7 @@ describe("EmailStudio", () => {
     const user = userEvent.setup();
     setup();
     mockedApi.listRecipientSuggestions.mockResolvedValue([
-      { email: "archived@x.com", source: "recent" }
+      { email: "archived@x.com", source: "recent" },
     ]);
     await renderStudio();
 
@@ -603,7 +663,7 @@ describe("EmailStudio", () => {
     const options = await screen.findAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual([
       "alice@x.com",
-      "archived@x.comRecent"
+      "archived@x.comRecent",
     ]);
 
     await user.click(options[0]);
@@ -656,14 +716,16 @@ describe("EmailStudio", () => {
     setup();
     mockedApi.sendManualEmail.mockResolvedValue({
       id: "job1",
-      status: "QUEUED"
+      status: "QUEUED",
     });
     await renderStudio();
 
     await user.type(screen.getByLabelText("To"), "rcpt@x.com{Enter}");
     await user.type(screen.getByLabelText("Subject"), "Hi");
     await user.type(screen.getByLabelText("body-editor"), "<p>Body</p>");
-    await user.click(screen.getByRole("button", { name: "Schedule or repeat" }));
+    await user.click(
+      screen.getByRole("button", { name: "Schedule or repeat" })
+    );
     await user.click(screen.getByLabelText("Schedule for later"));
     const future = new Date(Date.now() + 60 * 60 * 1000)
       .toISOString()
@@ -690,7 +752,7 @@ describe("EmailStudio", () => {
     await waitFor(() => expect(mockedApi.manualEmailStatus).toHaveBeenCalled());
     const panel = await screen.findByTestId("delivery-status");
     expect(within(panel).getByText("rcpt@x.com")).toBeInTheDocument();
-    expect(within(panel).getByText("delivered")).toBeInTheDocument();
+    expect(within(panel).getByText("Sent to mail server")).toBeInTheDocument();
   });
 
   // Previewing server-side is the point: it runs the same MJML wrap and tracking
@@ -712,7 +774,7 @@ describe("EmailStudio", () => {
       organizationId: "org_1",
       subject: "Hi",
       html: "<p>Body</p>",
-      to: ["alice@x.com"]
+      to: ["alice@x.com"],
     });
 
     const frame = await screen.findByTestId("composer-preview");
@@ -758,7 +820,9 @@ describe("EmailStudio", () => {
       // The form track is fluid, so the cluster fills the page instead of
       // leaving a gutter. Nothing here states a width of its own.
       const form = container.querySelector("form")!;
-      expect(form.className).toContain("xl:grid-cols-[minmax(0,1fr)_var(--content-rail)]");
+      expect(form.className).toContain(
+        "xl:grid-cols-[minmax(0,1fr)_var(--content-rail)]"
+      );
       expect(form.className).not.toMatch(/max-w-|mx-auto/);
     });
 

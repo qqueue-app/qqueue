@@ -1,5 +1,6 @@
 import { logger } from "./logger.js";
 import { prisma } from "./prisma.js";
+import { settleSendGroup } from "./send-group.js";
 import { campaignProcessingQueue } from "../queues/campaign-processing.queue.js";
 import { emailSendingQueue } from "../queues/email-sending.queue.js";
 import {
@@ -45,39 +46,35 @@ export async function recoverQueuedWork() {
       }),
     ]);
 
-  // Jobs stranded in PROCESSING by a crash mid-send (Phase 5). Reset them to
-  // QUEUED and re-enqueue: the processor re-reads status before sending (the
-  // CANCELLED re-check pattern), so a job that actually completed after this
-  // read is not resent — but a crash after SMTP accepted and before the SENT
-  // write can still double-send. The grace period keeps that window rare.
-  const stuckJobs = await prisma.emailJob.findMany({
+  // A crashed SMTP attempt may already be accepted; never automatically resend.
+  const uncertain = await prisma.emailJob.updateMany({
     where: {
       status: "PROCESSING",
       updatedAt: { lt: new Date(now.getTime() - STUCK_PROCESSING_GRACE_MS) },
     },
-    select: { id: true },
+    data: { status: "UNCERTAIN" },
   });
-  if (stuckJobs.length > 0) {
-    await prisma.emailJob.updateMany({
-      where: { id: { in: stuckJobs.map((job) => job.id) } },
-      data: { status: "QUEUED" },
-    });
+  if (uncertain.count)
     logger.warn(
-      { count: stuckJobs.length },
-      "re-queued email jobs stuck in PROCESSING"
+      { count: uncertain.count },
+      "SMTP outcomes require reconciliation"
     );
-    await emailSendingQueue.addBulk(
-      stuckJobs.map((job) => ({
-        name: "send-email",
-        data: { emailJobId: job.id },
-        opts: {
-          jobId: `email-${job.id}`,
-          attempts: 3,
-          backoff: { type: "exponential", delay: 30_000 },
-        },
-      }))
-    );
-  }
+
+  // A crash after recording SMTP acceptance can leave the logical message in
+  // Outbox. Rotate through pending summaries; settling also advances updatedAt
+  // so a busy mailbox cannot permanently hide another group's stale summary.
+  const pendingGroups = await prisma.emailJob.findMany({
+    where: {
+      groupPrimary: true,
+      sendGroupId: { not: null },
+      groupStatus: { in: ["PENDING", "QUEUED", "PROCESSING"] },
+    },
+    orderBy: { updatedAt: "asc" },
+    take: 100,
+    select: { organizationId: true, sendGroupId: true },
+  });
+  for (const group of pendingGroups)
+    await settleSendGroup(group.organizationId, group.sendGroupId);
 
   // Active recurring compose sends: re-register their job schedulers so a Redis
   // flush doesn't silently stop them. Idempotent, like the campaign loop below.

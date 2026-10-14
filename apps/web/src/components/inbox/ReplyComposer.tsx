@@ -40,6 +40,8 @@ interface ReplyBackup {
   attachments: EmailAttachment[];
   draftId?: string;
   replyAll: boolean;
+  revision?: number;
+  clientId?: string;
 }
 
 export function ReplyComposer({
@@ -72,6 +74,8 @@ export function ReplyComposer({
   const [uploading, setUploading] = useState(false);
   const [saved, setSaved] = useState(Boolean(backup));
   const draftId = useRef(initialDraftId ?? backup?.draftId);
+  const revision = useRef(backup?.revision ?? 1);
+  const clientId = useRef(backup?.clientId ?? crypto.randomUUID());
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
   const touched = useRef(Boolean(backup));
   const sent = useRef(false);
@@ -96,6 +100,7 @@ export function ReplyComposer({
     const draft = draftQuery.data;
     if (!draft) return;
     draftId.current = draft.id;
+    revision.current = draft.revision ?? 1;
     if (!touched.current) {
       setHtml(draft.html ?? "");
       setAttachments(draft.attachments ?? []);
@@ -122,9 +127,18 @@ export function ReplyComposer({
             variables: { qqueueReplyAll: replyAll },
           };
           const draft = draftId.current
-            ? await api.updateEmailDraft(draftId.current, payload)
-            : await api.createEmailDraft({ organizationId, ...payload });
+            ? await api.updateEmailDraft(draftId.current, {
+                ...payload,
+                expectedRevision: revision.current,
+                mutationId: crypto.randomUUID(),
+              })
+            : await api.createEmailDraft({
+                organizationId,
+                clientId: clientId.current,
+                ...payload,
+              });
           draftId.current = draft.id;
+          revision.current = draft.revision ?? 1;
           setSaved(true);
           return draft.id;
         });
@@ -148,6 +162,8 @@ export function ReplyComposer({
             attachments,
             replyAll,
             draftId: draftId.current,
+            revision: revision.current,
+            clientId: clientId.current,
           })
         );
       } catch {
@@ -176,6 +192,8 @@ export function ReplyComposer({
         html,
         replyAll,
         idempotencyKey: savedDraftId,
+        draftId: savedDraftId,
+        expectedRevision: revision.current,
         attachmentIds: attachments.map((file) => file.id),
       });
       sent.current = true;
@@ -184,8 +202,7 @@ export function ReplyComposer({
       } catch {
         /* The accepted send remains successful. */
       }
-      if (draftId.current)
-        await api.deleteEmailDraft(draftId.current).catch(() => undefined);
+
       return result;
     },
     {

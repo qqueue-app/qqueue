@@ -1,3 +1,4 @@
+const uploadIdentities = new WeakMap<File, Map<string, string>>();
 import { clearSession, getSession, updateTokens } from "./session.js";
 
 // Empty string in a production build means same-origin relative requests, which
@@ -230,6 +231,8 @@ export interface InboxAccount {
 }
 
 export interface InboundMessage {
+  readPending?: boolean;
+  readSyncError?: string | null;
   id: string;
   organizationId: string;
   inboxAccountId: string;
@@ -541,6 +544,9 @@ export interface ImageAsset {
 }
 
 export interface EmailDraft {
+  revision: number;
+  clientId?: string | null;
+  completedSendId?: string | null;
   inboundMessageId?: string | null;
   id: string;
   organizationId: string;
@@ -563,6 +569,7 @@ export interface EmailDraft {
 }
 
 export type RecipientDeliveryStatus =
+  | "uncertain"
   | "delivered"
   | "rejected"
   | "pending"
@@ -632,7 +639,7 @@ export interface SentEmail {
   to: string[];
   ccCount: number;
   bccCount: number;
-  status: "SENT" | "FAILED";
+  status: "SENT" | "FAILED" | "UNCERTAIN";
   origin: "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
   sentAt?: string | null;
   createdAt: string;
@@ -703,6 +710,7 @@ export interface SentEmailEvent {
  * subjects has no use for 25 rendered emails.
  */
 export interface SentEmailDetail extends SentEmail {
+  recipients?: RecipientDelivery[];
   /**
    * The body as stored — before the send worker injected tracking and appended
    * the unsubscribe footer. Reading your own archive must not fire the
@@ -2304,9 +2312,20 @@ export const api = {
 
   uploadAttachment(
     file: File,
-    options: { organizationId: string; emailDraftId?: string }
+    options: {
+      organizationId: string;
+      emailDraftId?: string;
+      uploadId?: string;
+    }
   ) {
     const form = new FormData();
+    const scope = `${getSession().user?.id}:${options.organizationId}:${options.emailDraftId ?? ""}`;
+    const identities = uploadIdentities.get(file) ?? new Map<string, string>();
+    const uploadId =
+      options.uploadId ?? identities.get(scope) ?? crypto.randomUUID();
+    identities.set(scope, uploadId);
+    uploadIdentities.set(file, identities);
+    form.append("uploadId", uploadId);
     form.append("file", file);
     form.append("organizationId", options.organizationId);
     if (options.emailDraftId) {
@@ -2593,6 +2612,11 @@ export const api = {
       text?: string;
       attachmentIds?: string[];
       replyAll?: boolean;
+      draftId?: string;
+      expectedRevision?: number;
+      to?: string[];
+      cc?: string[];
+      bcc?: string[];
     }
   ) {
     return request<{ id: string; status: string }>(

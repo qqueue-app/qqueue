@@ -14,6 +14,7 @@ beforeEach(() => {
   prismaMock.organizationMember.findUnique.mockResolvedValue({
     role: "OWNER",
   } as never);
+  prismaMock.emailJob.updateMany.mockResolvedValue({ count: 1 } as never);
   queue.remove.mockReset();
   queue.remove.mockResolvedValue(1);
 });
@@ -28,7 +29,19 @@ describe("outboxService.list", () => {
     expect(args.where).toEqual({
       NOT: { origin: "SYSTEM" },
       organizationId: "org_1",
-      status: { in: ["PENDING", "QUEUED", "PROCESSING"] },
+      groupPrimary: true,
+      AND: [
+        {
+          OR: [
+            {
+              groupStatus: null,
+              status: { in: ["PENDING", "QUEUED", "PROCESSING"] },
+            },
+            { groupStatus: { in: ["PENDING", "QUEUED", "PROCESSING"] } },
+          ],
+        },
+        {},
+      ],
     });
     expect(args.orderBy).toEqual([
       { scheduledAt: "asc" },
@@ -115,10 +128,23 @@ describe("outboxService mailbox scope", () => {
     expect(args.where).toEqual({
       NOT: { origin: "SYSTEM" },
       organizationId: "org_1",
-      status: { in: ["PENDING", "QUEUED", "PROCESSING"] },
-      OR: [
-        { smtpConnectionId: { in: ["smtp_1"] } },
-        { createdByUserId: "user_1" },
+      groupPrimary: true,
+      AND: [
+        {
+          OR: [
+            {
+              groupStatus: null,
+              status: { in: ["PENDING", "QUEUED", "PROCESSING"] },
+            },
+            { groupStatus: { in: ["PENDING", "QUEUED", "PROCESSING"] } },
+          ],
+        },
+        {
+          OR: [
+            { smtpConnectionId: { in: ["smtp_1"] } },
+            { createdByUserId: "user_1" },
+          ],
+        },
       ],
     });
   });
@@ -144,6 +170,37 @@ describe("outboxService mailbox scope", () => {
 });
 
 describe("outboxService.cancel", () => {
+  it("preserves a delivery claimed while the remaining group is cancelled", async () => {
+    prismaMock.emailJob.findFirst.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED",
+      groupStatus: "QUEUED",
+      sendGroupId: "group_1",
+    } as never);
+    prismaMock.emailJob.findMany.mockResolvedValue([
+      { status: "CANCELLED" },
+      { status: "PROCESSING" },
+    ] as never);
+    await expect(
+      outboxService.cancel("job_1", "org_1", "user_1")
+    ).resolves.toEqual({ id: "job_1", status: "PROCESSING" });
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org_1",
+        sendGroupId: "group_1",
+        groupPrimary: true,
+      },
+      data: { groupStatus: "PROCESSING" },
+    });
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org_1",
+        sendGroupId: "group_1",
+        status: { in: ["PENDING", "QUEUED"] },
+      },
+      data: { status: "CANCELLED" },
+    });
+  });
   it("marks the job cancelled and drops the delayed queue job", async () => {
     prismaMock.emailJob.findFirst.mockResolvedValue({
       id: "job_1",
@@ -162,10 +219,14 @@ describe("outboxService.cancel", () => {
         organizationId: "org_1",
         NOT: { origin: "SYSTEM" },
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, groupStatus: true, sendGroupId: true },
     });
-    expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
-      where: { id: "job_1" },
+    expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "job_1",
+        organizationId: "org_1",
+        status: { in: ["PENDING", "QUEUED"] },
+      },
       data: { status: "CANCELLED" },
     });
     // Must match the jobId both enqueue sites use.

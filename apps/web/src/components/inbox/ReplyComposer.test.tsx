@@ -188,7 +188,7 @@ describe("reply composer", () => {
         expect.objectContaining({ attachmentIds: ["file_1"], replyAll: true })
       )
     );
-    expect(mocked.deleteEmailDraft).toHaveBeenCalledWith("draft_1");
+    expect(mocked.deleteEmailDraft).not.toHaveBeenCalled();
   });
 
   it("does not let a reply leave while a file is uploading", async () => {

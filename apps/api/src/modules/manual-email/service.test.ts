@@ -4,7 +4,7 @@ import { prismaMock } from "../../test/prisma-mock.js";
 
 const send = vi.fn();
 vi.mock("../transactional-email/service.js", () => ({
-  transactionalEmailService: { send },
+  transactionalEmailService: { send, enqueue: vi.fn() },
 }));
 
 const renderHtmlAsEmailSafe = vi.hoisted(() => vi.fn());
@@ -20,6 +20,10 @@ const { manualEmailService } = await import("./service.js");
 beforeEach(() => {
   prismaMock.organizationMember.findUnique.mockResolvedValue({
     role: "OWNER",
+  } as never);
+  prismaMock.emailJob.findMany.mockResolvedValue([] as never);
+  prismaMock.emailAttachment.updateMany.mockResolvedValue({
+    count: 2,
   } as never);
   send.mockReset().mockResolvedValue({ id: "job_1", status: "QUEUED" });
   renderHtmlAsEmailSafe
@@ -121,21 +125,20 @@ describe("manualEmailService.send", () => {
     );
 
     expect(result).toEqual({ id: "job_1", status: "QUEUED" });
-    // One deduplicated recipient → one job, carrying the copies.
-    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledTimes(3);
     const arg = send.mock.calls[0][0];
     expect(arg.origin).toBe("MANUAL");
     expect(arg.createdByUserId).toBe("user_1");
     expect(arg.to).toBe("a@x.com");
-    expect(arg.cc).toEqual(["cc@x.com"]);
-    expect(arg.bcc).toEqual(["bcc@x.com"]);
+    expect(arg.cc).toEqual([]);
+    expect(arg.bcc).toEqual([]);
     // A single-recipient send needs no group.
-    expect(arg.sendGroupId).toBeNull();
+    expect(arg.sendGroupId).toEqual(expect.any(String));
     // Body rendered through the MJML email-safe layer.
     expect(arg.html).toBe("<safe><p>Body</p></safe>");
   });
 
-  it("fans out one job per To recipient, copies riding the first only", async () => {
+  it("delivers each To and Cc independently with one logical group", async () => {
     send
       .mockResolvedValueOnce({ id: "job_a", status: "QUEUED" })
       .mockResolvedValueOnce({ id: "job_b", status: "QUEUED" });
@@ -151,13 +154,13 @@ describe("manualEmailService.send", () => {
       "user_1"
     );
 
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(3);
     const [first, second] = send.mock.calls.map((call) => call[0]);
     expect(first.to).toBe("a@x.com");
     expect(second.to).toBe("b@x.com");
     // CC rides exactly one job — one copy per copy-recipient, not one per To.
-    expect(first.cc).toEqual(["cc@x.com"]);
-    expect(second.cc).toBeUndefined();
+    expect(first.cc).toEqual([]);
+    expect(second.cc).toEqual([]);
     // Jobs share a group so delivery status can be aggregated.
     expect(first.sendGroupId).toEqual(expect.any(String));
     expect(second.sendGroupId).toBe(first.sendGroupId);
@@ -186,17 +189,17 @@ describe("manualEmailService.send", () => {
         "private"
       );
     }
-    expect(calls[0].idempotencyKey).toBe(calls[2].idempotencyKey);
+    expect(calls[0].idempotencyKey).toBe(calls[4].idempotencyKey);
     // Keep the pre-existing group-key format so interrupted sends can resume
     // across an upgrade without splitting their delivery-status group.
     expect(calls[0].sendGroupId).toBe(
       createHash("sha256").update("user_1:org_1:draft-1").digest("hex")
     );
     await manualEmailService.send(input, "user_2");
-    expect(send.mock.calls[4][0].messageId).not.toBe(calls[0].messageId);
+    expect(send.mock.calls[8][0].messageId).not.toBe(calls[0].messageId);
   });
 
-  it("moves the CC carrier past a suppressed first recipient", async () => {
+  it("still delivers Cc independently when the first To is suppressed", async () => {
     // a@x.com is suppressed: copies must ride a job that will actually send.
     prismaMock.suppression.findMany.mockResolvedValue([
       { email: "a@x.com" },
@@ -217,10 +220,14 @@ describe("manualEmailService.send", () => {
     );
 
     const [first, second] = send.mock.calls.map((call) => call[0]);
-    expect(first.cc).toBeUndefined();
-    expect(second.cc).toEqual(["cc@x.com"]);
+    expect(first.cc).toEqual([]);
+    expect(second.cc).toEqual([]);
+    expect(send.mock.calls[2][0]).toMatchObject({
+      to: "cc@x.com",
+      recipientField: "cc",
+    });
     // The carrier (second job) is the primary the composer polls.
-    expect(result).toEqual({ id: "job_b", status: "QUEUED" });
+    expect(result).toEqual({ id: "job_a", status: "QUEUED" });
   });
 
   it("links attachments on the first job and copies them onto siblings", async () => {
@@ -237,7 +244,7 @@ describe("manualEmailService.send", () => {
 
     const [first, second] = send.mock.calls.map((call) => call[0]);
     expect(first.attachmentIds).toEqual(["att_1", "att_2"]);
-    expect(first.attachmentMode).toBe("link");
+    expect(first.attachmentMode).toBe("copy");
     expect(second.attachmentIds).toEqual(["att_1", "att_2"]);
     expect(second.attachmentMode).toBe("copy");
   });
