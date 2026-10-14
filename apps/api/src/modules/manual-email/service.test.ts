@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../../test/prisma-mock.js";
 
@@ -162,6 +163,37 @@ describe("manualEmailService.send", () => {
     expect(second.sendGroupId).toBe(first.sendGroupId);
     // The carrier job is the one the composer polls.
     expect(result).toEqual({ id: "job_a", status: "QUEUED" });
+  });
+
+  it("retains visible group headers and Message-ID across copies and retries without exposing Bcc", async () => {
+    const input = {
+      organizationId: "org_1",
+      to: ["a@x.com", "b@x.com"],
+      cc: ["copy@x.com"],
+      bcc: ["private@x.com"],
+      subject: "Group",
+      text: "Hello",
+      idempotencyKey: "draft-1",
+    };
+    await manualEmailService.send(input, "user_1");
+    await manualEmailService.send(input, "user_1");
+    const calls = send.mock.calls.map(([call]) => call);
+    expect(new Set(calls.map((call) => call.messageId)).size).toBe(1);
+    for (const call of calls) {
+      expect(call.visibleTo).toEqual(input.to);
+      expect(call.visibleCc).toEqual(input.cc);
+      expect(JSON.stringify([call.visibleTo, call.visibleCc])).not.toContain(
+        "private"
+      );
+    }
+    expect(calls[0].idempotencyKey).toBe(calls[2].idempotencyKey);
+    // Keep the pre-existing group-key format so interrupted sends can resume
+    // across an upgrade without splitting their delivery-status group.
+    expect(calls[0].sendGroupId).toBe(
+      createHash("sha256").update("user_1:org_1:draft-1").digest("hex")
+    );
+    await manualEmailService.send(input, "user_2");
+    expect(send.mock.calls[4][0].messageId).not.toBe(calls[0].messageId);
   });
 
   it("moves the CC carrier past a suppressed first recipient", async () => {

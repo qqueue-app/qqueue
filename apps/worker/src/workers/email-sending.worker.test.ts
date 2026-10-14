@@ -98,11 +98,13 @@ vi.mock("../lib/throttle.js", () => ({
 
 import { startEmailSendingWorker } from "./email-sending.worker.js";
 
-function makeJob(overrides: Partial<{
-  emailJobId: string;
-  attemptsMade: number;
-  attempts: number;
-}> = {}) {
+function makeJob(
+  overrides: Partial<{
+    emailJobId: string;
+    attemptsMade: number;
+    attempts: number;
+  }> = {}
+) {
   return {
     data: { emailJobId: overrides.emailJobId ?? "ej1" },
     attemptsMade: overrides.attemptsMade ?? 0,
@@ -190,6 +192,73 @@ describe("email-sending worker", () => {
     } as never);
     await run(makeJob());
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each(["SENT", "SUPPRESSED"])(
+    "does not redeliver a %s job replayed by the queue",
+    async (status) => {
+      prismaMock.emailJob.findUnique.mockResolvedValue({
+        ...baseEmailJob,
+        status
+      } as never);
+      await run(makeJob());
+      expect(send).not.toHaveBeenCalled();
+    }
+  );
+
+  it("separates visible group headers from the suppression-filtered SMTP envelope", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      visibleTo: ["to@example.com", "sibling@example.com"],
+      visibleCc: ["copy@example.com", "suppressed@example.com"],
+      cc: ["copy@example.com", "suppressed@example.com"],
+      bcc: ["private@example.com"],
+      messageId: "<stable@qqueue.invalid>"
+    } as never);
+    prismaMock.suppression.findMany.mockResolvedValue([
+      { email: "suppressed@example.com" }
+    ] as never);
+    send.mockResolvedValue({
+      messageId: "<stable@qqueue.invalid>",
+      accepted: ["to@example.com"],
+      rejected: [],
+      provider: "smtp"
+    });
+    await run(makeJob());
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ["to@example.com", "sibling@example.com"],
+        cc: ["copy@example.com", "suppressed@example.com"],
+        bcc: undefined,
+        envelope: {
+          from: "from@example.com",
+          to: ["to@example.com", "copy@example.com", "private@example.com"]
+        },
+        messageId: "<stable@qqueue.invalid>"
+      })
+    );
+  });
+
+  it("does not reset a recorded SMTP success when later bookkeeping fails", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
+    send.mockResolvedValue({
+      messageId: "<ej1@qqueue.invalid>",
+      accepted: ["to@example.com"],
+      rejected: [],
+      provider: "smtp"
+    });
+    settleRunIfComplete.mockRejectedValueOnce(new Error("Bookkeeping offline"));
+    await expect(run(makeJob())).rejects.toThrow("Bookkeeping offline");
+    const statuses = prismaMock.emailJob.update.mock.calls.map(
+      ([args]) => args.data.status
+    );
+    expect(statuses).toEqual(["PROCESSING", "SENT"]);
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      status: "SENT"
+    } as never);
+    await run(makeJob({ attemptsMade: 1 }));
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("delays the job and throws DelayedError when the campaign is PAUSED", async () => {
@@ -333,10 +402,10 @@ describe("email-sending worker", () => {
 
     await run(makeJob());
 
-    // Marks processing first.
+    // Identity is stored before the SMTP attempt.
     expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
       where: { id: "ej1" },
-      data: { status: "PROCESSING" }
+      data: { status: "PROCESSING", messageId: "<ej1@qqueue.invalid>" }
     });
     // Builds the provider from decrypted creds.
     expect(decryptSecret).toHaveBeenCalledWith("u-enc");
@@ -348,7 +417,10 @@ describe("email-sending worker", () => {
       })
     );
     // Injects tracking and sends with a formatted From.
-    expect(injectTracking).toHaveBeenCalledWith("<p>Body</p>", expect.any(Object));
+    expect(injectTracking).toHaveBeenCalledWith(
+      "<p>Body</p>",
+      expect.any(Object)
+    );
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
         from: "Sender <from@example.com>",
@@ -475,9 +547,7 @@ describe("email-sending worker", () => {
     await run(makeJob());
 
     expect(h.loadAttachmentsForJob).toHaveBeenCalledWith("ej1");
-    expect(send).toHaveBeenCalledWith(
-      expect.objectContaining({ attachments })
-    );
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ attachments }));
   });
 
   it("omits cc, bcc and replyTo for jobs without them (unchanged behavior)", async () => {
@@ -848,9 +918,9 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
     send.mockRejectedValue(new Error("connection refused"));
 
-    await expect(run(makeJob({ attemptsMade: 0, attempts: 3 }))).rejects.toThrow(
-      "connection refused"
-    );
+    await expect(
+      run(makeJob({ attemptsMade: 0, attempts: 3 }))
+    ).rejects.toThrow("connection refused");
 
     const failCall = prismaMock.emailJob.update.mock.calls.find(
       (c) => (c[0] as { data: { status: string } }).data.status === "QUEUED"
@@ -871,16 +941,19 @@ describe("email-sending worker", () => {
       throw new Error(secretDecryptionMessage);
     });
 
-    await expect(run(makeJob({ attemptsMade: 2, attempts: 3 }))).rejects.toThrow(
-      "Stored SMTP credentials cannot be decrypted"
-    );
+    await expect(
+      run(makeJob({ attemptsMade: 2, attempts: 3 }))
+    ).rejects.toThrow("Stored SMTP credentials cannot be decrypted");
 
     const failCall = prismaMock.emailJob.update.mock.calls.find(
       (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"
     );
     expect(
-      (failCall![0] as { data: { events: { create: { metadata: { message: string } } } } })
-        .data.events.create.metadata.message
+      (
+        failCall![0] as {
+          data: { events: { create: { metadata: { message: string } } } };
+        }
+      ).data.events.create.metadata.message
     ).toContain("changing it invalidates existing SMTP credentials");
   });
 
@@ -888,9 +961,9 @@ describe("email-sending worker", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue(baseEmailJob as never);
     send.mockRejectedValue(new Error("boom"));
 
-    await expect(run(makeJob({ attemptsMade: 2, attempts: 3 }))).rejects.toThrow(
-      "boom"
-    );
+    await expect(
+      run(makeJob({ attemptsMade: 2, attempts: 3 }))
+    ).rejects.toThrow("boom");
 
     const failCall = prismaMock.emailJob.update.mock.calls.find(
       (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"
@@ -920,8 +993,11 @@ describe("email-sending worker", () => {
       (c) => (c[0] as { data: { status: string } }).data.status === "FAILED"
     );
     expect(
-      (failCall![0] as { data: { events: { create: { metadata: { message: string } } } } })
-        .data.events.create.metadata.message
+      (
+        failCall![0] as {
+          data: { events: { create: { metadata: { message: string } } } };
+        }
+      ).data.events.create.metadata.message
     ).toBe("Unknown send error");
   });
 

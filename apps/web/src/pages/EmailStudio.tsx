@@ -56,6 +56,7 @@ import { useSession } from "../lib/session-context.js";
 import { getSession } from "../lib/session.js";
 import { useOnline } from "../lib/use-online.js";
 import {
+  acknowledgePendingDraft,
   deletePendingDraft,
   flushPendingDrafts,
   listPendingDrafts,
@@ -792,14 +793,15 @@ function EmailStudioWorkspace() {
           dead battery — the server copy is then just the version other devices
           can see.
         */
-        await savePendingDraft({
+        const snapshot = {
           userId: user?.id ?? "",
           localId: localDraftId.current,
           organizationId,
           draftId,
           payload,
           updatedAt: new Date().toISOString(),
-        });
+        };
+        await savePendingDraft(snapshot);
 
         if (user?.id && getSession().user?.id !== user.id) return null;
         let saved: EmailDraft;
@@ -810,7 +812,7 @@ function EmailStudioWorkspace() {
           setDraftId(saved.id);
         }
         // Acknowledged by the server, so the local copy has done its job.
-        await deletePendingDraft(localDraftId.current);
+        await acknowledgePendingDraft(snapshot, saved.id);
         setLastSavedAt(saved.updatedAt);
         setPendingLocally(false);
         if (!silent) {
@@ -825,9 +827,8 @@ function EmailStudioWorkspace() {
           Unreachable (ApiError status 0, or a 5xx) means the draft is fine and
           the network isn't: keep the local record, say so, and let the sync
           replay it. Anything else is the server refusing this content — a
-          validation error, a revoked membership — and replaying it would fail
-          identically forever, so the record is dropped and the real message
-          shown.
+          validation error or a revoked membership. Keep the writing in both
+          cases; a refusal needs a visible error when saving explicitly.
         */
         const status =
           typeof error === "object" && error !== null && "status" in error
@@ -848,8 +849,9 @@ function EmailStudioWorkspace() {
             );
           }
         } else {
-          await deletePendingDraft(localDraftId.current);
-          setPendingLocally(false);
+          // A rejected save is still the user's writing. Preserve its device
+          // backup so validation or a deleted server draft cannot erase it.
+          setPendingLocally(true);
           if (!silent) {
             toast.error(
               error instanceof Error ? error.message : "Unable to save draft"
@@ -872,6 +874,7 @@ function EmailStudioWorkspace() {
       selectedListIds,
       smtpConnectionId,
       templateId,
+      replyTo,
       draftId,
     ]
   );
@@ -905,6 +908,7 @@ function EmailStudioWorkspace() {
     selectedListIds,
     smtpConnectionId,
     templateId,
+    replyTo,
   ]);
 
   /*

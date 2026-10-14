@@ -32,9 +32,11 @@ function startFakeSmtp(): Promise<{
   port: number;
   sockets: Set<Socket>;
   messages: string[];
+  envelopes: string[][];
 }> {
   const sockets = new Set<Socket>();
   const messages: string[] = [];
+  const envelopes: string[][] = [];
   const server = createServer((socket: Socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
@@ -42,6 +44,7 @@ function startFakeSmtp(): Promise<{
     let authLoginStep = 0;
     let pending = "";
     let messageLines: string[] = [];
+    let recipients: string[] = [];
 
     socket.write("220 qqueue-smoke ESMTP\r\n");
     socket.on("data", (chunk) => {
@@ -56,6 +59,7 @@ function startFakeSmtp(): Promise<{
           if (line === ".") {
             inData = false;
             messages.push(messageLines.join("\r\n"));
+            envelopes.push([...recipients]);
             messageLines = [];
             socket.write("250 queued\r\n");
           } else {
@@ -82,12 +86,13 @@ function startFakeSmtp(): Promise<{
         } else if (authLoginStep === 2) {
           authLoginStep = 0;
           socket.write("235 authenticated\r\n");
-        } else if (
-          upper.startsWith("MAIL FROM") ||
-          upper.startsWith("RCPT TO") ||
-          upper === "RSET" ||
-          upper === "NOOP"
-        ) {
+        } else if (upper.startsWith("MAIL FROM") || upper === "RSET") {
+          recipients = [];
+          socket.write("250 OK\r\n");
+        } else if (upper.startsWith("RCPT TO")) {
+          recipients.push(/<([^>]+)>/.exec(line)?.[1] ?? "");
+          socket.write("250 OK\r\n");
+        } else if (upper === "NOOP") {
           socket.write("250 OK\r\n");
         } else if (upper === "DATA") {
           inData = true;
@@ -108,7 +113,7 @@ function startFakeSmtp(): Promise<{
       if (!address || typeof address === "string") {
         throw new Error("Fake SMTP server did not bind to a TCP port");
       }
-      resolve({ server, port: address.port, sockets, messages });
+      resolve({ server, port: address.port, sockets, messages, envelopes });
     });
   });
 }
@@ -169,6 +174,7 @@ async function main() {
     port: smtpPort,
     sockets: smtpSockets,
     messages: smtpMessages,
+    envelopes: smtpEnvelopes,
   } = await startFakeSmtp();
   const worker = startEmailSendingWorker();
   const app = createApp();
@@ -284,6 +290,77 @@ async function main() {
         "Smoke SMTP message is missing the one-click headers or footer"
       );
     }
+
+    // Group messages retain their full headers and identity on the SMTP wire.
+    // A sibling To job must not receive the carrier's copy recipients again.
+    const groupPayload = {
+      organizationId,
+      to: ["group-a@example.com", "group-b@example.com"],
+      cc: ["group-copy@example.com"],
+      bcc: ["group-private@example.com"],
+      subject: "Group smoke",
+      text: "Group conversation",
+      idempotencyKey: "group-smoke",
+    };
+    const groupStart = smtpMessages.length;
+    const group = await request(app)
+      .post("/api/v1/manual-email/send")
+      .set("Authorization", auth)
+      .send(groupPayload)
+      .expect(202);
+    const groupReplay = await request(app)
+      .post("/api/v1/manual-email/send")
+      .set("Authorization", auth)
+      .send(groupPayload)
+      .expect(202);
+    if (group.body.data.id !== groupReplay.body.data.id)
+      throw new Error("Group retry created another carrier");
+    const carrier = await prisma.emailJob.findUniqueOrThrow({
+      where: { id: group.body.data.id },
+    });
+    await eventually(async () => {
+      const jobs = await prisma.emailJob.findMany({
+        where: { organizationId, sendGroupId: carrier.sendGroupId },
+      });
+      return jobs.length === 2 && jobs.every((job) => job.status === "SENT")
+        ? jobs
+        : null;
+    });
+    const groupMessages = smtpMessages.slice(groupStart);
+    const header = (raw: string, name: string) =>
+      raw
+        .split("\r\n\r\n")[0]
+        .replace(/\r\n[ \t]+/g, " ")
+        .split("\r\n")
+        .find((line) =>
+          line.toLowerCase().startsWith(`${name.toLowerCase()}:`)
+        );
+    if (
+      groupMessages.length !== 2 ||
+      groupMessages.some(
+        (raw) =>
+          header(raw, "To") !==
+            "To: group-a@example.com, group-b@example.com" ||
+          header(raw, "Cc") !== "Cc: group-copy@example.com" ||
+          header(raw, "Bcc") ||
+          header(raw, "Message-ID") !== `Message-ID: ${carrier.messageId}`
+      )
+    )
+      throw new Error(
+        "Group SMTP headers, Bcc privacy, or message identity are incorrect"
+      );
+
+    const deliveredAddresses = smtpEnvelopes.slice(groupStart).flat().sort();
+    if (
+      JSON.stringify(deliveredAddresses) !==
+      JSON.stringify([
+        "group-a@example.com",
+        "group-b@example.com",
+        "group-copy@example.com",
+        "group-private@example.com",
+      ])
+    )
+      throw new Error("Group SMTP envelope duplicated or omitted a recipient");
 
     // Exercise the mailbox flows against real Postgres, not only query mocks.
     const connection = await prisma.sMTPConnection.findFirstOrThrow({
@@ -427,7 +504,7 @@ async function main() {
       "--exit-code",
     ]);
     console.log(
-      `Smoke test passed: ${sentJob.id} ${sentJob.status}; mailbox privacy, pagination, replies, disconnect, and migration drift verified`
+      `Smoke test passed: ${sentJob.id} ${sentJob.status}; group headers/envelopes, mailbox privacy, pagination, replies, disconnect, and migration drift verified`
     );
     process.exit(0);
   } finally {

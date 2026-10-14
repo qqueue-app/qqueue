@@ -771,6 +771,10 @@ model EmailJob {
   campaignId       String?
   campaignRunId    String?
   toEmail          String
+  // Visible conversation headers, separate from this job's SMTP recipients.
+  // Empty for older jobs and non-manual sends (use toEmail/cc as before).
+  visibleTo        String[]          @default([])
+  visibleCc        String[]          @default([])
   cc               String[]          @default([])
   bcc              String[]          @default([])
   replyTo          String?

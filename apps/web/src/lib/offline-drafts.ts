@@ -56,7 +56,7 @@ export interface PendingDraft {
   /** The server draft this updates, or null if the server hasn't seen it. */
   draftId: string | null;
   payload: PendingDraftPayload;
-  /** When the composer last touched it, for last-write-wins on flush. */
+  /** When the composer last touched it. Not a server conflict token. */
   updatedAt: string;
 }
 
@@ -87,9 +87,15 @@ function run<T>(
       new Promise<T>((resolve, reject) => {
         const tx = db.transaction(STORE, mode);
         const request = work(tx.objectStore(STORE));
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-        tx.oncomplete = () => db.close();
+        tx.oncomplete = () => {
+          db.close();
+          resolve(request.result);
+        };
+        tx.onabort = () => {
+          db.close();
+          reject(tx.error);
+        };
+        tx.onerror = () => reject(tx.error);
       })
   );
 }
@@ -137,6 +143,62 @@ export async function listPendingDrafts(
   }
 }
 
+/** Acknowledge only the snapshot actually saved, in one atomic transaction.
+ * A newer local edit must survive a late response from an older network save.
+ * Adopt the server ID on that newer edit so its next flush updates the same draft.
+ */
+export async function acknowledgePendingDraft(
+  snapshot: PendingDraft,
+  serverId: string
+): Promise<void> {
+  try {
+    const db = await openDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      const request = store.get(snapshot.localId);
+      request.onsuccess = () => {
+        const current = request.result as PendingDraft | undefined;
+        if (
+          !current ||
+          current.userId !== snapshot.userId ||
+          current.organizationId !== snapshot.organizationId
+        )
+          return;
+        if (JSON.stringify(current) === JSON.stringify(snapshot)) {
+          store.delete(snapshot.localId);
+        } else if (!current.draftId) {
+          store.put({ ...current, draftId: serverId });
+        }
+      };
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onabort = () => {
+        db.close();
+        reject(tx.error);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // Retain the backup if acknowledging it fails.
+  }
+}
+
+let flushChain: Promise<unknown> = Promise.resolve();
+
+/** Serialize reconnect/start/visibility flushes in this tab. */
+export function flushPendingDrafts(
+  organizationId?: string
+): Promise<Array<{ localId: string; draft: EmailDraft }>> {
+  const work = flushChain
+    .catch(() => undefined)
+    .then(() => flushDrafts(organizationId));
+  flushChain = work;
+  return work;
+}
+
 /**
  * Push every locally-held draft to the server, oldest first.
  *
@@ -147,7 +209,7 @@ export async function listPendingDrafts(
  * Returns the drafts that made it, so a mounted composer can adopt the server
  * id its local record was just given.
  */
-export async function flushPendingDrafts(
+async function flushDrafts(
   organizationId?: string
 ): Promise<Array<{ localId: string; draft: EmailDraft }>> {
   const pending = await listPendingDrafts(organizationId);
@@ -164,7 +226,7 @@ export async function flushPendingDrafts(
             organizationId: record.organizationId,
             ...record.payload,
           });
-      await deletePendingDraft(record.localId);
+      await acknowledgePendingDraft(record, draft.id);
       synced.push({ localId: record.localId, draft });
     } catch (error) {
       if (
@@ -185,14 +247,8 @@ export async function flushPendingDrafts(
         break;
       }
 
-      /*
-        The server refused this one specifically: the draft it referenced was
-        deleted from another device, the membership was revoked, the payload no
-        longer validates. Replaying it would fail identically forever and wedge
-        every draft queued behind it, so it is dropped rather than allowed to
-        block the queue.
-      */
-      await deletePendingDraft(record.localId);
+      // Keep rejected content available for recovery. Continue with other
+      // drafts so a validation/conflict/deletion response cannot block them.
     }
   }
 

@@ -1073,6 +1073,7 @@ function InboxWorkspace() {
             ) : (
               <DataGrid
                 label="Inbox conversations"
+                stickyHeader={false}
                 data={threads}
                 getRowId={(thread) => thread.threadKey}
                 columns={[

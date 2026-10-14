@@ -24,13 +24,6 @@ interface FakeRequest<T> {
   onblocked?: (() => void) | null;
 }
 
-/** Resolve a request on a macrotask, the way a real one settles later. */
-function settle<T>(request: FakeRequest<T>, result: T) {
-  request.result = result;
-  setTimeout(() => request.onsuccess?.(), 0);
-  return request;
-}
-
 export interface FakeIndexedDB {
   /** The rows currently held, keyed by the store's keyPath value. */
   rows: Map<string, unknown>;
@@ -43,25 +36,33 @@ export function installFakeIndexedDB(): FakeIndexedDB {
   const rows = new Map<string, unknown>();
   let openFails = false;
 
-  function makeStore() {
+  function makeStore(finish: () => void = () => undefined) {
+    function complete<T>(request: FakeRequest<T>, value: T) {
+      request.result = value;
+      setTimeout(() => {
+        request.onsuccess?.();
+        finish();
+      }, 0);
+      return request;
+    }
     return {
       put(value: Record<string, unknown>) {
         const request = blankRequest<undefined>();
         rows.set(String(value.localId), value);
-        return settle(request, undefined);
+        return complete(request, undefined);
       },
       delete(key: string) {
         const request = blankRequest<undefined>();
         rows.delete(key);
-        return settle(request, undefined);
+        return complete(request, undefined);
       },
       getAll() {
         const request = blankRequest<unknown[]>();
-        return settle(request, [...rows.values()]);
+        return complete(request, [...rows.values()]);
       },
       get(key: string) {
         const request = blankRequest<unknown>();
-        return settle(request, rows.get(key));
+        return complete(request, rows.get(key));
       },
     };
   }
@@ -95,12 +96,15 @@ export function installFakeIndexedDB(): FakeIndexedDB {
           createObjectStore: () => makeStore(),
           transaction: () => {
             const tx = {
-              objectStore: () => makeStore(),
+              objectStore: () =>
+                makeStore(() => {
+                  // Completion follows all requests queued by a success handler.
+                  setTimeout(() => tx.oncomplete?.(), 0);
+                }),
               oncomplete: null as (() => void) | null,
             };
             // Real transactions complete after their requests do; the module
             // closes the database from this callback.
-            setTimeout(() => tx.oncomplete?.(), 0);
             return tx;
           },
           close: vi.fn(),

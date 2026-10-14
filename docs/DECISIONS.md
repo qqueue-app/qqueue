@@ -1153,3 +1153,21 @@ from. It now also accepts anyone who may read the attachment's `EmailJob`, using
 the same `emailJobScope` the archive and the outbox already use. Unsent rows (a
 draft's files) keep the uploader-only rule: they have no message to inherit
 access from, and that is what keeps drafts private.
+
+## Manual Group Headers and Shared Mailbox Read State (2026-10-14)
+
+Manual messages remain one visible conversation even though delivery jobs are
+separate. `EmailJob.visibleTo` and `visibleCc` preserve the original headers;
+`toEmail`, `cc` and `bcc` continue to describe each job's delivery recipients.
+The worker sets an explicit SMTP envelope so visible headers cannot duplicate
+sibling deliveries or bypass suppression. All copies use the same Message-ID,
+including unchanged-key API retries. Legacy jobs with no visible To set retain
+their old behavior. This supersedes the header behavior of the earlier manual
+fan-out decision, while leaving its carrier and delivery-outcome limitations
+explicit in `ORG_EMAIL_READINESS.md`.
+
+The organization chose shared read state per mailbox: reading mail changes the
+mailbox for everyone with access, including other mail clients. Future IMAP
+writeback will reconcile QQueue state with `\Seen`, using durable pending
+operations to preserve newer user actions. A personal unread overlay is not part
+of this decision. This batch records the policy without implementing writeback.

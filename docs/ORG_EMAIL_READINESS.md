@@ -45,23 +45,73 @@ not an acceptance test for that target.
 - Keep extra campaign/reporting navigation behind Show more tools and remove
   the artificial dashboard splash delay.
 
+## Follow-up batch: group identity and device draft retention (2026-10-14)
+
+Verified in code and automated checks:
+
+- New manual messages and replies retain the complete visible To/Cc headers and
+  one RFC Message-ID across their delivery jobs and unchanged-key retries.
+  Separate SMTP envelopes deliver each recipient once; Bcc stays off the wire
+  headers. Existing jobs retain their previous header behavior. The additive
+  `visibleTo`/`visibleCc` migration defaults old rows to empty arrays, triggering
+  that compatibility path.
+- Worker queue replays skip already SENT or SUPPRESSED jobs. A failure in
+  bookkeeping after recording the SMTP result no longer changes that result
+  back into QUEUED. Message-ID is persisted before SMTP and reused on retries.
+- Device draft backups are acknowledged atomically against the exact snapshot
+  saved. A late save response keeps newer local content and gives it the server
+  draft ID. Server refusals retain the backup while other pending drafts can
+  sync. Reconnect/visibility flushes serialize within a tab. Editing Reply-To
+  now triggers autosave as well.
+
+This is a bounded improvement, **not** full draft or group-send acceptance.
+Cc/Bcc still use a single carrier job: suppressing that To recipient after
+creation can lose the copies, and all suppressed To recipients still prevent
+copy delivery. Partial SMTP acceptance needs correct per-address bounce handling.
+Sent/conversation views still expose per-recipient delivery jobs. Draft create
+requests lack server-side retry identity; simultaneous tabs/devices lack revision
+conflict protection, and retrying a changed recipient set can add deliveries.
+Attachment preparation and enqueue are not an atomic operation. An SMTP server
+accepting DATA followed by a lost response remains an ambiguous delivery outcome;
+a stable Message-ID alone does not guarantee exactly-once SMTP delivery.
+
+### Read-state decision
+
+The organization selected **shared read state per mailbox**. Every authorized
+teammate sees the same read/unread state, and the IMAP `\Seen` flag must converge
+with it across other mail apps. Future writeback needs durable pending operations
+and reconciliation so an old sync result cannot undo a newer local action. No
+IMAP writeback or personal unread overlay was added in this batch.
+
+### Verification of this batch
+
+Typecheck, lint, build, the full test suite, and unmodified coverage thresholds
+passed. The Docker smoke test applied every migration to disposable PostgreSQL,
+reported no schema drift, and checked real SMTP wire To/Cc/Message-ID headers,
+Bcc omission and recipient envelope counts, alongside existing access, pagination,
+reply retry and disconnect checks. Docker's exhausted default network pools were
+handled with a temporary explicit smoke-only subnet, removed by teardown.
+
+No live mail-provider, interrupted-network browser, mobile-device, or assistive
+technology acceptance is implied by these checks.
+
 ## Required before calling the primary-client goal complete
 
 1. **IMAP state and history:** durable read/unread writeback and reconciliation,
    complete older-history backfill, folder discovery, Archive, Trash/restore,
    move and flags, plus mail sent/drafted in another client. Today read state is
    shared inside QQueue and receiving sync still imports one configured folder.
-2. **Normal group messages:** preserve the visible To/Cc conversation and shared
-   message identity. The existing per-To fan-out and single copy-recipient
-   carrier remain in place. Reconcile that behavior with suppression enforcement
-   and per-recipient outcomes inside the one delivery pipeline.
+2. **Normal group messages:** visible To/Cc and shared identity now reach SMTP.
+   Replace the single copy-recipient carrier and reconcile partial acceptance,
+   suppression, job presentation and per-recipient outcomes inside the one
+   delivery pipeline.
 3. **Composer completion:** forwarding with original attachments, signatures,
    editable reply recipients, and simpler advanced-editor controls. Check draft
    recovery across devices, concurrent tabs, interrupted uploads and lost send
    responses.
 4. **Attachment recovery:** show unavailable/oversized inbound parts, retry
    storage failures without duplicates, and recover missing inline content.
-5. **Team coordination:** define personal versus shared unread state and show
+5. **Team coordination:** shared mailbox unread state was selected above; show
    concurrent replies; streamline invitation, mailbox assignment, resend and
    recovery-address workflows. Mailbox-password reset links are distinct from
    QQueue sign-in reset links and are not implemented by the Team action.

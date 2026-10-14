@@ -99,6 +99,10 @@ export type TransactionalSendInput = SendEmailInput & {
   // Internal: groups the per-recipient jobs of one multi-recipient manual send
   // so delivery status can be aggregated. Set by manualEmailService.send.
   sendGroupId?: string | null;
+  // Internal conversation headers; never accepted from public raw headers.
+  visibleTo?: string[];
+  visibleCc?: string[];
+  messageId?: string;
   // Internal: how attachmentIds bind to the created job. "link" (default)
   // claims the uploaded rows for this job; "copy" clones their metadata onto
   // this job, for sibling jobs of a fanned-out send whose originals were
@@ -234,6 +238,9 @@ export const transactionalEmailService = {
           smtpConnectionId: smtpConnection.id,
           templateId: template?.id,
           toEmail: to,
+          visibleTo: input.visibleTo,
+          visibleCc: input.visibleCc,
+          messageId: input.messageId,
           cc,
           bcc,
           replyTo: input.replyTo,
@@ -269,6 +276,9 @@ export const transactionalEmailService = {
         smtpConnectionId: smtpConnection.id,
         templateId: template?.id,
         toEmail: to,
+        visibleTo: input.visibleTo,
+        visibleCc: input.visibleCc,
+        messageId: input.messageId,
         cc,
         bcc,
         replyTo: input.replyTo,

@@ -308,16 +308,14 @@ export const manualEmailService = {
     );
     const carrierIndex = Math.max(0, firstDeliverable);
 
-    const sendGroupId =
-      recipients.to.length > 1
-        ? input.idempotencyKey
-          ? createHash("sha256")
-              .update(
-                `${userId}:${input.organizationId}:${input.idempotencyKey}`
-              )
-              .digest("hex")
-          : randomUUID()
-        : null;
+    // A retry keeps the same RFC Message-ID across all To/Cc/Bcc copies.
+    // Keep job identity per recipient for suppression and delivery outcomes.
+    const messageIdentity = input.idempotencyKey
+      ? createHash("sha256")
+          .update(`${userId}:${input.organizationId}:${input.idempotencyKey}`)
+          .digest("hex")
+      : randomUUID();
+    const sendGroupId = recipients.to.length > 1 ? messageIdentity : null;
 
     const base = {
       organizationId: input.organizationId,
@@ -334,6 +332,9 @@ export const manualEmailService = {
       origin: "MANUAL" as const,
       createdByUserId: userId,
       sendGroupId,
+      messageId: `<${messageIdentity}@qqueue.invalid>`,
+      visibleTo: recipients.to,
+      visibleCc: recipients.cc,
     };
 
     const results: TransactionalSendResponse[] = [];

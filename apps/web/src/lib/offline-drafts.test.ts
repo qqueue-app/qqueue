@@ -5,6 +5,7 @@ import {
 } from "../test/fake-indexeddb.js";
 import { ApiError, api } from "./api.js";
 import {
+  acknowledgePendingDraft,
   deletePendingDraft,
   flushPendingDrafts,
   listPendingDrafts,
@@ -159,7 +160,7 @@ describe("offline drafts (§5)", () => {
     expect(await listPendingDrafts()).toHaveLength(2);
   });
 
-  it("drops a draft the server refuses, so it can't wedge the queue behind it", async () => {
+  it("retains a rejected draft without blocking the queue behind it", async () => {
     vi.spyOn(api, "createEmailDraft")
       .mockRejectedValueOnce(new ApiError("Draft no longer exists", 404))
       .mockResolvedValueOnce({ id: "server-2", updatedAt: "x" } as never);
@@ -173,10 +174,43 @@ describe("offline drafts (§5)", () => {
 
     const synced = await flushPendingDrafts();
 
-    // The rejected one is gone and the one behind it still got through — a 404
-    // replayed forever would have blocked it on every future attempt.
+    // Refused content remains recoverable; unrelated drafts still sync.
     expect(synced.map((entry) => entry.localId)).toEqual(["fine"]);
-    expect(await listPendingDrafts()).toHaveLength(0);
+    expect((await listPendingDrafts()).map((entry) => entry.localId)).toEqual([
+      "doomed",
+    ]);
+  });
+
+  it("keeps an edit made while the old snapshot was saving and adopts its server ID", async () => {
+    const original = draft();
+    await savePendingDraft(original);
+    const newer = draft({
+      payload: { ...original.payload, html: "<p>New writing</p>" },
+    });
+    await savePendingDraft(newer);
+    await acknowledgePendingDraft(original, "server-1");
+    expect(await listPendingDrafts()).toEqual([
+      { ...newer, draftId: "server-1" },
+    ]);
+  });
+
+  it("does not acknowledge a backup belonging to another signed-in person", async () => {
+    await savePendingDraft(draft({ userId: "other-user" }));
+    await acknowledgePendingDraft(draft(), "server-1");
+    expect(db.rows.size).toBe(1);
+  });
+
+  it("serializes simultaneous reconnect flushes so they create only one server draft", async () => {
+    const create = vi
+      .spyOn(api, "createEmailDraft")
+      .mockResolvedValue({ id: "server-1" } as never);
+    await savePendingDraft(draft());
+    const results = await Promise.all([
+      flushPendingDrafts(),
+      flushPendingDrafts(),
+    ]);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(results.map((result) => result.length)).toEqual([1, 0]);
   });
 
   it("deletes a draft by its local key", async () => {

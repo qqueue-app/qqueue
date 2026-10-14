@@ -15,6 +15,10 @@ export interface SendEmailPayload {
   to: string | string[];
   cc?: string | string[];
   bcc?: string | string[];
+  /** SMTP delivery recipients, independent of visible To/Cc headers. */
+  envelope?: { from: string; to: string[] };
+  /** Stable RFC Message-ID retained across retries and group copies. */
+  messageId?: string;
   subject: string;
   html?: string;
   text?: string;

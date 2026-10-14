@@ -100,6 +100,8 @@ export interface DataGridProps<TData> {
   pageSize?: number;
   /** Hide pagination when the caller already pages server-side. */
   paginated?: boolean;
+  /** Disable when the page already has a sticky toolbar above the grid. */
+  stickyHeader?: boolean;
   className?: string;
   /** Accessible name for the table. */
   label: string;
@@ -151,6 +153,7 @@ export function DataGrid<TData>({
   getRowLabel,
   pageSize = 25,
   paginated = true,
+  stickyHeader = true,
   className,
   label,
 }: DataGridProps<TData>) {
@@ -435,7 +438,9 @@ export function DataGrid<TData>({
                 {/* Sticky against the *document* now that main no longer
                   scrolls, so it has to clear whatever the shell has parked at
                   the top of the viewport at this width. */}
-                <thead className="sticky top-sticky-top z-10">
+                <thead
+                  className={cn(stickyHeader && "sticky top-sticky-top z-10")}
+                >
                   {table.getHeaderGroups().map((headerGroup) => (
                     <tr key={headerGroup.id}>
                       {headerGroup.headers.map((header) => {

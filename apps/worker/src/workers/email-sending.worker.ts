@@ -27,7 +27,10 @@ import type { EmailSendingJob } from "../queues/email-sending.queue.js";
 
 const PAUSE_RETRY_DELAY_MS = 30_000;
 
-function formatFrom(connection: { fromEmail: string; fromName: string | null }) {
+function formatFrom(connection: {
+  fromEmail: string;
+  fromName: string | null;
+}) {
   if (!connection.fromName) {
     return connection.fromEmail;
   }
@@ -50,7 +53,10 @@ export function startEmailSendingWorker() {
         }
       });
 
-      if (!emailJob || emailJob.status === "CANCELLED") {
+      if (
+        !emailJob ||
+        ["CANCELLED", "SENT", "SUPPRESSED"].includes(emailJob.status)
+      ) {
         return;
       }
 
@@ -104,10 +110,7 @@ export function startEmailSendingWorker() {
       let bcc = emailJob.bcc;
       let strippedCc: string[] = [];
       let strippedBcc: string[] = [];
-      if (
-        emailJob.origin !== "SYSTEM" &&
-        (cc.length > 0 || bcc.length > 0)
-      ) {
+      if (emailJob.origin !== "SYSTEM" && (cc.length > 0 || bcc.length > 0)) {
         const suppressedCopies = await suppressedAmong(
           emailJob.organizationId,
           [...cc, ...bcc]
@@ -133,10 +136,12 @@ export function startEmailSendingWorker() {
             }
           : {};
 
+      const messageId = emailJob.messageId ?? `<${emailJob.id}@qqueue.invalid>`;
       await prisma.emailJob.update({
         where: { id: emailJob.id },
-        data: { status: "PROCESSING" }
+        data: { status: "PROCESSING", messageId }
       });
+      let outcomeRecorded = false;
 
       try {
         const provider = new SMTPProvider({
@@ -229,9 +234,30 @@ export function startEmailSendingWorker() {
 
         const result = await provider.send({
           from: formatFrom(emailJob.smtpConnection),
-          to: emailJob.toEmail,
-          cc: cc.length ? cc : undefined,
-          bcc: bcc.length ? bcc : undefined,
+          // Visible headers do not decide SMTP delivery. In particular, never
+          // re-deliver to sibling To recipients or leak a Bcc header.
+          to: emailJob.visibleTo?.length
+            ? emailJob.visibleTo
+            : emailJob.toEmail,
+          cc: emailJob.visibleTo?.length
+            ? emailJob.visibleCc.length
+              ? emailJob.visibleCc
+              : undefined
+            : cc.length
+              ? cc
+              : undefined,
+          bcc: emailJob.visibleTo?.length
+            ? undefined
+            : bcc.length
+              ? bcc
+              : undefined,
+          envelope: emailJob.visibleTo?.length
+            ? {
+                from: emailJob.smtpConnection.fromEmail,
+                to: [emailJob.toEmail, ...cc, ...bcc]
+              }
+            : undefined,
+          messageId,
           // The account's default Reply-To, unless this send named its own.
           // Resolved here rather than at job creation so it lands on every
           // origin at once — campaign fan-out, recurring runs, transactional
@@ -240,7 +266,9 @@ export function startEmailSendingWorker() {
           replyTo:
             emailJob.replyTo ?? emailJob.smtpConnection.replyTo ?? undefined,
           inReplyTo: emailJob.inReplyTo ?? undefined,
-          references: emailJob.references.length ? emailJob.references : undefined,
+          references: emailJob.references.length
+            ? emailJob.references
+            : undefined,
           subject: emailJob.subject,
           html, // tracking injected and unsubscribe footer appended above
           text, // same footer, plaintext half
@@ -279,6 +307,8 @@ export function startEmailSendingWorker() {
               }
             }
           });
+
+          outcomeRecorded = true;
 
           // Hard/block bounces suppress immediately; a soft bounce only after
           // the org's threshold (the just-recorded BOUNCED event is counted).
@@ -337,6 +367,7 @@ export function startEmailSendingWorker() {
           }
         });
 
+        outcomeRecorded = true;
         await enqueueLatestWebhookDeliveries({
           organizationId: emailJob.organizationId,
           emailJobId: emailJob.id,
@@ -345,8 +376,10 @@ export function startEmailSendingWorker() {
 
         await settleRunIfComplete(emailJob.campaignRunId);
       } catch (error) {
-        const isFinalAttempt =
-          job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+        // A webhook/bookkeeping failure after recording the SMTP outcome must
+        // never turn a delivered message back into a sendable queued job.
+        if (outcomeRecorded) throw error;
+        const isFinalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
 
         /*
           The FAILED event is written once, on the attempt that gives up.

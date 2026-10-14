@@ -21,8 +21,11 @@ disconnect/reconnect, team sign-in reset links, and simpler daily navigation.
 Sensitive system mail and ancillary sending APIs now have tighter access scopes.
 
 This does **not** complete primary-client readiness. Full IMAP state/folder sync,
-older-history backfill, normal group-message semantics, forwarding, attachment
-recovery, and live mailbox/browser acceptance remain. See
+older-history backfill, remaining group-delivery edge cases, forwarding,
+attachment recovery, and live mailbox/browser acceptance remain. A follow-up
+batch preserves visible group headers and message identity, guards completed
+send replays, and retains newer or rejected device draft backups. The organization
+selected shared read state per mailbox; IMAP writeback is still pending. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer
 to the earlier email-operations scope.
