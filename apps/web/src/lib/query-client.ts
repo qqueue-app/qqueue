@@ -67,6 +67,10 @@ export function createQueryClient() {
  * one org's rows into another's view.
  */
 export const qk = {
+  mailSignatures: (orgId: string, userId: string) =>
+    ["mail-signatures", orgId, userId] as const,
+  composerDraft: (orgId: string, userId: string, id: string) =>
+    ["email-draft", orgId, userId, id] as const,
   dashboard: (orgId: string) => ["dashboard", orgId] as const,
 
   smtpConnections: (orgId: string) => ["smtp-connections", orgId] as const,

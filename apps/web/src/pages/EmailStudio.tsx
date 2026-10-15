@@ -62,6 +62,13 @@ import {
   listPendingDrafts,
   savePendingDraft,
 } from "../lib/offline-drafts.js";
+import {
+  SignatureControl,
+  signatureStamp,
+  type SignatureStamp,
+} from "../components/inbox/SignatureControl.js";
+import { useOrgQuery } from "../lib/use-api.js";
+import { qk } from "../lib/query-client.js";
 import { DraftConflictReview } from "../components/inbox/DraftConflictReview.js";
 import { RecipientField } from "../components/inbox/RecipientField.js";
 import { Badge } from "../components/ui/badge.js";
@@ -146,6 +153,18 @@ function EmailStudioWorkspace() {
   const { currentOrganizationId: organizationId, user } = useSession();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const requestedDraftId = searchParams.get("draft");
+  const requestedDraft = useOrgQuery(
+    organizationId,
+    qk.composerDraft(
+      organizationId ?? "",
+      user?.id ?? "",
+      requestedDraftId ?? ""
+    ),
+    () => api.getEmailDraft(requestedDraftId!),
+    { enabled: Boolean(requestedDraftId), staleTime: 0 }
+  );
+  const openingDraft = Boolean(requestedDraftId);
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -162,6 +181,10 @@ function EmailStudioWorkspace() {
   const [templateId, setTemplateId] = useState(NO_TEMPLATE);
   const [subject, setSubject] = useState("");
   const [html, setHtml] = useState("");
+  const [signature, setSignature] = useState<SignatureStamp>();
+  const [draftVariables, setDraftVariables] = useState<Record<string, unknown>>(
+    {}
+  );
   const [recipientInputs, setRecipientInputs] = useState<
     Record<string, string>
   >({});
@@ -441,6 +464,8 @@ function EmailStudioWorkspace() {
     setSubject("");
     setHtml("");
     setToEmails([]);
+    setSignature(undefined);
+    setDraftVariables({});
     setRecipientInputs({});
     setCcEmails([]);
     setBccEmails([]);
@@ -622,7 +647,7 @@ function EmailStudioWorkspace() {
       const work = saveChain.current
         .catch(() => undefined)
         .then(async (): Promise<string | null> => {
-          if (!organizationId) {
+          if (!organizationId || openingDraft) {
             return null;
           }
           if (acceptedSend.current) return null;
@@ -631,7 +656,11 @@ function EmailStudioWorkspace() {
             const payload = {
               subject,
               html,
-              variables: { qqueueRecipientInputs: recipientInputs },
+              variables: {
+                ...draftVariables,
+                qqueueRecipientInputs: recipientInputs,
+                qqueueSignature: signature,
+              },
               to: toEmails,
               cc: ccEmails,
               bcc: bccEmails,
@@ -756,6 +785,9 @@ function EmailStudioWorkspace() {
     },
     [
       organizationId,
+      openingDraft,
+      signature,
+      draftVariables,
       user?.id,
       subject,
       html,
@@ -794,6 +826,8 @@ function EmailStudioWorkspace() {
   }, [
     subject,
     html,
+    signature,
+    draftVariables,
     toEmails,
     recipientInputs,
     ccEmails,
@@ -838,6 +872,8 @@ function EmailStudioWorkspace() {
         id: latest.draftId,
         revision: latest.revision ?? 1,
       };
+      setSignature(signatureStamp(latest.payload.variables?.qqueueSignature));
+      setDraftVariables(latest.payload.variables ?? {});
       setSubject(latest.payload.subject);
       setHtml(latest.payload.html);
       setToEmails(latest.payload.to);
@@ -909,6 +945,8 @@ function EmailStudioWorkspace() {
       acceptedSend.current = draft.completedSendId ?? null;
       setAcceptedSendId(acceptedSend.current);
       setDraftConflict(false);
+      setSignature(signatureStamp(draft.variables?.qqueueSignature));
+      setDraftVariables(draft.variables ?? {});
       setSubject(draft.subject ?? "");
       setHtml(draft.html ?? "");
       setToEmails(draft.to ?? []);
@@ -935,28 +973,27 @@ function EmailStudioWorkspace() {
   );
 
   async function loadDraft(summary: EmailDraft) {
-    // The drafts list omits attachments; fetch the full draft so resuming
-    // restores its files too. Fall back to the summary if the fetch fails.
-    let draft = summary;
-    try {
-      draft = await api.getEmailDraft(summary.id);
-    } catch {
-      toast.error(
-        "Couldn't restore this draft's attachments. Try opening it again."
-      );
-      return;
+    if (sending || openingDraft) return;
+    if (hasContent && !acceptedSend.current) {
+      const saved = await saveDraft(true);
+      if (!saved && !deviceBackup.current) return;
     }
-    applyDraft(draft);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("draft", summary.id);
+      return next;
+    });
+    setDraftsOpen(false);
   }
-
-  // Deep link from the Drafts page: /email-studio?draft=<id>.
-  const requestedDraftId = searchParams.get("draft");
   useEffect(() => {
-    if (!requestedDraftId) {
+    if (
+      !requestedDraftId ||
+      !requestedDraft.data ||
+      requestedDraft.isFetching ||
+      requestedDraft.isError
+    )
       return;
-    }
-    // Drop the param first so a refresh doesn't re-open the draft over work in
-    // progress.
+    applyDraft(requestedDraft.data);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -965,11 +1002,7 @@ function EmailStudioWorkspace() {
       },
       { replace: true }
     );
-    api
-      .getEmailDraft(requestedDraftId)
-      .then(applyDraft)
-      .catch(() => toast.error("That draft couldn't be opened."));
-  }, [requestedDraftId, applyDraft, setSearchParams]);
+  }, [requestedDraftId, requestedDraft.data, applyDraft, setSearchParams]);
 
   async function confirmDeleteDraft() {
     if (!deleteDraftTarget) {
@@ -997,6 +1030,7 @@ function EmailStudioWorkspace() {
    * delivered email exactly where it matters (pasted HTML, tracked links).
    */
   async function openPreview() {
+    if (openingDraft) return;
     if (uploadBackup.current.length) {
       toast.error(
         "Some files need attention. Retry or remove them before sending."
@@ -1262,7 +1296,7 @@ function EmailStudioWorkspace() {
               type="button"
               variant="secondary"
               onClick={() => setDraftsOpen(true)}
-              disabled={!organizationId}
+              disabled={!organizationId || sending || openingDraft}
             >
               <FileText className="h-4 w-4" />
               Drafts{drafts.length ? ` (${drafts.length})` : ""}
@@ -1271,7 +1305,14 @@ function EmailStudioWorkspace() {
               type="button"
               variant="secondary"
               onClick={() => void saveDraft(false)}
-              disabled={!organizationId || savingDraft || !hasContent}
+              disabled={
+                !organizationId ||
+                savingDraft ||
+                sending ||
+                openingDraft ||
+                Boolean(acceptedSendId) ||
+                !hasContent
+              }
             >
               {savingDraft ? <Spinner /> : <Save className="h-4 w-4" />}
               Save draft
@@ -1281,6 +1322,40 @@ function EmailStudioWorkspace() {
       />
 
       <PageContainer>
+        {openingDraft ? (
+          <div role="status" className="mb-4 text-ui">
+            {requestedDraft.isError ? (
+              <>
+                Couldn't open this draft. Your current writing is kept.{" "}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void requestedDraft.refetch()}
+                >
+                  Try opening again
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() =>
+                    setSearchParams(
+                      (current) => {
+                        const next = new URLSearchParams(current);
+                        next.delete("draft");
+                        return next;
+                      },
+                      { replace: true }
+                    )
+                  }
+                >
+                  Keep current writing
+                </Button>
+              </>
+            ) : (
+              "Opening saved draft…"
+            )}
+          </div>
+        ) : null}
         {loading ? (
           <div className="space-y-4">
             <Skeleton className="h-touch w-full sm:h-control sm:w-field-name" />
@@ -1306,7 +1381,7 @@ function EmailStudioWorkspace() {
             className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_var(--content-rail)]"
           >
             <fieldset
-              disabled={sending || Boolean(acceptedSendId)}
+              disabled={sending || openingDraft || Boolean(acceptedSendId)}
               className="min-w-0 space-y-6"
             >
               {noSmtp ? (
@@ -1370,7 +1445,9 @@ function EmailStudioWorkspace() {
                   </Field>
 
                   <RecipientField
-                    disabled={sending || Boolean(acceptedSendId)}
+                    disabled={
+                      sending || openingDraft || Boolean(acceptedSendId)
+                    }
                     id="to"
                     label="To"
                     pendingValue={recipientInputs["to"] ?? ""}
@@ -1458,7 +1535,9 @@ function EmailStudioWorkspace() {
                   {copyVisible ? (
                     <>
                       <RecipientField
-                        disabled={sending || Boolean(acceptedSendId)}
+                        disabled={
+                          sending || openingDraft || Boolean(acceptedSendId)
+                        }
                         id="cc"
                         label="Cc"
                         pendingValue={recipientInputs["cc"] ?? ""}
@@ -1473,7 +1552,9 @@ function EmailStudioWorkspace() {
                         suggestions={recipientSuggestions}
                       />
                       <RecipientField
-                        disabled={sending || Boolean(acceptedSendId)}
+                        disabled={
+                          sending || openingDraft || Boolean(acceptedSendId)
+                        }
                         id="bcc"
                         label="Bcc"
                         pendingValue={recipientInputs["bcc"] ?? ""}
@@ -1570,8 +1651,23 @@ function EmailStudioWorkspace() {
 
                     {/* The editor is the one control that legitimately fills
                         the form column — prose has no natural width. */}
+                    <SignatureControl
+                      organizationId={organizationId!}
+                      connectionId={sendingConnection?.id}
+                      value={html}
+                      onChange={setHtml}
+                      stamp={signature}
+                      onStamp={setSignature}
+                      autoReady={!loading && !openingDraft && !draftId}
+                      generation={localDraftId.current}
+                      disabled={
+                        sending || openingDraft || Boolean(acceptedSendId)
+                      }
+                    />
                     <BodyEditor
-                      disabled={sending || Boolean(acceptedSendId)}
+                      disabled={
+                        sending || openingDraft || Boolean(acceptedSendId)
+                      }
                       compactToolbar
                       value={html}
                       onChange={setHtml}
@@ -1749,6 +1845,7 @@ function EmailStudioWorkspace() {
                   className="w-full"
                   disabled={
                     sending ||
+                    openingDraft ||
                     uploading ||
                     pendingUploads.length > 0 ||
                     Boolean(acceptedSendId) ||

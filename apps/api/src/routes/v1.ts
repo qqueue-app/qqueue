@@ -16,8 +16,9 @@ import { instanceAdminRouter } from "../modules/instance-admin/routes.js";
 import { instanceSettingsRouter } from "../modules/instance-settings/routes.js";
 import {
   invitationPublicRouter,
-  invitationRouter
+  invitationRouter,
 } from "../modules/invitations/routes.js";
+import { mailPreferenceRouter } from "../modules/mail-preferences/routes.js";
 import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { recurringSendRouter } from "../modules/recurring-sends/routes.js";
 import { organizationRouter } from "../modules/organizations/routes.js";
@@ -105,6 +106,7 @@ v1Router.use("/campaigns", campaignRouter);
 // shared send pipeline (origin = MANUAL) rather than a parallel send path.
 v1Router.use("/manual-email", manualEmailRouter);
 v1Router.use("/email-drafts", emailDraftRouter);
+v1Router.use("/mail-preferences", mailPreferenceRouter);
 // Outbox: mail that has been accepted but not yet delivered, in product terms
 // (subjects, addresses, sending account) rather than the raw BullMQ jobs the
 // queue-operations dashboard exposes. Any member can view and cancel.

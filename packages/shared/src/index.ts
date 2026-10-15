@@ -3131,3 +3131,20 @@ export const pushNotificationPayloadSchema = z.object({
 export type PushNotificationPayload = z.infer<
   typeof pushNotificationPayloadSchema
 >;
+
+export const mailSignatureSchema = z.object({
+  smtpConnectionId: z.string().min(1),
+  text: z.string().max(10000),
+  enabled: z.boolean(),
+  expectedRevision: z.number().int().min(0),
+});
+export type MailSignatureInput = z.infer<typeof mailSignatureSchema>;
+export interface PersonalMailSignature {
+  smtpConnectionId: string;
+  fromEmail: string;
+  fromName: string | null;
+  isDefault: boolean;
+  text: string;
+  enabled: boolean;
+  revision: number;
+}

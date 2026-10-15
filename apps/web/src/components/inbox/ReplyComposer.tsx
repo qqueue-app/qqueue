@@ -2,6 +2,11 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Paperclip, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  SignatureControl,
+  signatureStamp,
+  type SignatureStamp,
+} from "./SignatureControl.js";
 import { RecipientField } from "./RecipientField.js";
 import {
   savePendingDraft,
@@ -51,6 +56,7 @@ interface ReplyBackup {
   cc?: string[];
   bcc?: string[];
   recipientInputs?: Record<string, string>;
+  signature?: SignatureStamp;
   attachments: EmailAttachment[];
   draftId?: string;
   replyAll: boolean;
@@ -80,6 +86,9 @@ export function ReplyComposer({
       return null;
     }
   });
+  const [signature, setSignature] = useState<SignatureStamp | undefined>(() =>
+    signatureStamp(backup?.signature)
+  );
   const [html, setHtml] = useState(backup?.html ?? "");
   const [attachments, setAttachments] = useState<EmailAttachment[]>(
     backup?.attachments ?? []
@@ -143,6 +152,7 @@ export function ReplyComposer({
             string
           >) ?? {}
         );
+        setSignature(signatureStamp(saved.payload.variables?.qqueueSignature));
         setHtml(saved.payload.html);
         setTo(saved.payload.to);
         setCc(saved.payload.cc);
@@ -163,8 +173,16 @@ export function ReplyComposer({
     pendingRef.current = files;
     setPendingFiles(files);
   }
-  const writing = useRef({ html, to, cc, bcc, replyAll, recipientInputs });
-  writing.current = { html, to, cc, bcc, replyAll, recipientInputs };
+  const writing = useRef({
+    html,
+    to,
+    cc,
+    bcc,
+    replyAll,
+    recipientInputs,
+    signature,
+  });
+  writing.current = { html, to, cc, bcc, replyAll, recipientInputs, signature };
   function pendingRecord(emailDraftId = draftId.current ?? null): PendingDraft {
     const current = writing.current;
     return {
@@ -184,6 +202,7 @@ export function ReplyComposer({
         bcc: current.bcc,
         listIds: [],
         variables: {
+          qqueueSignature: current.signature,
           qqueueEditableRecipients: true,
           qqueueReplyAll: current.replyAll,
           qqueueRecipientInputs: current.recipientInputs,
@@ -194,6 +213,7 @@ export function ReplyComposer({
   const latest = useRef("");
   latest.current = JSON.stringify({
     html,
+    signature,
     to,
     cc,
     bcc,
@@ -241,6 +261,7 @@ export function ReplyComposer({
     } else if (!loadedDraft.current) revision.current = draft.revision ?? 1;
     loadedDraft.current = true;
     if (!touched.current) {
+      setSignature(signatureStamp(draft.variables?.qqueueSignature));
       setHtml(draft.html ?? "");
       setAttachments(draft.attachments ?? []);
       setRecipientInputs(
@@ -262,7 +283,7 @@ export function ReplyComposer({
   const save = useApiMutation(
     async (body: string) => {
       const fingerprint = latest.current;
-      const recipients = { to, cc, bcc, replyAll, recipientInputs };
+      const recipients = { to, cc, bcc, replyAll, recipientInputs, signature };
       const work = saveChain.current
         .catch(() => undefined)
         .then(async () => {
@@ -279,6 +300,7 @@ export function ReplyComposer({
             cc: recipients.cc,
             bcc: recipients.bcc,
             variables: {
+              qqueueSignature: recipients.signature,
               qqueueEditableRecipients: true,
               qqueueReplyAll: recipients.replyAll,
               qqueueRecipientInputs: recipients.recipientInputs,
@@ -350,6 +372,7 @@ export function ReplyComposer({
           storageKey,
           JSON.stringify({
             html,
+            signature,
             recipientInputs,
             to,
             cc,
@@ -375,6 +398,7 @@ export function ReplyComposer({
     return () => window.clearTimeout(timer);
   }, [
     html,
+    signature,
     recipientInputs,
     to,
     cc,
@@ -655,6 +679,26 @@ export function ReplyComposer({
                 Reply to everyone
               </label>
             ) : null}
+            <SignatureControl
+              organizationId={organizationId}
+              mailboxEmail={mailboxEmail}
+              value={html}
+              onChange={(value) => {
+                touched.current = true;
+                setSaved(false);
+                setHtml(value);
+              }}
+              stamp={signature}
+              onStamp={setSignature}
+              autoReady={
+                filesRestored &&
+                !draftQuery.isPending &&
+                !draftQuery.data &&
+                !backup
+              }
+              generation={backupId}
+              disabled={send.isPending || Boolean(acceptedId)}
+            />
             <BodyEditor
               compactToolbar
               disabled={send.isPending || Boolean(acceptedId)}
@@ -742,6 +786,9 @@ export function ReplyComposer({
                 onUse={(current) => {
                   draftId.current = current.id;
                   revision.current = current.revision ?? 1;
+                  setSignature(
+                    signatureStamp(current.variables?.qqueueSignature)
+                  );
                   setHtml(current.html ?? "");
                   setTo(current.to ?? defaultTo);
                   setCc(current.cc ?? []);

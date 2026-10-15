@@ -325,17 +325,52 @@ Acceptance evidence:
   Reply all, Cc-only restore, lost send responses, competing draft versions, file
   retries after reopening, and newer writing during failed uploads. These are
   automated checks; actual browser transport loss and device storage exhaustion
-  still require acceptance. The latest reply sheet still needs its own native
-  browser/mobile journey beyond these component checks.
+  still require acceptance. The subsequent signature batch below also verifies
+  the reply sheet in Chrome and a phone viewport.
+
+## Personal signatures and safe draft opening (2026-10-15)
+
+Implemented:
+
+- Personal signatures are stored per user and sending account, with revision
+  conflicts and stable unchanged retries. Existing accounts start without an
+  active signature. Settings appear under You, and members can configure only
+  sending accounts they are allowed to use. Organization administrators do not
+  gain access to another person's signature.
+- New messages and replies insert an enabled signature into empty writing.
+  Manual insertion remains available when automatic use is disabled. Switching
+  From replaces an untouched inserted signature; edited sign-offs are retained
+  with a useful explanation. Full HTML documents retain their body boundaries.
+  Drafts/device backups retain the inserted signature and its account identity.
+- Deep-linked drafts now load through organization/user-scoped query state.
+  Editing and sending are locked until loading succeeds, with explicit retry and
+  keep-current-writing options on failure. Opening another saved draft first
+  saves the current writing or retains its device backup.
+
+Acceptance evidence:
+
+- Actual API/PostgreSQL checks verified private signatures for two users sharing
+  one sending account, denied writes without its send grant, stable retry
+  revisions, rejection of changed retries, and cleanup of a deleted temporary
+  user's preferences. The additive migration and fresh Docker smoke passed;
+  disposable PostgreSQL reports no schema drift.
+- Chrome saved a personal signature in Settings and automatically inserted it
+  into Compose and a message-specific reply. An incomplete Cc address prevented
+  submission and survived closing/reopening the unsent reply. The reply sheet,
+  recipient fields, saved status and footer controls fit a 440px phone viewport.
+  This is browser emulation, not physical keyboard/safe-area acceptance.
+- Full typecheck, lint, build, tests and unchanged coverage gates passed. Tests
+  also cover From changes, preserving edited signatures, manual insertion,
+  private settings conflicts and failed deep-link loading/retry.
 
 ## Required before calling the primary-client goal complete
 
 1. **IMAP folder operations:** external-draft editing/reconciliation and integration of imported Sent
    with the logical delivery archive. Validate UID-validity replacement, large
    mailboxes and interrupted import against real services.
-2. **Draft/composer recovery:** per-account signatures and broader native-browser
-   reply/recovery acceptance. Verify concurrent tabs/devices, interrupted uploads
-   and device storage failures, including navigation and organization changes.
+2. **Draft/composer recovery:** broader acceptance of concurrent tabs/devices,
+   interrupted uploads and device storage failures, including navigation and
+   organization changes.
 3. **Inbound content acceptance:** stress large/complex MIME messages, missing
    inline parts, real interrupted network/storage uploads and recovery when
    messages move or disappear in another client.

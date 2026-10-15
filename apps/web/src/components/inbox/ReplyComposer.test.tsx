@@ -28,6 +28,7 @@ vi.mock("../editor/BodyEditor.js", () => ({
 }));
 vi.mock("../../lib/api.js", () => ({
   api: {
+    listMailSignatures: vi.fn().mockResolvedValue([]),
     listEmailDrafts: vi.fn(),
     getEmailDraft: vi.fn(),
     createEmailDraft: vi.fn(),

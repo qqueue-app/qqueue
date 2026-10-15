@@ -31,6 +31,7 @@ vi.mock("../lib/api.js", () => ({
     markInboundMessagesRead: vi.fn(),
     syncInbox: vi.fn(),
     retryInboundContent: vi.fn(),
+    listMailSignatures: vi.fn().mockResolvedValue([]),
     listEmailDrafts: vi.fn(),
     getEmailDraft: vi.fn(),
     createEmailDraft: vi.fn(),

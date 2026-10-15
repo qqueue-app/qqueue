@@ -129,6 +129,11 @@ const groups: { heading: string; links: HubLink[] }[] = [
     heading: "You",
     links: [
       {
+        to: "/settings/signatures",
+        title: "Signatures",
+        description: "Your personal sign-off for each sending account.",
+      },
+      {
         to: "/settings/notifications",
         title: "Notifications",
         description: "Which mailboxes may interrupt you, and on which devices.",

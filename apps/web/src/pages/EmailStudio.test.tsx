@@ -30,6 +30,7 @@ vi.mock("../lib/api.js", () => ({
     listSendableSMTPConnections: vi.fn(),
     listContacts: vi.fn(),
     listContactLists: vi.fn(),
+    listMailSignatures: vi.fn().mockResolvedValue([]),
     listEmailDrafts: vi.fn(),
     listRecipientSuggestions: vi.fn(),
     sendManualEmail: vi.fn(),
@@ -846,4 +847,12 @@ describe("EmailStudio", () => {
       await screen.findByRole("button", { name: /Send email/i });
     });
   });
+});
+
+it("locks the composer while a deep-linked draft is opening and recovers a failed load",async()=>{
+ setup();mockedApi.getEmailDraft.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({id:"d9",organizationId:"org_1",revision:2,subject:"Recovered",html:"<p>Keep the saved writing</p>",to:["alice@x.com"],cc:[],bcc:[],listIds:[],attachments:[]});
+ const user=userEvent.setup();renderWithProviders(<EmailStudio/>,{route:"/email-studio?draft=d9"});
+ expect(await screen.findByRole("button",{name:"Try opening again"})).toBeInTheDocument();expect(screen.getByRole("button",{name:"Send email"})).toBeDisabled();
+ await user.click(screen.getByRole("button",{name:"Try opening again"}));await waitFor(()=>expect(screen.getByRole("textbox",{name:"Subject"})).toHaveValue("Recovered"));
+ expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
 });

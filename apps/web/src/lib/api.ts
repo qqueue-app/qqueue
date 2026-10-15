@@ -1,4 +1,6 @@
 import type {
+  PersonalMailSignature,
+  MailSignatureInput,
   MailboxView,
   InboxFolder,
   InboxMoveInput,
@@ -2678,6 +2680,23 @@ export const api = {
 
   deleteRecurringSend(id: string) {
     return request<void>(`/api/v1/recurring-sends/${id}`, { method: "DELETE" });
+  },
+
+  listMailSignatures(organizationId: string) {
+    return request<PersonalMailSignature[]>(
+      `/api/v1/mail-preferences/signatures?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+  saveMailSignature(organizationId: string, input: MailSignatureInput) {
+    return request<{
+      revision: number;
+      text: string;
+      enabled: boolean;
+      smtpConnectionId: string;
+    }>(
+      `/api/v1/mail-preferences/signatures?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "PUT", body: JSON.stringify(input) }
+    );
   },
 
   prepareInboundForward(id: string, organizationId: string, clientId: string) {

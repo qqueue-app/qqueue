@@ -35,8 +35,9 @@ Durable user-initiated Archive, Trash/restore and destination moves now preserve
 accepted intent, reconcile ambiguous server outcomes and keep cached writing.
 Editable reply recipients, forward drafts with original private attachments,
 recoverable reply files, saved-version comparison and simpler mail formatting
-are now implemented. External-draft editing, per-account signatures, and broader
-attachment, team and device acceptance remain. See
+are now implemented. Personal per-sending-account signatures and protected
+draft opening/retry are implemented as well. External-draft editing, unified
+received/sent search, team coordination and broader acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer
 to the earlier email-operations scope.

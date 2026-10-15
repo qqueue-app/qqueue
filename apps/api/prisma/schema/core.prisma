@@ -163,6 +163,7 @@ model User {
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
+  mailSignatures      MailSignature[]
   inboxMoves          InboxMove[]
   inboxMoveBatches    InboxMoveBatch[]
   invitesSent         OrganizationInvite[]  @relation("InvitesSent")
@@ -271,6 +272,7 @@ model Organization {
   brandingEnabled      Boolean               @default(true)
   members              OrganizationMember[]
   invites              OrganizationInvite[]
+  mailSignatures       MailSignature[]
   smtpConnections      SMTPConnection[]
   smtpConnectionGrants SmtpConnectionGrant[]
   inboxAccountGrants   InboxAccountGrant[]
@@ -348,6 +350,7 @@ model OrganizationInvite {
 }
 
 model SMTPConnection {
+  mailSignatures    MailSignature[]
   id                String                @id @default(cuid())
   organizationId    String
   name              String
@@ -1304,4 +1307,23 @@ model WebhookDelivery {
   @@index([endpointId])
   @@index([emailEventId])
   @@index([status, nextAttemptAt])
+}
+
+// Personal sign-off per sending account. Never an organization-wide From identity.
+model MailSignature {
+  id               String         @id @default(cuid())
+  organizationId   String
+  userId           String
+  smtpConnectionId String
+  text             String         @default("")
+  enabled          Boolean        @default(true)
+  revision         Int            @default(1)
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  smtpConnection   SMTPConnection @relation(fields: [smtpConnectionId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([userId, smtpConnectionId])
+  @@index([organizationId, userId])
 }

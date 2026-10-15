@@ -100,6 +100,7 @@ const InstanceMailboxes = lazy(() =>
     default: module.InstanceMailboxes,
   }))
 );
+const SignatureSettings = lazy(() => import("../pages/settings/SignatureSettings.js").then(module => ({default:module.SignatureSettings})));
 const AccountSettings = lazy(() =>
   import("../pages/settings/AccountSettings.js").then((module) => ({
     default: module.AccountSettings,
@@ -299,6 +300,7 @@ export function AppRoutes() {
             path="/settings/instance/mailboxes"
             element={<InstanceMailboxes />}
           />
+          <Route path="/settings/signatures" element={<SignatureSettings />} />
           <Route path="/settings/account" element={<AccountSettings />} />
           <Route
             path="/settings/notifications"
