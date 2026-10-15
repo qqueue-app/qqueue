@@ -43,6 +43,8 @@ import { formatBytes } from "../../lib/format.js";
 import { qk } from "../../lib/query-client.js";
 import { useApiMutation, useOrgQuery } from "../../lib/use-api.js";
 import { useSession } from "../../lib/session-context.js";
+import { useDraftCloseWarning } from "../../lib/use-draft-close-warning.js";
+import { useOnline } from "../../lib/use-online.js";
 import { replyBackupKey } from "../../lib/reply-backup.js";
 import { getSession } from "../../lib/session.js";
 
@@ -51,6 +53,7 @@ interface Props {
   organizationId: string;
   mailboxEmail: string;
   initialDraftId?: string;
+  initialBackupId?: string;
   replyPresence?: { available: boolean; participants: ReplyPresence[] };
   onClose: () => void;
   onQueued: (id: string) => void;
@@ -77,12 +80,14 @@ export function ReplyComposer({
   organizationId,
   mailboxEmail,
   initialDraftId,
+  initialBackupId,
   replyPresence,
   onClose,
   onQueued,
 }: Props) {
   const { user } = useSession();
   const queryClient = useQueryClient();
+  const online = useOnline();
   const [presenceClientId] = useState(() => crypto.randomUUID());
   const presence = useApiMutation(
     () => api.touchReplyPresence(message.id, organizationId, presenceClientId),
@@ -111,7 +116,8 @@ export function ReplyComposer({
   }, [message.id, organizationId, presenceClientId]);
   const [sourceStorageKey] = useState(() =>
     user?.id
-      ? replyBackupKey(user.id, organizationId, message.id, initialDraftId)
+      ? (initialBackupId ??
+        replyBackupKey(user.id, organizationId, message.id, initialDraftId))
       : null
   );
   const [backup] = useState<ReplyBackup | null>(() => {
@@ -158,7 +164,12 @@ export function ReplyComposer({
   const [pendingFiles, setPendingFiles] = useState<PendingUpload[]>([]);
   const pendingRef = useRef<PendingUpload[]>([]);
   const [filesRestored, setFilesRestored] = useState(false);
+  const [backupMissing, setBackupMissing] = useState(false);
   const [storageError, setStorageError] = useState(false);
+  const [localBackupFingerprint, setLocalBackupFingerprint] =
+    useState<string>();
+  const [indexedBackupFingerprint, setIndexedBackupFingerprint] =
+    useState<string>();
   const [conflict, setConflict] = useState(false);
   const [acceptedId, setAcceptedId] = useState<string>();
   const [uploading, setUploading] = useState(false);
@@ -170,15 +181,25 @@ export function ReplyComposer({
   const touched = useRef(Boolean(backup));
   const sent = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const uploadAbort = useRef<AbortController>();
+  useEffect(() => () => uploadAbort.current?.abort(), []);
   const backupId = storageKey ?? `reply.${organizationId}.${message.id}`;
   useEffect(() => {
     let active = true;
     void listPendingDrafts(organizationId).then((drafts) => {
       if (!active) return;
-      const saved =
-        drafts.find((entry) => entry.localId === backupId) ??
-        drafts.find((entry) => entry.localId === sourceStorageKey);
-      if (saved && !backup) {
+      const scoped = drafts.filter(
+        (entry) =>
+          entry.payload.inboundMessageId === message.id &&
+          (!initialDraftId || entry.draftId === initialDraftId)
+      );
+      const saved = initialBackupId
+        ? scoped.find((entry) => entry.localId === initialBackupId)
+        : (scoped.find((entry) => entry.localId === backupId) ??
+          scoped.find((entry) => entry.localId === sourceStorageKey) ??
+          scoped.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]);
+      if (initialBackupId && !saved && !backup) setBackupMissing(true);
+      if (saved && (!backup || saved.updatedAt >= (backup.updatedAt ?? ""))) {
         setRecipientInputs(
           (saved.payload.variables?.qqueueRecipientInputs as Record<
             string,
@@ -192,6 +213,8 @@ export function ReplyComposer({
         setBcc(saved.payload.bcc);
         draftId.current = saved.draftId ?? undefined;
         revision.current = saved.revision ?? 1;
+        clientId.current = saved.clientId ?? clientId.current;
+        setAttachments(saved.attachments ?? []);
         touched.current = true;
       }
       pendingRef.current = saved?.pendingUploads ?? [];
@@ -214,8 +237,18 @@ export function ReplyComposer({
     replyAll,
     recipientInputs,
     signature,
+    attachments,
   });
-  writing.current = { html, to, cc, bcc, replyAll, recipientInputs, signature };
+  writing.current = {
+    html,
+    to,
+    cc,
+    bcc,
+    replyAll,
+    recipientInputs,
+    signature,
+    attachments,
+  };
   function pendingRecord(emailDraftId = draftId.current ?? null): PendingDraft {
     const current = writing.current;
     return {
@@ -224,9 +257,9 @@ export function ReplyComposer({
       organizationId,
       draftId: emailDraftId,
       revision: revision.current,
-      updatedAt: new Date().toISOString(),
+      updatedAt: backupTime.current,
       pendingUploads: pendingRef.current,
-      attachments,
+      attachments: current.attachments,
       clientId: clientId.current,
       payload: {
         inboundMessageId: message.id,
@@ -245,6 +278,13 @@ export function ReplyComposer({
       },
     };
   }
+  useEffect(
+    () => () => {
+      if ((touched.current || pendingRef.current.length) && !sent.current)
+        void savePendingDraft(pendingRecord());
+    },
+    []
+  );
   const latest = useRef("");
   latest.current = JSON.stringify({
     html,
@@ -257,13 +297,29 @@ export function ReplyComposer({
     replyAll,
     recipientInputs,
   });
+  const durableText =
+    saved ||
+    localBackupFingerprint === latest.current ||
+    indexedBackupFingerprint === latest.current;
+  const durableFiles =
+    pendingFiles.length === 0 || indexedBackupFingerprint === latest.current;
+  useDraftCloseWarning(
+    !sent.current &&
+      (touched.current || pendingFiles.length > 0) &&
+      (!durableText || !durableFiles)
+  );
   const subject = /^re:/i.test(message.subject)
     ? message.subject
     : `Re: ${message.subject || "(no subject)"}`;
 
   const draftQuery = useOrgQuery(
     organizationId,
-    ["reply-draft", organizationId, user?.id, message.id, initialDraftId],
+    qk.replyDraft(
+      organizationId,
+      user?.id ?? "",
+      message.id,
+      draftId.current ?? initialBackupId
+    ),
     async () => {
       if (draftId.current) return api.getEmailDraft(draftId.current);
       const drafts = await api.listEmailDrafts(organizationId);
@@ -272,7 +328,7 @@ export function ReplyComposer({
       );
       return existing ? api.getEmailDraft(existing.id) : null;
     },
-    { enabled: filesRestored }
+    { enabled: filesRestored && !backupMissing }
   );
   const loadedDraft = useRef(false);
   useEffect(() => {
@@ -320,6 +376,7 @@ export function ReplyComposer({
       body: writing.current.html,
       recipients: writing.current,
       fingerprint: latest.current,
+      backup: pendingRecord(),
     };
   }
   const save = useApiMutation(
@@ -327,6 +384,7 @@ export function ReplyComposer({
       body,
       recipients,
       fingerprint,
+      backup: snapshot,
     }: ReturnType<typeof saveSnapshot>) => {
       const work = saveChain.current
         .catch(() => undefined)
@@ -364,11 +422,7 @@ export function ReplyComposer({
           draftId.current = draft.id;
           revision.current = draft.revision ?? 1;
           setSaved(fingerprint === latest.current);
-          const pending = (await listPendingDrafts(organizationId)).find(
-            (entry) => entry.localId === backupId
-          );
-          if (pending)
-            await acknowledgePendingDraft(pending, draft.id, draft.revision);
+          await acknowledgePendingDraft(snapshot, draft.id, draft.revision);
           try {
             if (storageKey) {
               const current = JSON.parse(
@@ -409,7 +463,13 @@ export function ReplyComposer({
   );
 
   useEffect(() => {
-    if (!touched.current || sent.current) return;
+    if (sent.current) return;
+    if (!touched.current && !pendingRef.current.length) {
+      lastBackupWriting.current = latest.current;
+      return;
+    }
+    let active = true;
+    const fingerprint = latest.current;
     if (
       lastBackupWriting.current &&
       lastBackupWriting.current !== latest.current
@@ -439,19 +499,33 @@ export function ReplyComposer({
             updatedAt: backupTime.current,
           })
         );
+        setLocalBackupFingerprint(fingerprint);
       } catch {
         setStorageError(true);
       }
     }
-    // Keep the latest writing beside retryable file bytes, even when browser
-    // localStorage is full. A server acknowledgement updates this revision.
-    if (filesRestored && pendingRef.current.length && draftId.current)
-      void savePendingDraft(pendingRecord());
-    if (draftQuery.isPending || draftQuery.isError) return;
-    if (conflict || acceptedId || !filesRestored) return;
-    const timer = window.setTimeout(() => save.mutate(saveSnapshot()), 1500);
-    return () => window.clearTimeout(timer);
+    // Record text and pending File bytes before a network call or navigation.
+    if (filesRestored)
+      void savePendingDraft(pendingRecord()).then((durable) => {
+        if (active)
+          setIndexedBackupFingerprint(durable ? fingerprint : undefined);
+      });
+    let timer: number | undefined;
+    if (
+      online &&
+      !draftQuery.isPending &&
+      !draftQuery.isError &&
+      !conflict &&
+      !acceptedId &&
+      filesRestored
+    )
+      timer = window.setTimeout(() => save.mutate(saveSnapshot()), 1500);
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [
+    online,
     html,
     signature,
     recipientInputs,
@@ -520,19 +594,30 @@ export function ReplyComposer({
   );
 
   async function processFiles(entries: PendingUpload[]) {
+    uploadAbort.current?.abort();
+    const controller = new AbortController();
+    uploadAbort.current = controller;
     setUploading(true);
     try {
+      // Save bytes even when the first server draft has not been created yet.
+      await savePendingDraft(pendingRecord());
+      if (!online || controller.signal.aborted)
+        throw new Error(
+          "Waiting for a connection. Your file copy is kept in this window."
+        );
       const emailDraftId = await save.mutateAsync(saveSnapshot());
       if (!emailDraftId)
         throw new Error("Save this reply before attaching files.");
       const persisted = await savePendingDraft(pendingRecord(emailDraftId));
       if (!persisted) setStorageError(true);
       for (const entry of entries) {
+        if (controller.signal.aborted) break;
         try {
           const uploaded = await api.uploadAttachment(entry.file, {
             organizationId,
             emailDraftId,
             uploadId: entry.uploadId,
+            signal: controller.signal,
           });
           touched.current = true;
           setAttachments((current) =>
@@ -572,7 +657,10 @@ export function ReplyComposer({
         }))
       );
     } finally {
-      setUploading(false);
+      if (uploadAbort.current === controller) {
+        uploadAbort.current = undefined;
+        setUploading(false);
+      }
       if (!pendingRef.current.length) await deletePendingDraft(backupId);
       else await savePendingDraft(pendingRecord());
       if (fileInput.current) fileInput.current.value = "";
@@ -585,6 +673,8 @@ export function ReplyComposer({
       uploadId: crypto.randomUUID(),
       error: "Waiting to upload",
     }));
+    touched.current = true;
+    setSaved(false);
     updateFiles([...pendingRef.current, ...entries]);
     await processFiles(entries);
   }
@@ -599,14 +689,12 @@ export function ReplyComposer({
       .replace(/&nbsp;/g, " ")
       .trim() && !/<img\b/i.test(html);
   function close() {
-    if (send.isPending || uploading) return;
-    if (storageError && touched.current && !saved) {
-      toast.error(
-        "Keep this reply open until it can be saved. Device storage is unavailable."
-      );
-      return;
-    }
+    if (send.isPending) return;
+    uploadAbort.current?.abort();
+    if ((touched.current || pendingRef.current.length) && !sent.current)
+      void savePendingDraft(pendingRecord());
     if (
+      online &&
       touched.current &&
       !conflict &&
       !acceptedId &&
@@ -657,6 +745,12 @@ export function ReplyComposer({
             }
           />
           <form id="message-reply-form" onSubmit={submit} className="space-y-4">
+            {backupMissing ? (
+              <p role="alert">
+                That window copy is no longer available. Check Drafts for a
+                saved copy.
+              </p>
+            ) : null}
             <p className="break-words text-ui">
               <strong>From:</strong> {mailboxEmail}
             </p>
@@ -684,7 +778,12 @@ export function ReplyComposer({
                 setSaved(false);
                 setTo(value);
               }}
-              disabled={send.isPending || Boolean(acceptedId)}
+              disabled={
+                !filesRestored ||
+                backupMissing ||
+                send.isPending ||
+                Boolean(acceptedId)
+              }
             />
             <RecipientField
               id="reply-cc-addresses"
@@ -704,7 +803,12 @@ export function ReplyComposer({
                 setSaved(false);
                 setCc(value);
               }}
-              disabled={send.isPending || Boolean(acceptedId)}
+              disabled={
+                !filesRestored ||
+                backupMissing ||
+                send.isPending ||
+                Boolean(acceptedId)
+              }
             />
             <RecipientField
               id="reply-bcc-addresses"
@@ -724,14 +828,24 @@ export function ReplyComposer({
                 setSaved(false);
                 setBcc(value);
               }}
-              disabled={send.isPending || Boolean(acceptedId)}
+              disabled={
+                !filesRestored ||
+                backupMissing ||
+                send.isPending ||
+                Boolean(acceptedId)
+              }
             />
             {message.to.length + message.cc.length > 1 ? (
               <label className="flex items-center gap-2 text-ui">
                 <input
                   type="checkbox"
                   checked={replyAll}
-                  disabled={send.isPending || Boolean(acceptedId)}
+                  disabled={
+                    !filesRestored ||
+                    backupMissing ||
+                    send.isPending ||
+                    Boolean(acceptedId)
+                  }
                   onChange={(event) => {
                     touched.current = true;
                     setSaved(false);
@@ -762,11 +876,21 @@ export function ReplyComposer({
                 !backup
               }
               generation={backupId}
-              disabled={send.isPending || Boolean(acceptedId)}
+              disabled={
+                !filesRestored ||
+                backupMissing ||
+                send.isPending ||
+                Boolean(acceptedId)
+              }
             />
             <BodyEditor
               compactToolbar
-              disabled={send.isPending || Boolean(acceptedId)}
+              disabled={
+                !filesRestored ||
+                backupMissing ||
+                send.isPending ||
+                Boolean(acceptedId)
+              }
               value={html}
               onChange={(value) => {
                 touched.current = true;
@@ -937,10 +1061,10 @@ export function ReplyComposer({
                 This reply was already accepted. Check its progress in Outbox.
               </p>
             ) : null}
-            {storageError ? (
+            {storageError && (!durableText || !durableFiles) ? (
               <p role="alert">
-                Device backup is unavailable. Keep this reply open until the
-                server confirms it is saved.
+                This writing or its files are kept only in this window. Keep the
+                window open until saving succeeds.
               </p>
             ) : null}
             <ul className="space-y-2">
@@ -974,7 +1098,7 @@ export function ReplyComposer({
               </p>
             ) : null}
             <p className="text-meta text-text-secondary" role="status">
-              {save.isPaused
+              {save.isPaused || (!online && touched.current)
                 ? "Waiting for a connection. Your reply is kept on this device when browser storage is available."
                 : save.isError
                   ? "Couldn't save to the server. Your reply is kept on this device when browser storage is available."
@@ -988,7 +1112,7 @@ export function ReplyComposer({
           <Button
             type="button"
             variant="secondary"
-            disabled={send.isPending || uploading}
+            disabled={send.isPending}
             onClick={close}
           >
             Close and keep draft

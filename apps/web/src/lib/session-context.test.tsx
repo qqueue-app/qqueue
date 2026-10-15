@@ -32,7 +32,7 @@ describe("SessionProvider", () => {
         user: { id: "u1", email: "a@b.com" },
         accessToken: "tok",
         organizations: [{ id: "o1", name: "Acme" }],
-        currentOrganizationId: "o1"
+        currentOrganizationId: "o1",
       })
     );
     expect(result.current.isAuthenticated).toBe(true);
@@ -47,8 +47,8 @@ describe("SessionProvider", () => {
       result.current.setSession({
         organizations: [
           { id: "o1", name: "A" },
-          { id: "o2", name: "B" }
-        ]
+          { id: "o2", name: "B" },
+        ],
       })
     );
     act(() => result.current.setCurrentOrganizationId("o2"));
@@ -80,7 +80,7 @@ describe("SessionProvider", () => {
       result.current.setSession({
         user: { id: "u1", email: "a@b.com" },
         accessToken: "tok",
-        organizations: [{ id: "o1", name: "Acme" }]
+        organizations: [{ id: "o1", name: "Acme" }],
       })
     );
     act(() => result.current.signOut());
@@ -97,7 +97,7 @@ describe("SessionProvider", () => {
         user: { id: "u1", email: "a@b.com" },
         accessToken: "tok",
         refreshToken: "refresh-tok",
-        organizations: []
+        organizations: [],
       })
     );
     act(() => result.current.signOut());
@@ -110,5 +110,29 @@ describe("SessionProvider", () => {
     expect(() => renderHook(() => useSession())).toThrow(
       "useSession must be used within a SessionProvider"
     );
+  });
+});
+
+it("preserves refreshed credentials when changing organization before the refresh notification renders", async () => {
+  const { updateTokens } = await import("./session.js");
+  const { result } = renderHook(() => useSession(), { wrapper });
+  act(() =>
+    result.current.setSession({
+      organizations: [
+        { id: "one", name: "One" },
+        { id: "two", name: "Two" },
+      ],
+      currentOrganizationId: "one",
+      accessToken: "old",
+    })
+  );
+  act(() => {
+    updateTokens({ accessToken: "new", refreshToken: "new-refresh" });
+    result.current.setCurrentOrganizationId("two");
+  });
+  expect(getSession()).toMatchObject({
+    currentOrganizationId: "two",
+    accessToken: "new",
+    refreshToken: "new-refresh",
   });
 });

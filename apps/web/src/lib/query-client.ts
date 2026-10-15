@@ -67,6 +67,16 @@ export function createQueryClient() {
  * one org's rows into another's view.
  */
 export const qk = {
+  // Window copies belong to a person across their organizations.
+  windowDrafts: (userId: string) => ["window-drafts", userId] as const,
+  replyDraft: (
+    orgId: string,
+    userId: string,
+    messageId: string,
+    identity?: string
+  ) => ["reply-draft", orgId, userId, messageId, identity] as const,
+  deviceDraft: (orgId: string, userId: string, localId: string) =>
+    ["device-draft", orgId, userId, localId] as const,
   deviceDrafts: (orgId: string, userId: string) =>
     ["device-drafts", orgId, userId] as const,
   mailSearch: (

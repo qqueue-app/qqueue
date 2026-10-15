@@ -231,6 +231,7 @@ function InboxWorkspace({
       const next = new URLSearchParams(current);
       next.delete("message");
       next.delete("replyDraft");
+      next.delete("replyBackup");
       next.delete("move");
       return next;
     });
@@ -256,6 +257,7 @@ function InboxWorkspace({
       const next = new URLSearchParams(current);
       next.delete("message");
       next.delete("replyDraft");
+      next.delete("replyBackup");
       next.delete("move");
       for (const [key, value] of Object.entries(values)) {
         if (value) next.set(key, value);
@@ -596,7 +598,11 @@ function InboxWorkspace({
         readMessages.current.add(message.id);
         markRead.mutate({ id: message.id, read: true });
       });
-    if (searchParams.get("replyDraft") && full?.length && !replyTarget) {
+    if (
+      (searchParams.get("replyDraft") || searchParams.get("replyBackup")) &&
+      full?.length &&
+      !replyTarget
+    ) {
       const target = full.find(
         (message) => message.id === searchParams.get("message")
       );
@@ -1559,7 +1565,7 @@ function InboxWorkspace({
       {embedded ? (
         reader
       ) : readingPane ? (
-        <div className="grid h-dvh grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]">
+        <div className="grid h-[calc(100dvh-var(--mail-notice-height,0px))] grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]">
           {/* scroll-exception: the approved desktop mail list scrolls independently of the adjacent reader. */}
           <div
             ref={listScroll}
@@ -1584,7 +1590,7 @@ function InboxWorkspace({
 
       {replyTarget && organizationId ? (
         <ReplyComposer
-          key={`${replyTarget.id}:${searchParams.get("replyDraft") ?? ""}`}
+          key={`${replyTarget.id}:${searchParams.get("replyDraft") ?? ""}:${searchParams.get("replyBackup") ?? ""}`}
           message={replyTarget}
           organizationId={organizationId}
           mailboxEmail={
@@ -1593,6 +1599,7 @@ function InboxWorkspace({
             )?.email ?? "Receiving mailbox"
           }
           replyPresence={conversationQuery.data?.replyPresence}
+          initialBackupId={searchParams.get("replyBackup") ?? undefined}
           initialDraftId={searchParams.get("replyDraft") ?? undefined}
           onClose={() => {
             setReplyTarget(null);
@@ -1600,6 +1607,7 @@ function InboxWorkspace({
               (current) => {
                 const next = new URLSearchParams(current);
                 next.delete("replyDraft");
+                next.delete("replyBackup");
                 next.delete("move");
                 return next;
               },
@@ -1612,6 +1620,7 @@ function InboxWorkspace({
               (current) => {
                 const next = new URLSearchParams(current);
                 next.delete("replyDraft");
+                next.delete("replyBackup");
                 next.delete("move");
                 next.delete("message");
                 return next;

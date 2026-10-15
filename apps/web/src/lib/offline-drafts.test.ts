@@ -13,7 +13,9 @@ import {
   type PendingDraft,
 } from "./offline-drafts.js";
 
+const draftKeys = new Set<string>();
 function draft(overrides: Partial<PendingDraft> = {}): PendingDraft {
+  draftKeys.add(overrides.localId ?? "local-1");
   return {
     userId: "user-1",
     localId: "local-1",
@@ -43,7 +45,9 @@ describe("offline drafts (§5)", () => {
     db = installFakeIndexedDB();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const key of draftKeys) await deletePendingDraft(key);
+    draftKeys.clear();
     db.restore();
     localStorage.removeItem("qqueue.session");
     vi.restoreAllMocks();
@@ -239,14 +243,20 @@ describe("offline drafts (§5)", () => {
     expect(await listPendingDrafts()).toHaveLength(0);
   });
 
-  it("degrades to no local backup rather than throwing when IndexedDB is unavailable", async () => {
+  it("retains a clearly volatile copy when IndexedDB is unavailable", async () => {
     db.failNextOpen();
     // Private browsing rejects the open outright. A composer that threw here
     // would lose the message it was trying to protect.
     await expect(savePendingDraft(draft())).resolves.toBe(false);
 
     db.failNextOpen();
-    await expect(listPendingDrafts()).resolves.toEqual([]);
+    await expect(listPendingDrafts()).resolves.toEqual([
+      expect.objectContaining({
+        localId: "local-1",
+        memoryOnly: true,
+        payload: draft().payload,
+      }),
+    ]);
   });
 });
 

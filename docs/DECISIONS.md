@@ -1292,3 +1292,21 @@ or resumed save may adopt its server identity without describing newer writing
 as saved. Local recovery queries run while server queries are paused offline.
 This does not establish safe navigation when every persistence mechanism rejects
 writes; that remaining scope is explicit in the readiness handoff.
+
+
+## Live-window Recovery Is Explicitly Temporary (2026-10-15)
+
+A pending draft enters an in-memory, user/organization-scoped copy synchronously
+before a device-storage write. If storage fails, that copy remains available
+across SPA navigation and organization changes. It is never called a saved device
+copy: a global notice exposes review, restore, downloads and persistence retry,
+and closing the window warns while volatile writing exists. Restoring clones a
+record rather than taking another composer's local identity. Private File bytes
+remain inside this window or IndexedDB, never public image storage.
+
+Storage/network acknowledgements apply only to the submitted snapshot. Late
+writes and responses cannot discard newer writing or pending uploads. Upload
+requests are abortable on departure; their stable retry identity and local bytes
+remain recoverable even if the server accepted the upload before cancellation.
+A browser close warning is a last resort, not durable persistence or proof of
+physical-device crash recovery.

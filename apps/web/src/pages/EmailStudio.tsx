@@ -55,6 +55,7 @@ import { formatBytes } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
 import { useSession } from "../lib/session-context.js";
 import { getSession } from "../lib/session.js";
+import { useDraftCloseWarning } from "../lib/use-draft-close-warning.js";
 import { draftWritingFingerprint } from "../lib/draft-writing.js";
 import { useOnline } from "../lib/use-online.js";
 import {
@@ -167,7 +168,34 @@ function EmailStudioWorkspace() {
     () => api.getEmailDraft(requestedDraftId!),
     { enabled: Boolean(requestedDraftId), staleTime: 0 }
   );
-  const openingDraft = Boolean(requestedDraftId);
+  const requestedRestoreId = searchParams.get("restore");
+  const requestedCopy = useOrgQuery(
+    organizationId,
+    qk.deviceDraft(
+      organizationId ?? "",
+      user?.id ?? "",
+      requestedRestoreId ?? ""
+    ),
+    async (org) => {
+      const copy = (await listPendingDrafts(org, true)).find(
+        (entry) =>
+          entry.localId === requestedRestoreId &&
+          !entry.payload.inboundMessageId
+      );
+      if (!copy)
+        throw new Error(
+          "This window copy is no longer available. Check Drafts for a saved version."
+        );
+      return copy;
+    },
+    {
+      enabled: Boolean(requestedRestoreId),
+      networkMode: "always",
+      staleTime: 0,
+      retry: false,
+    }
+  );
+  const openingDraft = Boolean(requestedDraftId || requestedRestoreId);
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -202,6 +230,9 @@ function EmailStudioWorkspace() {
     Array<{ file: File; uploadId: string; error: string }>
   >([]);
   const uploadBackup = useRef(pendingUploads);
+  const uploadAbort = useRef<AbortController>();
+  useEffect(() => () => uploadAbort.current?.abort(), []);
+
   function updateUploads(next: typeof pendingUploads) {
     uploadBackup.current = next;
     setPendingUploads(next);
@@ -552,6 +583,9 @@ function EmailStudioWorkspace() {
           !uploadBackup.current.some((old) => old.uploadId === entry.uploadId)
       ),
     ]);
+    uploadAbort.current?.abort();
+    const controller = new AbortController();
+    uploadAbort.current = controller;
     setUploading(true);
     try {
       // Save file bytes and retry identities in the same device backup as the
@@ -562,11 +596,13 @@ function EmailStudioWorkspace() {
           "Couldn't save this draft before uploading. Your files are waiting here; try again."
         );
       for (const entry of entries) {
+        if (controller.signal.aborted) break;
         try {
           const attachment = await api.uploadAttachment(entry.file, {
             organizationId,
             emailDraftId: ensuredDraftId,
             uploadId: entry.uploadId,
+            signal: controller.signal,
           });
           setAttachments((current) =>
             current.some((item) => item.id === attachment.id)
@@ -603,8 +639,11 @@ function EmailStudioWorkspace() {
         }))
       );
     } finally {
-      setUploading(false);
-      void saveDraft(true);
+      if (uploadAbort.current === controller) {
+        uploadAbort.current = undefined;
+        setUploading(false);
+      }
+      void autoSaveRef.current(true);
     }
   }
 
@@ -689,21 +728,53 @@ function EmailStudioWorkspace() {
   const [savedFingerprint, setSavedFingerprint] = useState<string>();
   const [backupFingerprint, setBackupFingerprint] = useState<string>();
   const [loadedSnapshot, setLoadedSnapshot] = useState<
-    "server" | "device" | null
+    "server" | "device" | "window" | null
   >(null);
   useEffect(() => {
     if (loadedSnapshot === "server") {
       setSavedFingerprint(writingFingerprint);
       setBackupFingerprint(undefined);
-    } else if (loadedSnapshot === "device") {
+    } else if (loadedSnapshot === "device" || loadedSnapshot === "window") {
       setSavedFingerprint(undefined);
-      setBackupFingerprint(writingFingerprint);
+      setBackupFingerprint(
+        loadedSnapshot === "device" ? writingFingerprint : undefined
+      );
     }
     if (loadedSnapshot) setLoadedSnapshot(null);
   }, [loadedSnapshot, writingFingerprint]);
 
+  // Capture before yielding to storage/network or replacing the composer. The
+  // synchronous window copy also protects navigation during the debounce period.
+  const preserveWriting = useRef(() => {});
+  preserveWriting.current = () => {
+    if (!hasContent || acceptedSend.current || !organizationId || !user?.id)
+      return;
+    void savePendingDraft({
+      userId: user.id,
+      organizationId,
+      localId: localDraftId.current,
+      clientId: draftClientId.current,
+      draftId: draftIdentity.current.id,
+      revision: draftIdentity.current.revision,
+      mutationId: newLocalDraftId(),
+      payload: draftPayload,
+      attachments,
+      pendingUploads: uploadBackup.current,
+      updatedAt: new Date().toISOString(),
+    });
+  };
   const deviceBackup = useRef(false);
   const [backupFailed, setBackupFailed] = useState(false);
+  useDraftCloseWarning(
+    Boolean(
+      hasContent &&
+      !acceptedSendId &&
+      ((savedFingerprint !== writingFingerprint &&
+        backupFingerprint !== writingFingerprint) ||
+        (pendingUploads.length && !deviceBackup.current))
+    )
+  );
+
   const saveDraft = useCallback(
     async (silent: boolean): Promise<string | null> => {
       const work = saveChain.current
@@ -872,7 +943,10 @@ function EmailStudioWorkspace() {
   hasUnsavedContent.current = hasContent && !sending;
   useEffect(
     () => () => {
-      if (hasUnsavedContent.current) void autoSaveRef.current(true);
+      if (hasUnsavedContent.current) {
+        preserveWriting.current();
+        void autoSaveRef.current(true);
+      }
     },
     []
   );
@@ -932,7 +1006,8 @@ function EmailStudioWorkspace() {
     setDraftConflict(false);
     setAcceptedSendId(null);
     acceptedSend.current = null;
-    setLoadedSnapshot("device");
+    setLoadedSnapshot(latest.memoryOnly ? "window" : "device");
+    setBackupFailed(Boolean(latest.memoryOnly));
   }
 
   /*
@@ -948,12 +1023,14 @@ function EmailStudioWorkspace() {
     if (restoredRef.current || !organizationId || loading || hasContent) {
       return;
     }
-    if (searchParams.get("draft")) {
+    if (searchParams.get("draft") || searchParams.get("restore")) {
       return;
     }
     restoredRef.current = true;
 
+    let active = true;
     void listPendingDrafts(organizationId).then((pending) => {
+      if (!active) return;
       const latest = pending
         .filter((entry) => !entry.payload.inboundMessageId)
         .slice()
@@ -965,7 +1042,34 @@ function EmailStudioWorkspace() {
       applyDeviceCopy(latest);
       toast.message("Recovered a draft that hadn't finished saving.");
     });
+    return () => {
+      active = false;
+    };
   }, [organizationId, loading, hasContent, searchParams]);
+
+  useEffect(() => {
+    if (!requestedRestoreId || !requestedCopy.data || requestedCopy.isFetching)
+      return;
+    preserveWriting.current();
+    restoredRef.current = true;
+    applyDeviceCopy(requestedCopy.data);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (next.get("restore") === requestedRestoreId) {
+          next.delete("restore");
+          next.delete("draft");
+        }
+        return next;
+      },
+      { replace: true }
+    );
+  }, [
+    requestedRestoreId,
+    requestedCopy.data,
+    requestedCopy.isFetching,
+    setSearchParams,
+  ]);
 
   /*
     Sync on reconnect.
@@ -1061,7 +1165,7 @@ function EmailStudioWorkspace() {
     if (sending || openingDraft) return;
     if (hasContent && !acceptedSend.current) {
       const saved = await saveDraft(true);
-      if (!saved && !deviceBackup.current) return;
+      if (!saved) preserveWriting.current();
     }
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -1409,13 +1513,21 @@ function EmailStudioWorkspace() {
       <PageContainer>
         {openingDraft ? (
           <div role="status" className="mb-4 text-ui">
-            {requestedDraft.isError ? (
+            {(
+              requestedRestoreId
+                ? requestedCopy.isError
+                : requestedDraft.isError
+            ) ? (
               <>
                 Couldn't open this draft. Your current writing is kept.{" "}
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => void requestedDraft.refetch()}
+                  onClick={() =>
+                    void (requestedRestoreId
+                      ? requestedCopy.refetch()
+                      : requestedDraft.refetch())
+                  }
                 >
                   Try opening again
                 </Button>
@@ -1427,6 +1539,7 @@ function EmailStudioWorkspace() {
                       (current) => {
                         const next = new URLSearchParams(current);
                         next.delete("draft");
+                        next.delete("restore");
                         return next;
                       },
                       { replace: true }
@@ -2028,8 +2141,8 @@ function EmailStudioWorkspace() {
                 ) : null}
                 {backupFailed ? (
                   <p role="alert" className="text-ui text-err">
-                    Couldn’t save to the server or this device. Keep this
-                    composer open and retry saving.
+                    This writing or its files are kept only in this window. Keep
+                    the window open until saving succeeds.
                   </p>
                 ) : pendingLocally &&
                   backupFingerprint === writingFingerprint ? (
@@ -2090,8 +2203,7 @@ function EmailStudioWorkspace() {
               onUse={async (copy) => {
                 if (hasContent && !acceptedSend.current) {
                   const saved = await saveDraft(true);
-                  if (!saved && !deviceBackup.current)
-                    throw new Error("Current writing could not be kept");
+                  if (!saved) preserveWriting.current();
                 }
                 applyDeviceCopy(copy);
                 setDraftsOpen(false);

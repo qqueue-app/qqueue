@@ -2362,6 +2362,7 @@ export const api = {
       organizationId: string;
       emailDraftId?: string;
       uploadId?: string;
+      signal?: AbortSignal;
     }
   ) {
     const form = new FormData();
@@ -2380,6 +2381,7 @@ export const api = {
     return request<EmailAttachment>("/api/v1/attachments", {
       method: "POST",
       body: form,
+      signal: options.signal,
     });
   },
 

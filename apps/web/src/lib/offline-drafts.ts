@@ -1,5 +1,15 @@
 import { ApiError, api, type EmailDraft, type EmailAttachment } from "./api.js";
-import { getSession } from "./session.js";
+import {
+  retainWindowDraft,
+  markWindowDraftVolatile,
+  isCurrentWindowDraft,
+  releaseWindowDraft,
+  forgetWindowDraft,
+  listWindowDrafts,
+  acknowledgeWindowDraft,
+  withoutWindowMarker,
+} from "./window-drafts.js";
+import { getSession, subscribeSession } from "./session.js";
 
 /**
  * Composer drafts that haven't reached the server yet.
@@ -53,6 +63,8 @@ export interface PendingUpload {
 }
 
 export interface PendingDraft {
+  /** Available only in this live window, not a durable device save. */
+  memoryOnly?: boolean;
   attachments?: EmailAttachment[];
   pendingUploads?: PendingUpload[];
   userId: string;
@@ -123,16 +135,25 @@ function run<T>(
  * no offline backup.
  */
 export async function savePendingDraft(draft: PendingDraft): Promise<boolean> {
+  const ticket = retainWindowDraft(draft);
+  let written = false;
   try {
-    await run("readwrite", (store) => store.put(draft));
-    return true;
+    await run("readwrite", (store) => {
+      if (!isCurrentWindowDraft(ticket)) return store.get(ticket.localId);
+      written = true;
+      return store.put(ticket);
+    });
+    if (written) releaseWindowDraft(ticket);
+    return written;
   } catch {
-    // Callers must not promise device retention when storage refuses the write.
+    // The live window retains the writing; callers must not call it durable.
+    markWindowDraftVolatile(ticket);
     return false;
   }
 }
 
 export async function deletePendingDraft(localId: string): Promise<void> {
+  forgetWindowDraft(localId);
   try {
     await run("readwrite", (store) => store.delete(localId));
   } catch {
@@ -144,20 +165,25 @@ export async function listPendingDrafts(
   organizationId?: string,
   reportFailure = false
 ): Promise<PendingDraft[]> {
+  const userId = getSession().user?.id;
+  if (!userId) return [];
+  const windowCopies = () => listWindowDrafts(userId, organizationId);
   try {
-    const userId = getSession().user?.id;
-    if (!userId) return [];
     const all = await run<PendingDraft[]>("readonly", (store) =>
       store.getAll()
     );
-    return all.filter(
+    const scoped = all.filter(
       (draft) =>
         draft.userId === userId &&
         (!organizationId || draft.organizationId === organizationId)
     );
+    const merged = new Map(scoped.map((draft) => [draft.localId, draft]));
+    for (const draft of windowCopies()) merged.set(draft.localId, draft);
+    return [...merged.values()];
   } catch (error) {
-    if (reportFailure) throw error;
-    return [];
+    const available = windowCopies();
+    if (reportFailure && !available.length) throw error;
+    return available;
   }
 }
 
@@ -170,6 +196,8 @@ export async function acknowledgePendingDraft(
   serverId: string,
   revision?: number
 ): Promise<void> {
+  acknowledgeWindowDraft(snapshot, serverId, revision);
+  snapshot = withoutWindowMarker(snapshot);
   try {
     const db = await openDatabase();
     await new Promise<void>((resolve, reject) => {
@@ -313,7 +341,7 @@ async function flushDrafts(
  * after the user has navigated to the inbox and the composer has unmounted.
  */
 export function startDraftSync(): void {
-  if (typeof window === "undefined" || !("indexedDB" in window)) {
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -321,6 +349,7 @@ export function startDraftSync(): void {
     void flushPendingDrafts();
   };
 
+  subscribeSession(flush);
   window.addEventListener("online", flush);
   // Coming back to a backgrounded tab is the other moment connectivity tends to
   // have quietly returned without an `online` event ever firing.

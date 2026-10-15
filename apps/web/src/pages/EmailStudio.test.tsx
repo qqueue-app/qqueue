@@ -1004,3 +1004,86 @@ it("does not label newer writing saved after an older composer save completes", 
     view.unmount();
   }
 });
+
+it("opens the explicitly selected window copy when durable storage and the server both fail", async () => {
+  vi.clearAllMocks();
+  setup();
+  session.current = {
+    currentOrganizationId: "org_1",
+    user: { id: "window-owner" },
+  };
+  localStorage.setItem(
+    "qqueue.session",
+    JSON.stringify({ user: { id: "window-owner" }, organizations: [] })
+  );
+  const { listWindowDrafts, forgetWindowDraft } =
+    await import("../lib/window-drafts.js");
+  mockedApi.createEmailDraft.mockRejectedValue(new Error("offline"));
+  const file = new File(["recover these bytes"], "window.txt");
+  await savePendingDraft({
+    userId: "window-owner",
+    organizationId: "org_1",
+    localId: "selected-copy",
+    clientId: "one-server-identity",
+    draftId: null,
+    payload: {
+      subject: "Selected window writing",
+      html: "<p>Exact selected writing</p>",
+      to: ["a@x.com"],
+      cc: [],
+      bcc: [],
+      listIds: [],
+    },
+    pendingUploads: [{ file, uploadId: "retry-upload", error: "offline" }],
+    updatedAt: "2026-10-15T11:00:00Z",
+  });
+  await savePendingDraft({
+    userId: "window-owner",
+    organizationId: "org_1",
+    localId: "newer-unselected",
+    draftId: null,
+    payload: {
+      subject: "Newer unselected copy",
+      html: "Do not substitute",
+      to: [],
+      cc: [],
+      bcc: [],
+      listIds: [],
+    },
+    updatedAt: "2026-10-15T12:00:00Z",
+  });
+  const view = renderWithProviders(<EmailStudio />, {
+    route: "/email-studio?restore=selected-copy",
+  });
+  try {
+    await waitFor(() =>
+      expect(screen.getByLabelText("Subject")).toHaveValue(
+        "Selected window writing"
+      )
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("body-editor")).toHaveValue(
+        "<p>Exact selected writing</p>"
+      )
+    );
+    await userEvent.type(screen.getByLabelText("Subject"), " edited");
+    view.unmount();
+    const copies = listWindowDrafts("window-owner", "org_1");
+    const edited = copies.find(
+      (copy) => copy.payload.subject === "Selected window writing edited"
+    );
+    expect(edited).toMatchObject({
+      memoryOnly: true,
+      clientId: "one-server-identity",
+      pendingUploads: [{ file, uploadId: "retry-upload" }],
+    });
+    expect(
+      copies.find((copy) => copy.localId === "selected-copy")?.payload.subject
+    ).toBe("Selected window writing");
+    expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    for (const copy of listWindowDrafts("window-owner"))
+      forgetWindowDraft(copy.localId);
+  }
+});

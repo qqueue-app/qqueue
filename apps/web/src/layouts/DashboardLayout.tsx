@@ -1,4 +1,10 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
@@ -18,6 +24,7 @@ import {
 } from "lucide-react";
 import { useUnreadCount } from "../lib/use-unread-count.js";
 import { BrandWordmark } from "../components/BrandWordmark.js";
+import { WindowDraftNotice } from "../components/WindowDraftNotice.js";
 import { OfflineBanner } from "../components/OfflineBanner.js";
 import { IconButton } from "../components/ui/icon-button.js";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet.js";
@@ -151,6 +158,23 @@ export function DashboardLayout() {
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const notices = useRef<HTMLDivElement>(null);
+  const [noticeHeight, setNoticeHeight] = useState(0);
+  useLayoutEffect(() => {
+    const measured = () =>
+      setNoticeHeight(notices.current?.getBoundingClientRect().height ?? 0);
+    measured();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measured);
+    if (notices.current) observer?.observe(notices.current);
+    window.addEventListener("resize", measured);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measured);
+    };
+  }, []);
 
   // Close both nav overlays whenever the route changes.
   useEffect(() => {
@@ -248,12 +272,16 @@ export function DashboardLayout() {
           and the next Tab goes back into the nav. */}
       <main
         id="main"
+        style={{ "--mail-notice-height": `${noticeHeight}px` } as CSSProperties}
         tabIndex={-1}
         className="min-w-0 pb-tabbar-safe pl-safe-l pr-safe-r pt-safe-t focus:outline-none sm:pb-0 sm:pt-0 lg:pl-sidebar lg:pt-safe-t"
       >
         {/* Above the routed page, so it can never cover a page header — and
             inside main, so it clears the sidebar on desktop. */}
-        <OfflineBanner />
+        <div ref={notices}>
+          <OfflineBanner />
+          <WindowDraftNotice />
+        </div>
         <Outlet />
       </main>
 

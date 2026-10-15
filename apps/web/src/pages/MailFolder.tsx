@@ -99,9 +99,15 @@ export function MailFolder({
     setParams(
       (current) => {
         const next = new URLSearchParams(current);
-        ["message", "job", "draft", "replyDraft", "move", "address"].forEach(
-          (key) => next.delete(key)
-        );
+        [
+          "message",
+          "job",
+          "draft",
+          "replyDraft",
+          "replyBackup",
+          "move",
+          "address",
+        ].forEach((key) => next.delete(key));
         return next;
       },
       { replace: true }
@@ -224,8 +230,8 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
     remember();
     setParams((current) => {
       const next = new URLSearchParams(current);
-      ["message", "job", "draft", "replyDraft", "move"].forEach((key) =>
-        next.delete(key)
+      ["message", "job", "draft", "replyDraft", "replyBackup", "move"].forEach(
+        (key) => next.delete(key)
       );
       for (const [key, value] of Object.entries(values)) {
         if (value) next.set(key, value);
@@ -237,8 +243,8 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
   function close() {
     setParams((current) => {
       const next = new URLSearchParams(current);
-      ["message", "job", "draft", "replyDraft", "move"].forEach((key) =>
-        next.delete(key)
+      ["message", "job", "draft", "replyDraft", "replyBackup", "move"].forEach(
+        (key) => next.delete(key)
       );
       return next;
     });
@@ -247,8 +253,8 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
     remember();
     setParams((current) => {
       const next = new URLSearchParams(current);
-      ["message", "job", "draft", "replyDraft", "move"].forEach((key) =>
-        next.delete(key)
+      ["message", "job", "draft", "replyDraft", "replyBackup", "move"].forEach(
+        (key) => next.delete(key)
       );
       next.set(
         row.kind === "RECEIVED"
@@ -587,7 +593,7 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
       <div
         className={
           pane
-            ? "grid h-dvh grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]"
+            ? "grid h-[calc(100dvh-var(--mail-notice-height,0px))] grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]"
             : "min-w-0"
         }
       >

@@ -39,7 +39,7 @@ export function DeviceDraftCopies({
     { enabled: open, staleTime: 0, networkMode: "always" }
   );
   function label(copy: PendingDraft) {
-    return `${copy.payload.subject || "Untitled message"} · ${new Date(copy.updatedAt).toLocaleString()}`;
+    return `${copy.memoryOnly ? "Only in this window · " : ""}${copy.payload.subject || "Untitled message"} · ${new Date(copy.updatedAt).toLocaleString()}`;
   }
   return (
     <>
@@ -65,7 +65,8 @@ export function DeviceDraftCopies({
             <DialogTitle>Draft copies on this device</DialogTitle>
             <DialogDescription>
               Unsent writing and retryable files from this account stay here
-              until they reach the server. Review a copy before using it; your
+              until they reach the server. Copies marked “Only in this window”
+              cannot survive closing it. Review a copy before using it; your
               current writing is kept first.
             </DialogDescription>
           </DialogHeader>
@@ -114,6 +115,11 @@ export function DeviceDraftCopies({
           />
           {selected ? (
             <div className="space-y-3">
+              {selected.memoryOnly ? (
+                <p role="alert">
+                  Only in this window. Keep it open until saving succeeds.
+                </p>
+              ) : null}
               <p className="break-words text-ui">
                 To: {selected.payload.to.join(", ") || "No recipients"}
               </p>

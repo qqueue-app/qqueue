@@ -2,16 +2,19 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
-  type ReactNode
+  type ReactNode,
 } from "react";
 import {
   clearSession,
   getSession,
   saveSession,
+  subscribeSession,
+  receiveSessionStorageChange,
   type SessionData,
-  type SessionOrganization
+  type SessionOrganization,
 } from "./session.js";
 import { api } from "./api.js";
 
@@ -36,14 +39,28 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<SessionData>(getSession);
 
+  useEffect(() => {
+    const unsubscribe = subscribeSession(setSessionState);
+    const changed = (event: StorageEvent) => {
+      if (event.key === "qqueue.session" || event.key === null)
+        receiveSessionStorageChange(event.newValue);
+    };
+    window.addEventListener("storage", changed);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("storage", changed);
+    };
+  }, []);
+
   const setSession = useCallback((next: SessionData) => {
     saveSession(next);
     setSessionState(next);
   }, []);
 
   const setCurrentOrganizationId = useCallback((organizationId: string) => {
-    setSessionState((prev) => {
-      const next = { ...prev, currentOrganizationId: organizationId };
+    setSessionState(() => {
+      const latest = getSession();
+      const next = { ...latest, currentOrganizationId: organizationId };
       saveSession(next);
       return next;
     });
@@ -51,7 +68,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const addOrganization = useCallback(
     (organization: SessionOrganization, makeActive = true) => {
-      setSessionState((prev) => {
+      setSessionState(() => {
+        const prev = getSession();
         const exists = prev.organizations.some(
           (item) => item.id === organization.id
         );
@@ -65,7 +83,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           organizations,
           currentOrganizationId: makeActive
             ? organization.id
-            : prev.currentOrganizationId
+            : prev.currentOrganizationId,
         };
         saveSession(next);
         return next;
@@ -100,7 +118,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSession,
       setCurrentOrganizationId,
       addOrganization,
-      signOut
+      signOut,
     };
   }, [session, setSession, setCurrentOrganizationId, addOrganization, signOut]);
 

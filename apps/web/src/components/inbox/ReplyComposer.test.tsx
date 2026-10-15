@@ -5,6 +5,10 @@ import { act } from "@testing-library/react";
 import { renderWithProviders, screen, waitFor } from "../../test/render.js";
 import { installFakeIndexedDB } from "../../test/fake-indexeddb.js";
 import { listPendingDrafts } from "../../lib/offline-drafts.js";
+import {
+  listWindowDrafts,
+  forgetWindowDraft,
+} from "../../lib/window-drafts.js";
 import { ReplyComposer } from "./ReplyComposer.js";
 import { api, type InboundMessage } from "../../lib/api.js";
 
@@ -16,13 +20,16 @@ vi.mock("../editor/BodyEditor.js", () => ({
     value,
     onChange,
     ariaLabel,
+    disabled,
   }: {
     value: string;
     onChange: (html: string) => void;
     ariaLabel: string;
+    disabled?: boolean;
   }) => (
     <textarea
       value={value}
+      disabled={disabled}
       aria-label={ariaLabel}
       onChange={(event) => onChange(event.target.value)}
     />
@@ -65,8 +72,8 @@ const queued = vi.fn();
 const close = vi.fn();
 const storageKey = "qqueue.reply.user_1.org_1.message_1";
 
-function renderReply() {
-  return renderWithProviders(
+async function renderReply() {
+  const view = renderWithProviders(
     <ReplyComposer
       message={message}
       organizationId="org_1"
@@ -75,10 +82,31 @@ function renderReply() {
       onClose={close}
     />
   );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Reply to Customer" })
+    ).toBeEnabled()
+  );
+  return view;
 }
 
 beforeEach(() => {
+  for (const copy of listWindowDrafts("user_1"))
+    forgetWindowDraft(copy.localId);
   vi.clearAllMocks();
+  for (const method of [
+    mocked.listEmailDrafts,
+    mocked.getEmailDraft,
+    mocked.createEmailDraft,
+    mocked.updateEmailDraft,
+    mocked.uploadAttachment,
+    mocked.replyToInboundMessage,
+  ])
+    method.mockReset();
+  mocked.getEmailDraft.mockResolvedValue({
+    id: "draft_1",
+    revision: 1,
+  } as never);
   localStorage.clear();
   localStorage.setItem(
     "qqueue.session",
@@ -97,7 +125,7 @@ beforeEach(() => {
 
 describe("reply composer", () => {
   it("shows the actual mailbox, Reply-To recipient and an immediately accessible rich editor", async () => {
-    renderReply();
+    await renderReply();
     expect(screen.getByText("support@example.com")).toBeInTheDocument();
     expect(screen.getByText("answers@example.com")).toBeInTheDocument();
     expect(
@@ -111,7 +139,7 @@ describe("reply composer", () => {
 
   it("submits the chosen message with HTML and a retry key, then reports queued", async () => {
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     await user.type(
       screen.getByRole("textbox", { name: "Reply to Customer" }),
       "<p>Hello</p>"
@@ -132,7 +160,7 @@ describe("reply composer", () => {
   it("keeps the text on failure and uses the same key on retry", async () => {
     mocked.replyToInboundMessage.mockRejectedValueOnce(new Error("offline"));
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     const editor = screen.getByRole("textbox", { name: "Reply to Customer" });
     await user.type(editor, "Keep my answer");
     await user.click(screen.getByRole("button", { name: "Send reply" }));
@@ -157,7 +185,7 @@ describe("reply composer", () => {
       html: "Already started",
       attachments: [{ id: "file_1", filename: "report.pdf", size: 2000 }],
     } as never);
-    renderReply();
+    await renderReply();
     await waitFor(() =>
       expect(
         screen.getByRole("textbox", { name: "Reply to Customer" })
@@ -173,7 +201,7 @@ describe("reply composer", () => {
       size: 2000,
     } as never);
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     await user.type(
       screen.getByRole("textbox", { name: "Reply to Customer" }),
       "Attached"
@@ -187,6 +215,7 @@ describe("reply composer", () => {
       organizationId: "org_1",
       emailDraftId: "draft_1",
       uploadId: expect.any(String),
+      signal: expect.any(AbortSignal),
     });
     await user.click(
       screen.getByRole("checkbox", { name: "Reply to everyone" })
@@ -210,7 +239,7 @@ describe("reply composer", () => {
         })
     );
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     await user.type(
       screen.getByRole("textbox", { name: "Reply to Customer" }),
       "Attached"
@@ -227,7 +256,7 @@ describe("reply composer", () => {
 
   it("keeps a draft when closing and restores its local backup", async () => {
     const user = userEvent.setup();
-    const rendered = renderReply();
+    const rendered = await renderReply();
     await user.type(
       screen.getByRole("textbox", { name: "Reply to Customer" }),
       "Unfinished"
@@ -246,7 +275,7 @@ describe("reply composer", () => {
     );
     expect(close).toHaveBeenCalled();
     rendered.unmount();
-    renderReply();
+    await renderReply();
     expect(
       screen.getByRole("textbox", { name: "Reply to Customer" })
     ).toHaveValue("Unfinished");
@@ -262,7 +291,7 @@ describe("reply composer", () => {
       })
     );
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     await user.click(screen.getByRole("button", { name: "Remove report.pdf" }));
     await waitFor(() =>
       expect(screen.queryByText(/report.pdf/)).not.toBeInTheDocument()
@@ -274,7 +303,7 @@ describe("reply composer", () => {
 describe("reply recovery and recipients", () => {
   it("sends the edited To, Cc and Bcc recipients rather than rebuilding Reply all", async () => {
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     await user.click(
       screen.getByRole("checkbox", { name: "Reply to everyone" })
     );
@@ -309,7 +338,7 @@ describe("reply recovery and recipients", () => {
       completedSendId: "accepted_1",
     } as never);
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     await user.type(
       screen.getByRole("textbox", { name: "Reply to Customer" }),
       "Once only"
@@ -327,7 +356,7 @@ describe("reply recovery and recipients", () => {
         size: 3,
       } as never);
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     await user.type(
       screen.getByRole("textbox", { name: "Reply to Customer" }),
       "File attached"
@@ -368,7 +397,7 @@ describe("reply recovery and recipients", () => {
       html: "Teammate version",
       to: ["answers@example.com"],
     } as never);
-    renderReply();
+    await renderReply();
     expect(
       await screen.findByText(/This draft changed on another device/)
     ).toBeInTheDocument();
@@ -402,7 +431,7 @@ it("restores legacy Reply all drafts without silently dropping original To and C
     cc: [],
     variables: { qqueueReplyAll: true },
   } as never);
-  renderReply();
+  await renderReply();
   expect(
     await screen.findByRole("button", { name: "Remove other@example.com" })
   ).toBeInTheDocument();
@@ -422,7 +451,7 @@ it("does not add a recipient back into a saved Cc-only reply", async () => {
     cc: ["copy@example.com"],
     variables: { qqueueEditableRecipients: true },
   } as never);
-  renderReply();
+  await renderReply();
   await screen.findByRole("button", { name: "Remove copy@example.com" });
   expect(
     screen.queryByRole("button", { name: "Remove answers@example.com" })
@@ -446,7 +475,7 @@ it("restores the bytes and retry identity of a failed file after the reply is re
       attachments: [],
     } as never);
     const user = userEvent.setup();
-    const first = renderReply();
+    const first = await renderReply();
     await user.type(
       screen.getByRole("textbox", { name: "Reply to Customer" }),
       "Keep my file"
@@ -455,7 +484,14 @@ it("restores the bytes and retry identity of a failed file after the reply is re
       screen.getByLabelText("Attach files to reply"),
       new File(["keep"], "reopen.txt")
     );
-    await screen.findByRole("button", { name: "Retry reopen.txt" });
+    await waitFor(() =>
+      expect(mocked.uploadAttachment).toHaveBeenCalledTimes(1)
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Retry reopen.txt" })
+      ).toBeEnabled()
+    );
     await waitFor(async () =>
       expect(
         (await listPendingDrafts("org_1"))[0]?.pendingUploads?.[0]?.file.name
@@ -463,7 +499,7 @@ it("restores the bytes and retry identity of a failed file after the reply is re
     );
     const identity = mocked.uploadAttachment.mock.calls[0][1]?.uploadId;
     first.unmount();
-    renderReply();
+    await renderReply();
     await user.click(
       await screen.findByRole("button", { name: "Retry reopen.txt" })
     );
@@ -488,7 +524,7 @@ it("keeps newer writing beside file bytes when an older upload attempt fails", a
         })
     );
     const user = userEvent.setup();
-    renderReply();
+    await renderReply();
     const editor = screen.getByRole("textbox", { name: "Reply to Customer" });
     await user.type(editor, "First version");
     await user.upload(
@@ -514,7 +550,7 @@ it("keeps composing available when best-effort reply presence fails", async () =
   mocked.touchReplyPresence.mockRejectedValueOnce(
     new Error("coordination unavailable")
   );
-  renderReply();
+  await renderReply();
   expect(
     await screen.findByText(/Replying status is unavailable/)
   ).toBeInTheDocument();
@@ -527,13 +563,14 @@ it("keeps composing available when best-effort reply presence fails", async () =
 });
 
 it("keeps two open composers' device writing separate and preserves the replaced copy", async () => {
-  const first = renderReply();
+  const first = await renderReply();
   await userEvent.type(
     screen.getByRole("textbox", { name: "Reply to Customer" }),
     "First tab writing"
   );
-  renderReply();
+  await renderReply();
   const body = screen.getByRole("textbox", { name: "Reply to Customer" });
+  await waitFor(() => expect(body).toBeEnabled());
   await userEvent.clear(body);
   await userEvent.type(body, "Second tab writing");
   const deviceWriting = () =>
@@ -570,7 +607,7 @@ it("does not call newer writing saved when an older offline save resumes", async
         finish = resolve;
       }) as never
   );
-  const view = renderReply();
+  const view = await renderReply();
   try {
     const body = screen.getByRole("textbox", { name: "Reply to Customer" });
     await waitFor(() =>
@@ -596,4 +633,80 @@ it("does not call newer writing saved when an older offline save resumes", async
     act(() => onlineManager.setOnline(true));
     view.unmount();
   }
+});
+
+it("retains first-attachment bytes and writing across navigation when both device stores fail offline", async () => {
+  const user = userEvent.setup();
+  const first = await renderReply();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Attach files" })).toBeEnabled()
+  );
+  const storageFailure = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("Quota exceeded");
+    });
+  try {
+    act(() => window.dispatchEvent(new Event("offline")));
+    await user.type(
+      screen.getByRole("textbox", { name: "Reply to Customer" }),
+      "Window-only reply writing"
+    );
+    await user.upload(
+      screen.getByLabelText("Attach files to reply"),
+      new File(["first file bytes"], "first-offline.txt")
+    );
+    await waitFor(async () =>
+      expect((await listPendingDrafts("org_1"))[0]).toMatchObject({
+        memoryOnly: true,
+        payload: { html: "Window-only reply writing" },
+        pendingUploads: [{ uploadId: expect.any(String) }],
+      })
+    );
+    expect(mocked.createEmailDraft).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", { name: "Close and keep draft" })
+    );
+    first.unmount();
+    await renderReply();
+    expect(
+      screen.getByRole("textbox", { name: "Reply to Customer" })
+    ).toHaveValue("Window-only reply writing");
+    const copy = (await listPendingDrafts("org_1"))[0];
+    expect(copy.pendingUploads?.[0].file.name).toBe("first-offline.txt");
+    expect(copy.pendingUploads?.[0].file.size).toBe(16);
+    expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
+  } finally {
+    storageFailure.mockRestore();
+    act(() => window.dispatchEvent(new Event("online")));
+  }
+});
+
+it("aborts a departing reply upload and keeps retry bytes under the same upload identity", async () => {
+  mocked.uploadAttachment.mockImplementation(() => new Promise(() => {}));
+  const view = await renderReply();
+  const user = userEvent.setup();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Attach files" })).toBeEnabled()
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: "Reply to Customer" }),
+    "Unfinished upload writing"
+  );
+  await user.upload(
+    screen.getByLabelText("Attach files to reply"),
+    new File(["keep"], "interrupted.txt")
+  );
+  await waitFor(() => expect(mocked.uploadAttachment).toHaveBeenCalledTimes(1));
+  const options = mocked.uploadAttachment.mock.calls[0][1]!;
+  await user.click(
+    screen.getByRole("button", { name: "Close and keep draft" })
+  );
+  expect(options.signal?.aborted).toBe(true);
+  view.unmount();
+  expect((await listPendingDrafts("org_1"))[0]).toMatchObject({
+    payload: { html: "Unfinished upload writing" },
+    pendingUploads: [{ uploadId: options.uploadId }],
+  });
+  expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
 });

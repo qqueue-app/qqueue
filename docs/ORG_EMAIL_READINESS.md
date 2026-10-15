@@ -476,15 +476,56 @@ Acceptance evidence:
   unchanged coverage thresholds passed. This web-only batch changes no schema
   or delivery pipeline.
 
+## Navigation recovery when draft storage is unavailable (2026-10-15)
+
+Implemented:
+
+- Pending writing and private file bytes enter a scoped live-window copy before
+  device persistence or network work. Leaving Compose, closing a reply or
+  switching organizations preserves that copy even when IndexedDB rejects the
+  write and the server is unavailable. These copies are explicitly temporary;
+  closing the window can still lose them, so active unsaved writing and retained
+  window copies trigger the browser's close warning.
+- A global recovery notice provides private previews, exact-copy reopening,
+  downloads of writing and waiting files, and an offline-capable device-save
+  retry. Restoring a copy retains the original and its server/upload identities.
+  Older asynchronous storage writes cannot replace newer window writing. Late
+  reply acknowledgements now acknowledge only their submitted snapshot.
+- Replies retain their first pending file before a server draft exists. Leaving
+  an uploading composer aborts its browser request and retains retry bytes and
+  identity. File completion saves the current composer writing rather than an
+  earlier upload closure. Reply restoration finishes before editing is enabled.
+- Session changes and token refreshes remain usable in the authenticated window
+  when browser storage rejects writes. Organization changes preserve the latest
+  refreshed credentials. Peer sign-out updates the session provider. Recovery
+  notices leave room for the fixed sidebar and independently scrolling panes.
+
+Acceptance evidence:
+
+- Actual Chrome used a temporary 1MB quota below the origin's existing 5MB usage
+  and browser offline mode. An unsent ordinary draft retained its exact subject
+  and body after navigating to Inbox, previewing the window copy, reopening it,
+  switching organizations and reopening the original organization's copy.
+  Restoring normal quota and connectivity allowed a confirmed device backup;
+  the pre-existing server-revision conflict remained visible. No email was sent.
+- Automated checks cover both device-store failures, scoped window recovery,
+  exact-copy opening, pending bytes before the first server save, upload aborts,
+  late snapshot acknowledgements, offline device-persistence retry, close warnings
+  and session-storage failures. Typecheck, lint, build, tests and unmodified
+  coverage gates passed. This batch changes no schema or delivery pipeline.
+- Chrome quota emulation establishes IndexedDB failure with an unavailable
+  server, not a physical storage-exhaustion event or simultaneous failure of
+  localStorage itself. Session/localStorage failures and interrupted file upload
+  are automated evidence; physical-device and browser transport-loss acceptance
+  remain separate gaps.
+
 ## Required before calling the primary-client goal complete
 
 1. **IMAP folder operations:** external-draft editing/reconciliation. Validate
    UID-validity replacement, large
    mailboxes and interrupted import against real services.
-2. **Draft/composer recovery:** finish navigation protection when both device
-   storage and server saving are unavailable; a warning alone cannot preserve
-   writing after leaving the composer. Simplify intentional merging of a local
-   copy with a newer server revision. Broaden actual concurrent-device, interrupted
+2. **Draft/composer recovery:** simplify intentional merging of a local copy
+   with a newer server revision. Broaden actual concurrent-device, interrupted
    upload, lost-response and storage-failure acceptance across navigation and
    organization changes.
 3. **Inbound content acceptance:** stress large/complex MIME messages, missing
