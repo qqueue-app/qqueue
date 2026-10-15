@@ -163,6 +163,8 @@ model User {
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
+  inboxMoves          InboxMove[]
+  inboxMoveBatches    InboxMoveBatch[]
   invitesSent         OrganizationInvite[]  @relation("InvitesSent")
   smtpGrants          SmtpConnectionGrant[]
   inboxGrants         InboxAccountGrant[]
@@ -289,6 +291,8 @@ model Organization {
   inboxAccounts        InboxAccount[]
   inboxNotifyRules     InboxNotifyRule[]
   inboundMessages      InboundMessage[]
+  inboxMoves           InboxMove[]
+  inboxMoveBatches     InboxMoveBatch[]
   inboundAttachments   InboundAttachment[]
   recurringSends       RecurringSend[]
   emailEvents          EmailEvent[]
@@ -1026,6 +1030,7 @@ model InboundMessageLocation {
   readAppliedRevision Int            @default(0)
   flagAppliedRevision Int            @default(0)
   attemptedAt         DateTime?
+  contentHash         String?
   observedAt          DateTime       @default(now())
   message             InboundMessage @relation(fields: [inboundMessageId], references: [id], onDelete: Cascade)
   folder              InboxFolder    @relation(fields: [inboxFolderId], references: [id], onDelete: Cascade)
@@ -1033,6 +1038,60 @@ model InboundMessageLocation {
   @@unique([inboxFolderId, uidValidity, uid])
   @@index([inboundMessageId, present])
   @@index([inboxFolderId, present, attemptedAt])
+}
+
+/// Durable, retry-identified IMAP move intent. An interrupted remote outcome
+/// is reconciled from the original source namespace and destination bytes;
+/// uncertain commands are never automatically replayed.
+model InboxMoveBatch {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String?
+  clientId       String
+  requestHash    String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  moves          InboxMove[]
+
+  @@unique([organizationId, userId, clientId])
+}
+
+model InboxMove {
+  id                String         @id @default(cuid())
+  organizationId    String
+  userId            String?
+  inboundMessageId  String
+  batchId           String
+  inboxAccountId    String
+  sourceLocationId  String
+  sourceFolderId    String
+  targetFolderId    String
+  sourcePath        String
+  targetPath        String
+  sourceUid         Int
+  sourceUidValidity String
+  targetUidValidity String?
+  targetUidNext     Int?
+  targetUid         Int?
+  sourceHash        String?
+  sourceHeaderId    String?
+  action            String
+  status            String         @default("PENDING")
+  error             String?
+  attemptedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  message           InboundMessage @relation(fields: [inboundMessageId], references: [id], onDelete: Cascade)
+
+  batch InboxMoveBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, sourceLocationId])
+  @@index([inboxAccountId, status, attemptedAt])
+  @@index([sourceLocationId, status])
+  @@index([inboundMessageId, createdAt])
 }
 
 /// Who may *read* a mailbox. The read-side counterpart to SmtpConnectionGrant,
@@ -1151,6 +1210,7 @@ model InboundMessage {
   inboxAccount         InboxAccount             @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
   emailJob             EmailJob?                @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
   locations            InboundMessageLocation[]
+  moves                InboxMove[]
   attachments          InboundAttachment[]
   createdAt            DateTime                 @default(now())
 

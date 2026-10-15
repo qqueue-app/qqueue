@@ -26,7 +26,9 @@ const messageInclude = {
     select: {
       id: true,
       inboxFolderId: true,
-      folder: { select: { path: true, name: true, role: true } },
+      folder: {
+        select: { path: true, name: true, role: true, isPrimary: true },
+      },
     },
   },
   emailJob: {

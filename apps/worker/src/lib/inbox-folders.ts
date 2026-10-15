@@ -1,4 +1,5 @@
 import type { ImapFlow, ListResponse } from "imapflow";
+import { createHash } from "node:crypto";
 import { prisma } from "./prisma.js";
 
 export function folderRole(folder: Pick<ListResponse, "path" | "specialUse">) {
@@ -71,8 +72,16 @@ export function matchesRemoteIdentity(input: {
   folderId: string;
   uidValidity: string;
   uid: number;
+  contentHash?: string | null;
+  source?: Uint8Array;
 }) {
   if (input.remoteMessageId) return input.remoteMessageId === input.messageId;
+  if (input.contentHash)
+    return Boolean(
+      input.source &&
+      createHash("sha256").update(input.source).digest("hex") ===
+        input.contentHash
+    );
   return [
     `${input.accountId}:${input.folderId}:${input.uidValidity}:${input.uid}`,
     `${input.accountId}:${input.uidValidity}:${input.uid}`,

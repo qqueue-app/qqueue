@@ -7,9 +7,11 @@ import {
   inboundMessageStoreSchema,
   inboundBulkReadSchema,
   inboundFlagSchema,
+  inboxMoveSchema,
 } from "@qqueue/shared";
 import { z } from "zod";
 import { inboxService } from "./service.js";
+import { inboxMoveService } from "./move-service.js";
 
 const markReadSchema = z.object({
   read: z
@@ -21,6 +23,47 @@ const markReadSchema = z.object({
 });
 
 export const inboxController = {
+  async createMove(req: Request, res: Response) {
+    res
+      .status(202)
+      .json({
+        data: await inboxMoveService.create(
+          String(req.params.id),
+          req.organizationId!,
+          req.userId!,
+          inboxMoveSchema.parse(req.body)
+        ),
+      });
+  },
+  async moveBatch(req: Request, res: Response) {
+    res.json({
+      data: await inboxMoveService.getBatch(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!
+      ),
+    });
+  },
+  async recentMoves(req: Request, res: Response) {
+    res.json({
+      data: await inboxMoveService.recent(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!
+      ),
+    });
+  },
+  async checkMoves(req: Request, res: Response) {
+    res
+      .status(202)
+      .json({
+        data: await inboxMoveService.check(
+          String(req.params.id),
+          req.organizationId!,
+          req.userId!
+        ),
+      });
+  },
   async listFolders(req: Request, res: Response) {
     const query = z
       .object({ inboxAccountId: z.string().min(1).optional() })

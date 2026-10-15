@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ImapFlow } from "imapflow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../test/prisma-mock.js";
@@ -303,4 +304,65 @@ describe("shared folder Seen and Flagged reconciliation", () => {
       data: { flagsCursor: 200 },
     });
   });
+});
+
+it("verifies bytes before writing Seen on a moved headerless message", async () => {
+  const raw = Buffer.from("Original headerless message");
+  const row = location({
+    uid: 12,
+    contentHash: createHash("sha256").update(raw).digest("hex"),
+    message: { ...message, messageId: "a1:old:98:7" },
+  });
+  prismaMock.inboundMessageLocation.findMany.mockResolvedValueOnce([
+    row,
+  ] as never);
+  const imap = client();
+  imap.fetchOne
+    .mockResolvedValueOnce({ uid: 12, envelope: {} } as never)
+    .mockResolvedValueOnce({ uid: 12, envelope: {}, source: raw } as never);
+  await sync(imap);
+  expect(imap.messageFlagsAdd).toHaveBeenCalledWith(12, ["\\Seen"], {
+    uid: true,
+  });
+});
+it("bounds headerless identity checks and resumes the unverified remainder", async () => {
+  const raw = Buffer.from("Controlled headerless bytes");
+  const rows = Array.from({ length: 12 }, (_, i) =>
+    location({
+      id: `l${i}`,
+      uid: i + 1,
+      contentHash: createHash("sha256").update(raw).digest("hex"),
+      message: { ...message, messageId: "a1:old:98:7", readPending: false },
+    })
+  );
+  const imap = client(new Set(["\\Seen"]));
+  imap.fetch.mockImplementation(async function* (uids) {
+    for (const uid of uids)
+      yield { uid, flags: new Set(["\\Seen"]), envelope: {} };
+  } as never);
+  imap.fetchOne.mockImplementation(
+    async (uid) =>
+      ({ uid, source: raw, flags: new Set(["\\Seen"]), envelope: {} }) as never
+  );
+  prismaMock.inboundMessageLocation.findMany
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce(rows as never);
+  await sync(imap);
+  expect(imap.fetchOne).toHaveBeenCalledTimes(10);
+  expect(prismaMock.inboxFolder.update).toHaveBeenLastCalledWith({
+    where: { id: "f1" },
+    data: { flagsCursor: 10 },
+  });
+  prismaMock.inboundMessageLocation.findMany
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce(rows.slice(10) as never);
+  await sync(imap, 10);
+  expect(imap.fetchOne).toHaveBeenCalledTimes(12);
+  expect(prismaMock.inboxFolder.update).toHaveBeenLastCalledWith({
+    where: { id: "f1" },
+    data: { flagsCursor: 0 },
+  });
+  expect(prismaMock.inboundMessageLocation.updateMany).not.toHaveBeenCalledWith(
+    expect.objectContaining({ data: { present: false } })
+  );
 });

@@ -280,7 +280,7 @@ export interface InboundMessage {
   locations?: Array<{
     id: string;
     inboxFolderId: string;
-    folder: { path: string; name: string; role: string };
+    folder: { path: string; name: string; role: string; isPrimary?: boolean };
   }>;
   bodyStatus?: "AVAILABLE" | "UNAVAILABLE";
   bodyError?: string | null;
@@ -1519,6 +1519,43 @@ export const mailboxViewSchema = z.enum([
   "FLAGGED",
 ]);
 export type MailboxView = z.infer<typeof mailboxViewSchema>;
+export const inboxMoveSchema = z
+  .object({
+    clientId: z.string().min(1).max(64),
+    sourceLocationId: z.string().min(1),
+    action: z.enum(["ARCHIVE", "TRASH", "RESTORE", "MOVE"]),
+    targetFolderId: z.string().min(1).optional(),
+    scope: z.enum(["MESSAGE", "CONVERSATION"]).default("CONVERSATION"),
+  })
+  .refine((input) => input.action !== "MOVE" || Boolean(input.targetFolderId), {
+    message: "Choose a destination folder",
+    path: ["targetFolderId"],
+  });
+export type InboxMoveInput = z.infer<typeof inboxMoveSchema>;
+export interface InboxMoveOutcome {
+  id: string;
+  inboundMessageId: string;
+  batchId: string;
+  sourceLocationId: string;
+  sourceFolderId: string;
+  targetFolderId: string;
+  sourcePath: string;
+  targetPath: string;
+  action: string;
+  status: "PENDING" | "PROCESSING" | "UNCERTAIN" | "DONE" | "FAILED";
+  error?: string | null;
+  createdAt: string;
+}
+
+export interface InboxMoveBatchSummary {
+  id: string;
+  clientId: string;
+  createdAt: string;
+  moves: InboxMoveOutcome[];
+  total: number;
+  counts: Record<InboxMoveOutcome["status"], number>;
+}
+
 export const inboundFlagSchema = z.object({ flagged: z.boolean() });
 
 export const inboundMessageQuerySchema = z.object({

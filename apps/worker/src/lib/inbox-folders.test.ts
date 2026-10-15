@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ImapFlow } from "imapflow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../test/prisma-mock.js";
@@ -77,4 +78,21 @@ describe("folder discovery", () => {
       matchesRemoteIdentity({ ...input, remoteMessageId: "<other>" })
     ).toBe(false);
   });
+});
+
+it("verifies a moved headerless message by bytes in its new UID namespace", () => {
+  const source = Buffer.from("Original message bytes");
+  const input = {
+    accountId: "a1",
+    folderId: "new",
+    uidValidity: "100",
+    uid: 12,
+    messageId: "a1:old:99:7",
+    contentHash: createHash("sha256").update(source).digest("hex"),
+  };
+  expect(matchesRemoteIdentity({ ...input, source })).toBe(true);
+  expect(
+    matchesRemoteIdentity({ ...input, source: Buffer.from("Different bytes") })
+  ).toBe(false);
+  expect(matchesRemoteIdentity(input)).toBe(false);
 });

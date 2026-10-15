@@ -22,6 +22,10 @@ vi.mock("../lib/api.js", () => ({
   api: {
     listInboxAccounts: vi.fn(),
     listInboxFolders: vi.fn(),
+    recentInboxMoves: vi.fn(),
+    getInboxMoveBatch: vi.fn(),
+    createInboxMove: vi.fn(),
+    checkInboxMoves: vi.fn(),
     markInboundMessageFlagged: vi.fn(),
     getInboxConversation: vi.fn(),
     markInboundMessagesRead: vi.fn(),
@@ -97,6 +101,7 @@ function makeMessage(overrides: Record<string, unknown> = {}) {
 function setup(messages: Record<string, unknown>[]) {
   mockedApi.getInboxConversation.mockResolvedValue({ messages, outgoing: [] });
   mockedApi.listInboxFolders.mockResolvedValue([]);
+  mockedApi.recentInboxMoves.mockResolvedValue([]);
   mockedApi.markInboundMessageFlagged.mockResolvedValue({} as never);
   mockedApi.markInboundMessagesRead.mockResolvedValue({
     updated: messages.length,

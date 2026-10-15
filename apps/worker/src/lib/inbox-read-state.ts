@@ -1,4 +1,4 @@
-import type { ImapFlow } from "imapflow";
+import type { ImapFlow, FetchMessageObject } from "imapflow";
 import { prisma } from "./prisma.js";
 import { matchesRemoteIdentity } from "./inbox-folders.js";
 
@@ -27,11 +27,17 @@ export async function synchronizeReadState(client: ImapFlow, folder: Folder) {
   for (const location of pending) {
     const message = location.message;
     try {
-      const remote = await client.fetchOne(
+      let remote = await client.fetchOne(
         location.uid,
         { envelope: true },
         { uid: true }
       );
+      if (remote && !remote.envelope?.messageId && location.contentHash)
+        remote = await client.fetchOne(
+          location.uid,
+          { envelope: true, source: true },
+          { uid: true }
+        );
       if (
         !remote ||
         !matchesRemoteIdentity({
@@ -41,6 +47,8 @@ export async function synchronizeReadState(client: ImapFlow, folder: Folder) {
           folderId: folder.id,
           uidValidity: folder.uidValidity,
           uid: location.uid,
+          contentHash: location.contentHash,
+          source: remote.source,
         })
       ) {
         await prisma.inboundMessageLocation.updateMany({
@@ -157,81 +165,115 @@ export async function synchronizeReadState(client: ImapFlow, folder: Folder) {
       take: 200,
     });
   const snapshots = new Map(rows.map((row) => [row.uid, row]));
-  const observed = new Set<number>();
+  const remotes: FetchMessageObject[] = [];
   if (rows.length)
     for await (const remote of client.fetch(
       rows.map((row) => row.uid),
       { uid: true, flags: true, envelope: true },
       { uid: true }
-    )) {
-      const location = snapshots.get(remote.uid);
-      if (!location) continue;
-      if (
-        !matchesRemoteIdentity({
-          messageId: location.message.messageId,
-          remoteMessageId: remote.envelope?.messageId,
-          accountId: folder.inboxAccountId,
-          folderId: folder.id,
-          uidValidity: folder.uidValidity,
-          uid: remote.uid,
-        })
-      )
-        continue;
-      observed.add(remote.uid);
-      if (!remote.flags) continue; // An omitted flags response is not "all flags off".
-      const message = location.message;
-      const seen = remote.flags.has("\\Seen");
-      const flagged = remote.flags.has("\\Flagged");
-      for (const field of ["read", "flag"] as const) {
-        const reading = field === "read";
-        const previous = reading ? location.remoteSeen : location.remoteFlagged;
-        const desired = reading ? seen : flagged;
-        if (previous === desired) continue;
-        // Only an external transition is a new shared action. An old copy of a
-        // message is never allowed to undo a just-acknowledged local action.
-        const revision = reading ? message.readRevision : message.flagRevision;
-        const changed = await prisma.inboundMessage.updateMany({
-          where: {
-            id: message.id,
-            ...(reading
-              ? { readRevision: revision, readPending: false }
-              : { flagRevision: revision, flagPending: false }),
-          },
-          data: reading
-            ? {
-                readAt: seen ? new Date() : null,
-                readRevision: { increment: 1 },
-                readPending: true,
-                readSyncError: null,
-              }
-            : {
-                flagged,
-                flagRevision: { increment: 1 },
-                flagPending: true,
-                flagSyncError: null,
-              },
-        });
-        if (changed.count) {
-          await prisma.inboundMessageLocation.updateMany({
-            where: { id: location.id },
-            data: reading
-              ? { readAppliedRevision: revision + 1 }
-              : { flagAppliedRevision: revision + 1 },
-          });
-          retryNewerAction = true;
-        }
+    ))
+      remotes.push(remote);
+  // Do not issue another IMAP command while a FETCH iterator holds its lock.
+  // Headerless moved messages need byte identity, so verify those afterwards.
+  let hashChecks = 0;
+  let limited = false;
+  let lastProcessed = 0;
+  for (let remote of remotes.sort((a, b) => a.uid - b.uid)) {
+    const location = snapshots.get(remote.uid);
+    if (!location) continue;
+    if (!remote.envelope?.messageId && location.contentHash) {
+      if (hashChecks >= 10) {
+        limited = true;
+        break;
       }
+      hashChecks++;
+      lastProcessed = remote.uid;
+      try {
+        const body = await client.fetchOne(
+          remote.uid,
+          { source: true, envelope: true, flags: true },
+          { uid: true }
+        );
+        if (!body) continue;
+        remote = body;
+      } catch {
+        continue;
+      }
+    }
+    lastProcessed = remote.uid;
+    if (
+      !matchesRemoteIdentity({
+        messageId: location.message.messageId,
+        remoteMessageId: remote.envelope?.messageId,
+        accountId: folder.inboxAccountId,
+        folderId: folder.id,
+        uidValidity: folder.uidValidity,
+        uid: remote.uid,
+        contentHash: location.contentHash,
+        source: remote.source,
+      })
+    ) {
       await prisma.inboundMessageLocation.updateMany({
         where: { id: location.id },
-        data: {
-          remoteSeen: seen,
-          remoteFlagged: flagged,
-          observedAt: new Date(),
-        },
+        data: { present: false },
       });
+      continue;
     }
+    if (!remote.flags) continue; // An omitted flags response is not "all flags off".
+    const message = location.message;
+    const seen = remote.flags.has("\\Seen");
+    const flagged = remote.flags.has("\\Flagged");
+    for (const field of ["read", "flag"] as const) {
+      const reading = field === "read";
+      const previous = reading ? location.remoteSeen : location.remoteFlagged;
+      const desired = reading ? seen : flagged;
+      if (previous === desired) continue;
+      // Only an external transition is a new shared action. An old copy of a
+      // message is never allowed to undo a just-acknowledged local action.
+      const revision = reading ? message.readRevision : message.flagRevision;
+      const changed = await prisma.inboundMessage.updateMany({
+        where: {
+          id: message.id,
+          ...(reading
+            ? { readRevision: revision, readPending: false }
+            : { flagRevision: revision, flagPending: false }),
+        },
+        data: reading
+          ? {
+              readAt: seen ? new Date() : null,
+              readRevision: { increment: 1 },
+              readPending: true,
+              readSyncError: null,
+            }
+          : {
+              flagged,
+              flagRevision: { increment: 1 },
+              flagPending: true,
+              flagSyncError: null,
+            },
+      });
+      if (changed.count) {
+        await prisma.inboundMessageLocation.updateMany({
+          where: { id: location.id },
+          data: reading
+            ? { readAppliedRevision: revision + 1 }
+            : { flagAppliedRevision: revision + 1 },
+        });
+        retryNewerAction = true;
+      }
+    }
+    await prisma.inboundMessageLocation.updateMany({
+      where: { id: location.id },
+      data: {
+        remoteSeen: seen,
+        remoteFlagged: flagged,
+        observedAt: new Date(),
+      },
+    });
+  }
   // Expunges/moves are location changes, never deletion of cached writing.
-  const missing = rows.filter((row) => !observed.has(row.uid));
+  const returned = new Set(remotes.map((remote) => remote.uid));
+  const missing = rows.filter((row) => !returned.has(row.uid));
   if (missing.length)
     await prisma.inboundMessageLocation.updateMany({
       where: { id: { in: missing.map((row) => row.id) } },
@@ -239,7 +281,13 @@ export async function synchronizeReadState(client: ImapFlow, folder: Folder) {
     });
   await prisma.inboxFolder.update({
     where: { id: folder.id },
-    data: { flagsCursor: rows.length < 200 ? 0 : rows.at(-1)!.uid },
+    data: {
+      flagsCursor: limited
+        ? lastProcessed
+        : rows.length < 200
+          ? 0
+          : rows.at(-1)!.uid,
+    },
   });
   return retryNewerAction;
 }

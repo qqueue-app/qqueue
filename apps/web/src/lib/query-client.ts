@@ -103,6 +103,10 @@ export const qk = {
   sentMessage: (orgId: string, id: string) =>
     ["sent", orgId, "message", id] as const,
 
+  inboxMoveBatch: (orgId: string, id: string) =>
+    ["inbox-move-batch", orgId, id] as const,
+  inboxMoves: (orgId: string, messageId: string) =>
+    ["inbox-moves", orgId, messageId] as const,
   inboxFolders: (orgId: string, accountId?: string) =>
     ["inbox-folders", orgId, accountId ?? "all"] as const,
   inboxAccounts: (orgId: string) => ["inbox-accounts", orgId] as const,

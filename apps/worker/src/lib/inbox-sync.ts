@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { randomUUID } from "node:crypto";
 import { ImapFlow, type SearchObject } from "imapflow";
 import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { env } from "../config/env.js";
@@ -6,6 +7,8 @@ import { decryptSecret } from "./crypto.js";
 import { applyDsnBounce, parseDsn } from "./dsn.js";
 import { discoverFolders, matchesRemoteIdentity } from "./inbox-folders.js";
 import { synchronizeReadState } from "./inbox-read-state.js";
+import { processInboxMoves } from "./inbox-moves.js";
+import { inboxSyncQueue } from "../queues/inbox-sync.queue.js";
 import { logger } from "./logger.js";
 import { prisma } from "./prisma.js";
 import { notifyNewInboundMessage } from "./push.js";
@@ -221,6 +224,8 @@ async function recoverAttachments(
           folderId: account.folderId,
           uidValidity: location.uidValidity,
           uid: location.uid,
+          contentHash: location.contentHash,
+          source: remote.source,
         })
       )
         continue;
@@ -558,7 +563,7 @@ async function getActiveInboxAccounts(id?: string) {
 export async function syncInboxAccount(account: InboxAccount) {
   // Serialize account sync across workers, including scheduler/manual overlap.
   // Bounded imports and flag scans finish within this transaction's lock lease.
-  return prisma.$transaction(
+  const moreMoves = await prisma.$transaction(
     async (db) => {
       const locks = await db.$queryRaw<
         Array<{ locked: boolean }>
@@ -568,10 +573,25 @@ export async function syncInboxAccount(account: InboxAccount) {
       const current = await prisma.inboxAccount.findFirst({
         where: { id: account.id, status: "ACTIVE" },
       });
-      if (current) await syncLockedInboxAccount(current);
+      return current ? syncLockedInboxAccount(current) : false;
     },
     { timeout: 600_000 }
   );
+  // Redis follow-up dispatch must not extend the account's database lock lease.
+  // A worker restart or Redis failure leaves the durable PENDING rows available
+  // for the periodic account check.
+  if (moreMoves)
+    void inboxSyncQueue
+      .add(
+        "sync-inbox",
+        { inboxAccountId: account.id },
+        {
+          jobId: `inbox-moves-${account.id}-${randomUUID()}`,
+          removeOnComplete: true,
+          removeOnFail: true,
+        }
+      )
+      .catch(() => undefined);
 }
 
 async function syncLockedInboxAccount(account: InboxAccount) {
@@ -608,6 +628,7 @@ async function syncLockedInboxAccount(account: InboxAccount) {
       account.mailbox,
       assertAlive
     );
+    const moreMoves = await processInboxMoves(client, account.id, assertAlive);
     const primary = folders.find((folder) => folder.path === account.mailbox);
     // Keep daily inbox checks responsive and rotate other folders behind it.
     // Every folder keeps independent cursors; one large folder cannot consume
@@ -662,6 +683,7 @@ async function syncLockedInboxAccount(account: InboxAccount) {
       }
     }
     if (primaryError) throw primaryError;
+    return moreMoves;
   } catch (error) {
     await prisma.inboxAccount.update({
       where: { id: account.id },
@@ -784,6 +806,33 @@ async function syncOpenedFolder(
               text: "",
             },
           };
+      if (!mail.messageId) {
+        const known = await prisma.inboundMessageLocation.findUnique({
+          where: {
+            inboxFolderId_uidValidity_uid: {
+              inboxFolderId: account.folderId,
+              uidValidity,
+              uid: message.uid,
+            },
+          },
+          include: { message: { select: { messageId: true } } },
+        });
+        if (
+          known &&
+          ((!message.source && !envelope?.messageId) ||
+            matchesRemoteIdentity({
+              messageId: known.message.messageId,
+              remoteMessageId: envelope?.messageId,
+              accountId: account.id,
+              folderId: account.folderId,
+              uidValidity,
+              uid: message.uid,
+              contentHash: known.contentHash,
+              source: message.source,
+            }))
+        )
+          mail.messageId = known.message.messageId;
+      }
       await storeParsedMessage({
         account: currentAccount,
         uid: message.uid,

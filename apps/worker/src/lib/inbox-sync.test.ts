@@ -117,6 +117,12 @@ const h = vi.hoisted(() => {
 
 vi.mock("imapflow", () => ({ ImapFlow: h.ImapFlow }));
 vi.mock("./push.js", () => ({ notifyNewInboundMessage: vi.fn() }));
+vi.mock("./inbox-moves.js", () => ({
+  processInboxMoves: vi.fn().mockResolvedValue(false),
+}));
+vi.mock("../queues/inbox-sync.queue.js", () => ({
+  inboxSyncQueue: { add: vi.fn() },
+}));
 vi.mock("./inbox-read-state.js", () => ({
   synchronizeReadState: vi.fn().mockResolvedValue(undefined),
 }));

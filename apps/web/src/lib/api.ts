@@ -1,5 +1,15 @@
-import type { MailboxView, InboxFolder } from "@qqueue/shared";
-export type { MailboxView, InboxFolder } from "@qqueue/shared";
+import type {
+  MailboxView,
+  InboxFolder,
+  InboxMoveInput,
+  InboxMoveBatchSummary,
+} from "@qqueue/shared";
+export type {
+  MailboxView,
+  InboxFolder,
+  InboxMoveInput,
+  InboxMoveBatchSummary,
+} from "@qqueue/shared";
 const uploadIdentities = new WeakMap<File, Map<string, string>>();
 import { clearSession, getSession, updateTokens } from "./session.js";
 
@@ -240,7 +250,7 @@ export interface InboundMessage {
   locations?: Array<{
     id: string;
     inboxFolderId: string;
-    folder: { path: string; name: string; role: string };
+    folder: { path: string; name: string; role: string; isPrimary?: boolean };
   }>;
   bodyStatus?: "AVAILABLE" | "UNAVAILABLE";
   bodyError?: string | null;
@@ -2488,6 +2498,31 @@ export const api = {
     );
   },
 
+  createInboxMove(id: string, organizationId: string, input: InboxMoveInput) {
+    return request<InboxMoveBatchSummary>(
+      `/api/v1/inbox/messages/${encodeURIComponent(id)}/moves`,
+      {
+        method: "POST",
+        body: JSON.stringify({ ...input, organizationId }),
+      }
+    );
+  },
+  getInboxMoveBatch(id: string, organizationId: string) {
+    return request<InboxMoveBatchSummary>(
+      `/api/v1/inbox/move-batches/${encodeURIComponent(id)}?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+  recentInboxMoves(id: string, organizationId: string) {
+    return request<InboxMoveBatchSummary[]>(
+      `/api/v1/inbox/messages/${encodeURIComponent(id)}/moves?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+  checkInboxMoves(id: string, organizationId: string) {
+    return request<{ queued: true }>(
+      `/api/v1/inbox/messages/${encodeURIComponent(id)}/moves/check`,
+      { method: "POST", body: JSON.stringify({ organizationId }) }
+    );
+  },
   listInboxFolders(organizationId: string, inboxAccountId?: string) {
     const params = new URLSearchParams({ organizationId });
     if (inboxAccountId) params.set("inboxAccountId", inboxAccountId);

@@ -238,10 +238,48 @@ Acceptance evidence:
   disposable PostgreSQL migration drift/SMTP smoke, dependency license audit and
   the cloud boundary check.
 
+## Durable Archive, Trash, restore and moves (2026-10-15)
+
+Implemented:
+
+- Folder actions create durable, retry-identified conversation snapshots. New
+  replies arriving after acceptance are not swept into an old retry. Requests
+  validate receiving grants, current source locations and same-mailbox targets;
+  concurrent actions cannot create conflicting moves for the same location.
+- The reader offers Archive, Trash/restore and an explicit destination dialog.
+  Accepted, completed, failed, partial and uncertain outcomes remain distinct.
+  Cached writing stays available while the server confirms its new location.
+- Workers require IMAP MOVE, verify UID-validity and original bytes, and persist
+  command intent before changing the server. A lost command response is reconciled
+  from source absence and an identical destination; uncertain commands are never
+  automatically repeated. Servers without MOVE expose a useful failure.
+- Headerless messages retain their logical identity through verified content
+  hashes. Shared read/flag state follows the new location. Accepted moves survive
+  deletion of their creator account. Durable pending work is redispatched after
+  releasing the account lock, with periodic checks as a fallback.
+
+Acceptance evidence:
+
+- Live IMAP moved a controlled two-message conversation, including a headerless
+  message, through Archive, Trash, restore and Inbox. A reply appended after
+  acceptance stayed outside the accepted snapshot; replay returned the same
+  batch and changed instructions were rejected. Private attachment bytes and
+  logical message identity survived the moves.
+- A move accepted by a temporary authorized member completed after that local
+  member account was deleted. The durable operation retained its intent without
+  retaining the deleted actor reference.
+- Chrome desktop confirmed the explicit destination dialog, pending-to-completed
+  status, removal from the source list, and retained body/attachment access.
+  Full typecheck, lint, build, tests and unmodified coverage gates passed. The
+  Docker smoke test and disposable PostgreSQL drift check passed.
+- Unit and component checks cover response-loss retries, conditional status,
+  missing/changed namespaces, unsupported servers, partial progress, cancelled
+  destination selection, and blocking dialog changes during acceptance. These
+  checks do not establish physical-device or actual transport-loss acceptance.
+
 ## Required before calling the primary-client goal complete
 
-1. **IMAP folder operations:** durable user-initiated Archive, Trash/restore and
-   moves; external-draft editing/reconciliation and integration of imported Sent
+1. **IMAP folder operations:** external-draft editing/reconciliation and integration of imported Sent
    with the logical delivery archive. Validate UID-validity replacement, large
    mailboxes and interrupted import against real services.
 2. **Draft/composer recovery:** editable reply recipients, forwarding with original

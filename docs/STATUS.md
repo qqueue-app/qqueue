@@ -31,8 +31,10 @@ batch adds bounded older-history backfill and visible/retryable inbound body and
 attachment failures. The next batch discovers IMAP folders, imports their
 contents with separate location/cursor records, reconciles shared Seen/Flagged
 actions across copies, and adds URL-owned folder/mailbox/search/read filters.
-User-initiated folder operations, external-draft editing, forwarding, signatures,
-and broader attachment, team and device acceptance remain. See
+Durable user-initiated Archive, Trash/restore and destination moves now preserve
+accepted intent, reconcile ambiguous server outcomes and keep cached writing.
+External-draft editing, forwarding, signatures, and broader attachment, team and
+device acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer
 to the earlier email-operations scope.

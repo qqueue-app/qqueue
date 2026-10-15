@@ -48,6 +48,7 @@ import { Spinner } from "../components/ui/spinner.js";
 import { DataGrid } from "../components/ui/data-grid.js";
 import { RowActions } from "../components/ui/row-actions.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
+import { MoveControls } from "../components/inbox/MoveControls.js";
 import { ReplyComposer } from "../components/inbox/ReplyComposer.js";
 import { Hint } from "../components/ui/tooltip.js";
 import {
@@ -213,6 +214,7 @@ function InboxWorkspace() {
       const next = new URLSearchParams(current);
       next.delete("message");
       next.delete("replyDraft");
+      next.delete("move");
       return next;
     });
   }
@@ -237,6 +239,7 @@ function InboxWorkspace() {
       const next = new URLSearchParams(current);
       next.delete("message");
       next.delete("replyDraft");
+      next.delete("move");
       for (const [key, value] of Object.entries(values)) {
         if (value) next.set(key, value);
         else next.delete(key);
@@ -748,6 +751,18 @@ function InboxWorkspace() {
               </p>
             ) : null}
           </div>
+        </div>
+        <div className="mx-auto w-full max-w-page px-4 pb-3 sm:px-6">
+          <MoveControls
+            key={`${organizationId}:${searchParams.get("message") ?? selectedThread.latestMessage.id}`}
+            messages={selectedThread.messages}
+            anchorId={
+              searchParams.get("message") ?? selectedThread.latestMessage.id
+            }
+            organizationId={organizationId as string}
+            view={view}
+            folderId={folderId}
+          />
         </div>
       </header>
 
@@ -1498,6 +1513,7 @@ function InboxWorkspace() {
               (current) => {
                 const next = new URLSearchParams(current);
                 next.delete("replyDraft");
+                next.delete("move");
                 return next;
               },
               { replace: true }
@@ -1509,6 +1525,7 @@ function InboxWorkspace() {
               (current) => {
                 const next = new URLSearchParams(current);
                 next.delete("replyDraft");
+                next.delete("move");
                 next.delete("message");
                 return next;
               },

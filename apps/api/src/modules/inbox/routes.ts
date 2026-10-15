@@ -4,6 +4,26 @@ import { requireOrgRole } from "../../middleware/require-org-role.js";
 import { inboxController } from "./controller.js";
 
 export const inboxRouter = Router();
+inboxRouter.get(
+  "/move-batches/:id",
+  requireOrgMembership,
+  inboxController.moveBatch
+);
+inboxRouter.get(
+  "/messages/:id/moves",
+  requireOrgMembership,
+  inboxController.recentMoves
+);
+inboxRouter.post(
+  "/messages/:id/moves",
+  requireOrgMembership,
+  inboxController.createMove
+);
+inboxRouter.post(
+  "/messages/:id/moves/check",
+  requireOrgMembership,
+  inboxController.checkMoves
+);
 inboxRouter.get("/folders", requireOrgMembership, inboxController.listFolders);
 inboxRouter.patch(
   "/messages/:id/flag",
