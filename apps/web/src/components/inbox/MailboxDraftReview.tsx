@@ -94,7 +94,7 @@ export function MailboxDraftReview({
                   ? status.data.reviewed
                     ? "You chose to keep your copy after reviewing the changed original."
                     : "The original changed in another app. Review its latest text and files before sending your copy."
-                  : "Your copy matches the last synced original version."}
+                  : "The original has not changed since this copy was prepared."}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button

@@ -1,4 +1,5 @@
 import type { PendingDraft } from "./offline-drafts.js";
+import { draftWritingFingerprint } from "./draft-writing.js";
 
 // A last-resort safety net for SPA navigation. Never described as durable: it
 // disappears when this window closes and beforeunload must warn while it is used.
@@ -96,6 +97,10 @@ export function acknowledgeWindowDraft(
   } else if (current.draftId === snapshot.draftId)
     copies.set(snapshot.localId, {
       ...current,
+      serverWritingFingerprint:
+        (current.revision ?? 1) > (revision ?? 1)
+          ? current.serverWritingFingerprint
+          : draftWritingFingerprint(snapshot.payload, snapshot.attachments),
       draftId: serverId,
       revision:
         current.revision === undefined && revision === undefined

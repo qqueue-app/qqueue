@@ -20,10 +20,14 @@ export function DeviceDraftCopies({
   organizationId,
   userId,
   onUse,
+  draftId,
+  waitingFilesOnly = false,
 }: {
   organizationId: string;
   userId: string;
   onUse: (copy: PendingDraft) => Promise<void>;
+  draftId?: string;
+  waitingFilesOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<PendingDraft>();
@@ -86,7 +90,11 @@ export function DeviceDraftCopies({
           <DataGrid
             className="[&_table]:table-fixed"
             label="Device drafts"
-            data={copies.data ?? []}
+            data={(copies.data ?? []).filter(
+              (copy) =>
+                (!draftId || copy.draftId === draftId) &&
+                (!waitingFilesOnly || Boolean(copy.pendingUploads?.length))
+            )}
             loading={copies.isPending}
             getRowId={(copy) => copy.localId}
             columns={[

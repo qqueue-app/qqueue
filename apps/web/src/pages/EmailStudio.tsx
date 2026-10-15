@@ -386,6 +386,44 @@ function EmailStudioWorkspace() {
   const localDraftId = useRef(newLocalDraftId());
   const draftClientId = useRef(localDraftId.current);
 
+  const [ignoredWaitingFiles, setIgnoredWaitingFiles] = useState<string | null>(
+    null
+  );
+  const deviceFiles = useOrgQuery(
+    organizationId,
+    qk.deviceDrafts(organizationId ?? "", user?.id ?? ""),
+    async (org) =>
+      (await listPendingDrafts(org, true))
+        .filter((copy) => !copy.payload.inboundMessageId)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    {
+      enabled: Boolean(draftId && user?.id) && !openingDraft,
+      networkMode: "always",
+      staleTime: 0,
+    }
+  );
+  const waitingDeviceCopies = (deviceFiles.data ?? []).filter(
+    (copy) =>
+      copy.draftId === draftId &&
+      copy.localId !== localDraftId.current &&
+      copy.pendingUploads?.some(
+        (file) =>
+          !attachments.some(
+            (attachment) => attachment.uploadId === file.uploadId
+          )
+      )
+  );
+  const checkWaitingFiles =
+    Boolean(draftId && user?.id) &&
+    !acceptedSendId &&
+    pendingUploads.length === 0 &&
+    ignoredWaitingFiles !== draftId;
+  const reviewWaitingFiles =
+    checkWaitingFiles &&
+    (deviceFiles.isPending ||
+      deviceFiles.isError ||
+      waitingDeviceCopies.length > 0);
+
   const hasContent =
     subject.trim() !== "" ||
     !htmlIsEmpty(html) ||
@@ -508,6 +546,7 @@ function EmailStudioWorkspace() {
 
   function resetComposer() {
     setLoadedDraftLink(null);
+    setIgnoredWaitingFiles(null);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -879,7 +918,11 @@ function EmailStudioWorkspace() {
             setPendingLocally(
               snapshotFingerprint !== liveWritingFingerprint.current
             );
-            setBackupFailed(false);
+            if (snapshotFingerprint === liveWritingFingerprint.current) {
+              setBackupFailed(
+                Boolean(snapshot.pendingUploads?.length) && !backedUp
+              );
+            }
             if (!silent) {
               if (snapshotFingerprint === liveWritingFingerprint.current)
                 toast.success("Draft saved.");
@@ -1252,6 +1295,12 @@ function EmailStudioWorkspace() {
    */
   async function openPreview() {
     if (openingDraft) return;
+    if (reviewWaitingFiles) {
+      toast.error(
+        "Review the files waiting on this device before sending this saved draft."
+      );
+      return;
+    }
     if (uploadBackup.current.length) {
       toast.error(
         "Some files need attention. Retry or remove them before sending."
@@ -1671,6 +1720,62 @@ function EmailStudioWorkspace() {
                 </div>
               ) : null}
 
+              {reviewWaitingFiles && draftId && organizationId && user ? (
+                <aside
+                  role="alert"
+                  className="space-y-3 rounded-card bg-warn-bg p-3 text-ui"
+                >
+                  <p className="font-medium">
+                    {deviceFiles.isPending
+                      ? "Checking for files waiting on this device…"
+                      : deviceFiles.isError
+                        ? "Couldn’t check this device for waiting files."
+                        : "Files are waiting on this device for this draft."}
+                  </p>
+                  <p>
+                    Resume their device copy to keep the writing and files
+                    together, or deliberately continue with only the saved
+                    files. The device copies are kept.
+                  </p>
+                  {waitingDeviceCopies
+                    .flatMap((copy) => copy.pendingUploads ?? [])
+                    .map((file) => (
+                      <p key={file.uploadId}>
+                        {file.file.name} · {formatBytes(file.file.size)} ·
+                        waiting to upload
+                      </p>
+                    ))}
+                  <DeviceDraftCopies
+                    organizationId={organizationId}
+                    userId={user.id}
+                    draftId={draftId}
+                    waitingFilesOnly
+                    onUse={async (copy) => {
+                      preserveWriting.current();
+                      const revision = draftIdentity.current.revision;
+                      applyDeviceCopy(copy);
+                      setDraftConflict((copy.revision ?? 1) !== revision);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={deviceFiles.isPending}
+                    onClick={() => setIgnoredWaitingFiles(draftId)}
+                  >
+                    Use saved files only
+                  </Button>
+                  {deviceFiles.isError ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void deviceFiles.refetch()}
+                    >
+                      Check device files again
+                    </Button>
+                  ) : null}
+                </aside>
+              ) : null}
               <FormSections>
                 <FormSection
                   title="Recipients"
@@ -2126,6 +2231,7 @@ function EmailStudioWorkspace() {
                     openingDraft ||
                     uploading ||
                     pendingUploads.length > 0 ||
+                    reviewWaitingFiles ||
                     Boolean(acceptedSendId) ||
                     noSmtp ||
                     !organizationId
@@ -2215,6 +2321,7 @@ function EmailStudioWorkspace() {
                     onUse={(draft) => {
                       preserveWriting.current();
                       applyDraft(draft);
+                      setIgnoredWaitingFiles(draft.id);
                     }}
                     onKeep={(draft) => {
                       preserveWriting.current();
@@ -2249,6 +2356,12 @@ function EmailStudioWorkspace() {
                   <p role="alert" className="text-ui text-err">
                     This writing or its files are kept only in this window. Keep
                     the window open until saving succeeds.
+                  </p>
+                ) : pendingUploads.length > 0 ? (
+                  <p className="text-center text-meta text-warn">
+                    {lastSavedAt && savedFingerprint === writingFingerprint
+                      ? "Writing saved; waiting file bytes are kept on this device."
+                      : "Writing and waiting files are kept on this device."}
                   </p>
                 ) : pendingLocally &&
                   backupFingerprint === writingFingerprint ? (

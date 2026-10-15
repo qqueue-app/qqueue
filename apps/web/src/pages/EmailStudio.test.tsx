@@ -7,7 +7,11 @@ import {
 } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
 import { installFakeIndexedDB } from "../test/fake-indexeddb.js";
-import { savePendingDraft, listPendingDrafts } from "../lib/offline-drafts.js";
+import {
+  savePendingDraft,
+  listPendingDrafts,
+  deletePendingDraft,
+} from "../lib/offline-drafts.js";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1277,4 +1281,205 @@ it("retains a loaded draft’s URL for reload and does not reapply it over newer
   await view.queryClient.invalidateQueries({ queryKey: ["email-draft"] });
   expect(subject).toHaveValue("Newer unsaved writing");
   expect(mockedApi.getEmailDraft).toHaveBeenCalledTimes(1);
+});
+
+it.each(["resume", "saved-only", "different-draft"])(
+  "reviews waiting device files when reopening a saved draft: %s",
+  async (choice) => {
+    vi.clearAllMocks();
+    setup();
+    session.current = { currentOrganizationId: "org_1", user: { id: "u1" } };
+    localStorage.setItem(
+      "qqueue.session",
+      JSON.stringify({ user: { id: "u1" }, organizations: [] })
+    );
+    const db = installFakeIndexedDB();
+    const copy = {
+      userId: "u1",
+      organizationId: "org_1",
+      localId: "waiting-copy",
+      clientId: "stable-copy",
+      draftId: choice === "different-draft" ? "another-draft" : "waiting9",
+      revision: 2,
+      payload: {
+        subject: "Pending local writing",
+        html: "<p>Keep my waiting writing</p>",
+        to: ["alice@x.com"],
+        cc: [],
+        bcc: [],
+        listIds: [],
+      },
+      pendingUploads: [
+        {
+          file: new File(["waiting bytes"], "waiting-private.txt"),
+          uploadId: "waiting-upload",
+          error: "interrupted",
+        },
+      ],
+      updatedAt: "2026-10-15T11:00:00Z",
+    };
+    await savePendingDraft(copy);
+    mockedApi.getEmailDraft.mockResolvedValue({
+      id: "waiting9",
+      organizationId: "org_1",
+      revision: 2,
+      subject: "Server writing",
+      html: "<p>Saved text</p>",
+      to: ["alice@x.com"],
+      cc: [],
+      bcc: [],
+      listIds: [],
+      attachments: [],
+    });
+    mockedApi.updateEmailDraft.mockResolvedValue({
+      id: "waiting9",
+      revision: 3,
+    });
+    const user = userEvent.setup();
+    const view = renderWithProviders(<EmailStudio />, {
+      route: "/email-studio?draft=waiting9",
+    });
+    try {
+      await waitFor(() =>
+        expect(screen.getByRole("textbox", { name: "Subject" })).toHaveValue(
+          "Server writing"
+        )
+      );
+      if (choice === "different-draft") {
+        await waitFor(() =>
+          expect(
+            screen.getByRole("button", { name: "Send email" })
+          ).toBeEnabled()
+        );
+        expect(
+          screen.queryByText("Files are waiting on this device for this draft.")
+        ).not.toBeInTheDocument();
+      } else {
+        expect(
+          await screen.findByText(
+            "Files are waiting on this device for this draft."
+          )
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("button", { name: "Send email" })
+        ).toBeDisabled();
+        expect(
+          screen.getByText(/waiting-private.txt.*waiting to upload/)
+        ).toBeInTheDocument();
+        if (choice === "saved-only") {
+          await user.click(
+            screen.getByRole("button", { name: "Use saved files only" })
+          );
+          expect(
+            screen.getByRole("button", { name: "Send email" })
+          ).toBeEnabled();
+          expect(
+            (await listPendingDrafts("org_1")).find(
+              (row) => row.localId === "waiting-copy"
+            )?.pendingUploads?.[0].file.size
+          ).toBe(13);
+        } else {
+          await user.click(
+            screen.getByRole("button", { name: "Review device drafts" })
+          );
+          await user.click(
+            await screen.findByRole("button", { name: /Pending local writing/ })
+          );
+          await user.click(
+            await screen.findByRole("button", { name: "Use this device draft" })
+          );
+          await waitFor(() =>
+            expect(
+              screen.getByRole("textbox", { name: "Subject" })
+            ).toHaveValue("Pending local writing")
+          );
+          expect(
+            screen.getByRole("button", { name: "Retry waiting-private.txt" })
+          ).toBeInTheDocument();
+          expect(
+            screen.getByRole("button", { name: "Send email" })
+          ).toBeDisabled();
+          expect(screen.queryByText(/^Draft saved$/)).not.toBeInTheDocument();
+        }
+      }
+    } finally {
+      view.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      for (const row of await listPendingDrafts("org_1"))
+        await deletePendingDraft(row.localId);
+      db.restore();
+      localStorage.removeItem("qqueue.session");
+      session.current = { currentOrganizationId: "org_1" };
+    }
+  }
+);
+
+it("keeps a window-only file warning after the server acknowledges its writing", async () => {
+  vi.clearAllMocks();
+  setup();
+  session.current = {
+    currentOrganizationId: "org_1",
+    user: { id: "file-window-owner" },
+  };
+  localStorage.setItem(
+    "qqueue.session",
+    JSON.stringify({ user: { id: "file-window-owner" }, organizations: [] })
+  );
+  vi.stubGlobal("indexedDB", {
+    open: () => {
+      throw new Error("Storage blocked");
+    },
+  });
+  const { listWindowDrafts, forgetWindowDraft } =
+    await import("../lib/window-drafts.js");
+  mockedApi.createEmailDraft.mockResolvedValue({
+    id: "file-window9",
+    revision: 1,
+    updatedAt: "now",
+  });
+  mockedApi.updateEmailDraft.mockResolvedValue({
+    id: "file-window9",
+    revision: 2,
+    updatedAt: "now",
+  });
+  mockedApi.uploadAttachment.mockRejectedValue(new Error("Upload interrupted"));
+  const user = userEvent.setup();
+  const view = await renderStudio();
+  try {
+    await user.type(screen.getByLabelText("Subject"), "Volatile file writing");
+    await user.upload(
+      screen.getByLabelText("Add attachments"),
+      new File(["volatile bytes"], "volatile.txt")
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Retry volatile.txt" })
+      ).toBeEnabled()
+    );
+    expect(mockedApi.createEmailDraft).toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        /This writing or its files are kept only in this window/
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/waiting file bytes are kept on this device/)
+    ).not.toBeInTheDocument();
+    expect(
+      listWindowDrafts("file-window-owner").some((copy) =>
+        copy.pendingUploads?.some((file) => file.file.name === "volatile.txt")
+      )
+    ).toBe(true);
+    const close = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(close);
+    expect(close.defaultPrevented).toBe(true);
+  } finally {
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    for (const copy of listWindowDrafts("file-window-owner"))
+      forgetWindowDraft(copy.localId);
+    vi.unstubAllGlobals();
+    localStorage.removeItem("qqueue.session");
+    session.current = { currentOrganizationId: "org_1" };
+  }
 });

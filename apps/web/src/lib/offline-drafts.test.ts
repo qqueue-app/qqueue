@@ -53,6 +53,46 @@ describe("offline drafts (§5)", () => {
     vi.restoreAllMocks();
   });
 
+  it("does not resubmit acknowledged writing just because private file bytes are still waiting", async () => {
+    const snapshot = draft({
+      draftId: "server-1",
+      revision: 1,
+      pendingUploads: [
+        {
+          file: new File(["private bytes"], "waiting.txt"),
+          uploadId: "file-retry1",
+          error: "offline",
+        },
+      ],
+    });
+    await savePendingDraft(snapshot);
+    await acknowledgePendingDraft(snapshot, "server-1", 2);
+    const update = vi
+      .spyOn(api, "updateEmailDraft")
+      .mockResolvedValue({ id: "server-1", revision: 3 } as never);
+    expect(await flushPendingDrafts("org-1")).toEqual([]);
+    expect(update).not.toHaveBeenCalled();
+    let retained = (await listPendingDrafts("org-1"))[0];
+    expect(retained.pendingUploads?.[0].file.size).toBe(13);
+    await savePendingDraft({
+      ...retained,
+      payload: { ...retained.payload, html: "<p>New writing</p>" },
+    });
+    await flushPendingDrafts("org-1");
+    expect(update).toHaveBeenCalledWith(
+      "server-1",
+      expect.objectContaining({
+        html: "<p>New writing</p>",
+        expectedRevision: 2,
+      })
+    );
+    retained = (await listPendingDrafts("org-1"))[0];
+    await savePendingDraft({ ...retained, pendingUploads: [] });
+    await flushPendingDrafts("org-1");
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(await listPendingDrafts("org-1")).toEqual([]);
+  });
+
   it("keeps a draft the server never received", async () => {
     await savePendingDraft(draft());
     const pending = await listPendingDrafts("org-1");
@@ -197,9 +237,10 @@ describe("offline drafts (§5)", () => {
     });
     await savePendingDraft(newer);
     await acknowledgePendingDraft(original, "server-1");
-    expect(await listPendingDrafts()).toEqual([
-      { ...newer, draftId: "server-1" },
-    ]);
+    const retained = await listPendingDrafts();
+    expect(retained).toMatchObject([{ ...newer, draftId: "server-1" }]);
+    expect(retained[0].serverWritingFingerprint).toContain("<p>Hi</p>");
+    expect(retained[0].serverWritingFingerprint).not.toContain("New writing");
   });
 
   it("does not acknowledge a backup belonging to another signed-in person", async () => {

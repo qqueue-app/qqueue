@@ -1074,10 +1074,12 @@ describe("api multipart uploads", () => {
     expect(url).toBe(`${apiBaseUrl}/api/v1/attachments`);
     expect((options.body as FormData).get("emailDraftId")).toBeNull();
 
-    await api.uploadAttachment(png(), {
+    const uploaded = await api.uploadAttachment(png(), {
       organizationId: "org_1",
       emailDraftId: "dft_1",
+      uploadId: "retry-upload-1",
     });
+    expect(uploaded.uploadId).toBe("retry-upload-1");
     [url, options] = lastCall();
     expect((options.body as FormData).get("emailDraftId")).toBe("dft_1");
   });

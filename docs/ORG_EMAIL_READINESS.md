@@ -685,6 +685,58 @@ Acceptance evidence:
   progress. All five verification gates and unchanged coverage thresholds pass.
   This batch changes no schema or sending pipeline.
 
+## Waiting-file recovery and real browser response loss (2026-10-15)
+
+Implemented:
+
+- Reopening a saved draft checks for matching device copies with waiting file
+  bytes. Their names and sizes stay visible, and sending waits for an explicit
+  choice: resume that device copy, or use only the saved files while retaining
+  recovery copies. Other drafts' pending files do not block this message. Failed
+  device reads have retry and an explicit saved-files choice. Already accepted
+  sends remain protected and do not ask for another file decision.
+- Restoring the waiting copy keeps its writing, uploaded metadata, pending bytes
+  and retry IDs together. A stale revision still requires saved-version review.
+  Completed upload IDs are available in saved file metadata and retained on new
+  upload responses, so an already recovered file is not mistaken for another
+  missing file in a device copy.
+- File-only backups remember the exact writing/uploaded-file snapshot already
+  acknowledged by the server. Visibility/reconnect sync no longer saves that
+  unchanged writing again merely because private file bytes remain on the
+  device. Newer text still syncs; older acknowledgements cannot replace the
+  newer marker. Removing the last waiting file can release an acknowledged copy
+  without an unnecessary server write. The composer distinguishes saved writing
+  from file bytes that remain on this device. A successful text save cannot
+  clear the window-only warning when device storage still rejects pending file
+  bytes; close protection remains active. That storage/server combination has
+  automated coverage and is not claimed as a physical storage-exhaustion test.
+
+Acceptance evidence:
+
+- A temporary local HTTP proxy closed actual Chrome upload connections after
+  64–130 KiB of a 1 MiB multipart request. The file remained retryable. Leaving
+  Compose and reopening its saved URL exposed a real missing-files issue: the
+  earlier build hid those waiting bytes and enabled sending. The final build
+  showed the matching file copies and disabled Send until review; Chrome then
+  restored the selected writing and pending file through the device-copy dialog.
+- The proxy next discarded successful 201 upload responses. Chrome retained the
+  waiting file and retried its same identity. Actual PostgreSQL/object storage
+  verified one attachment with all 1,048,576 original bytes; retrying recovered
+  that same record. Regression tests also cover deliberately continuing with
+  saved files while keeping the pending copy and ignoring another draft's files.
+- Finally the proxy discarded successful 202 send-acceptance responses. Chrome
+  recovered the completed draft's job, kept the writing and disabled sending
+  again. The real pipeline recorded one MANUAL delivery group; actual IMAP
+  retrieval found one received Message-ID with the original reply chain, inline
+  image and exact recovered 1 MiB file. Chrome opened that message and its files
+  in Sent. This demonstrates the controlled lost-response case, not a general
+  exactly-once SMTP guarantee or a physical mobile network test.
+- All five verification gates and the unchanged coverage thresholds passed.
+  The temporary fault proxy was removed and the normal local API restored.
+  Only the exact controlled external-draft UIDs were then removed; sync reported
+  the original unavailable while retaining the unsent private copy and both of
+  its files. Existing device writing and alternate recovery copies were kept.
+
 ## Required before calling the primary-client goal complete
 
 1. **IMAP recovery acceptance:** production-scale mailboxes and broader
@@ -692,9 +744,10 @@ Acceptance evidence:
    reconnection, a 240-message history and UID-validity replacement now pass. External drafts now
    continue as explicitly separate personal copies; editing the original IMAP
    draft in place is not supported.
-2. **Draft/composer recovery:** broaden actual concurrent-device, interrupted
-   upload, lost-response and storage-failure acceptance across navigation and
-   organization changes.
+2. **Draft/composer recovery:** physical concurrent devices and broader storage,
+   mobile-network and account-change combinations remain. Controlled Chrome
+   interrupted uploads, navigation/reopen, lost upload responses and lost send
+   acceptance responses now pass against the real API/provider.
 3. **Inbound content acceptance:** stress large/complex MIME messages, missing
    inline parts, real interrupted network/storage uploads and recovery when
    messages move or disappear in another client.
@@ -702,8 +755,8 @@ Acceptance evidence:
    provisioning service and different teammates in the browser. Mailbox-password
    recovery remains distinct from QQueue sign-in reset links.
 5. **Broader acceptance:** distinct controlled To/Cc/Bcc recipient mailboxes,
-   slow/interrupted browser networks and lost responses, actual phone keyboards
-   and safe areas, accessibility/assistive technology, large histories and multiple
+   physical mobile networks, actual phone keyboards and safe areas,
+   accessibility/assistive technology, production-scale histories and multiple
    teammates with different read/send grants and administrator roles. The live
    check above used one provided mailbox and a self-addressed synthetic message;
    it does not prove these other scenarios. The user confirmed that no additional

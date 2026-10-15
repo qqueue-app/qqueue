@@ -569,6 +569,7 @@ export interface Template {
 
 export interface EmailAttachment {
   id: string;
+  uploadId?: string | null;
   cid?: string | null;
   filename: string;
   contentType: string;
@@ -2396,7 +2397,7 @@ export const api = {
       method: "POST",
       body: form,
       signal: options.signal,
-    });
+    }).then((attachment) => ({ ...attachment, uploadId }));
   },
 
   deleteAttachment(id: string) {

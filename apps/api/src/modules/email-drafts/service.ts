@@ -113,6 +113,7 @@ export const emailDraftService = {
             contentType: true,
             size: true,
             cid: true,
+            uploadId: true,
           },
           orderBy: { createdAt: "asc" },
         },

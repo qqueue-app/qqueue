@@ -10,6 +10,7 @@ import {
   withoutWindowMarker,
 } from "./window-drafts.js";
 import { getSession, subscribeSession } from "./session.js";
+import { draftWritingFingerprint } from "./draft-writing.js";
 
 /**
  * Composer drafts that haven't reached the server yet.
@@ -63,6 +64,9 @@ export interface PendingUpload {
 }
 
 export interface PendingDraft {
+  /** The exact text/uploaded-file metadata already acknowledged by the server.
+   * Waiting file bytes remain local and must not cause another body save. */
+  serverWritingFingerprint?: string;
   /** Available only in this live window, not a durable device save. */
   memoryOnly?: boolean;
   attachments?: EmailAttachment[];
@@ -220,6 +224,13 @@ export async function acknowledgePendingDraft(
         } else if (current.draftId === snapshot.draftId) {
           store.put({
             ...current,
+            serverWritingFingerprint:
+              (current.revision ?? 1) > (revision ?? 1)
+                ? current.serverWritingFingerprint
+                : draftWritingFingerprint(
+                    snapshot.payload,
+                    snapshot.attachments
+                  ),
             draftId: serverId,
             revision:
               current.revision === undefined && revision === undefined
@@ -286,6 +297,15 @@ async function flushDrafts(
 
   for (const record of pending) {
     if (getSession().user?.id !== record.userId) break;
+    if (
+      record.draftId &&
+      record.serverWritingFingerprint ===
+        draftWritingFingerprint(record.payload, record.attachments)
+    ) {
+      if (!record.pendingUploads?.length)
+        await acknowledgePendingDraft(record, record.draftId, record.revision);
+      continue;
+    }
     try {
       const draft = record.draftId
         ? await api.updateEmailDraft(record.draftId, {
