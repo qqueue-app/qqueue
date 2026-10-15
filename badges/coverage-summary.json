@@ -1,12 +1,12 @@
 {
   "backend": {
-    "pct": 91.18,
-    "covered": 14072,
-    "total": 15434
+    "pct": 91.08,
+    "covered": 14381,
+    "total": 15789
   },
   "web": {
-    "pct": 85.95,
-    "covered": 22619,
-    "total": 26317
+    "pct": 85.93,
+    "covered": 22699,
+    "total": 26415
   }
 }
