@@ -14,6 +14,7 @@ vi.mock("./service.js", () => ({
     updateAccount: vi.fn(),
     deleteAccount: vi.fn(),
     listMessages: vi.fn(),
+    getConversation: vi.fn(),
     storeInboundMessage: vi.fn(),
     markRead: vi.fn(),
     replyToMessage: vi.fn(),
@@ -567,4 +568,38 @@ describe("forward preparation controller", () => {
     ).rejects.toThrow();
     expect(inboxForwardService.prepare).not.toHaveBeenCalled();
   });
+});
+
+it("validates conversation page direction before passing the authorized scope to the service", async () => {
+  const res = mockRes();
+  vi.mocked(inboxService.getConversation).mockResolvedValue({
+    messages: [],
+    outgoing: [],
+  } as never);
+  await inboxController.getConversation(
+    {
+      params: { id: "message" },
+      organizationId: "org",
+      userId: "user",
+      query: { before: "received:older" },
+    } as unknown as Request,
+    res
+  );
+  expect(inboxService.getConversation).toHaveBeenCalledWith(
+    "message",
+    "org",
+    "user",
+    { before: "received:older" }
+  );
+  await expect(
+    inboxController.getConversation(
+      {
+        params: { id: "message" },
+        organizationId: "org",
+        userId: "user",
+        query: { before: "one", after: "two" },
+      } as unknown as Request,
+      res
+    )
+  ).rejects.toThrow("Choose one conversation page direction");
 });

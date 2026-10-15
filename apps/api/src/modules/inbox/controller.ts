@@ -3,6 +3,7 @@ import {
   inboxAccountSchema,
   inboxAccountUpdateSchema,
   inboundMessageQuerySchema,
+  inboxConversationWindowSchema,
   inboundMessageReplySchema,
   inboundMessageStoreSchema,
   inboundBulkReadSchema,
@@ -26,16 +27,14 @@ const markReadSchema = z.object({
 
 export const inboxController = {
   async prepareForward(req: Request, res: Response) {
-    res
-      .status(201)
-      .json({
-        data: await inboxForwardService.prepare(
-          String(req.params.id),
-          req.organizationId!,
-          req.userId!,
-          inboundForwardSchema.parse(req.body)
-        ),
-      });
+    res.status(201).json({
+      data: await inboxForwardService.prepare(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!,
+        inboundForwardSchema.parse(req.body)
+      ),
+    });
   },
   async createMove(req: Request, res: Response) {
     res.status(202).json({
@@ -123,7 +122,8 @@ export const inboxController = {
       data: await inboxService.getConversation(
         String(req.params.id),
         req.organizationId!,
-        req.userId!
+        req.userId!,
+        inboxConversationWindowSchema.parse(req.query)
       ),
     });
   },

@@ -324,3 +324,96 @@ it("includes an authorized completed reply to a headerless original without inve
     ],
   });
 });
+
+it("keeps complete conversation membership while fetching at most ten received/sent bodies per stable page", async () => {
+  const rows = Array.from({ length: 35 }, (_, index) => ({
+    ...message,
+    id: `received-${index}`,
+    messageId: `<received-${index}>`,
+    html: `<p>Body ${index}</p>`,
+    text: `Body ${index}`,
+    receivedAt: new Date(2026, 0, 1, 0, index),
+    attachments: [{ id: `file-${index}`, filename: `file-${index}.txt` }],
+  }));
+  const jobs = Array.from({ length: 10 }, (_, index) => ({
+    id: `sent-${index}`,
+    messageId: `<sent-${index}>`,
+    subject: "Reply",
+    html: `<p>Sent ${index}</p>`,
+    text: `Sent ${index}`,
+    sentAt: new Date(2026, 0, 1, 0, 30, index),
+    createdAt: new Date(2026, 0, 1, 0, 30, index),
+    attachments: [],
+    smtpConnection: null,
+    status: "SENT",
+    groupStatus: null,
+    visibleTo: [],
+    visibleCc: [],
+    cc: [],
+  }));
+  prismaMock.inboundMessage.findFirst.mockResolvedValue(rows.at(-1) as never);
+  prismaMock.inboundMessage.findMany.mockImplementation((async (args: {
+    omit?: unknown;
+    where: { id?: { in: string[] } };
+  }) =>
+    args.omit
+      ? rows.map(
+          ({ html: _html, text: _text, attachments: _files, ...metadata }) =>
+            metadata
+        )
+      : rows.filter((row) => args.where.id!.in.includes(row.id))) as never);
+  prismaMock.emailJob.findMany.mockImplementation((async (args: {
+    select: { html?: boolean };
+    where: { id?: { in: string[] } };
+  }) =>
+    args.select.html
+      ? jobs.filter((job) => args.where.id!.in.includes(job.id))
+      : jobs.map(
+          ({ html: _html, text: _text, attachments: _files, ...metadata }) =>
+            metadata
+        )) as never);
+  prismaMock.user.findMany.mockResolvedValue([]);
+  let before: string | undefined;
+  const seen: string[] = [];
+  for (let page = 0; page < 5; page++) {
+    const result = await inboxService.getConversation(
+      "received-34",
+      "org_1",
+      "user_1",
+      { paged: "true", before }
+    );
+    expect(result.messages).toHaveLength(35);
+    expect(result.window.keys.length).toBeLessThanOrEqual(10);
+    expect(
+      result.messages.filter((row) => row.bodyLoaded).length +
+        result.outgoing.filter((row) => row.html).length
+    ).toBeLessThanOrEqual(10);
+    for (const row of result.messages.filter((row) => !row.bodyLoaded))
+      expect(row).toMatchObject({ html: null, text: null, attachments: [] });
+    seen.unshift(...result.window.keys);
+    if (!result.window.before) break;
+    before = result.window.before;
+  }
+  expect(seen).toHaveLength(45);
+  expect(new Set(seen).size).toBe(45);
+  expect(prismaMock.inboundMessage.findFirst.mock.calls[0][0]).toMatchObject({
+    omit: { html: true, text: true },
+    where: { inboxAccountId: { in: ["inbox_1"] } },
+  });
+  const bodyReads = prismaMock.inboundMessage.findMany.mock.calls.filter(
+    ([args]) => !args?.omit
+  );
+  expect(
+    bodyReads.every(
+      ([args]) => (args?.where?.id as { in: string[] }).in.length <= 10
+    )
+  ).toBe(true);
+  const legacy = await inboxService.getConversation(
+    "received-34",
+    "org_1",
+    "user_1",
+    {}
+  );
+  expect(legacy.messages.filter((row) => row.bodyLoaded)).toHaveLength(35);
+  expect(legacy.outgoing.filter((row) => row.html)).toHaveLength(10);
+});

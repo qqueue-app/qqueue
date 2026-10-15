@@ -1323,3 +1323,18 @@ what is on screen. Neither action sends mail or merges text automatically.
 Changing the chosen writing invalidates queued earlier save work. Late save
 responses acknowledge only their submitted snapshot and cannot change the new
 composer's draft identity, save status or conflict state.
+
+
+## Conversation Membership and Body Windows Are Separate (2026-10-15)
+
+Relationship discovery reads a bounded metadata index, then fetches only the
+current client's ten visible received/sent bodies and private file metadata.
+Message-identity boundaries keep pages stable when new replies arrive. Shared
+read state and conversation moves still use the complete incoming membership;
+a body page must never redefine the scope of a mailbox action.
+
+The current client opts into paged responses. Installed older clients retain
+the full response they understand until refreshed. Metadata limits fail explicitly
+rather than pretending a truncated conversation is complete. Local/URL page state
+can therefore change independently of message identity, shared read revisions,
+reply drafts and accepted move intent.

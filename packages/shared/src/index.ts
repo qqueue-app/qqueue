@@ -1558,6 +1558,13 @@ export interface InboxMoveBatchSummary {
 
 export const inboundFlagSchema = z.object({ flagged: z.boolean() });
 
+export const inboxConversationWindowSchema = z.object({
+  paged: z.literal("true").optional(),
+  before: z.string().min(1).max(200).optional(),
+  after: z.string().min(1).max(200).optional(),
+}).refine(input => !(input.before && input.after), "Choose one conversation page direction.");
+export type InboxConversationWindowInput = z.infer<typeof inboxConversationWindowSchema>;
+
 export const inboundMessageQuerySchema = z.object({
   organizationId: z.string().min(1),
   inboxAccountId: z.string().min(1).optional(),

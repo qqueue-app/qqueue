@@ -549,6 +549,44 @@ Acceptance evidence:
   pipeline changed. Actual concurrent physical devices and transport-loss
   acceptance remain open.
 
+## Bounded conversation bodies and stable pages (2026-10-15)
+
+Implemented:
+
+- Conversation discovery reads a complete authorized header/location index
+  without fetching bodies or file metadata on each relationship-expansion pass.
+  The current client requests ten received/sent bodies per page and renders only
+  those frames; private inline parts are fetched only for the visible page.
+- Earlier/newer pages use message identities rather than offsets. Deep links,
+  reload and browser Back retain page selection. A selected older message remains
+  in its initial window. Failed pages expose retry and a return-to-linked-message
+  action without discarding cached content. Installed older clients retain their
+  complete response until refreshed; bounded mode is an explicit client request.
+- Shared read state and conversation moves retain every incoming member ID,
+  independent of the body page. Opening marks unread members in one bulk request,
+  rather than one HTTP request per message. Failed bulk updates remain retryable.
+  The metadata safety limits remain 1,000 incoming messages, 1,000 outgoing
+  records and 20 relationship-expansion rounds; exceeding them fails explicitly
+  and retains cached messages rather than silently truncating conversation scope.
+- Desktop mail-list scroll restoration now runs before painting, preventing a
+  delayed initial restoration from replacing a newer scroll position.
+
+Acceptance evidence:
+
+- Full typecheck, lint, build, tests and unchanged coverage gates passed. A fresh
+  Docker smoke passed SMTP, authorization, pagination, reply and disconnect
+  checks and reported no migration drift. No schema or send pipeline changed.
+- Actual PostgreSQL/HTTP checks used 64 synthetic incoming messages and 16
+  synthetic outgoing records, not actual delivered mail. Eight pages returned
+  all 80 identities without skips or duplicates, at most ten bodies per response,
+  and a largest response of 208,742 bytes. The older-client response retained all
+  bodies and an older-message deep link selected the correct initial window.
+- Chrome displayed ten body frames, paged in both directions, restored a page
+  through browser Back and reloaded an earlier-page URL correctly. The 440px
+  phone layout showed readable paging controls without header overlap. This is
+  emulation/layout evidence, not physical keyboard or assistive-technology
+  acceptance. All exact synthetic fixture records were removed afterward.
+
 ## Required before calling the primary-client goal complete
 
 1. **IMAP folder operations:** external-draft editing/reconciliation. Validate
@@ -563,10 +601,7 @@ Acceptance evidence:
 4. **Team acceptance:** exercise mailbox assignment and recovery with a real
    provisioning service and different teammates in the browser. Mailbox-password
    recovery remains distinct from QQueue sign-in reset links.
-5. **Long conversations:** bound body loading and rendering rather than opening
-   every body at once. Complete Back/scroll/deep-link acceptance on long threads
-   and all remaining mail surfaces.
-6. **Broader acceptance:** distinct controlled To/Cc/Bcc recipient mailboxes,
+5. **Broader acceptance:** distinct controlled To/Cc/Bcc recipient mailboxes,
    slow/interrupted browser networks and lost responses, actual phone keyboards
    and safe areas, accessibility/assistive technology, large histories and multiple
    teammates with different read/send grants and administrator roles. The live

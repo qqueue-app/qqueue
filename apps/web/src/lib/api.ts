@@ -256,6 +256,7 @@ export interface InboundMessage {
     inboxFolderId: string;
     folder: { path: string; name: string; role: string; isPrimary?: boolean };
   }>;
+  bodyLoaded?: boolean;
   bodyStatus?: "AVAILABLE" | "UNAVAILABLE";
   bodyError?: string | null;
   contentImportPending?: boolean;
@@ -310,6 +311,14 @@ export interface ReplyPresence {
   expiresAt: string;
 }
 export interface InboxConversation {
+  window?: {
+    keys: string[];
+    before: string | null;
+    after: string | null;
+    total: number;
+    start: number;
+    end: number;
+  };
   replyPresence?: { available: boolean; participants: ReplyPresence[] };
   messages: InboundMessage[];
   outgoing: {
@@ -2594,9 +2603,16 @@ export const api = {
     );
   },
 
-  getInboxConversation(id: string, organizationId: string) {
+  getInboxConversation(
+    id: string,
+    organizationId: string,
+    window?: { before?: string; after?: string }
+  ) {
+    const params = new URLSearchParams({ organizationId, paged: "true" });
+    if (window?.before) params.set("before", window.before);
+    if (window?.after) params.set("after", window.after);
     return request<InboxConversation>(
-      `/api/v1/inbox/messages/${encodeURIComponent(id)}/conversation?organizationId=${encodeURIComponent(organizationId)}`
+      `/api/v1/inbox/messages/${encodeURIComponent(id)}/conversation?${params}`
     );
   },
   touchReplyPresence(

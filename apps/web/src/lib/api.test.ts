@@ -41,6 +41,19 @@ describe("api lib", () => {
     expect(options.headers.Authorization).toBeUndefined();
   });
 
+  it("opts into bounded conversation bodies and encodes its page boundary", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ data: { messages: [], outgoing: [] } })
+    );
+    await api.getInboxConversation("message", "org_1", {
+      before: "sent:boundary",
+    });
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      "paged=true&before=sent%3Aboundary"
+    );
+  });
+
   it("attaches the bearer token when a session exists", async () => {
     saveSession({ organizations: [], accessToken: "tok_123" });
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;

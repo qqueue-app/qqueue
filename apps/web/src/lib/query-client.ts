@@ -135,8 +135,11 @@ export const qk = {
   inboxFolders: (orgId: string, accountId?: string) =>
     ["inbox-folders", orgId, accountId ?? "all"] as const,
   inboxAccounts: (orgId: string) => ["inbox-accounts", orgId] as const,
-  inboxConversation: (orgId: string, messageId: string) =>
-    ["inbox-conversation", orgId, messageId] as const,
+  inboxConversation: (
+    orgId: string,
+    messageId: string,
+    window?: { before?: string; after?: string }
+  ) => ["inbox-conversation", orgId, messageId, window ?? {}] as const,
   inboundMessages: (orgId: string, filters?: Record<string, unknown>) =>
     ["inbound-messages", orgId, filters ?? {}] as const,
   inboxUnreadCount: (orgId: string) => ["inbox-unread", orgId] as const,

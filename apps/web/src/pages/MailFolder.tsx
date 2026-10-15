@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
+import {
+  useLayoutEffect,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 import {
   Link,
   useLocation,
@@ -105,6 +113,8 @@ export function MailFolder({
           "draft",
           "replyDraft",
           "replyBackup",
+          "beforeMessage",
+          "afterMessage",
           "move",
           "address",
         ].forEach((key) => next.delete(key));
@@ -212,13 +222,12 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
     const timer = setTimeout(() => change({ q: input.trim() || null }), 300);
     return () => clearTimeout(timer);
   }, [input, q]);
-  useEffect(() => {
-    if (!selected)
-      requestAnimationFrame(() => {
-        const top = positions.get(positionKey) ?? 0;
-        if (pane && scroll.current) scroll.current.scrollTop = top;
-        else window.scrollTo?.(0, top);
-      });
+  useLayoutEffect(() => {
+    if (!selected) {
+      const top = positions.get(positionKey) ?? 0;
+      if (pane && scroll.current) scroll.current.scrollTop = top;
+      else window.scrollTo?.(0, top);
+    }
   }, [selected, positionKey, pane]);
   function remember() {
     positions.set(
@@ -230,9 +239,16 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
     remember();
     setParams((current) => {
       const next = new URLSearchParams(current);
-      ["message", "job", "draft", "replyDraft", "replyBackup", "move"].forEach(
-        (key) => next.delete(key)
-      );
+      [
+        "message",
+        "job",
+        "draft",
+        "replyDraft",
+        "replyBackup",
+        "move",
+        "beforeMessage",
+        "afterMessage",
+      ].forEach((key) => next.delete(key));
       for (const [key, value] of Object.entries(values)) {
         if (value) next.set(key, value);
         else next.delete(key);
@@ -243,9 +259,16 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
   function close() {
     setParams((current) => {
       const next = new URLSearchParams(current);
-      ["message", "job", "draft", "replyDraft", "replyBackup", "move"].forEach(
-        (key) => next.delete(key)
-      );
+      [
+        "message",
+        "job",
+        "draft",
+        "replyDraft",
+        "replyBackup",
+        "move",
+        "beforeMessage",
+        "afterMessage",
+      ].forEach((key) => next.delete(key));
       return next;
     });
   }
@@ -253,9 +276,16 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
     remember();
     setParams((current) => {
       const next = new URLSearchParams(current);
-      ["message", "job", "draft", "replyDraft", "replyBackup", "move"].forEach(
-        (key) => next.delete(key)
-      );
+      [
+        "message",
+        "job",
+        "draft",
+        "replyDraft",
+        "replyBackup",
+        "move",
+        "beforeMessage",
+        "afterMessage",
+      ].forEach((key) => next.delete(key));
       next.set(
         row.kind === "RECEIVED"
           ? "message"

@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { resolveMailReplyRecipients } from "@qqueue/shared";
 import type {
+  InboxConversationWindowInput,
   InboxAccountInput,
   InboxAccountUpdateInput,
   InboundMessageQueryInput,
@@ -21,6 +22,7 @@ import { storage } from "../../lib/storage.js";
 import { inboxSyncQueue } from "../../queues/inbox-sync.queue.js";
 import { manualEmailService } from "../manual-email/service.js";
 
+import { selectConversationWindow } from "./conversation-window.js";
 import { replyPresenceService } from "./presence-service.js";
 
 const messageInclude = {
@@ -60,13 +62,9 @@ const messageInclude = {
   },
 } satisfies Prisma.InboundMessageInclude;
 
-type IncludedMessage = Prisma.InboundMessageGetPayload<{
-  include: typeof messageInclude;
-}>;
-
-async function withDsnAttribution(
+async function withDsnAttribution<T extends { id: string; isDsn: boolean }>(
   organizationId: string,
-  messages: IncludedMessage[]
+  messages: T[]
 ) {
   const dsnIds = messages
     .filter((message) => message.isDsn)
@@ -271,12 +269,17 @@ export const inboxService = {
   async getConversation(
     messageId: string,
     organizationId: string,
-    userId: string
+    userId: string,
+    windowInput: InboxConversationWindowInput = { paged: "true" }
   ) {
     const access = await resolveMailboxAccess(userId, organizationId);
     const seed = await prisma.inboundMessage.findFirst({
       where: { id: messageId, organizationId, ...inboundMessageScope(access) },
-      include: messageInclude,
+      omit: { html: true, text: true },
+      include: {
+        locations: messageInclude.locations,
+        emailJob: messageInclude.emailJob,
+      },
     });
     if (!seed) throw new HttpError(404, "Message not found", "not_found");
     // Expand header relationships within this mailbox. A search or unread
@@ -299,7 +302,11 @@ export const inboxService = {
             { references: { hasSome: [...headers] } },
           ],
         },
-        include: messageInclude,
+        omit: { html: true, text: true },
+        include: {
+          locations: messageInclude.locations,
+          emailJob: messageInclude.emailJob,
+        },
         orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
         take: 1001,
       });
@@ -320,7 +327,7 @@ export const inboxService = {
       if (messages.size > 1000 || (round === 19 && expanded))
         throw new HttpError(
           413,
-          "This conversation is too large to open. Narrow it by mailbox."
+          "This conversation exceeds the supported message index. Its cached messages are retained."
         );
       if (!expanded) break;
     }
@@ -363,8 +370,6 @@ export const inboxService = {
       select: {
         id: true,
         subject: true,
-        html: true,
-        text: true,
         toEmail: true,
         cc: true,
         status: true,
@@ -376,20 +381,107 @@ export const inboxService = {
         messageId: true,
         smtpConnection: { select: { fromEmail: true, fromName: true } },
         createdByUserId: true,
-        attachments: {
-          select: {
-            id: true,
-            filename: true,
-            contentType: true,
-            size: true,
-            cid: true,
-          },
-          orderBy: { createdAt: "asc" },
-        },
       },
       orderBy: { createdAt: "asc" },
-      take: 1000,
+      take: 1001,
     });
+    if (outgoing.length > 1000)
+      throw new HttpError(
+        413,
+        "This conversation exceeds the supported message index. Its cached messages are retained."
+      );
+    const incoming = [...messages.values()].sort(
+      (a, b) =>
+        a.receivedAt.getTime() - b.receivedAt.getTime() ||
+        a.id.localeCompare(b.id)
+    );
+    const externalIds = new Set(incoming.map((message) => message.messageId));
+    const logicalOutgoing = outgoing.filter(
+      (job) => !job.messageId || !externalIds.has(job.messageId)
+    );
+    const bodyWindow = selectConversationWindow(
+      [
+        ...incoming.map((message) => ({
+          key: `received:${message.id}`,
+          at: message.receivedAt,
+        })),
+        ...logicalOutgoing.map((job) => ({
+          key: `sent:${job.id}`,
+          at: job.sentAt ?? job.createdAt,
+        })),
+      ],
+      `received:${seed.id}`,
+      windowInput
+    );
+    // Installed older clients do not understand window metadata. Preserve their
+    // complete response until they refresh, while the current client opts into
+    // bounded bodies explicitly. Internal calls default to the bounded mode.
+    if (!windowInput.paged && !windowInput.before && !windowInput.after) {
+      bodyWindow.keys = [
+        ...incoming.map((message) => `received:${message.id}`),
+        ...logicalOutgoing.map((job) => `sent:${job.id}`),
+      ];
+      bodyWindow.before = null;
+      bodyWindow.after = null;
+      bodyWindow.start = 1;
+      bodyWindow.end = bodyWindow.total;
+    }
+    const visible = new Set(bodyWindow.keys);
+    // Reply headers remain in the complete metadata index; bodies and private
+    // file metadata are fetched only for the ten visible entries.
+    const bodyIds = new Set(
+      incoming
+        .filter((message) => visible.has(`received:${message.id}`))
+        .map((message) => message.id)
+    );
+    const bodies = await prisma.inboundMessage.findMany({
+      where: {
+        organizationId,
+        inboxAccountId: seed.inboxAccountId,
+        id: { in: [...bodyIds] },
+        AND: [inboundMessageScope(access)],
+      },
+      include: messageInclude,
+    });
+    const hydrated = new Map(
+      bodies
+        .filter((message) => bodyIds.has(message.id))
+        .map((message) => [message.id, message])
+    );
+    const outgoingBodyIds = logicalOutgoing
+      .filter((job) => visible.has(`sent:${job.id}`))
+      .map((job) => job.id);
+    const outgoingBodies = outgoingBodyIds.length
+      ? await prisma.emailJob.findMany({
+          where: {
+            organizationId,
+            id: { in: outgoingBodyIds },
+            NOT: { origin: "SYSTEM" },
+            groupPrimary: true,
+            ...emailJobScope(access),
+          },
+          select: {
+            id: true,
+            html: true,
+            text: true,
+            attachments: {
+              select: {
+                id: true,
+                filename: true,
+                contentType: true,
+                size: true,
+                cid: true,
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        })
+      : [];
+    const hydratedOutgoing = new Map(
+      outgoingBodies
+        .filter((job) => outgoingBodyIds.includes(job.id))
+        .map((job) => [job.id, job])
+    );
     const authors = await prisma.user.findMany({
       where: {
         id: {
@@ -406,35 +498,36 @@ export const inboxService = {
       .catch(() => ({ available: false, participants: [] }));
     return {
       replyPresence,
+      window: bodyWindow,
       messages: await withDsnAttribution(
         organizationId,
-        [...messages.values()].sort(
-          (a, b) => a.receivedAt.getTime() - b.receivedAt.getTime()
-        )
+        incoming.map((message) => ({
+          ...message,
+          html: null,
+          text: null,
+          attachments: [],
+          ...hydrated.get(message.id),
+          bodyLoaded: hydrated.has(message.id),
+        }))
       ),
-      outgoing: outgoing
-        .filter(
-          (job) =>
-            ![...messages.values()].some(
-              (message) => message.messageId === job.messageId
-            )
-        )
-        .map((job) => ({
-          ...job,
-          status: job.groupStatus ?? job.status,
-          toEmail: job.visibleTo?.length
-            ? job.visibleTo.join(", ")
-            : job.toEmail,
-          cc: job.visibleCc?.length ? job.visibleCc : job.cc,
-          attachments: job.attachments.map((file) => ({
+      outgoing: logicalOutgoing.map((job) => ({
+        ...job,
+        html: hydratedOutgoing.get(job.id)?.html ?? null,
+        text: hydratedOutgoing.get(job.id)?.text ?? null,
+        status: job.groupStatus ?? job.status,
+        toEmail: job.visibleTo?.length ? job.visibleTo.join(", ") : job.toEmail,
+        cc: job.visibleCc?.length ? job.visibleCc : job.cc,
+        attachments: (hydratedOutgoing.get(job.id)?.attachments ?? []).map(
+          (file) => ({
             ...file,
             isInline: Boolean(file.cid),
             contentId: file.cid,
-          })),
-          sentByName:
-            authors.find((user) => user.id === job.createdByUserId)?.name ??
-            "Team",
-        })),
+          })
+        ),
+        sentByName:
+          authors.find((user) => user.id === job.createdByUserId)?.name ??
+          "Team",
+      })),
     };
   },
   /**

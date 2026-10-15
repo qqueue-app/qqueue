@@ -20,11 +20,9 @@ vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
   api: {
-    touchReplyPresence: vi
-      .fn()
-      .mockResolvedValue({
-        expiresAt: new Date(Date.now() + 45000).toISOString(),
-      }),
+    touchReplyPresence: vi.fn().mockResolvedValue({
+      expiresAt: new Date(Date.now() + 45000).toISOString(),
+    }),
     leaveReplyPresence: vi.fn().mockResolvedValue({ left: true }),
     listInboxAccounts: vi.fn(),
     listInboxFolders: vi.fn(),
@@ -620,10 +618,11 @@ describe("Inbox mark-as-read", () => {
     await user.click(await findRow());
 
     await waitFor(() => {
-      expect(mockedApi.markInboundMessageRead).toHaveBeenCalledWith("m1", {
-        organizationId: "org_1",
-        read: true,
-      });
+      expect(mockedApi.markInboundMessagesRead).toHaveBeenCalledWith(
+        "org_1",
+        ["m1"],
+        true
+      );
     });
   });
 
@@ -1146,4 +1145,81 @@ it("retries a deep-linked embedded conversation without fetching an unrelated in
     await screen.findByRole("heading", { name: "Quarterly numbers" })
   ).toBeInTheDocument();
   expect(mockedApi.listInboundMessages).not.toHaveBeenCalled();
+});
+
+it("pages ten rendered bodies while marking all conversation members read once and restoring its page through Back", async () => {
+  const rows = Array.from({ length: 25 }, (_, index) =>
+    makeMessage({
+      id: `m${index + 1}`,
+      messageId: `<m${index + 1}>`,
+      references: ["<root>"],
+      receivedAt: new Date(2026, 0, 1, 0, index).toISOString(),
+      readAt: null,
+    })
+  );
+  setup(rows);
+  mockedApi.getInboxConversation.mockImplementation(
+    async (
+      _id: string,
+      _org: string,
+      page: { before?: string; after?: string } = {}
+    ) => {
+      const earlier = Boolean(page.before);
+      const visible = rows
+        .slice(earlier ? 5 : 15, earlier ? 15 : 25)
+        .map((row) => `received:${row.id}`);
+      return {
+        messages: rows.map((row, index) => ({
+          ...row,
+          bodyLoaded: visible.includes(`received:${row.id}`),
+          html: visible.includes(`received:${row.id}`)
+            ? `<p>Body ${index + 1}</p>`
+            : null,
+          text: null,
+          attachments: [],
+        })),
+        outgoing: [],
+        window: {
+          keys: visible,
+          before: earlier ? "received:m6" : "received:m16",
+          after: earlier ? "received:m15" : null,
+          total: 25,
+          start: earlier ? 6 : 16,
+          end: earlier ? 15 : 25,
+        },
+      };
+    }
+  );
+  const user = userEvent.setup();
+  renderWithProviders(
+    <>
+      <Inbox embedded />
+      <HistoryControls />
+    </>,
+    { route: "/search?message=m25" }
+  );
+  await screen.findByText("Messages 16–25 of 25");
+  expect(screen.getAllByTitle(/^Message from/)).toHaveLength(10);
+  expect(mockedApi.markInboundMessagesRead).toHaveBeenCalledWith(
+    "org_1",
+    rows.map((row) => row.id),
+    true
+  );
+  expect(mockedApi.markInboundMessageRead).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Earlier messages" }));
+  await screen.findByText("Messages 6–15 of 25");
+  expect(screen.getAllByTitle(/^Message from/)).toHaveLength(10);
+  expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+    "beforeMessage=received%3Am16"
+  );
+  expect(mockedApi.getInboxConversation).toHaveBeenCalledWith(
+    "m25",
+    "org_1",
+    expect.objectContaining({ before: "received:m16" })
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Browser history back" })
+  );
+  await screen.findByText("Messages 16–25 of 25");
+  expect(screen.getAllByTitle(/^Message from/)).toHaveLength(10);
 });
