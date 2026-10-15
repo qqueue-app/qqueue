@@ -433,13 +433,59 @@ Acceptance evidence:
   scheduled seven days ahead and cancelled it through Outbox's confirmation.
   PostgreSQL confirmed CANCELLED, no SMTP send time and retained original writing.
 
+## Isolated device copies and honest save feedback (2026-10-15)
+
+Implemented:
+
+- Each open reply composer owns a separate device-backup key. A stale tab cannot
+  overwrite another tab's local writing or adopt its save acknowledgement.
+  Explicit draft links and message entry points still find the latest matching
+  copy; other versions stay available through Review device copies.
+- Device-copy review shows writing, recipients and file metadata. Replacing the
+  current reply preserves that writing and any pending file bytes first. A copy
+  whose pending bytes are unavailable fails visibly rather than dropping files.
+- Restoring an ordinary composer backup copies it into a fresh local record while
+  retaining its server draft/creation identity, revision and upload retry IDs.
+  Review device drafts exposes all scoped ordinary pending copies, including
+  file bytes and uploaded metadata. Its IndexedDB query runs while offline and
+  reports a blocked store rather than showing a successful empty list.
+- Reply saves capture body/recipients/fingerprint before an offline pause. Main
+  composer saves and reconnect acknowledgements identify the exact snapshot
+  accepted. Newer writing therefore cannot inherit an older response's Saved
+  label. The interface distinguishes changes awaiting save, a confirmed device
+  copy, and an accepted server save. A rejected concurrent sync offers saved-
+  version comparison while retaining the local record.
+
+Acceptance evidence:
+
+- Two actual Chrome tabs retained different unsent offline replies. Restoring
+  the first tab's writing kept the replaced second-tab text available in the
+  review dialog. No reply was sent.
+- Chrome saved ordinary composer writing offline, reopened its device recovery
+  dialog without a connection, restored a copy and edited it. The dialog then
+  showed two separate records; the original preview still contained its earlier
+  exact writing. Earlier reconnection also verified retained writing in actual
+  PostgreSQL. A cached older preview initially paused the local-store query;
+  the refreshed current build verified the offline query fix. Reconnecting and
+  reloading kept the edited copy and exposed Compare saved version plus an
+  explicit retained-device-copy status when its revision was rejected.
+- Tests exercise separate concurrent reply backups, preserving a replaced copy,
+  restoration scopes, file bytes and stable server creation IDs, unavailable
+  device storage, rejected revision sync, and newer writing during older reply
+  and ordinary-composer save responses. Full typecheck, lint, build, tests and
+  unchanged coverage thresholds passed. This web-only batch changes no schema
+  or delivery pipeline.
+
 ## Required before calling the primary-client goal complete
 
 1. **IMAP folder operations:** external-draft editing/reconciliation. Validate
    UID-validity replacement, large
    mailboxes and interrupted import against real services.
-2. **Draft/composer recovery:** broader acceptance of concurrent tabs/devices,
-   interrupted uploads and device storage failures, including navigation and
+2. **Draft/composer recovery:** finish navigation protection when both device
+   storage and server saving are unavailable; a warning alone cannot preserve
+   writing after leaving the composer. Simplify intentional merging of a local
+   copy with a newer server revision. Broaden actual concurrent-device, interrupted
+   upload, lost-response and storage-failure acceptance across navigation and
    organization changes.
 3. **Inbound content acceptance:** stress large/complex MIME messages, missing
    inline parts, real interrupted network/storage uploads and recovery when

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
+import { onlineManager } from "@tanstack/react-query";
+import { act } from "@testing-library/react";
 import { renderWithProviders, screen, waitFor } from "../../test/render.js";
 import { installFakeIndexedDB } from "../../test/fake-indexeddb.js";
 import { listPendingDrafts } from "../../lib/offline-drafts.js";
@@ -522,4 +524,76 @@ it("keeps composing available when best-effort reply presence fails", async () =
   );
   expect(screen.getByRole("button", { name: "Send reply" })).toBeEnabled();
   expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
+});
+
+it("keeps two open composers' device writing separate and preserves the replaced copy", async () => {
+  const first = renderReply();
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Reply to Customer" }),
+    "First tab writing"
+  );
+  renderReply();
+  const body = screen.getByRole("textbox", { name: "Reply to Customer" });
+  await userEvent.clear(body);
+  await userEvent.type(body, "Second tab writing");
+  const deviceWriting = () =>
+    Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
+      .filter((key) => key.startsWith(storageKey))
+      .map((key) => JSON.parse(localStorage.getItem(key)!));
+  expect(deviceWriting().map((value) => value.html)).toEqual(
+    expect.arrayContaining(["First tab writing", "Second tab writing"])
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Review device copies" })
+  );
+  await userEvent.click(screen.getByRole("button", { name: /Review copy 1/ }));
+  await userEvent.click(
+    screen.getByRole("button", { name: "Use this device copy" })
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Reply to Customer" })
+    ).toHaveValue("First tab writing")
+  );
+  expect(deviceWriting().map((value) => value.html)).toEqual(
+    expect.arrayContaining(["First tab writing", "Second tab writing"])
+  );
+  expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
+  first.unmount();
+});
+
+it("does not call newer writing saved when an older offline save resumes", async () => {
+  let finish!: (value: unknown) => void;
+  mocked.createEmailDraft.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }) as never
+  );
+  const view = renderReply();
+  try {
+    const body = screen.getByRole("textbox", { name: "Reply to Customer" });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Attach files" })).toBeEnabled()
+    );
+    act(() => onlineManager.setOnline(false));
+    await userEvent.type(body, "Older offline snapshot");
+    await screen.findByText(/Waiting for a connection/, {}, { timeout: 3000 });
+    await userEvent.clear(body);
+    await userEvent.type(body, "Newer unsaved writing");
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() =>
+      expect(mocked.createEmailDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ html: "Older offline snapshot" })
+      )
+    );
+    await act(async () => {
+      finish({ id: "draft1", revision: 1 });
+    });
+    expect(body).toHaveValue("Newer unsaved writing");
+    expect(screen.queryByText("Draft saved")).not.toBeInTheDocument();
+  } finally {
+    act(() => onlineManager.setOnline(true));
+    view.unmount();
+  }
 });

@@ -1,10 +1,13 @@
 import {
   renderWithProviders,
+  act,
   screen,
   waitFor,
   within,
 } from "../test/render.js";
 import userEvent from "@testing-library/user-event";
+import { installFakeIndexedDB } from "../test/fake-indexeddb.js";
+import { savePendingDraft, listPendingDrafts } from "../lib/offline-drafts.js";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,13 +21,17 @@ const toast = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast }));
 
 const session = vi.hoisted(() => ({
-  current: { currentOrganizationId: "org_1" },
+  current: { currentOrganizationId: "org_1" } as {
+    currentOrganizationId: string;
+    user?: { id: string };
+  },
 }));
 vi.mock("../lib/session-context.js", () => ({
   useSession: () => session.current,
 }));
 
-vi.mock("../lib/api.js", () => ({
+vi.mock("../lib/api.js", async (importOriginal) => ({
+  ApiError: (await importOriginal<typeof import("../lib/api.js")>()).ApiError,
   api: {
     listTemplates: vi.fn(),
     listSendableSMTPConnections: vi.fn(),
@@ -849,10 +856,151 @@ describe("EmailStudio", () => {
   });
 });
 
-it("locks the composer while a deep-linked draft is opening and recovers a failed load",async()=>{
- setup();mockedApi.getEmailDraft.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({id:"d9",organizationId:"org_1",revision:2,subject:"Recovered",html:"<p>Keep the saved writing</p>",to:["alice@x.com"],cc:[],bcc:[],listIds:[],attachments:[]});
- const user=userEvent.setup();renderWithProviders(<EmailStudio/>,{route:"/email-studio?draft=d9"});
- expect(await screen.findByRole("button",{name:"Try opening again"})).toBeInTheDocument();expect(screen.getByRole("button",{name:"Send email"})).toBeDisabled();
- await user.click(screen.getByRole("button",{name:"Try opening again"}));await waitFor(()=>expect(screen.getByRole("textbox",{name:"Subject"})).toHaveValue("Recovered"));
- expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
+it("locks the composer while a deep-linked draft is opening and recovers a failed load", async () => {
+  setup();
+  mockedApi.getEmailDraft
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({
+      id: "d9",
+      organizationId: "org_1",
+      revision: 2,
+      subject: "Recovered",
+      html: "<p>Keep the saved writing</p>",
+      to: ["alice@x.com"],
+      cc: [],
+      bcc: [],
+      listIds: [],
+      attachments: [],
+    });
+  const user = userEvent.setup();
+  renderWithProviders(<EmailStudio />, { route: "/email-studio?draft=d9" });
+  expect(
+    await screen.findByRole("button", { name: "Try opening again" })
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send email" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Try opening again" }));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Subject" })).toHaveValue(
+      "Recovered"
+    )
+  );
+  expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
+});
+
+it("restores into a separate device record while retaining creation identity and original pending file bytes", async () => {
+  vi.clearAllMocks();
+  setup();
+  session.current = { currentOrganizationId: "org_1", user: { id: "u1" } };
+  localStorage.setItem(
+    "qqueue.session",
+    JSON.stringify({ user: { id: "u1" }, organizations: [] })
+  );
+  const db = installFakeIndexedDB();
+  mockedApi.createEmailDraft.mockRejectedValue(new Error("offline"));
+  let view: Awaited<ReturnType<typeof renderStudio>> | undefined;
+  try {
+    await savePendingDraft({
+      userId: "u1",
+      organizationId: "org_1",
+      localId: "original-tab",
+      clientId: "stable-create",
+      draftId: null,
+      payload: {
+        subject: "Original backup",
+        html: "<p>Original writing</p>",
+        to: ["alice@x.com"],
+        cc: [],
+        bcc: [],
+        listIds: [],
+      },
+      pendingUploads: [
+        {
+          file: new File(["pending bytes"], "pending.txt"),
+          uploadId: "stable-upload",
+          error: "offline",
+        },
+      ],
+      updatedAt: "2026-10-15T11:00:00Z",
+    });
+    view = await renderStudio();
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Subject" })).toHaveValue(
+        "Original backup"
+      )
+    );
+    await userEvent.clear(screen.getByRole("textbox", { name: "Subject" }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Subject" }),
+      "New tab writing"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(mockedApi.createEmailDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientId: "stable-create",
+          subject: "New tab writing",
+        })
+      )
+    );
+    const records = await listPendingDrafts("org_1");
+    expect(
+      records.find((record) => record.localId === "original-tab")?.payload
+        .subject
+    ).toBe("Original backup");
+    const clone = records.find((record) => record.localId !== "original-tab");
+    expect(clone).toMatchObject({
+      clientId: "stable-create",
+      payload: { subject: "New tab writing" },
+    });
+    expect(clone?.pendingUploads?.[0].file.size).toBe(13);
+  } finally {
+    view?.unmount();
+    db.restore();
+    localStorage.clear();
+  }
+});
+
+it("does not label newer writing saved after an older composer save completes", async () => {
+  vi.clearAllMocks();
+  setup();
+  session.current = { currentOrganizationId: "org_1" };
+  let finish!: (value: unknown) => void;
+  mockedApi.createEmailDraft.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const view = await renderStudio();
+  try {
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Subject" }),
+      "Save snapshot"
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "body-editor" }),
+      "Older writing"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(mockedApi.createEmailDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ html: "Older writing" })
+      )
+    );
+    await userEvent.clear(screen.getByRole("textbox", { name: "body-editor" }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "body-editor" }),
+      "Newer writing"
+    );
+    await act(async () => {
+      finish({ id: "d1", revision: 1, updatedAt: "2026-10-15T12:00:00Z" });
+    });
+    expect(screen.queryByText("Draft saved")).not.toBeInTheDocument();
+    expect(screen.getByText("Changes waiting to save")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "body-editor" })).toHaveValue(
+      "Newer writing"
+    );
+  } finally {
+    view.unmount();
+  }
 });

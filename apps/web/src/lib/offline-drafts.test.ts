@@ -100,7 +100,11 @@ describe("offline drafts (§5)", () => {
       expect.objectContaining({ organizationId: "org-1", subject: "Hello" })
     );
     expect(synced).toEqual([
-      { localId: "local-1", draft: { id: "server-1", updatedAt: "x" } },
+      {
+        localId: "local-1",
+        draft: { id: "server-1", updatedAt: "x" },
+        snapshot: draft(),
+      },
     ]);
     // The server has it now; holding a second copy would resurrect it later.
     expect(await listPendingDrafts()).toHaveLength(0);
@@ -244,4 +248,68 @@ describe("offline drafts (§5)", () => {
     db.failNextOpen();
     await expect(listPendingDrafts()).resolves.toEqual([]);
   });
+});
+
+it("keeps separate local records while retrying one server creation identity", async () => {
+  const db = installFakeIndexedDB();
+  localStorage.setItem(
+    "qqueue.session",
+    JSON.stringify({ user: { id: "user-1" }, organizations: [] })
+  );
+  const create = vi
+    .spyOn(api, "createEmailDraft")
+    .mockResolvedValue({ id: "same-server-draft", revision: 1 } as never);
+  try {
+    await savePendingDraft(
+      draft({
+        localId: "tab-one",
+        clientId: "one-creation",
+        payload: { ...draft().payload, subject: "First version" },
+      })
+    );
+    await savePendingDraft(
+      draft({
+        localId: "tab-two",
+        clientId: "one-creation",
+        payload: { ...draft().payload, subject: "Second version" },
+      })
+    );
+    expect((await listPendingDrafts()).map((record) => record.localId)).toEqual(
+      ["tab-one", "tab-two"]
+    );
+    await flushPendingDrafts();
+    expect(create.mock.calls.map((call) => call[0].clientId)).toEqual([
+      "one-creation",
+      "one-creation",
+    ]);
+  } finally {
+    db.restore();
+    vi.restoreAllMocks();
+  }
+});
+
+it("reports a rejected concurrent version while retaining its device copy", async () => {
+  const db = installFakeIndexedDB();
+  localStorage.setItem(
+    "qqueue.session",
+    JSON.stringify({ user: { id: "user-1" }, organizations: [] })
+  );
+  vi.spyOn(api, "updateEmailDraft").mockRejectedValue(
+    new ApiError("Draft changed elsewhere", 409)
+  );
+  const rejected = vi.fn();
+  try {
+    await savePendingDraft(draft({ draftId: "server1", revision: 1 }));
+    await flushPendingDrafts("org-1", rejected);
+    expect(rejected).toHaveBeenCalledWith(
+      "local-1",
+      expect.objectContaining({ status: 409 })
+    );
+    expect((await listPendingDrafts("org-1"))[0].payload.html).toBe(
+      "<p>Hi</p>"
+    );
+  } finally {
+    db.restore();
+    vi.restoreAllMocks();
+  }
 });

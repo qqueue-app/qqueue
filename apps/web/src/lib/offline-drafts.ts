@@ -1,4 +1,4 @@
-import { ApiError, api, type EmailDraft } from "./api.js";
+import { ApiError, api, type EmailDraft, type EmailAttachment } from "./api.js";
 import { getSession } from "./session.js";
 
 /**
@@ -53,6 +53,7 @@ export interface PendingUpload {
 }
 
 export interface PendingDraft {
+  attachments?: EmailAttachment[];
   pendingUploads?: PendingUpload[];
   userId: string;
   /**
@@ -61,6 +62,8 @@ export interface PendingDraft {
    * never been to the server and so doesn't have one yet.
    */
   localId: string;
+  /** Creation identity survives copying a device backup into a new tab. */
+  clientId?: string;
   organizationId: string;
   /** The server draft this updates, or null if the server hasn't seen it. */
   draftId: string | null;
@@ -138,7 +141,8 @@ export async function deletePendingDraft(localId: string): Promise<void> {
 }
 
 export async function listPendingDrafts(
-  organizationId?: string
+  organizationId?: string,
+  reportFailure = false
 ): Promise<PendingDraft[]> {
   try {
     const userId = getSession().user?.id;
@@ -151,7 +155,8 @@ export async function listPendingDrafts(
         draft.userId === userId &&
         (!organizationId || draft.organizationId === organizationId)
     );
-  } catch {
+  } catch (error) {
+    if (reportFailure) throw error;
     return [];
   }
 }
@@ -214,11 +219,14 @@ let flushChain: Promise<unknown> = Promise.resolve();
 
 /** Serialize reconnect/start/visibility flushes in this tab. */
 export function flushPendingDrafts(
-  organizationId?: string
-): Promise<Array<{ localId: string; draft: EmailDraft }>> {
+  organizationId?: string,
+  onRejected?: (localId: string, error: ApiError) => void
+): Promise<
+  Array<{ localId: string; draft: EmailDraft; snapshot: PendingDraft }>
+> {
   const work = flushChain
     .catch(() => undefined)
-    .then(() => flushDrafts(organizationId));
+    .then(() => flushDrafts(organizationId, onRejected));
   flushChain = work;
   return work;
 }
@@ -234,12 +242,19 @@ export function flushPendingDrafts(
  * id its local record was just given.
  */
 async function flushDrafts(
-  organizationId?: string
-): Promise<Array<{ localId: string; draft: EmailDraft }>> {
+  organizationId?: string,
+  onRejected?: (localId: string, error: ApiError) => void
+): Promise<
+  Array<{ localId: string; draft: EmailDraft; snapshot: PendingDraft }>
+> {
   const pending = await listPendingDrafts(organizationId);
   pending.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
 
-  const synced: Array<{ localId: string; draft: EmailDraft }> = [];
+  const synced: Array<{
+    localId: string;
+    draft: EmailDraft;
+    snapshot: PendingDraft;
+  }> = [];
 
   for (const record of pending) {
     if (getSession().user?.id !== record.userId) break;
@@ -251,13 +266,20 @@ async function flushDrafts(
             mutationId: record.mutationId ?? record.updatedAt,
           })
         : await api.createEmailDraft({
-            clientId: record.localId,
+            clientId: record.clientId ?? record.localId,
             organizationId: record.organizationId,
             ...record.payload,
           });
       await acknowledgePendingDraft(record, draft.id, draft.revision);
-      synced.push({ localId: record.localId, draft });
+      synced.push({ localId: record.localId, draft, snapshot: record });
     } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status >= 400 &&
+        error.status < 500
+      ) {
+        onRejected?.(record.localId, error);
+      }
       if (
         error instanceof ApiError &&
         (error.status === 401 || error.status === 403)

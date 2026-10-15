@@ -46,3 +46,36 @@ it("preserves a known backup identity when browser storage cannot be read", () =
     `${base}.draft`
   );
 });
+
+it("chooses the latest tab copy for an explicit draft while preserving every other copy", () => {
+  localStorage.setItem(
+    `${base}.draft1`,
+    JSON.stringify({
+      html: "legacy",
+      draftId: "draft1",
+      updatedAt: "2026-10-14",
+    })
+  );
+  localStorage.setItem(
+    `${base}.tab.one`,
+    JSON.stringify({ html: "one", draftId: "draft1", updatedAt: "2026-10-15" })
+  );
+  localStorage.setItem(
+    `${base}.tab.two`,
+    JSON.stringify({ html: "two", draftId: "draft1", updatedAt: "2026-10-16" })
+  );
+  localStorage.setItem(
+    `${base}.tab.otherDraft`,
+    JSON.stringify({
+      html: "different",
+      draftId: "draft2",
+      updatedAt: "2026-10-17",
+    })
+  );
+  expect(replyBackupKey("user", "org", "message", "draft1")).toBe(
+    `${base}.tab.two`
+  );
+  expect(JSON.parse(localStorage.getItem(`${base}.tab.one`)!)).toMatchObject({
+    html: "one",
+  });
+});

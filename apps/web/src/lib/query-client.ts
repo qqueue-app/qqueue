@@ -67,6 +67,8 @@ export function createQueryClient() {
  * one org's rows into another's view.
  */
 export const qk = {
+  deviceDrafts: (orgId: string, userId: string) =>
+    ["device-drafts", orgId, userId] as const,
   mailSearch: (
     orgId: string,
     userId: string,

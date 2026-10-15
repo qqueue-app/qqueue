@@ -41,7 +41,9 @@ Sent/Drafts/Outbox reading panes now include imported Sent mail, mailbox scoping
 URL state and stable pagination. Concurrent reply indicators, invitation renewal,
 honest invitation delivery status and atomic team/grant changes are implemented.
 Actual browser offline reply recovery also exposed and verified a backup lookup
-fix. External-draft editing, bounded long-conversation loading and broader
+fix. Reply device copies are now isolated per open tab; restored ordinary drafts
+retain one server identity with separate local records. Recovery dialogs and
+snapshot-specific save feedback preserve concurrent writing. External-draft editing, bounded long-conversation loading and broader
 acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer

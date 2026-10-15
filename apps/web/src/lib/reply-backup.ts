@@ -7,33 +7,60 @@ export function replyBackupKey(
   draftId?: string
 ) {
   const base = `qqueue.reply.${userId}.${organizationId}.${messageId}`;
+  const candidates = listReplyBackups(
+    userId,
+    organizationId,
+    messageId,
+    draftId
+  );
+  return candidates[0]?.key ?? (draftId ? `${base}.${draftId}` : base);
+}
+
+export interface StoredReplyBackup {
+  key: string;
+  value: {
+    html: string;
+    updatedAt?: string;
+    draftId?: string;
+    revision?: number;
+    clientId?: string;
+    [key: string]: unknown;
+  };
+}
+export function listReplyBackups(
+  userId: string,
+  organizationId: string,
+  messageId: string,
+  draftId?: string
+): StoredReplyBackup[] {
+  const base = `qqueue.reply.${userId}.${organizationId}.${messageId}`;
+  const candidates: StoredReplyBackup[] = [];
   try {
-    const baseValue = localStorage.getItem(base);
-    if (draftId) {
-      const exact = `${base}.${draftId}`;
-      if (localStorage.getItem(exact)) return exact;
-      if (baseValue && JSON.parse(baseValue).draftId === draftId) return base;
-      return exact;
-    }
-    const candidates: { key: string; at: number }[] = [];
     for (let index = 0; index < localStorage.length; index++) {
       const key = localStorage.key(index);
       if (!key || (key !== base && !key.startsWith(`${base}.`))) continue;
       try {
         const value = JSON.parse(localStorage.getItem(key) ?? "null");
         if (typeof value?.html !== "string") continue;
-        candidates.push({ key, at: Date.parse(value.updatedAt ?? "") || 0 });
+        if (
+          draftId &&
+          value.draftId !== draftId &&
+          key !== `${base}.${draftId}`
+        )
+          continue;
+        candidates.push({ key, value });
       } catch {
-        /* A damaged backup cannot hide another readable version. */
+        /* Retain another readable version when one backup is damaged. */
       }
     }
-    candidates.sort(
-      (a, b) =>
-        b.at - a.at ||
-        (a.key === base ? -1 : b.key === base ? 1 : a.key.localeCompare(b.key))
-    );
-    return candidates[0]?.key ?? base;
   } catch {
-    return draftId ? `${base}.${draftId}` : base;
+    return [];
   }
+  candidates.sort(
+    (a, b) =>
+      (Date.parse(b.value.updatedAt ?? "") || 0) -
+        (Date.parse(a.value.updatedAt ?? "") || 0) ||
+      (a.key === base ? -1 : b.key === base ? 1 : a.key.localeCompare(b.key))
+  );
+  return candidates;
 }

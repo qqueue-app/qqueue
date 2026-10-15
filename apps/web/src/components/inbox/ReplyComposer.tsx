@@ -8,6 +8,7 @@ import {
   signatureStamp,
   type SignatureStamp,
 } from "./SignatureControl.js";
+import { ReplyDeviceCopies } from "./ReplyDeviceCopies.js";
 import { ReplyPresenceNotice } from "./ReplyPresenceNotice.js";
 import { RecipientField } from "./RecipientField.js";
 import {
@@ -57,12 +58,14 @@ interface Props {
 
 interface ReplyBackup {
   html: string;
+  updatedAt?: string;
   to?: string[];
   cc?: string[];
   bcc?: string[];
   recipientInputs?: Record<string, string>;
   signature?: SignatureStamp;
   attachments: EmailAttachment[];
+  pendingFiles?: { name: string; size: number }[];
   draftId?: string;
   replyAll: boolean;
   revision?: number;
@@ -106,20 +109,29 @@ export function ReplyComposer({
         .catch(() => undefined);
     };
   }, [message.id, organizationId, presenceClientId]);
-  const [storageKey] = useState(() =>
+  const [sourceStorageKey] = useState(() =>
     user?.id
       ? replyBackupKey(user.id, organizationId, message.id, initialDraftId)
       : null
   );
   const [backup] = useState<ReplyBackup | null>(() => {
     try {
-      return storageKey
-        ? JSON.parse(localStorage.getItem(storageKey) ?? "null")
+      return sourceStorageKey
+        ? JSON.parse(localStorage.getItem(sourceStorageKey) ?? "null")
         : null;
     } catch {
       return null;
     }
   });
+  const storageKey = user?.id
+    ? `qqueue.reply.${user.id}.${organizationId}.${message.id}.tab.${presenceClientId}`
+    : null;
+  const backupTime = useRef(
+    backup
+      ? (backup.updatedAt ?? "1970-01-01T00:00:00.000Z")
+      : new Date().toISOString()
+  );
+  const lastBackupWriting = useRef<string>();
   const [signature, setSignature] = useState<SignatureStamp | undefined>(() =>
     signatureStamp(backup?.signature)
   );
@@ -163,7 +175,9 @@ export function ReplyComposer({
     let active = true;
     void listPendingDrafts(organizationId).then((drafts) => {
       if (!active) return;
-      const saved = drafts.find((entry) => entry.localId === backupId);
+      const saved =
+        drafts.find((entry) => entry.localId === backupId) ??
+        drafts.find((entry) => entry.localId === sourceStorageKey);
       if (saved && !backup) {
         setRecipientInputs(
           (saved.payload.variables?.qqueueRecipientInputs as Record<
@@ -187,7 +201,7 @@ export function ReplyComposer({
     return () => {
       active = false;
     };
-  }, [organizationId, backupId]);
+  }, [organizationId, backupId, sourceStorageKey]);
   function updateFiles(files: PendingUpload[]) {
     pendingRef.current = files;
     setPendingFiles(files);
@@ -212,6 +226,8 @@ export function ReplyComposer({
       revision: revision.current,
       updatedAt: new Date().toISOString(),
       pendingUploads: pendingRef.current,
+      attachments,
+      clientId: clientId.current,
       payload: {
         inboundMessageId: message.id,
         subject,
@@ -299,10 +315,19 @@ export function ReplyComposer({
     }
   }, [draftQuery.data]);
 
+  function saveSnapshot() {
+    return {
+      body: writing.current.html,
+      recipients: writing.current,
+      fingerprint: latest.current,
+    };
+  }
   const save = useApiMutation(
-    async (body: string) => {
-      const fingerprint = latest.current;
-      const recipients = { to, cc, bcc, replyAll, recipientInputs, signature };
+    async ({
+      body,
+      recipients,
+      fingerprint,
+    }: ReturnType<typeof saveSnapshot>) => {
       const work = saveChain.current
         .catch(() => undefined)
         .then(async () => {
@@ -385,6 +410,12 @@ export function ReplyComposer({
 
   useEffect(() => {
     if (!touched.current || sent.current) return;
+    if (
+      lastBackupWriting.current &&
+      lastBackupWriting.current !== latest.current
+    )
+      backupTime.current = new Date().toISOString();
+    lastBackupWriting.current = latest.current;
     if (storageKey) {
       try {
         localStorage.setItem(
@@ -397,11 +428,15 @@ export function ReplyComposer({
             cc,
             bcc,
             attachments,
+            pendingFiles: pendingRef.current.map((file) => ({
+              name: file.file.name,
+              size: file.file.size,
+            })),
             replyAll,
             draftId: draftId.current,
             revision: revision.current,
             clientId: clientId.current,
-            updatedAt: new Date().toISOString(),
+            updatedAt: backupTime.current,
           })
         );
       } catch {
@@ -414,7 +449,7 @@ export function ReplyComposer({
       void savePendingDraft(pendingRecord());
     if (draftQuery.isPending || draftQuery.isError) return;
     if (conflict || acceptedId || !filesRestored) return;
-    const timer = window.setTimeout(() => save.mutate(html), 1500);
+    const timer = window.setTimeout(() => save.mutate(saveSnapshot()), 1500);
     return () => window.clearTimeout(timer);
   }, [
     html,
@@ -436,7 +471,7 @@ export function ReplyComposer({
 
   const send = useApiMutation(
     async () => {
-      const savedDraftId = await save.mutateAsync(html);
+      const savedDraftId = await save.mutateAsync(saveSnapshot());
       if (!savedDraftId) throw new Error("Save your reply before sending it.");
       let result;
       try {
@@ -487,7 +522,7 @@ export function ReplyComposer({
   async function processFiles(entries: PendingUpload[]) {
     setUploading(true);
     try {
-      const emailDraftId = await save.mutateAsync(html);
+      const emailDraftId = await save.mutateAsync(saveSnapshot());
       if (!emailDraftId)
         throw new Error("Save this reply before attaching files.");
       const persisted = await savePendingDraft(pendingRecord(emailDraftId));
@@ -578,7 +613,7 @@ export function ReplyComposer({
       !draftQuery.isPending &&
       !draftQuery.isError
     )
-      save.mutate(html);
+      save.mutate(saveSnapshot());
     onClose();
   }
   function submit(event: FormEvent) {
@@ -804,6 +839,67 @@ export function ReplyComposer({
                 </Button>
               </div>
             ))}
+            {user?.id && storageKey ? (
+              <ReplyDeviceCopies
+                userId={user.id}
+                organizationId={organizationId}
+                messageId={message.id}
+                draftId={draftId.current}
+                currentKey={storageKey}
+                onUse={async (copy) => {
+                  // Preserve this tab's writing before the explicit replacement.
+                  const current = localStorage.getItem(storageKey);
+                  const archivedKey = `${storageKey}.before.${crypto.randomUUID()}`;
+                  const deviceDrafts = await listPendingDrafts(organizationId);
+                  const currentFiles = deviceDrafts.find(
+                    (entry) => entry.localId === backupId
+                  );
+                  if (
+                    currentFiles?.pendingUploads?.length &&
+                    !(await savePendingDraft({
+                      ...currentFiles,
+                      localId: archivedKey,
+                    }))
+                  ) {
+                    throw new Error("Couldn't keep the current file bytes");
+                  }
+                  if (current) localStorage.setItem(archivedKey, current);
+                  const restored = copy.value as unknown as ReplyBackup;
+                  const files = deviceDrafts.find(
+                    (entry) => entry.localId === copy.key
+                  );
+                  if (
+                    restored.pendingFiles?.length &&
+                    !files?.pendingUploads?.length
+                  ) {
+                    throw new Error(
+                      "This copy's pending file bytes are unavailable. Copy its writing and reattach the listed files before sending."
+                    );
+                  }
+                  draftId.current = restored.draftId;
+                  revision.current = restored.revision ?? 1;
+                  clientId.current = restored.clientId ?? clientId.current;
+                  touched.current = true;
+                  setSaved(false);
+                  setHtml(restored.html);
+                  setTo(restored.to ?? defaultTo);
+                  setCc(restored.cc ?? []);
+                  setBcc(restored.bcc ?? []);
+                  setRecipientInputs(restored.recipientInputs ?? {});
+                  setSignature(signatureStamp(restored.signature));
+                  setReplyAll(restored.replyAll ?? false);
+                  setAttachments(restored.attachments ?? []);
+                  updateFiles(files?.pendingUploads ?? []);
+                  // Choosing a device copy does not adopt a newer server revision.
+                  setConflict(
+                    Boolean(
+                      draftQuery.data &&
+                      restored.revision !== draftQuery.data.revision
+                    )
+                  );
+                }}
+              />
+            ) : null}
             {conflict ? (
               <DraftConflictReview
                 organizationId={organizationId}

@@ -1276,3 +1276,19 @@ same transaction, while retaining personal writing and accepted delivery intent.
 Invitation renewal serializes token replacement and acceptance consumes a valid
 pending token atomically. Queue acceptance and manual invitation-link fallback
 are reported separately from actual email delivery.
+
+## Independent Device Copies of One Server Draft (2026-10-15)
+
+An open composer owns its device-backup record. Restoring writing copies that
+record instead of taking ownership of another tab's row. The server draft ID,
+creation client ID, revision and upload retry IDs remain separate from this
+local key, preserving one server draft while retaining competing local writing.
+Reply copies and ordinary pending drafts have explicit review/restore controls;
+using a reply copy first preserves the replaced writing and pending file bytes.
+A stale server revision still requires comparison rather than automatic overwrite.
+
+Save feedback belongs to the exact snapshot written or acknowledged. A delayed
+or resumed save may adopt its server identity without describing newer writing
+as saved. Local recovery queries run while server queries are paused offline.
+This does not establish safe navigation when every persistence mechanism rejects
+writes; that remaining scope is explicit in the readiness handoff.

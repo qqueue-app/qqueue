@@ -25,6 +25,7 @@ import { PageHeader } from "../components/PageHeader.js";
 import { ConfirmDialog } from "../components/ConfirmDialog.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { EmailPreviewFrame } from "../components/EmailPreviewFrame.js";
+import { DeviceDraftCopies } from "../components/inbox/DeviceDraftCopies.js";
 import { BodyEditor } from "../components/editor/BodyEditor.js";
 import {
   Field,
@@ -54,6 +55,7 @@ import { formatBytes } from "../lib/format.js";
 import { cn } from "../lib/utils.js";
 import { useSession } from "../lib/session-context.js";
 import { getSession } from "../lib/session.js";
+import { draftWritingFingerprint } from "../lib/draft-writing.js";
 import { useOnline } from "../lib/use-online.js";
 import {
   acknowledgePendingDraft,
@@ -61,6 +63,7 @@ import {
   flushPendingDrafts,
   listPendingDrafts,
   savePendingDraft,
+  type PendingDraft,
 } from "../lib/offline-drafts.js";
 import {
   SignatureControl,
@@ -337,6 +340,7 @@ function EmailStudioWorkspace() {
    * and so has no server id to be keyed by.
    */
   const localDraftId = useRef(newLocalDraftId());
+  const draftClientId = useRef(localDraftId.current);
 
   const hasContent =
     subject.trim() !== "" ||
@@ -491,6 +495,7 @@ function EmailStudioWorkspace() {
     // here is a different email, and must not overwrite the queued one.
     void deletePendingDraft(localDraftId.current);
     localDraftId.current = newLocalDraftId();
+    draftClientId.current = localDraftId.current;
     setPendingLocally(false);
   }
 
@@ -640,6 +645,63 @@ function EmailStudioWorkspace() {
     }
   }
 
+  const draftPayload = useMemo(
+    () => ({
+      subject,
+      html,
+      variables: {
+        ...draftVariables,
+        qqueueRecipientInputs: recipientInputs,
+        qqueueSignature: signature,
+      },
+      to: toEmails,
+      cc: ccEmails,
+      bcc: bccEmails,
+      // Sent even when blank so clearing it survives the round trip.
+      replyTo,
+      listIds: selectedListIds,
+      smtpConnectionId:
+        smtpConnectionId === DEFAULT_SMTP ? undefined : smtpConnectionId,
+      templateId: templateId === NO_TEMPLATE ? undefined : templateId,
+    }),
+    [
+      subject,
+      html,
+      draftVariables,
+      recipientInputs,
+      signature,
+      toEmails,
+      ccEmails,
+      bccEmails,
+      replyTo,
+      selectedListIds,
+      smtpConnectionId,
+      templateId,
+    ]
+  );
+  const writingFingerprint = draftWritingFingerprint(
+    draftPayload,
+    attachments,
+    pendingUploads
+  );
+  const liveWritingFingerprint = useRef(writingFingerprint);
+  liveWritingFingerprint.current = writingFingerprint;
+  const [savedFingerprint, setSavedFingerprint] = useState<string>();
+  const [backupFingerprint, setBackupFingerprint] = useState<string>();
+  const [loadedSnapshot, setLoadedSnapshot] = useState<
+    "server" | "device" | null
+  >(null);
+  useEffect(() => {
+    if (loadedSnapshot === "server") {
+      setSavedFingerprint(writingFingerprint);
+      setBackupFingerprint(undefined);
+    } else if (loadedSnapshot === "device") {
+      setSavedFingerprint(undefined);
+      setBackupFingerprint(writingFingerprint);
+    }
+    if (loadedSnapshot) setLoadedSnapshot(null);
+  }, [loadedSnapshot, writingFingerprint]);
+
   const deviceBackup = useRef(false);
   const [backupFailed, setBackupFailed] = useState(false);
   const saveDraft = useCallback(
@@ -653,26 +715,7 @@ function EmailStudioWorkspace() {
           if (acceptedSend.current) return null;
           setSavingDraft(true);
           try {
-            const payload = {
-              subject,
-              html,
-              variables: {
-                ...draftVariables,
-                qqueueRecipientInputs: recipientInputs,
-                qqueueSignature: signature,
-              },
-              to: toEmails,
-              cc: ccEmails,
-              bcc: bccEmails,
-              // Sent even when blank so clearing it survives the round trip.
-              replyTo,
-              listIds: selectedListIds,
-              smtpConnectionId:
-                smtpConnectionId === DEFAULT_SMTP
-                  ? undefined
-                  : smtpConnectionId,
-              templateId: templateId === NO_TEMPLATE ? undefined : templateId,
-            };
+            const payload = draftPayload;
 
             /*
           Local first, network second (§5).
@@ -686,8 +729,10 @@ function EmailStudioWorkspace() {
         */
             const snapshot = {
               pendingUploads: uploadBackup.current,
+              attachments,
               userId: user?.id ?? "",
               localId: localDraftId.current,
+              clientId: draftClientId.current,
               organizationId,
               draftId: draftIdentity.current.id,
               revision: draftIdentity.current.revision,
@@ -697,6 +742,12 @@ function EmailStudioWorkspace() {
             };
             const backedUp = await savePendingDraft(snapshot);
             deviceBackup.current = backedUp;
+            const snapshotFingerprint = draftWritingFingerprint(
+              snapshot.payload,
+              snapshot.attachments,
+              snapshot.pendingUploads
+            );
+            if (backedUp) setBackupFingerprint(snapshotFingerprint);
 
             if (user?.id && getSession().user?.id !== user.id) return null;
             let saved: EmailDraft;
@@ -709,7 +760,7 @@ function EmailStudioWorkspace() {
             } else {
               saved = await api.createEmailDraft({
                 organizationId,
-                clientId: snapshot.localId,
+                clientId: snapshot.clientId ?? snapshot.localId,
                 ...payload,
               });
               setDraftId(saved.id);
@@ -722,10 +773,18 @@ function EmailStudioWorkspace() {
             await acknowledgePendingDraft(snapshot, saved.id, saved.revision);
             setDraftConflict(false);
             setLastSavedAt(saved.updatedAt);
-            setPendingLocally(false);
+            setSavedFingerprint(snapshotFingerprint);
+            setPendingLocally(
+              snapshotFingerprint !== liveWritingFingerprint.current
+            );
             setBackupFailed(false);
             if (!silent) {
-              toast.success("Draft saved.");
+              if (snapshotFingerprint === liveWritingFingerprint.current)
+                toast.success("Draft saved.");
+              else
+                toast.message(
+                  "An earlier version was saved. Your latest changes still need saving."
+                );
             }
             return saved.id;
           } catch (error) {
@@ -786,6 +845,7 @@ function EmailStudioWorkspace() {
     [
       organizationId,
       openingDraft,
+      draftPayload,
       signature,
       draftVariables,
       user?.id,
@@ -800,6 +860,7 @@ function EmailStudioWorkspace() {
       templateId,
       replyTo,
       draftId,
+      attachments,
     ]
   );
 
@@ -838,6 +899,42 @@ function EmailStudioWorkspace() {
     replyTo,
   ]);
 
+  function applyDeviceCopy(latest: PendingDraft) {
+    // Restore a copy into this composer; another open tab still owns its
+    // original local row. Creation retries retain the original server identity.
+    localDraftId.current = newLocalDraftId();
+    draftClientId.current = latest.clientId ?? latest.localId;
+    updateUploads(latest.pendingUploads ?? []);
+    setDraftId(latest.draftId);
+    draftIdentity.current = {
+      id: latest.draftId,
+      revision: latest.revision ?? 1,
+    };
+    setAttachments(latest.attachments ?? []);
+    setSignature(signatureStamp(latest.payload.variables?.qqueueSignature));
+    setDraftVariables(latest.payload.variables ?? {});
+    setSubject(latest.payload.subject);
+    setHtml(latest.payload.html);
+    setToEmails(latest.payload.to);
+    setRecipientInputs(
+      (latest.payload.variables?.qqueueRecipientInputs as Record<
+        string,
+        string
+      >) ?? {}
+    );
+    setCcEmails(latest.payload.cc);
+    setBccEmails(latest.payload.bcc);
+    setReplyTo(latest.payload.replyTo ?? "");
+    setSelectedListIds(latest.payload.listIds);
+    setSMTPConnectionId(latest.payload.smtpConnectionId ?? DEFAULT_SMTP);
+    setTemplateId(latest.payload.templateId ?? NO_TEMPLATE);
+    setPendingLocally(true);
+    setDraftConflict(false);
+    setAcceptedSendId(null);
+    acceptedSend.current = null;
+    setLoadedSnapshot("device");
+  }
+
   /*
     Recover a message the server never received.
 
@@ -865,31 +962,7 @@ function EmailStudioWorkspace() {
         return;
       }
 
-      localDraftId.current = latest.localId;
-      updateUploads(latest.pendingUploads ?? []);
-      setDraftId(latest.draftId);
-      draftIdentity.current = {
-        id: latest.draftId,
-        revision: latest.revision ?? 1,
-      };
-      setSignature(signatureStamp(latest.payload.variables?.qqueueSignature));
-      setDraftVariables(latest.payload.variables ?? {});
-      setSubject(latest.payload.subject);
-      setHtml(latest.payload.html);
-      setToEmails(latest.payload.to);
-      setRecipientInputs(
-        (latest.payload.variables?.qqueueRecipientInputs as Record<
-          string,
-          string
-        >) ?? {}
-      );
-      setCcEmails(latest.payload.cc);
-      setBccEmails(latest.payload.bcc);
-      setReplyTo(latest.payload.replyTo ?? "");
-      setSelectedListIds(latest.payload.listIds);
-      setSMTPConnectionId(latest.payload.smtpConnectionId ?? DEFAULT_SMTP);
-      setTemplateId(latest.payload.templateId ?? NO_TEMPLATE);
-      setPendingLocally(true);
+      applyDeviceCopy(latest);
       toast.message("Recovered a draft that hadn't finished saving.");
     });
   }, [organizationId, loading, hasContent, searchParams]);
@@ -908,7 +981,10 @@ function EmailStudioWorkspace() {
       return;
     }
 
-    void flushPendingDrafts(organizationId).then((synced) => {
+    void flushPendingDrafts(organizationId, (localId, error) => {
+      if (localId === localDraftId.current && error.status === 409)
+        setDraftConflict(true);
+    }).then((synced) => {
       const mine = synced.find(
         (entry) => entry.localId === localDraftId.current
       );
@@ -921,8 +997,15 @@ function EmailStudioWorkspace() {
         revision: mine.draft.revision ?? 1,
       };
       setLastSavedAt(mine.draft.updatedAt);
-      setPendingLocally(false);
-      toast.success("Draft synced.");
+      const syncedFingerprint = draftWritingFingerprint(
+        mine.snapshot.payload,
+        mine.snapshot.attachments,
+        mine.snapshot.pendingUploads
+      );
+      setSavedFingerprint(syncedFingerprint);
+      setPendingLocally(syncedFingerprint !== liveWritingFingerprint.current);
+      if (syncedFingerprint === liveWritingFingerprint.current)
+        toast.success("Draft synced.");
     });
   }, [online, organizationId, pendingLocally]);
 
@@ -961,11 +1044,13 @@ function EmailStudioWorkspace() {
       setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
       setTemplateId(draft.templateId ?? NO_TEMPLATE);
       setLastSavedAt(draft.updatedAt);
+      setLoadedSnapshot("server");
       setDeliveryStatus(null);
       setDraftsOpen(false);
       // A different message is on screen now, so it gets its own queue key — and
       // it arrived from the server, so nothing is pending locally.
       localDraftId.current = newLocalDraftId();
+      draftClientId.current = draft.clientId ?? localDraftId.current;
       setPendingLocally(false);
       toast.success("Draft loaded.");
     },
@@ -1933,7 +2018,7 @@ function EmailStudioWorkspace() {
                   <DraftConflictReview
                     organizationId={organizationId!}
                     draftId={draftIdentity.current.id}
-                    clientId={localDraftId.current}
+                    clientId={draftClientId.current}
                     onUse={applyDraft}
                     onAccepted={(id) => {
                       acceptedSend.current = id;
@@ -1946,13 +2031,20 @@ function EmailStudioWorkspace() {
                     Couldn’t save to the server or this device. Keep this
                     composer open and retry saving.
                   </p>
-                ) : pendingLocally ? (
+                ) : pendingLocally &&
+                  backupFingerprint === writingFingerprint ? (
                   <p className="text-center text-meta text-warn">
-                    Saved on this device — syncs when you&rsquo;re back online
+                    {draftConflict
+                      ? "Device copy kept — compare the saved version before syncing."
+                      : "Saved on this device — syncs when you’re back online"}
                   </p>
-                ) : lastSavedAt ? (
+                ) : lastSavedAt && savedFingerprint === writingFingerprint ? (
                   <p className="text-center text-meta text-text-tertiary">
                     Draft saved
+                  </p>
+                ) : hasContent ? (
+                  <p className="text-center text-meta text-text-secondary">
+                    Changes waiting to save
                   </p>
                 ) : null}
               </Card>
@@ -1991,6 +2083,21 @@ function EmailStudioWorkspace() {
               Resume editing a saved draft, or delete one you no longer need.
             </DialogDescription>
           </DialogHeader>
+          {organizationId && user?.id ? (
+            <DeviceDraftCopies
+              organizationId={organizationId}
+              userId={user.id}
+              onUse={async (copy) => {
+                if (hasContent && !acceptedSend.current) {
+                  const saved = await saveDraft(true);
+                  if (!saved && !deviceBackup.current)
+                    throw new Error("Current writing could not be kept");
+                }
+                applyDeviceCopy(copy);
+                setDraftsOpen(false);
+              }}
+            />
+          ) : null}
           {drafts.length === 0 ? (
             // §3: no full-width bordered box around a "you have nothing yet".
             <EmptyState

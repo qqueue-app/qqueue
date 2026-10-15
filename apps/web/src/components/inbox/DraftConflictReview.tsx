@@ -100,8 +100,8 @@ export function DraftConflictReview({
             <p key={file.id}>{file.filename}</p>
           ))}
           <p>
-            Copy any writing you want to keep into your version before choosing
-            the saved version.
+            Copy any writing you want to keep before choosing the saved version.
+            Choosing it replaces your current text and files.
           </p>
           <Button
             type="button"
