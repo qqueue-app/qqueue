@@ -696,3 +696,25 @@ describe("folder and shared flag access", () => {
     }
   });
 });
+
+it("does not send a synthetic headerless cache identity as an RFC reply header", async () => {
+  prismaMock.inboundMessage.findFirst.mockResolvedValue({
+    id: "m1",
+    messageId: "imap:account:77:8",
+    references: ["<valid@example.com>", "imap:account:77:7"],
+    fromEmail: "customer@example.com",
+    inboxAccount: { email: "support@example.com" },
+  } as never);
+  await inboxService.replyToMessage("m1", "user_1", {
+    organizationId: "org_1",
+    subject: "Question",
+    text: "Reply",
+  });
+  expect(manualEmailServiceMock.send).toHaveBeenCalledWith(
+    expect.objectContaining({
+      inReplyTo: undefined,
+      references: ["<valid@example.com>"],
+    }),
+    "user_1"
+  );
+});

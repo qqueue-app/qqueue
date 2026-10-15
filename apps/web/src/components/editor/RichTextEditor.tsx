@@ -224,6 +224,7 @@ function EditorPromptDialog({
 
 interface RichTextEditorProps {
   disabled?: boolean;
+  compactToolbar?: boolean;
   ariaLabel?: string;
   value: string;
   onChange: (html: string) => void;
@@ -370,7 +371,10 @@ export function RichTextEditor({
   onUploadImage,
   ariaLabel = "Message body",
   disabled = false,
+  compactToolbar = false,
 }: RichTextEditorProps) {
+  const [advanced, setAdvanced] = useState(false);
+  const showAdvanced = !compactToolbar || advanced;
   const [prompt, setPrompt] = useState<PromptConfig | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
   const [buttonOpen, setButtonOpen] = useState(false);
@@ -650,7 +654,10 @@ export function RichTextEditor({
         masked — put them on the scroller and the fade takes the bottom border
         with it, leaving the rule under the toolbar dissolving at both ends.
       */}
-      <div className="border-b bg-muted/40">
+      <fieldset
+        disabled={disabled}
+        className="min-w-0 border-b bg-muted/40 p-0"
+      >
         <div
           ref={toolbarRef}
           role="toolbar"
@@ -684,35 +691,39 @@ export function RichTextEditor({
           >
             <UnderlineIcon />
           </ToolbarButton>
-          <ToolbarButton
-            label="Strikethrough"
-            active={editor.isActive("strike")}
-            onClick={() => editor.chain().focus().toggleStrike().run()}
-          >
-            <Strikethrough />
-          </ToolbarButton>
-          <ColorMenu editor={editor} />
+          {showAdvanced ? (
+            <>
+              <ToolbarButton
+                label="Strikethrough"
+                active={editor.isActive("strike")}
+                onClick={() => editor.chain().focus().toggleStrike().run()}
+              >
+                <Strikethrough />
+              </ToolbarButton>
+              <ColorMenu editor={editor} />
 
-          <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
+              <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
-          <ToolbarButton
-            label="Heading 1"
-            active={editor.isActive("heading", { level: 1 })}
-            onClick={() =>
-              editor.chain().focus().toggleHeading({ level: 1 }).run()
-            }
-          >
-            <Heading1 />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Heading 2"
-            active={editor.isActive("heading", { level: 2 })}
-            onClick={() =>
-              editor.chain().focus().toggleHeading({ level: 2 }).run()
-            }
-          >
-            <Heading2 />
-          </ToolbarButton>
+              <ToolbarButton
+                label="Heading 1"
+                active={editor.isActive("heading", { level: 1 })}
+                onClick={() =>
+                  editor.chain().focus().toggleHeading({ level: 1 }).run()
+                }
+              >
+                <Heading1 />
+              </ToolbarButton>
+              <ToolbarButton
+                label="Heading 2"
+                active={editor.isActive("heading", { level: 2 })}
+                onClick={() =>
+                  editor.chain().focus().toggleHeading({ level: 2 }).run()
+                }
+              >
+                <Heading2 />
+              </ToolbarButton>
+            </>
+          ) : null}
           <ToolbarButton
             label="Bullet list"
             active={editor.isActive("bulletList")}
@@ -737,30 +748,39 @@ export function RichTextEditor({
 
           <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
 
-          <ToolbarButton
-            label="Align left"
-            active={editor.isActive({ textAlign: "left" })}
-            onClick={() => editor.chain().focus().setTextAlign("left").run()}
-          >
-            <AlignLeft />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Align centre"
-            active={editor.isActive({ textAlign: "center" })}
-            onClick={() => editor.chain().focus().setTextAlign("center").run()}
-          >
-            <AlignCenter />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Align right"
-            active={editor.isActive({ textAlign: "right" })}
-            onClick={() => editor.chain().focus().setTextAlign("right").run()}
-          >
-            <AlignRight />
-          </ToolbarButton>
+          {showAdvanced ? (
+            <>
+              <ToolbarButton
+                label="Align left"
+                active={editor.isActive({ textAlign: "left" })}
+                onClick={() =>
+                  editor.chain().focus().setTextAlign("left").run()
+                }
+              >
+                <AlignLeft />
+              </ToolbarButton>
+              <ToolbarButton
+                label="Align centre"
+                active={editor.isActive({ textAlign: "center" })}
+                onClick={() =>
+                  editor.chain().focus().setTextAlign("center").run()
+                }
+              >
+                <AlignCenter />
+              </ToolbarButton>
+              <ToolbarButton
+                label="Align right"
+                active={editor.isActive({ textAlign: "right" })}
+                onClick={() =>
+                  editor.chain().focus().setTextAlign("right").run()
+                }
+              >
+                <AlignRight />
+              </ToolbarButton>
 
-          <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
-
+              <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
+            </>
+          ) : null}
           <ToolbarButton
             label="Link"
             active={editor.isActive("link")}
@@ -771,75 +791,82 @@ export function RichTextEditor({
           <ToolbarButton label="Image" onClick={() => setImageOpen(true)}>
             <ImageIcon />
           </ToolbarButton>
-          {/* Labelled rather than icon-only: an icon alone made this hard to
-            find, and it doubles as "edit" when a button is selected. */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => setButtonOpen(true)}
-            aria-label={buttonSelected ? "Edit button" : "Button"}
-            className={cn(
-              "h-touch shrink-0 gap-field px-2 text-muted-foreground hover:text-foreground sm:h-8",
-              buttonSelected && "bg-primary/10 text-primary"
-            )}
-          >
-            <RectangleHorizontal className="h-4 w-4" />
-            {buttonSelected ? "Edit button" : "Button"}
-          </Button>
-          <ToolbarButton
-            label={
-              editor.isActive("table") ? "Delete table" : "Insert table (3×3)"
-            }
-            active={editor.isActive("table")}
-            onClick={() => {
-              if (editor.isActive("table")) {
-                editor.chain().focus().deleteTable().run();
-                return;
-              }
-              editor
-                .chain()
-                .focus()
-                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                .run();
-            }}
-          >
-            <TableIcon />
-          </ToolbarButton>
-          {editor.isActive("table") ? (
+          {showAdvanced ? (
             <>
-              <ToolbarButton
-                label="Add row"
-                onClick={() => editor.chain().focus().addRowAfter().run()}
+              {/* Labelled rather than icon-only: an icon alone made this hard to
+            find, and it doubles as "edit" when a button is selected. */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setButtonOpen(true)}
+                aria-label={buttonSelected ? "Edit button" : "Button"}
+                className={cn(
+                  "h-touch shrink-0 gap-field px-2 text-muted-foreground hover:text-foreground sm:h-8",
+                  buttonSelected && "bg-primary/10 text-primary"
+                )}
               >
-                <Rows3 />
-              </ToolbarButton>
+                <RectangleHorizontal className="h-4 w-4" />
+                {buttonSelected ? "Edit button" : "Button"}
+              </Button>
               <ToolbarButton
-                label="Add column"
-                onClick={() => editor.chain().focus().addColumnAfter().run()}
+                label={
+                  editor.isActive("table")
+                    ? "Delete table"
+                    : "Insert table (3×3)"
+                }
+                active={editor.isActive("table")}
+                onClick={() => {
+                  if (editor.isActive("table")) {
+                    editor.chain().focus().deleteTable().run();
+                    return;
+                  }
+                  editor
+                    .chain()
+                    .focus()
+                    .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                    .run();
+                }}
               >
-                <Columns3 />
+                <TableIcon />
               </ToolbarButton>
+              {editor.isActive("table") ? (
+                <>
+                  <ToolbarButton
+                    label="Add row"
+                    onClick={() => editor.chain().focus().addRowAfter().run()}
+                  >
+                    <Rows3 />
+                  </ToolbarButton>
+                  <ToolbarButton
+                    label="Add column"
+                    onClick={() =>
+                      editor.chain().focus().addColumnAfter().run()
+                    }
+                  >
+                    <Columns3 />
+                  </ToolbarButton>
+                </>
+              ) : null}
+              <ToolbarButton
+                label="Divider"
+                onClick={() => editor.chain().focus().setHorizontalRule().run()}
+              >
+                <Minus />
+              </ToolbarButton>
+              {/* Dropping a snippet in no longer means abandoning the editor for the
+            source view: it lands as a block that keeps its own markup. */}
+              <ToolbarButton
+                label="HTML block"
+                onClick={() => setRawEdit({ pos: null, html: "" })}
+              >
+                <Code2 />
+              </ToolbarButton>
+
+              <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
             </>
           ) : null}
-          <ToolbarButton
-            label="Divider"
-            onClick={() => editor.chain().focus().setHorizontalRule().run()}
-          >
-            <Minus />
-          </ToolbarButton>
-          {/* Dropping a snippet in no longer means abandoning the editor for the
-            source view: it lands as a block that keeps its own markup. */}
-          <ToolbarButton
-            label="HTML block"
-            onClick={() => setRawEdit({ pos: null, html: "" })}
-          >
-            <Code2 />
-          </ToolbarButton>
-
-          <Separator orientation="vertical" className="mx-1 h-6 shrink-0" />
-
           <ToolbarButton
             label="Undo"
             disabled={!editor.can().undo()}
@@ -854,6 +881,18 @@ export function RichTextEditor({
           >
             <Redo />
           </ToolbarButton>
+
+          {compactToolbar ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-expanded={advanced}
+              onClick={() => setAdvanced(!advanced)}
+            >
+              {advanced ? "Less formatting" : "More formatting"}
+            </Button>
+          ) : null}
 
           {showVariables ? (
             /*
@@ -871,7 +910,7 @@ export function RichTextEditor({
             </div>
           ) : null}
         </div>
-      </div>
+      </fieldset>
 
       <div ref={surfaceRef}>
         <EditorContent editor={editor} />

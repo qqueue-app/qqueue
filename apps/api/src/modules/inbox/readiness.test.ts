@@ -292,3 +292,35 @@ describe("complete conversations and correct replies", () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+it("includes an authorized completed reply to a headerless original without inventing RFC headers", async () => {
+  prismaMock.inboundMessage.findFirst.mockResolvedValue({
+    ...message,
+    messageId: "imap:a:77:1",
+    references: [],
+    inReplyTo: null,
+  } as never);
+  prismaMock.inboundMessage.findMany.mockResolvedValue([]);
+  prismaMock.emailDraft.findMany.mockResolvedValue([
+    { completedSendId: "accepted_reply" },
+  ] as never);
+  prismaMock.emailJob.findMany.mockResolvedValue([]);
+  prismaMock.user.findMany.mockResolvedValue([]);
+  await inboxService.getConversation("received", "org_1", "user_1");
+  expect(prismaMock.emailDraft.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: {
+        organizationId: "org_1",
+        inboundMessageId: { in: ["received"] },
+        completedSendId: { not: null },
+      },
+    })
+  );
+  expect(prismaMock.emailJob.findMany.mock.calls[0][0]?.where).toMatchObject({
+    NOT: { origin: "SYSTEM" },
+    AND: [
+      expect.anything(),
+      { OR: expect.arrayContaining([{ id: { in: ["accepted_reply"] } }]) },
+    ],
+  });
+});

@@ -33,8 +33,10 @@ contents with separate location/cursor records, reconciles shared Seen/Flagged
 actions across copies, and adds URL-owned folder/mailbox/search/read filters.
 Durable user-initiated Archive, Trash/restore and destination moves now preserve
 accepted intent, reconcile ambiguous server outcomes and keep cached writing.
-External-draft editing, forwarding, signatures, and broader attachment, team and
-device acceptance remain. See
+Editable reply recipients, forward drafts with original private attachments,
+recoverable reply files, saved-version comparison and simpler mail formatting
+are now implemented. External-draft editing, per-account signatures, and broader
+attachment, team and device acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer
 to the earlier email-operations scope.

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { getSession } from "../lib/session.js";
 import { useReadingPreference } from "../lib/reading-preference.js";
 import { useMediaQuery } from "../lib/use-media-query.js";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -11,6 +12,7 @@ import {
   Paperclip,
   RefreshCw,
   Reply,
+  Forward,
   Trash2,
   Flag,
 } from "lucide-react";
@@ -272,6 +274,33 @@ function InboxWorkspace() {
   );
   const [connectOpen, setConnectOpen] = useState(false);
   const [replyTarget, setReplyTarget] = useState<InboundMessage | null>(null);
+  const navigate = useNavigate();
+  const forwardIds = useRef(new Map<string, string>());
+  const forward = useApiMutation(
+    async (messageId: string) => {
+      if (!organizationId) throw new Error("Select an organization first.");
+      let clientId = forwardIds.current.get(messageId);
+      if (!clientId) {
+        clientId = crypto.randomUUID();
+        forwardIds.current.set(messageId, clientId);
+      }
+      return api.prepareInboundForward(messageId, organizationId, clientId);
+    },
+    {
+      errorMessage:
+        "Couldn't prepare the forward. Your original message is kept.",
+      onSuccess: (draft, messageId) => {
+        forwardIds.current.delete(messageId);
+        if (
+          getSession().currentOrganizationId &&
+          getSession().currentOrganizationId !== organizationId
+        )
+          return;
+        navigate(`/email-studio?draft=${encodeURIComponent(draft.id)}`);
+      },
+    }
+  );
+
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const readMessages = useRef(new Set<string>());
   const [openingId, setOpeningId] = useState<string | null>(null);
@@ -734,6 +763,16 @@ function InboxWorkspace() {
               >
                 <Reply />
               </IconButton>
+              <IconButton
+                label="Forward"
+                disabled={
+                  forward.isPending ||
+                  selectedThread.latestMessage.bodyStatus === "UNAVAILABLE"
+                }
+                onClick={() => forward.mutate(selectedThread.latestMessage.id)}
+              >
+                <Forward />
+              </IconButton>
             </div>
           </div>
 
@@ -885,6 +924,15 @@ function InboxWorkspace() {
                     onClick={() => setReplyTarget(message)}
                   >
                     <Reply />
+                  </IconButton>
+                  <IconButton
+                    label={`Forward this message from ${senderName(message)}`}
+                    disabled={
+                      forward.isPending || message.bodyStatus === "UNAVAILABLE"
+                    }
+                    onClick={() => forward.mutate(message.id)}
+                  >
+                    <Forward />
                   </IconButton>
                   {message.emailJob ? (
                     <Hint
@@ -1498,7 +1546,7 @@ function InboxWorkspace() {
 
       {replyTarget && organizationId ? (
         <ReplyComposer
-          key={replyTarget.id}
+          key={`${replyTarget.id}:${searchParams.get("replyDraft") ?? ""}`}
           message={replyTarget}
           organizationId={organizationId}
           mailboxEmail={

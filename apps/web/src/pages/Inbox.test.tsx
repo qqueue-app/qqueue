@@ -42,6 +42,7 @@ vi.mock("../lib/api.js", () => ({
     listInboundMessages: vi.fn(),
     markInboundMessageRead: vi.fn(),
     replyToInboundMessage: vi.fn(),
+    prepareInboundForward: vi.fn(),
     createInboxAccount: vi.fn(),
     deleteInboxAccount: vi.fn(),
     downloadInboundAttachment: vi.fn(),
@@ -1064,6 +1065,60 @@ describe("mail folder navigation and shared flags", () => {
         "org_1",
         false
       )
+    );
+  });
+});
+
+describe("forwarding from a conversation", () => {
+  it("prepares the chosen original message once and navigates to its draft", async () => {
+    const user = userEvent.setup();
+    setup([makeMessage()]);
+    mockedApi.prepareInboundForward.mockResolvedValue({ id: "forward_draft" });
+    renderWithProviders(
+      <>
+        <Inbox />
+        <HistoryControls />
+      </>
+    );
+    await openRow(user);
+    await user.click(
+      screen.getByRole("button", { name: "Forward this message from Sender" })
+    );
+    await waitFor(() =>
+      expect(mockedApi.prepareInboundForward).toHaveBeenCalledWith(
+        "m1",
+        "org_1",
+        expect.any(String)
+      )
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+        "draft=forward_draft"
+      )
+    );
+  });
+  it("retains the preparation identity after a lost response", async () => {
+    const user = userEvent.setup();
+    setup([makeMessage()]);
+    mockedApi.prepareInboundForward
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValue({ id: "forward_draft" });
+    renderWithProviders(<Inbox />);
+    await openRow(user);
+    await user.click(
+      screen.getByRole("button", { name: "Forward this message from Sender" })
+    );
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("response lost")
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Forward this message from Sender" })
+    );
+    await waitFor(() =>
+      expect(mockedApi.prepareInboundForward).toHaveBeenCalledTimes(2)
+    );
+    expect(mockedApi.prepareInboundForward.mock.calls[0][2]).toBe(
+      mockedApi.prepareInboundForward.mock.calls[1][2]
     );
   });
 });

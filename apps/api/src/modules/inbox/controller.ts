@@ -8,9 +8,11 @@ import {
   inboundBulkReadSchema,
   inboundFlagSchema,
   inboxMoveSchema,
+  inboundForwardSchema,
 } from "@qqueue/shared";
 import { z } from "zod";
 import { inboxService } from "./service.js";
+import { inboxForwardService } from "./forward-service.js";
 import { inboxMoveService } from "./move-service.js";
 
 const markReadSchema = z.object({
@@ -23,17 +25,27 @@ const markReadSchema = z.object({
 });
 
 export const inboxController = {
-  async createMove(req: Request, res: Response) {
+  async prepareForward(req: Request, res: Response) {
     res
-      .status(202)
+      .status(201)
       .json({
-        data: await inboxMoveService.create(
+        data: await inboxForwardService.prepare(
           String(req.params.id),
           req.organizationId!,
           req.userId!,
-          inboxMoveSchema.parse(req.body)
+          inboundForwardSchema.parse(req.body)
         ),
       });
+  },
+  async createMove(req: Request, res: Response) {
+    res.status(202).json({
+      data: await inboxMoveService.create(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!,
+        inboxMoveSchema.parse(req.body)
+      ),
+    });
   },
   async moveBatch(req: Request, res: Response) {
     res.json({
@@ -54,15 +66,13 @@ export const inboxController = {
     });
   },
   async checkMoves(req: Request, res: Response) {
-    res
-      .status(202)
-      .json({
-        data: await inboxMoveService.check(
-          String(req.params.id),
-          req.organizationId!,
-          req.userId!
-        ),
-      });
+    res.status(202).json({
+      data: await inboxMoveService.check(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!
+      ),
+    });
   },
   async listFolders(req: Request, res: Response) {
     const query = z

@@ -491,3 +491,15 @@ describe("RichTextEditor", () => {
     expect(document.querySelector("table")?.getAttribute("width")).toBe("600");
   });
 });
+
+
+it("keeps everyday formatting compact and reveals advanced controls on request",async()=>{
+ const user=userEvent.setup();const changed=vi.fn();renderWithProviders(<RichTextEditor value="<p>Keep my text</p>" onChange={changed} compactToolbar showVariables={false}/>);
+ expect(await screen.findByLabelText("Bold")).toBeInTheDocument();expect(screen.getByLabelText("Link")).toBeInTheDocument();expect(screen.queryByLabelText("HTML block")).not.toBeInTheDocument();
+ await user.click(screen.getByRole("button",{name:"More formatting"}));expect(screen.getByLabelText("HTML block")).toBeInTheDocument();
+ await user.click(screen.getByRole("button",{name:"Less formatting"}));expect(screen.queryByLabelText("HTML block")).not.toBeInTheDocument();expect(changed).not.toHaveBeenCalled();
+});
+it("disables formatting while accepting a send",async()=>{
+ renderWithProviders(<RichTextEditor value="<p>Keep my text</p>" onChange={()=>{}} disabled/>);
+ expect(await screen.findByLabelText("Bold")).toBeDisabled();expect(screen.getByLabelText("Image")).toBeDisabled();
+});

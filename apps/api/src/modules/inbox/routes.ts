@@ -4,6 +4,11 @@ import { requireOrgRole } from "../../middleware/require-org-role.js";
 import { inboxController } from "./controller.js";
 
 export const inboxRouter = Router();
+inboxRouter.post(
+  "/messages/:id/forward",
+  requireOrgMembership,
+  inboxController.prepareForward
+);
 inboxRouter.get(
   "/move-batches/:id",
   requireOrgMembership,

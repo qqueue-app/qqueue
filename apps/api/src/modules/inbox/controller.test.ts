@@ -20,6 +20,11 @@ vi.mock("./service.js", () => ({
   },
 }));
 
+vi.mock("./forward-service.js", () => ({
+  inboxForwardService: { prepare: vi.fn() },
+}));
+const { inboxForwardService } = await import("./forward-service.js");
+
 const { inboxController } = await import("./controller.js");
 const { inboxService } = await import("./service.js");
 
@@ -521,5 +526,45 @@ describe("folder and flag contracts", () => {
         mockRes()
       )
     ).rejects.toThrow();
+  });
+});
+
+describe("forward preparation controller", () => {
+  it("uses the verified organization and returns the prepared draft", async () => {
+    vi.mocked(inboxForwardService.prepare).mockResolvedValue({
+      id: "draft1",
+    } as never);
+    const res = mockRes();
+    await inboxController.prepareForward(
+      {
+        params: { id: "message1" },
+        organizationId: "org1",
+        userId: "u1",
+        body: { clientId: "stable1" },
+      } as unknown as Request,
+      res
+    );
+    expect(inboxForwardService.prepare).toHaveBeenCalledWith(
+      "message1",
+      "org1",
+      "u1",
+      { clientId: "stable1" }
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith({ data: { id: "draft1" } });
+  });
+  it("rejects missing retry identity", async () => {
+    await expect(
+      inboxController.prepareForward(
+        {
+          params: { id: "message1" },
+          organizationId: "org1",
+          userId: "u1",
+          body: {},
+        } as unknown as Request,
+        mockRes()
+      )
+    ).rejects.toThrow();
+    expect(inboxForwardService.prepare).not.toHaveBeenCalled();
   });
 });

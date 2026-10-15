@@ -122,7 +122,7 @@ function replyReferences(message: {
   return [
     ...new Set(
       [...message.references, message.inReplyTo, message.messageId].filter(
-        (value): value is string => Boolean(value)
+        (value): value is string => Boolean(value && /^<[^<>\s]+>$/.test(value))
       )
     ),
   ];
@@ -281,6 +281,7 @@ export const inboxService = {
     const messages = new Map([[seed.id, seed]]);
     const headers = new Set([
       seed.messageId,
+      ...(seed.emailJob?.messageId ? [seed.emailJob.messageId] : []),
       ...seed.references,
       ...(seed.inReplyTo ? [seed.inReplyTo] : []),
     ]);
@@ -320,6 +321,25 @@ export const inboxService = {
         );
       if (!expanded) break;
     }
+    // A headerless original cannot supply an RFC reply reference. The durable
+    // completed draft still links its accepted delivery to this conversation.
+    const headerless = [...messages.values()].filter(
+      (message) => !/^<[^<>\s]+>$/.test(message.messageId)
+    );
+    const completedReplies = headerless.length
+      ? await prisma.emailDraft.findMany({
+          where: {
+            organizationId,
+            inboundMessageId: { in: headerless.map((message) => message.id) },
+            completedSendId: { not: null },
+          },
+          select: { completedSendId: true },
+          take: 1000,
+        })
+      : [];
+    const replyIds = completedReplies.flatMap((draft) =>
+      draft.completedSendId ? [draft.completedSendId] : []
+    );
     const outgoing = await prisma.emailJob.findMany({
       where: {
         organizationId,
@@ -329,6 +349,7 @@ export const inboxService = {
           emailJobScope(access),
           {
             OR: [
+              ...(replyIds.length ? [{ id: { in: replyIds } }] : []),
               { messageId: { in: [...headers] } },
               { inReplyTo: { in: [...headers] } },
               { references: { hasSome: [...headers] } },
@@ -832,7 +853,9 @@ export const inboxService = {
         text: input.text,
         attachmentIds: input.attachmentIds,
         idempotencyKey: input.idempotencyKey,
-        inReplyTo: message.messageId,
+        inReplyTo: /^<[^<>\s]+>$/.test(message.messageId)
+          ? message.messageId
+          : undefined,
         references: replyReferences(message),
       },
       userId

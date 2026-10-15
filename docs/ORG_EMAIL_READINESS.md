@@ -277,15 +277,65 @@ Acceptance evidence:
   destination selection, and blocking dialog changes during acceptance. These
   checks do not establish physical-device or actual transport-loss acceptance.
 
+## Editable replies, forwarding and composer recovery (2026-10-15)
+
+Implemented:
+
+- Replies expose editable To/Cc/Bcc fields. Reply all populates visible recipients,
+  excludes the receiving mailbox, and preserves subsequent edits. Legacy Reply all
+  drafts retain their original intent; a saved Cc-only reply does not silently
+  regain a To recipient. Uncommitted recipient text is backed up with the draft.
+- Invalid recipient text remains visible and blocks submission until corrected or
+  removed. The same accessible recipient control is used by new mail and replies.
+  Ordinary mail editors show basic formatting first, with advanced controls behind
+  More formatting. Accepting a send disables recipient and body editing.
+- Reply uploads retain retry identities and file bytes in device storage when
+  available. Failed files remain visible, block sending, and can be retried or
+  removed. Reopening restores pending files. Newer writing typed during an upload
+  is retained when an older attempt fails. Storage failures carry an explicit
+  keep-open warning rather than a false device-save promise.
+- Replies recover a completed draft's delivery identity after a lost send response.
+  Revision conflicts preserve local writing and offer a read-only saved-version
+  comparison including recipients and files. Choosing that version rechecks its
+  revision and file set. The main composer uses the same comparison workflow.
+- Forward prepares a personal draft through a stable retry identity, with readable
+  quoted original text and all private original attachments. HTML-only originals
+  are converted to text without executing or fetching their markup. Missing,
+  oversized or unavailable original content blocks preparation explicitly. The
+  receiving grant and an authorized matching sending account are required.
+  Sending the prepared draft uses the existing manual delivery pipeline. Removing
+  a forwarded draft's file cannot remove the received original's private blob.
+- Headerless originals do not put local cache identifiers on RFC reply headers.
+  Completed reply drafts retain the link to their authorized delivery outcomes.
+
+Acceptance evidence:
+
+- Chrome prepared a forward from the controlled original, showed its quoted text
+  and private attachment, selected the provided mailbox as the recipient, and
+  reported queue acceptance separately from mail-server acceptance. Independent
+  IMAP fetch verified one received forwarded message, the original writing and
+  the exact original 41-byte attachment.
+- Actual PostgreSQL/API preparation retries returned one draft and attachment.
+  Removing that forwarded attachment left the received original downloadable with
+  identical bytes. Only temporary acceptance drafts were then removed.
+- Full typecheck, lint, build, tests and unchanged coverage thresholds passed.
+  Docker smoke also passed its real SMTP, permissions, reply and migration-drift
+  checks.
+- Regression checks cover edited recipients, invalid/incomplete addresses, legacy
+  Reply all, Cc-only restore, lost send responses, competing draft versions, file
+  retries after reopening, and newer writing during failed uploads. These are
+  automated checks; actual browser transport loss and device storage exhaustion
+  still require acceptance. The latest reply sheet still needs its own native
+  browser/mobile journey beyond these component checks.
+
 ## Required before calling the primary-client goal complete
 
 1. **IMAP folder operations:** external-draft editing/reconciliation and integration of imported Sent
    with the logical delivery archive. Validate UID-validity replacement, large
    mailboxes and interrupted import against real services.
-2. **Draft/composer recovery:** editable reply recipients, forwarding with original
-   attachments, per-account signatures, simpler advanced-editor controls, a clear
-   recovery workflow for conflicting versions, and reply upload recovery. Verify
-   concurrent tabs/devices, interrupted uploads and device storage failures.
+2. **Draft/composer recovery:** per-account signatures and broader native-browser
+   reply/recovery acceptance. Verify concurrent tabs/devices, interrupted uploads
+   and device storage failures, including navigation and organization changes.
 3. **Inbound content acceptance:** stress large/complex MIME messages, missing
    inline parts, real interrupted network/storage uploads and recovery when
    messages move or disappear in another client.

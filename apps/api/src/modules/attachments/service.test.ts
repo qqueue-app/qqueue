@@ -578,3 +578,19 @@ describe("accepted attachment safety", () => {
     expect(storageMock.deleteObject).not.toHaveBeenCalled();
   });
 });
+
+it("removing a forwarded draft attachment preserves its private inbound original", async () => {
+  storageMock.deleteObject.mockReset();
+  prismaMock.emailAttachment.findFirst.mockResolvedValue({
+    id: "forward_file",
+    storageKey: "private/original",
+  } as never);
+  prismaMock.emailAttachment.deleteMany.mockResolvedValue({ count: 1 });
+  prismaMock.emailAttachment.count.mockResolvedValue(0);
+  prismaMock.inboundAttachment.count.mockResolvedValue(1);
+  await attachmentService.delete("forward_file", "user_1");
+  expect(prismaMock.inboundAttachment.count).toHaveBeenCalledWith({
+    where: { storageKey: "private/original" },
+  });
+  expect(storageMock.deleteObject).not.toHaveBeenCalled();
+});

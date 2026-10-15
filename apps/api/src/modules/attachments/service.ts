@@ -271,6 +271,13 @@ export const attachmentService = {
       })
     )
       return;
+    // Forward drafts can share private original blobs with inbound mail.
+    if (
+      await prisma.inboundAttachment.count({
+        where: { storageKey: attachment.storageKey },
+      })
+    )
+      return;
     // Best-effort blob removal: a storage hiccup must not block clearing the
     // metadata row (an orphaned blob is harmless and reclaimable).
     await storage.deleteObject(attachment.storageKey).catch(() => undefined);

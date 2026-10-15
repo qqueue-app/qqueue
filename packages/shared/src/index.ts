@@ -1573,6 +1573,11 @@ export type InboundMessageQueryInput = z.infer<
   typeof inboundMessageQuerySchema
 >;
 
+export const inboundForwardSchema = z.object({
+  clientId: z.string().min(1).max(128),
+});
+export type InboundForwardInput = z.infer<typeof inboundForwardSchema>;
+
 export const inboundMessageReplySchema = z
   .object({
     organizationId: z.string().min(1),

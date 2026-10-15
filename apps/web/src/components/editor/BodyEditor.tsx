@@ -21,6 +21,7 @@ interface BodyEditorProps {
   allowSource?: boolean;
   ariaLabel?: string;
   disabled?: boolean;
+  compactToolbar?: boolean;
 }
 
 /**
@@ -53,6 +54,7 @@ export function BodyEditor({
   allowSource = true,
   ariaLabel,
   disabled = false,
+  compactToolbar = false,
 }: BodyEditorProps) {
   const [mode, setMode] = useState<BodyEditorMode>("rich");
   const [prepared, setPrepared] = useState(() => toEditorHtml(value));
@@ -159,6 +161,7 @@ export function BodyEditor({
           onUploadImage={onUploadImage}
           ariaLabel={ariaLabel}
           disabled={disabled}
+          compactToolbar={compactToolbar}
         />
       ) : (
         <div className="space-y-field">

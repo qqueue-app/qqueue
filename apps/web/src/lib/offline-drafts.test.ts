@@ -239,7 +239,7 @@ describe("offline drafts (§5)", () => {
     db.failNextOpen();
     // Private browsing rejects the open outright. A composer that threw here
     // would lose the message it was trying to protect.
-    await expect(savePendingDraft(draft())).resolves.toBeUndefined();
+    await expect(savePendingDraft(draft())).resolves.toBe(false);
 
     db.failNextOpen();
     await expect(listPendingDrafts()).resolves.toEqual([]);

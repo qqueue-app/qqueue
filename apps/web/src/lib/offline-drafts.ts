@@ -32,6 +32,8 @@ const STORE = "pending-drafts";
  * signature that makes it assignable to one.
  */
 export type PendingDraftPayload = {
+  inboundMessageId?: string;
+  variables?: Record<string, unknown>;
   subject: string;
   html: string;
   to: string[];
@@ -117,11 +119,13 @@ function run<T>(
  * because IndexedDB is unavailable is strictly worse than one that quietly has
  * no offline backup.
  */
-export async function savePendingDraft(draft: PendingDraft): Promise<void> {
+export async function savePendingDraft(draft: PendingDraft): Promise<boolean> {
   try {
     await run("readwrite", (store) => store.put(draft));
+    return true;
   } catch {
-    // No local backup this time; the network save still stands on its own.
+    // Callers must not promise device retention when storage refuses the write.
+    return false;
   }
 }
 

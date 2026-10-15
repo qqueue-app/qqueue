@@ -2680,6 +2680,13 @@ export const api = {
     return request<void>(`/api/v1/recurring-sends/${id}`, { method: "DELETE" });
   },
 
+  prepareInboundForward(id: string, organizationId: string, clientId: string) {
+    return request<EmailDraft>(
+      `/api/v1/inbox/messages/${id}/forward?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "POST", body: JSON.stringify({ clientId }) }
+    );
+  },
+
   replyToInboundMessage(
     id: string,
     input: {
