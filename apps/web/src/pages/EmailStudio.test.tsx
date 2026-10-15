@@ -1087,3 +1087,155 @@ it("opens the explicitly selected window copy when durable storage and the serve
       forgetWindowDraft(copy.localId);
   }
 });
+
+it("keeps local composer writing against a reviewed revision and archives it before adopting the saved version", async () => {
+  vi.clearAllMocks();
+  setup();
+  session.current = {
+    currentOrganizationId: "org_1",
+    user: { id: "conflict-owner" },
+  };
+  localStorage.setItem(
+    "qqueue.session",
+    JSON.stringify({ user: { id: "conflict-owner" }, organizations: [] })
+  );
+  const { listWindowDrafts, forgetWindowDraft } =
+    await import("../lib/window-drafts.js");
+  const user = userEvent.setup();
+  const view = await renderStudio();
+  try {
+    await user.type(screen.getByLabelText("Subject"), "Local subject");
+    await user.type(screen.getByLabelText("body-editor"), "Local body");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(mockedApi.createEmailDraft).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled()
+    );
+    mockedApi.updateEmailDraft.mockRejectedValueOnce({ status: 409 });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    const remote = {
+      id: "d1",
+      organizationId: "org_1",
+      revision: 3,
+      subject: "Saved subject",
+      html: "<p>Saved body</p>",
+      to: ["remote@x.com"],
+      cc: [],
+      bcc: [],
+      listIds: [],
+      attachments: [{ id: "remote-file", filename: "remote.txt" }],
+    };
+    mockedApi.getEmailDraft.mockResolvedValue(remote);
+    await user.click(
+      await screen.findByRole("button", { name: "Compare saved version" })
+    );
+    await screen.findByText("Saved version (read only)");
+    await user.click(screen.getByRole("button", { name: "Keep my writing" }));
+    expect(screen.getByLabelText("Subject")).toHaveValue("Local subject");
+    expect(screen.getByLabelText("body-editor")).toHaveValue("Local body");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled()
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(mockedApi.updateEmailDraft).toHaveBeenCalledWith(
+        "d1",
+        expect.objectContaining({
+          expectedRevision: 3,
+          subject: "Local subject",
+          html: "Local body",
+        })
+      )
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled()
+    );
+    mockedApi.updateEmailDraft.mockRejectedValueOnce({ status: 409 });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Compare saved version" })
+    );
+    await screen.findByText("Saved version (read only)");
+    await user.click(screen.getByRole("button", { name: "Use saved version" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("body-editor")).toHaveValue(
+        "<p>Saved body</p>"
+      )
+    );
+    const archive = (await listPendingDrafts("org_1")).find(
+      (copy) => copy.payload.subject === "Local subject"
+    );
+    expect(archive?.payload.html).toBe("Local body");
+    expect(mockedApi.sendManualEmail).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    for (const copy of listWindowDrafts("conflict-owner"))
+      forgetWindowDraft(copy.localId);
+  }
+});
+
+it("ignores a late rejected save from writing replaced through conflict review", async () => {
+  vi.clearAllMocks();
+  setup();
+  session.current = { currentOrganizationId: "org_1" };
+  const user = userEvent.setup();
+  const view = await renderStudio();
+  let rejectSave!: (error: unknown) => void;
+  try {
+    await user.type(screen.getByLabelText("Subject"), "Old local writing");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(mockedApi.createEmailDraft).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled()
+    );
+    mockedApi.updateEmailDraft.mockRejectedValueOnce({ status: 409 });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByRole("button", { name: "Compare saved version" });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled()
+    );
+    mockedApi.updateEmailDraft.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSave = reject;
+        })
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(rejectSave).toBeTypeOf("function"));
+    mockedApi.getEmailDraft.mockResolvedValue({
+      id: "d1",
+      organizationId: "org_1",
+      revision: 3,
+      subject: "Chosen saved writing",
+      html: "<p>Chosen saved body</p>",
+      to: [],
+      cc: [],
+      bcc: [],
+      listIds: [],
+      attachments: [],
+    });
+    await user.click(
+      screen.getByRole("button", { name: "Compare saved version" })
+    );
+    await screen.findByText("Saved version (read only)");
+    await user.click(screen.getByRole("button", { name: "Use saved version" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Subject")).toHaveValue(
+        "Chosen saved writing"
+      )
+    );
+    await act(async () => {
+      rejectSave({ status: 409 });
+    });
+    expect(
+      screen.queryByRole("button", { name: "Compare saved version" })
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByLabelText("body-editor")).toHaveValue(
+        "<p>Chosen saved body</p>"
+      )
+    );
+  } finally {
+    view.unmount();
+  }
+});

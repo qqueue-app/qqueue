@@ -7,6 +7,7 @@ vi.mock("../../lib/api.js", () => ({
   api: { getEmailDraft: vi.fn(), listEmailDrafts: vi.fn() },
 }));
 const use = vi.fn(),
+  keep = vi.fn(),
   accepted = vi.fn();
 const saved = {
   id: "d1",
@@ -26,6 +27,7 @@ function renderReview(draftId: string | null = "d1") {
       draftId={draftId ?? undefined}
       clientId="client1"
       onUse={use}
+      onKeep={keep}
       onAccepted={accepted}
     />
   );
@@ -118,4 +120,31 @@ describe("draft conflict comparison", () => {
     expect(use).not.toHaveBeenCalled();
     expect(screen.queryByTitle("Saved draft version")).not.toBeInTheDocument();
   });
+});
+
+it("rechecks the reviewed snapshot before keeping local writing and never adopts a newly changed or completed version", async () => {
+  const user = userEvent.setup();
+  renderReview();
+  await user.click(
+    screen.getByRole("button", { name: "Compare saved version" })
+  );
+  await screen.findByText("private.txt");
+  vi.mocked(api.getEmailDraft).mockResolvedValue({
+    ...saved,
+    revision: 3,
+    html: "Changed again",
+  });
+  await user.click(screen.getByRole("button", { name: "Keep my writing" }));
+  await waitFor(() =>
+    expect(screen.getByTitle("Saved draft version")).toHaveAttribute(
+      "srcdoc",
+      "Changed again"
+    )
+  );
+  expect(keep).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Keep my writing" }));
+  await waitFor(() =>
+    expect(keep).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
+  );
+  expect(use).not.toHaveBeenCalled();
 });

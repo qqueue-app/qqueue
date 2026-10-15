@@ -1310,3 +1310,16 @@ requests are abortable on departure; their stable retry identity and local bytes
 remain recoverable even if the server accepted the upload before cancellation.
 A browser close warning is a last resort, not durable persistence or proof of
 physical-device crash recovery.
+
+
+## Conflict Resolution Requires an Explicit Reviewed Choice (2026-10-15)
+
+Keep my writing rechecks the compared server snapshot before adopting its
+revision for a conditional save. Local text/recipients and both uploaded file
+sets remain visible; a subsequent competing revision still conflicts. Use saved
+version first archives local writing and pending private file bytes, then replaces
+what is on screen. Neither action sends mail or merges text automatically.
+
+Changing the chosen writing invalidates queued earlier save work. Late save
+responses acknowledge only their submitted snapshot and cannot change the new
+composer's draft identity, save status or conflict state.

@@ -43,7 +43,7 @@ honest invitation delivery status and atomic team/grant changes are implemented.
 Actual browser offline reply recovery also exposed and verified a backup lookup
 fix. Reply device copies are now isolated per open tab; restored ordinary drafts
 retain one server identity with separate local records. Recovery dialogs and
-snapshot-specific save feedback preserve concurrent writing. Scoped live-window copies now preserve navigation and organization changes when device/server draft saving fails, with honest close warnings, private recovery/download controls and retryable device persistence. External-draft editing, bounded long-conversation loading and broader
+snapshot-specific save feedback preserve concurrent writing. Scoped live-window copies now preserve navigation and organization changes when device/server draft saving fails, with honest close warnings, private recovery/download controls and retryable device persistence. Conflict review now supports deliberately keeping local writing against a reviewed revision or adopting the saved version after preserving the replaced copy and file bytes. External-draft editing, bounded long-conversation loading and broader
 acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer

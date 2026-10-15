@@ -176,8 +176,10 @@ export function ReplyComposer({
   const [saved, setSaved] = useState(false);
   const draftId = useRef(initialDraftId ?? backup?.draftId);
   const revision = useRef(backup?.revision ?? 1);
+  const recoveredRevision = useRef(Boolean(backup?.draftId));
   const clientId = useRef(backup?.clientId ?? crypto.randomUUID());
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  const saveGeneration = useRef(0);
   const touched = useRef(Boolean(backup));
   const sent = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -213,6 +215,7 @@ export function ReplyComposer({
         setBcc(saved.payload.bcc);
         draftId.current = saved.draftId ?? undefined;
         revision.current = saved.revision ?? 1;
+        recoveredRevision.current = Boolean(saved.draftId);
         clientId.current = saved.clientId ?? clientId.current;
         setAttachments(saved.attachments ?? []);
         touched.current = true;
@@ -340,9 +343,8 @@ export function ReplyComposer({
       sent.current = true;
     }
     if (
-      ((backup?.draftId &&
-        backup.revision &&
-        backup.revision !== draft.revision) ||
+      ((recoveredRevision.current &&
+        revision.current !== (draft.revision ?? 1)) ||
         (loadedDraft.current &&
           touched.current &&
           revision.current !== (draft.revision ?? 1))) &&
@@ -377,6 +379,7 @@ export function ReplyComposer({
       recipients: writing.current,
       fingerprint: latest.current,
       backup: pendingRecord(),
+      generation: saveGeneration.current,
     };
   }
   const save = useApiMutation(
@@ -385,10 +388,12 @@ export function ReplyComposer({
       recipients,
       fingerprint,
       backup: snapshot,
+      generation,
     }: ReturnType<typeof saveSnapshot>) => {
       const work = saveChain.current
         .catch(() => undefined)
         .then(async () => {
+          if (generation !== saveGeneration.current) return;
           if (user?.id && getSession().user?.id !== user.id)
             throw new Error(
               "Sign in to the original account to save this reply."
@@ -419,6 +424,10 @@ export function ReplyComposer({
                 clientId: clientId.current,
                 ...payload,
               });
+          if (generation !== saveGeneration.current) {
+            await acknowledgePendingDraft(snapshot, draft.id, draft.revision);
+            return draft.id;
+          }
           draftId.current = draft.id;
           revision.current = draft.revision ?? 1;
           setSaved(fingerprint === latest.current);
@@ -449,7 +458,8 @@ export function ReplyComposer({
     {
       errorMessage:
         "Couldn't save to the server. Keep this reply open and try again.",
-      onError: (error) => {
+      onError: (error, snapshot) => {
+        if (snapshot.generation !== saveGeneration.current) return;
         setSaved(false);
         if (
           typeof error === "object" &&
@@ -1033,7 +1043,54 @@ export function ReplyComposer({
                   sent.current = true;
                   setAcceptedId(id);
                 }}
+                onKeep={(current) => {
+                  saveGeneration.current++;
+                  saveChain.current = Promise.resolve();
+                  uploadAbort.current?.abort();
+                  draftId.current = current.id;
+                  revision.current = current.revision ?? 1;
+                  clientId.current = current.clientId ?? clientId.current;
+                  setAttachments((local) => [
+                    ...new Map(
+                      [...local, ...(current.attachments ?? [])].map((file) => [
+                        file.id,
+                        file,
+                      ])
+                    ).values(),
+                  ]);
+                  touched.current = true;
+                  setSaved(false);
+                  setConflict(false);
+                }}
                 onUse={(current) => {
+                  saveGeneration.current++;
+                  saveChain.current = Promise.resolve();
+                  uploadAbort.current?.abort();
+                  const archivedKey = `${backupId}.before.${crypto.randomUUID()}`;
+                  void savePendingDraft({
+                    ...pendingRecord(),
+                    localId: archivedKey,
+                  });
+                  try {
+                    if (storageKey)
+                      localStorage.setItem(
+                        archivedKey,
+                        JSON.stringify({
+                          ...writing.current,
+                          draftId: draftId.current,
+                          revision: revision.current,
+                          clientId: clientId.current,
+                          updatedAt: new Date().toISOString(),
+                          pendingFiles: pendingRef.current.map((file) => ({
+                            name: file.file.name,
+                            size: file.file.size,
+                          })),
+                        })
+                      );
+                  } catch {
+                    setStorageError(true);
+                  }
+                  updateFiles([]);
                   draftId.current = current.id;
                   revision.current = current.revision ?? 1;
                   setSignature(

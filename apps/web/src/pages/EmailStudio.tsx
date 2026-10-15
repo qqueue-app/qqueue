@@ -777,10 +777,15 @@ function EmailStudioWorkspace() {
 
   const saveDraft = useCallback(
     async (silent: boolean): Promise<string | null> => {
+      const generation = localDraftId.current;
       const work = saveChain.current
         .catch(() => undefined)
         .then(async (): Promise<string | null> => {
-          if (!organizationId || openingDraft) {
+          if (
+            generation !== localDraftId.current ||
+            !organizationId ||
+            openingDraft
+          ) {
             return null;
           }
           if (acceptedSend.current) return null;
@@ -834,7 +839,10 @@ function EmailStudioWorkspace() {
                 clientId: snapshot.clientId ?? snapshot.localId,
                 ...payload,
               });
-              setDraftId(saved.id);
+            }
+            if (generation !== localDraftId.current) {
+              await acknowledgePendingDraft(snapshot, saved.id, saved.revision);
+              return saved.id;
             }
             // Acknowledged by the server, so the local copy has done its job.
             draftIdentity.current = {
@@ -842,6 +850,7 @@ function EmailStudioWorkspace() {
               revision: saved.revision ?? 1,
             };
             await acknowledgePendingDraft(snapshot, saved.id, saved.revision);
+            setDraftId(saved.id);
             setDraftConflict(false);
             setLastSavedAt(saved.updatedAt);
             setSavedFingerprint(snapshotFingerprint);
@@ -859,6 +868,7 @@ function EmailStudioWorkspace() {
             }
             return saved.id;
           } catch (error) {
+            if (generation !== localDraftId.current) return null;
             /*
           Two very different failures wear the same exception here, and telling
           them apart is what keeps the offline queue honest.
@@ -951,7 +961,7 @@ function EmailStudioWorkspace() {
     []
   );
   useEffect(() => {
-    if (!organizationId || !hasContent || sending) {
+    if (!organizationId || !hasContent || sending || draftConflict) {
       return;
     }
     const timeout = window.setTimeout(() => {
@@ -971,9 +981,12 @@ function EmailStudioWorkspace() {
     smtpConnectionId,
     templateId,
     replyTo,
+    draftConflict,
   ]);
 
   function applyDeviceCopy(latest: PendingDraft) {
+    uploadAbort.current?.abort();
+    saveChain.current = Promise.resolve();
     // Restore a copy into this composer; another open tab still owns its
     // original local row. Creation retries retain the original server identity.
     localDraftId.current = newLocalDraftId();
@@ -1115,6 +1128,8 @@ function EmailStudioWorkspace() {
 
   const applyDraft = useCallback(
     (draft: EmailDraft) => {
+      uploadAbort.current?.abort();
+      saveChain.current = Promise.resolve();
       if (draft.organizationId && draft.organizationId !== organizationId) {
         toast.error(
           "This draft belongs to another organization. Switch to that organization to open it."
@@ -1145,6 +1160,7 @@ function EmailStudioWorkspace() {
       setReplyTo(draft.replyTo ?? "");
       setSelectedListIds(draft.listIds ?? []);
       setAttachments(draft.attachments ?? []);
+      updateUploads([]);
       setSMTPConnectionId(draft.smtpConnectionId ?? DEFAULT_SMTP);
       setTemplateId(draft.templateId ?? NO_TEMPLATE);
       setLastSavedAt(draft.updatedAt);
@@ -2132,7 +2148,33 @@ function EmailStudioWorkspace() {
                     organizationId={organizationId!}
                     draftId={draftIdentity.current.id}
                     clientId={draftClientId.current}
-                    onUse={applyDraft}
+                    onUse={(draft) => {
+                      preserveWriting.current();
+                      applyDraft(draft);
+                    }}
+                    onKeep={(draft) => {
+                      preserveWriting.current();
+                      localDraftId.current = newLocalDraftId();
+                      saveChain.current = Promise.resolve();
+                      uploadAbort.current?.abort();
+                      draftIdentity.current = {
+                        id: draft.id,
+                        revision: draft.revision ?? 1,
+                      };
+                      draftClientId.current =
+                        draft.clientId ?? draftClientId.current;
+                      setDraftId(draft.id);
+                      setAttachments((local) => [
+                        ...new Map(
+                          [...local, ...(draft.attachments ?? [])].map(
+                            (file) => [file.id, file]
+                          )
+                        ).values(),
+                      ]);
+                      setSavedFingerprint(undefined);
+                      setDraftConflict(false);
+                      setPendingLocally(true);
+                    }}
                     onAccepted={(id) => {
                       acceptedSend.current = id;
                       setAcceptedSendId(id);

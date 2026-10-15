@@ -710,3 +710,108 @@ it("aborts a departing reply upload and keeps retry bytes under the same upload 
   });
   expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
 });
+
+it("keeps local reply writing against the reviewed revision and retains the remote uploaded files", async () => {
+  localStorage.setItem(
+    storageKey,
+    JSON.stringify({
+      html: "Local reply writing",
+      to: ["local@example.com"],
+      cc: [],
+      bcc: [],
+      draftId: "draft_1",
+      revision: 1,
+    })
+  );
+  mocked.getEmailDraft.mockResolvedValue({
+    id: "draft_1",
+    organizationId: "org_1",
+    revision: 2,
+    html: "Remote reply writing",
+    to: ["remote@example.com"],
+    attachments: [{ id: "remote-file", filename: "remote.txt" }],
+  } as never);
+  mocked.updateEmailDraft.mockResolvedValue({
+    id: "draft_1",
+    revision: 3,
+  } as never);
+  const user = userEvent.setup();
+  await renderReply();
+  await user.click(
+    await screen.findByRole("button", { name: "Compare saved version" })
+  );
+  await screen.findByText("Saved version (read only)");
+  await user.click(screen.getByRole("button", { name: "Keep my writing" }));
+  expect(
+    screen.getByRole("textbox", { name: "Reply to Customer" })
+  ).toHaveValue("Local reply writing");
+  await waitFor(
+    () =>
+      expect(mocked.updateEmailDraft).toHaveBeenCalledWith(
+        "draft_1",
+        expect.objectContaining({
+          expectedRevision: 2,
+          html: "Local reply writing",
+          to: ["local@example.com"],
+        })
+      ),
+    { timeout: 3000 }
+  );
+  expect(screen.getByText(/remote.txt/)).toBeInTheDocument();
+  expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
+});
+
+it("keeps replaced reply writing and file bytes in a separate copy before using the saved version", async () => {
+  const { savePendingDraft } = await import("../../lib/offline-drafts.js");
+  const file = new File(["pending private bytes"], "local-pending.txt");
+  await savePendingDraft({
+    userId: "user_1",
+    organizationId: "org_1",
+    localId: "old-device-copy",
+    draftId: "draft_1",
+    revision: 1,
+    payload: {
+      inboundMessageId: "message_1",
+      subject: "Re: Question",
+      html: "Local with waiting bytes",
+      to: ["local@example.com"],
+      cc: [],
+      bcc: [],
+      listIds: [],
+    },
+    pendingUploads: [{ file, uploadId: "stable-pending", error: "Offline" }],
+    updatedAt: "2026-10-15T13:00:00Z",
+  });
+  mocked.getEmailDraft.mockResolvedValue({
+    id: "draft_1",
+    organizationId: "org_1",
+    revision: 2,
+    html: "Saved replacement",
+    to: ["saved@example.com"],
+    attachments: [],
+  } as never);
+  const user = userEvent.setup();
+  await renderReply();
+  // A restored pending record carries the original revision even without a localStorage backup.
+  await user.click(
+    await screen.findByRole("button", { name: "Compare saved version" })
+  );
+  await screen.findByText("Saved version (read only)");
+  await user.click(screen.getByRole("button", { name: "Use saved version" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Reply to Customer" })
+    ).toHaveValue("Saved replacement")
+  );
+  expect(
+    screen.queryByRole("button", { name: "Retry local-pending.txt" })
+  ).not.toBeInTheDocument();
+  const archive = (await listPendingDrafts("org_1")).find((copy) =>
+    copy.localId.includes(".before.")
+  );
+  expect(archive).toMatchObject({
+    payload: { html: "Local with waiting bytes" },
+    pendingUploads: [{ file, uploadId: "stable-pending" }],
+  });
+  expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
+});

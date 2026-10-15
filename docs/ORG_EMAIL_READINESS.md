@@ -519,13 +519,42 @@ Acceptance evidence:
   are automated evidence; physical-device and browser transport-loss acceptance
   remain separate gaps.
 
+## Deliberate draft-conflict resolution (2026-10-15)
+
+Implemented:
+
+- Comparison now offers Keep my writing after rechecking the exact reviewed
+  server revision and file set. It retains the current text and recipients,
+  includes both sets of uploaded files and saves with the reviewed revision.
+  A further concurrent server change still rejects the save. This is an explicit
+  choice, not automatic text merging or a bypass of revision checks.
+- Use saved version preserves the replaced writing and pending private file
+  bytes in a separate recovery copy before replacing the composer. Waiting
+  uploads no longer remain attached to the replacement. Recovery from a pending
+  reply record detects stale revisions even without a localStorage backup.
+- Changing the selected writing invalidates queued older saves. Late responses
+  from the previous writing cannot replace the chosen draft identity or restore
+  its old conflict state. Existing server identity and stable send acceptance
+  remain the correctness controls.
+
+Acceptance evidence:
+
+- Chrome compared the actual saved draft, chose Keep my writing and retained the
+  exact controlled subject/body. Actual PostgreSQL confirmed the newer revision
+  and no completed send. Existing alternate local records were retained.
+- Automated checks cover a second server change during review, preserving local
+  recipients and remote files, archiving replaced reply bytes, both ordinary
+  composer choices and a late rejected save after replacement. Full typecheck,
+  lint, build, tests and unchanged coverage gates passed. No schema or delivery
+  pipeline changed. Actual concurrent physical devices and transport-loss
+  acceptance remain open.
+
 ## Required before calling the primary-client goal complete
 
 1. **IMAP folder operations:** external-draft editing/reconciliation. Validate
    UID-validity replacement, large
    mailboxes and interrupted import against real services.
-2. **Draft/composer recovery:** simplify intentional merging of a local copy
-   with a newer server revision. Broaden actual concurrent-device, interrupted
+2. **Draft/composer recovery:** broaden actual concurrent-device, interrupted
    upload, lost-response and storage-failure acceptance across navigation and
    organization changes.
 3. **Inbound content acceptance:** stress large/complex MIME messages, missing

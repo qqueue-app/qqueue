@@ -24,11 +24,13 @@ export function DraftConflictReview({
   clientId,
   onUse,
   onAccepted,
+  onKeep,
 }: {
   organizationId: string;
   draftId?: string | null;
   clientId?: string;
-  onUse: (draft: EmailDraft) => void;
+  onUse: (draft: EmailDraft) => void | Promise<void>;
+  onKeep?: (draft: EmailDraft) => void | Promise<void>;
   onAccepted: (id: string) => void;
 }) {
   const [compared, setCompared] = useState<EmailDraft>();
@@ -56,7 +58,7 @@ export function DraftConflictReview({
     },
     errorMessage: "Couldn't load the saved version. Your writing is kept here.",
   });
-  const useSaved = useApiMutation(async () => {
+  const choose = useApiMutation(async (choice: "saved" | "local") => {
     const current = await load();
     if (current.completedSendId) {
       onAccepted(current.completedSendId);
@@ -68,7 +70,8 @@ export function DraftConflictReview({
         "The saved draft changed again. Review its latest version before replacing your writing."
       );
     }
-    onUse(current);
+    if (choice === "local") await onKeep?.(current);
+    else await onUse(current);
     setCompared(undefined);
   });
   return (
@@ -80,7 +83,7 @@ export function DraftConflictReview({
       <Button
         type="button"
         variant="secondary"
-        disabled={compare.isPending || useSaved.isPending}
+        disabled={compare.isPending || choose.isPending}
         onClick={() => compare.mutate()}
       >
         Compare saved version
@@ -100,14 +103,26 @@ export function DraftConflictReview({
             <p key={file.id}>{file.filename}</p>
           ))}
           <p>
-            Copy any writing you want to keep before choosing the saved version.
-            Choosing it replaces your current text and files.
+            Use the saved version to replace this composer; your current writing
+            and waiting files are kept as a separate recovery copy. Keep my
+            writing retains your current text and recipients and both sets of
+            uploaded files. It saves against the reviewed version; another
+            concurrent change will require comparison again.
           </p>
+          {onKeep ? (
+            <Button
+              type="button"
+              disabled={compare.isPending || choose.isPending}
+              onClick={() => choose.mutate("local")}
+            >
+              Keep my writing
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="secondary"
-            disabled={compare.isPending || useSaved.isPending}
-            onClick={() => useSaved.mutate()}
+            disabled={compare.isPending || choose.isPending}
+            onClick={() => choose.mutate("saved")}
           >
             Use saved version
           </Button>
