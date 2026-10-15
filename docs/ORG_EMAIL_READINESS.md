@@ -363,10 +363,80 @@ Acceptance evidence:
   also cover From changes, preserving edited signatures, manual insertion,
   private settings conflicts and failed deep-link loading/retry.
 
+## Unified mail workspaces, search and team coordination (2026-10-15)
+
+Implemented:
+
+- Sent, Drafts, Outbox and Search mail share the approved reading-pane layout,
+  Focused mail preference and phone list/reader flow. Long subjects truncate in
+  the fixed-width list rather than shifting its contents under the 200px sidebar.
+  Existing delivery reports, queue management and legacy filtered links remain
+  available. Imported Sent copies and the delivery archive appear in one list;
+  a matching mailbox/Message-ID produces one logical search result.
+- Received/sent subject, address and body search is scoped to current mailbox
+  grants. Personal drafts stay private; SYSTEM mail stays excluded. Search text
+  is a bound literal, including wildcard characters. Stable cursor pages bind
+  the organization, person, view and filters, with an explicit older-mail action.
+  URL-owned filters/selections, Back, reader focus and list scroll restoration
+  preserve context. Failed reads retain cached rows and expose retry controls.
+- Replies to imported own Sent messages target the original recipients rather
+  than the sender's own mailbox; Reply all deduplicates visible recipients.
+- Renewable 45-second reply indicators show authorized teammates and the same
+  person's other open composer. They carry names and expiry only, no writing,
+  and never lock a send. Expired indicators disappear locally without waiting
+  for another server response. Revoked membership/read access hides them; failed
+  coordination is visible and does not prevent composing.
+- Team data uses organization-scoped query state with a visible retry path.
+  Invitations report email queue acceptance separately from manual-link fallback,
+  show expiry and provide Resend. Renewal invalidates old links; acceptance
+  consumes a still-valid token atomically. The screen links mailbox assignment
+  and distinguishes QQueue sign-in resets from mailbox-password recovery.
+- Role and mailbox-grant edits serialize with membership removal. Competing
+  changes cannot remove the last owner. Removing a member also removes mailbox
+  and provisioning grants, so rejoining does not restore former access; personal
+  writing is retained. Organization roles do not confer instance administration.
+- Reply device backups resolve consistently across Drafts and message entry
+  points while keeping explicit draft identities separate. Offline saves show
+  their paused connection state rather than a server-save promise.
+
+Acceptance evidence:
+
+- Full typecheck, lint, build, tests and unchanged coverage thresholds passed.
+  Fresh Docker smoke applied the additive presence migration, checked SMTP and
+  permissions, exercised actual SQL search/pagination and reported no schema drift.
+- Actual PostgreSQL/API checks verified received/sent pagination, mailbox scope,
+  private drafts, SYSTEM exclusion, literal search and cursor boundaries. A
+  disposable 3,000-row database fixture produced 2,000 logical messages over 80
+  pages without skipped or repeated results; all page queries took 1.58 seconds
+  in total. This is database-volume evidence, not large real-IMAP acceptance.
+- One self-addressed message sent by an independent SMTP client and appended to
+  its real Sent folder imported as one logical message with Inbox/Sent locations
+  and its exact 39-byte private attachment. It appeared once in unified Sent.
+- Chrome verified filtered search deep links and Back, imported Sent reading,
+  delivery writing/outcomes/private-file metadata, and saved-draft preview. A
+  440px phone viewport showed the single-screen draft preview; keyboard navigation
+  reopened its saved reply with recipients and signature. These are browser
+  checks, not physical phone keyboard or assistive-technology acceptance.
+- Two actual Chrome tabs showed simultaneous reply presence. Disconnecting the
+  test tab through browser network controls, editing, closing and reopening the
+  original reply retained its latest writing. Reconnecting saved that writing
+  to PostgreSQL without sending a reply. This test exposed and verified the
+  backup-entry and paused-save-status fixes above; it does not prove interrupted
+  file-upload or lost-send-response recovery in a real browser.
+- Real PostgreSQL/API checks verified invitation renewal/revocation, no-account
+  email fallback, grant-scoped renewable presence, revoked-reader invisibility,
+  per-user indicator removal, retained drafts after membership removal, denied
+  instance controls for an ordinary org admin, and concurrent owner edits. Chrome
+  also created, resent and revoked a disposable invitation in an organization
+  without a sending account, showing the honest manual-link fallback. No email
+  was sent for that invitation test. Chrome also opened an accepted message
+  scheduled seven days ahead and cancelled it through Outbox's confirmation.
+  PostgreSQL confirmed CANCELLED, no SMTP send time and retained original writing.
+
 ## Required before calling the primary-client goal complete
 
-1. **IMAP folder operations:** external-draft editing/reconciliation and integration of imported Sent
-   with the logical delivery archive. Validate UID-validity replacement, large
+1. **IMAP folder operations:** external-draft editing/reconciliation. Validate
+   UID-validity replacement, large
    mailboxes and interrupted import against real services.
 2. **Draft/composer recovery:** broader acceptance of concurrent tabs/devices,
    interrupted uploads and device storage failures, including navigation and
@@ -374,12 +444,12 @@ Acceptance evidence:
 3. **Inbound content acceptance:** stress large/complex MIME messages, missing
    inline parts, real interrupted network/storage uploads and recovery when
    messages move or disappear in another client.
-4. **Team coordination:** concurrent reply presence; streamline invitations,
-   mailbox assignment, resend and recovery-address workflows. Mailbox-password
+4. **Team acceptance:** exercise mailbox assignment and recovery with a real
+   provisioning service and different teammates in the browser. Mailbox-password
    recovery remains distinct from QQueue sign-in reset links.
-5. **Navigation/search:** unified received/sent search with mailbox scope, URL-owned
-   search/filter state and acceptance of Back/scroll/deep links across all mail
-   surfaces, including long conversations and failed loads.
+5. **Long conversations:** bound body loading and rendering rather than opening
+   every body at once. Complete Back/scroll/deep-link acceptance on long threads
+   and all remaining mail surfaces.
 6. **Broader acceptance:** distinct controlled To/Cc/Bcc recipient mailboxes,
    slow/interrupted browser networks and lost responses, actual phone keyboards
    and safe areas, accessibility/assistive technology, large histories and multiple

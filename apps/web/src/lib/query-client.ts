@@ -67,6 +67,15 @@ export function createQueryClient() {
  * one org's rows into another's view.
  */
 export const qk = {
+  mailSearch: (
+    orgId: string,
+    userId: string,
+    filters: Record<string, unknown>
+  ) => ["mail-search", orgId, userId, filters] as const,
+  searchableMailboxes: (orgId: string, userId: string) =>
+    ["mail-search-mailboxes", orgId, userId] as const,
+  outgoingMail: (orgId: string, id: string) =>
+    ["mail-outgoing", orgId, id] as const,
   mailSignatures: (orgId: string, userId: string) =>
     ["mail-signatures", orgId, userId] as const,
   composerDraft: (orgId: string, userId: string, id: string) =>

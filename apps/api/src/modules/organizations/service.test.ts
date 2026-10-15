@@ -7,21 +7,23 @@ describe("organizationService", () => {
     prismaMock.organizationMember.findMany.mockResolvedValue([
       {
         role: "OWNER",
-        organization: { id: "org_1", name: "Acme", createdAt: new Date(0) }
-      }
+        organization: { id: "org_1", name: "Acme", createdAt: new Date(0) },
+      },
     ] as never);
 
     const result = await organizationService.list("user_1");
     expect(result).toEqual([
-      { id: "org_1", name: "Acme", createdAt: new Date(0), role: "OWNER" }
+      { id: "org_1", name: "Acme", createdAt: new Date(0), role: "OWNER" },
     ]);
   });
 
   it("gets an organization after asserting access", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
-    prismaMock.organization.findUnique.mockResolvedValue({ id: "org_1" } as never);
+    prismaMock.organization.findUnique.mockResolvedValue({
+      id: "org_1",
+    } as never);
 
     const result = await organizationService.get("org_1", "user_1");
     expect(result).toEqual({ id: "org_1" });
@@ -38,11 +40,11 @@ describe("organizationService", () => {
     // Owner or admin somewhere already — the account-level check that replaces
     // the role check an organization that does not exist yet cannot answer.
     prismaMock.organizationMember.findFirst.mockResolvedValue({
-      id: "member_1"
+      id: "member_1",
     } as never);
     prismaMock.organization.create.mockResolvedValue({
       id: "org_1",
-      name: "Acme"
+      name: "Acme",
     } as never);
     const result = await organizationService.create({ name: "Acme" }, "user_1");
     expect(result).toEqual({ id: "org_1", name: "Acme", role: "OWNER" });
@@ -62,7 +64,7 @@ describe("organizationService", () => {
 
   it("updates an organization when the user is OWNER/ADMIN", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
     prismaMock.organization.update.mockResolvedValue({ id: "org_1" } as never);
     await organizationService.update("org_1", "user_1", { name: "New" });
@@ -71,7 +73,7 @@ describe("organizationService", () => {
 
   it("throws 403 updating without OWNER/ADMIN role", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     await expect(
       organizationService.update("org_1", "user_1", { name: "New" })
@@ -80,18 +82,18 @@ describe("organizationService", () => {
 
   it("deletes an organization when the user is OWNER", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.organization.delete.mockResolvedValue({ id: "org_1" } as never);
     await organizationService.delete("org_1", "user_1");
     expect(prismaMock.organization.delete).toHaveBeenCalledWith({
-      where: { id: "org_1" }
+      where: { id: "org_1" },
     });
   });
 
   it("throws 403 deleting without OWNER role", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
     await expect(organizationService.delete("org_1", "user_1")).rejects.toThrow(
       "You do not have permission to do this"
@@ -106,7 +108,7 @@ describe("organizationService", () => {
         .mockResolvedValueOnce({ role: "MEMBER" } as never);
       prismaMock.organizationMember.update.mockResolvedValue({
         userId: "target",
-        role: "ADMIN"
+        role: "ADMIN",
       } as never);
 
       const result = await organizationService.updateMemberRole(
@@ -125,7 +127,12 @@ describe("organizationService", () => {
         .mockResolvedValueOnce({ role: "OWNER" } as never);
 
       await expect(
-        organizationService.updateMemberRole("org_1", "target", "actor", "MEMBER")
+        organizationService.updateMemberRole(
+          "org_1",
+          "target",
+          "actor",
+          "MEMBER"
+        )
       ).rejects.toThrow("Admins cannot change an owner's role");
     });
 
@@ -135,7 +142,12 @@ describe("organizationService", () => {
         .mockResolvedValueOnce({ role: "MEMBER" } as never);
 
       await expect(
-        organizationService.updateMemberRole("org_1", "target", "actor", "OWNER")
+        organizationService.updateMemberRole(
+          "org_1",
+          "target",
+          "actor",
+          "OWNER"
+        )
       ).rejects.toThrow("Only an owner can grant the owner role");
     });
 
@@ -146,7 +158,12 @@ describe("organizationService", () => {
       prismaMock.organizationMember.count.mockResolvedValue(1);
 
       await expect(
-        organizationService.updateMemberRole("org_1", "target", "actor", "MEMBER")
+        organizationService.updateMemberRole(
+          "org_1",
+          "target",
+          "actor",
+          "MEMBER"
+        )
       ).rejects.toThrow("at least one owner");
     });
 
@@ -170,7 +187,9 @@ describe("organizationService", () => {
 
       await organizationService.removeMember("org_1", "target", "actor");
       expect(prismaMock.organizationMember.delete).toHaveBeenCalledWith({
-        where: { organizationId_userId: { organizationId: "org_1", userId: "target" } }
+        where: {
+          organizationId_userId: { organizationId: "org_1", userId: "target" },
+        },
       });
     });
 
@@ -201,12 +220,12 @@ describe("organizationService", () => {
       brandName: "Acme",
       logoUrl: "https://cdn.example.com/logo.png",
       accentColor: "#2E7D63",
-      footerNote: "Acme Inc, 400 Market St"
+      footerNote: "Acme Inc, 400 Market St",
     };
 
     it("lets any member read it, so a MEMBER still gets an accurate preview", async () => {
       prismaMock.organizationMember.findUnique.mockResolvedValue({
-        role: "MEMBER"
+        role: "MEMBER",
       } as never);
       prismaMock.organization.findUnique.mockResolvedValue(branding as never);
 
@@ -217,7 +236,7 @@ describe("organizationService", () => {
 
     it("throws 404 when the organization is gone", async () => {
       prismaMock.organizationMember.findUnique.mockResolvedValue({
-        role: "OWNER"
+        role: "OWNER",
       } as never);
       prismaMock.organization.findUnique.mockResolvedValue(null as never);
 
@@ -228,7 +247,7 @@ describe("organizationService", () => {
 
     it("lets an ADMIN write it", async () => {
       prismaMock.organizationMember.findUnique.mockResolvedValue({
-        role: "ADMIN"
+        role: "ADMIN",
       } as never);
       prismaMock.organization.update.mockResolvedValue(branding as never);
 
@@ -239,7 +258,7 @@ describe("organizationService", () => {
 
     it("forbids a MEMBER from writing it — it changes what every recipient sees", async () => {
       prismaMock.organizationMember.findUnique.mockResolvedValue({
-        role: "MEMBER"
+        role: "MEMBER",
       } as never);
 
       await expect(
@@ -248,4 +267,18 @@ describe("organizationService", () => {
       expect(prismaMock.organization.update).not.toHaveBeenCalled();
     });
   });
+});
+
+it("removes mailbox/provisioning grants and reply indicators with membership, preserving personal writing", async () => {
+  prismaMock.organizationMember.findUnique
+    .mockResolvedValueOnce({ role: "OWNER" } as never)
+    .mockResolvedValueOnce({ role: "MEMBER" } as never);
+  await organizationService.removeMember("org_1", "target", "actor");
+  const scope = { where: { organizationId: "org_1", userId: "target" } };
+  expect(prismaMock.smtpConnectionGrant.deleteMany).toHaveBeenCalledWith(scope);
+  expect(prismaMock.inboxAccountGrant.deleteMany).toHaveBeenCalledWith(scope);
+  expect(prismaMock.mailDomainGrant.deleteMany).toHaveBeenCalledWith(scope);
+  expect(prismaMock.replyPresence.deleteMany).toHaveBeenCalledWith(scope);
+  expect(prismaMock.emailDraft.deleteMany).not.toHaveBeenCalled();
+  expect(prismaMock.$queryRaw).toHaveBeenCalled();
 });

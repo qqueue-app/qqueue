@@ -1,3 +1,4 @@
+import { resolveMailReplyRecipients } from "@qqueue/shared";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Paperclip, Send, Trash2 } from "lucide-react";
@@ -7,6 +8,7 @@ import {
   signatureStamp,
   type SignatureStamp,
 } from "./SignatureControl.js";
+import { ReplyPresenceNotice } from "./ReplyPresenceNotice.js";
 import { RecipientField } from "./RecipientField.js";
 import {
   savePendingDraft,
@@ -34,11 +36,13 @@ import {
   api,
   type EmailAttachment,
   type InboundMessage,
+  type ReplyPresence,
 } from "../../lib/api.js";
 import { formatBytes } from "../../lib/format.js";
 import { qk } from "../../lib/query-client.js";
 import { useApiMutation, useOrgQuery } from "../../lib/use-api.js";
 import { useSession } from "../../lib/session-context.js";
+import { replyBackupKey } from "../../lib/reply-backup.js";
 import { getSession } from "../../lib/session.js";
 
 interface Props {
@@ -46,6 +50,7 @@ interface Props {
   organizationId: string;
   mailboxEmail: string;
   initialDraftId?: string;
+  replyPresence?: { available: boolean; participants: ReplyPresence[] };
   onClose: () => void;
   onQueued: (id: string) => void;
 }
@@ -69,14 +74,43 @@ export function ReplyComposer({
   organizationId,
   mailboxEmail,
   initialDraftId,
+  replyPresence,
   onClose,
   onQueued,
 }: Props) {
   const { user } = useSession();
   const queryClient = useQueryClient();
-  const storageKey = user?.id
-    ? `qqueue.reply.${user.id}.${organizationId}.${message.id}${initialDraftId ? `.${initialDraftId}` : ""}`
-    : null;
+  const [presenceClientId] = useState(() => crypto.randomUUID());
+  const presence = useApiMutation(
+    () => api.touchReplyPresence(message.id, organizationId, presenceClientId),
+    {
+      silentError: true,
+    }
+  );
+  const heartbeat = useRef(presence.mutate);
+  heartbeat.current = presence.mutate;
+  useEffect(() => {
+    heartbeat.current();
+    const timer = window.setInterval(() => heartbeat.current(), 10_000);
+    const renew = () => {
+      if (document.visibilityState === "visible") heartbeat.current();
+    };
+    window.addEventListener("online", renew);
+    document.addEventListener("visibilitychange", renew);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("online", renew);
+      document.removeEventListener("visibilitychange", renew);
+      void api
+        .leaveReplyPresence(message.id, organizationId, presenceClientId)
+        .catch(() => undefined);
+    };
+  }, [message.id, organizationId, presenceClientId]);
+  const [storageKey] = useState(() =>
+    user?.id
+      ? replyBackupKey(user.id, organizationId, message.id, initialDraftId)
+      : null
+  );
   const [backup] = useState<ReplyBackup | null>(() => {
     try {
       return storageKey
@@ -94,28 +128,13 @@ export function ReplyComposer({
     backup?.attachments ?? []
   );
   const [replyAll, setReplyAll] = useState(backup?.replyAll ?? false);
-  const defaultTo = message.replyTo?.length
-    ? message.replyTo
-    : [message.fromEmail];
+  const defaultTo = resolveMailReplyRecipients(
+    message,
+    [mailboxEmail],
+    false
+  ).to;
   function resolvedRecipients(all: boolean) {
-    const own = mailboxEmail.toLowerCase();
-    const recipients = all
-      ? [
-          ...new Set(
-            [...defaultTo, ...message.to].map((email) => email.toLowerCase())
-          ),
-        ].filter((email) => email !== own)
-      : defaultTo;
-    return {
-      to: recipients,
-      cc: all
-        ? message.cc.filter(
-            (email) =>
-              email.toLowerCase() !== own &&
-              !recipients.includes(email.toLowerCase())
-          )
-        : [],
-    };
+    return resolveMailReplyRecipients(message, [mailboxEmail], all);
   }
   const initialRecipients = resolvedRecipients(backup?.replyAll ?? false);
   const [recipientInputs, setRecipientInputs] = useState<
@@ -382,6 +401,7 @@ export function ReplyComposer({
             draftId: draftId.current,
             revision: revision.current,
             clientId: clientId.current,
+            updatedAt: new Date().toISOString(),
           })
         );
       } catch {
@@ -591,6 +611,16 @@ export function ReplyComposer({
           <SheetDescription>{subject}</SheetDescription>
         </SheetHeader>
         <SheetBody>
+          <ReplyPresenceNotice
+            participants={replyPresence?.participants ?? []}
+            userId={user?.id}
+            clientId={presenceClientId}
+            unavailable={
+              presence.isError ||
+              presence.isPaused ||
+              replyPresence?.available === false
+            }
+          />
           <form id="message-reply-form" onSubmit={submit} className="space-y-4">
             <p className="break-words text-ui">
               <strong>From:</strong> {mailboxEmail}
@@ -848,11 +878,13 @@ export function ReplyComposer({
               </p>
             ) : null}
             <p className="text-meta text-text-secondary" role="status">
-              {save.isError
-                ? "Couldn't save to the server. Your reply is kept on this device when browser storage is available."
-                : saved
-                  ? "Draft saved"
-                  : "Changes will be saved automatically"}
+              {save.isPaused
+                ? "Waiting for a connection. Your reply is kept on this device when browser storage is available."
+                : save.isError
+                  ? "Couldn't save to the server. Your reply is kept on this device when browser storage is available."
+                  : saved
+                    ? "Draft saved"
+                    : "Changes will be saved automatically"}
             </p>
           </form>
         </SheetBody>

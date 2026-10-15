@@ -186,12 +186,27 @@ function buildConversationThreads(messages: InboundMessage[]) {
  * Nothing is open until it is tapped: there is no auto-selected first
  * conversation, so arriving at the inbox never marks a message read.
  */
-export function Inbox() {
+export function Inbox({
+  embedded = false,
+  backLabel,
+}: { embedded?: boolean; backLabel?: string } = {}) {
   const { currentOrganizationId } = useSession();
-  return <InboxWorkspace key={currentOrganizationId} />;
+  return (
+    <InboxWorkspace
+      key={currentOrganizationId}
+      embedded={embedded}
+      backLabel={backLabel}
+    />
+  );
 }
 
-function InboxWorkspace() {
+function InboxWorkspace({
+  embedded,
+  backLabel,
+}: {
+  embedded: boolean;
+  backLabel?: string;
+}) {
   const {
     user,
     currentOrganizationId: organizationId,
@@ -206,7 +221,7 @@ function InboxWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams();
   const reading = useReadingPreference(user?.id ?? "signed-out");
   const desktop = useMediaQuery("(min-width: 1024px)");
-  const readingPane = desktop && reading === "pane";
+  const readingPane = !embedded && desktop && reading === "pane";
   const listScroll = useRef<HTMLDivElement>(null);
   const scrollPosition = useRef(0);
   function closeConversation() {
@@ -329,7 +344,7 @@ function InboxWorkspace() {
     { refetchInterval: 15_000 }
   );
   const messagesQuery = useOrgInfiniteQuery(
-    organizationId,
+    embedded ? undefined : organizationId,
     qk.inboundMessages(organizationId ?? "", messageFilters),
     (id, cursor) =>
       api.listInboundMessages({
@@ -718,7 +733,7 @@ function InboxWorkspace() {
               className="-ml-1 inline-flex min-h-touch items-center gap-field rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <ArrowLeft className="h-4 w-4" />
-              {folderLabels[view]}
+              {backLabel ?? folderLabels[view]}
             </button>
 
             <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -1124,8 +1139,29 @@ function InboxWorkspace() {
       </div>
     </>
   ) : (
-    <div className="hidden min-h-96 items-center justify-center p-8 text-text-secondary lg:flex">
-      Select a conversation to read it.
+    <div className="flex min-h-80 flex-col items-center justify-center gap-3 p-8 text-text-secondary">
+      {searchParams.get("message") ? (
+        conversationQuery.isError ? (
+          <>
+            <p role="alert">
+              Couldn't open this conversation. Your mail may still be available.
+            </p>
+            <Button onClick={() => void conversationQuery.refetch()}>
+              Try opening again
+            </Button>
+            <Button variant="ghost" onClick={closeConversation}>
+              Back to {backLabel ?? "Inbox"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Spinner />
+            <p>Opening conversation…</p>
+          </>
+        )
+      ) : (
+        "Select a conversation to read it."
+      )}
     </div>
   );
   const mailList = (
@@ -1520,7 +1556,9 @@ function InboxWorkspace() {
   );
   return (
     <div className="min-h-0">
-      {readingPane ? (
+      {embedded ? (
+        reader
+      ) : readingPane ? (
         <div className="grid h-dvh grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]">
           {/* scroll-exception: the approved desktop mail list scrolls independently of the adjacent reader. */}
           <div
@@ -1538,7 +1576,7 @@ function InboxWorkspace() {
             {reader}
           </section>
         </div>
-      ) : selectedThread ? (
+      ) : selectedThread || searchParams.get("message") ? (
         reader
       ) : (
         mailList
@@ -1554,6 +1592,7 @@ function InboxWorkspace() {
               (account) => account.id === replyTarget.inboxAccountId
             )?.email ?? "Receiving mailbox"
           }
+          replyPresence={conversationQuery.data?.replyPresence}
           initialDraftId={searchParams.get("replyDraft") ?? undefined}
           onClose={() => {
             setReplyTarget(null);

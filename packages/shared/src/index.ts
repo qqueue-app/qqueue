@@ -2751,6 +2751,7 @@ export interface SentEmailEvent {
 }
 
 export interface SentEmailDetail extends SentEmail {
+  scheduledAt?: string | null;
   recipients?: RecipientDelivery[];
   /**
    * The body as stored, which is the body *before* the send worker injected
@@ -3148,3 +3149,79 @@ export interface PersonalMailSignature {
   enabled: boolean;
   revision: number;
 }
+
+export const mailSearchSchema = z.object({
+  view: z.enum(["ALL", "RECEIVED", "SENT", "OUTBOX", "DRAFTS"]).default("ALL"),
+  q: z.string().trim().max(200).optional(),
+  mailbox: emailAddressSchema.optional(),
+  cursor: z.string().max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+export type MailSearchInput = z.infer<typeof mailSearchSchema>;
+export interface MailSearchRow {
+  scheduledAt?: string | null;
+  kind: "RECEIVED" | "SENT" | "DRAFT";
+  id: string;
+  messageId: string | null;
+  subject: string;
+  fromEmail: string;
+  fromName: string | null;
+  to: string[];
+  cc: string[];
+  at: string;
+  preview: string;
+  mailboxEmail: string;
+  inboxAccountId: string | null;
+  smtpConnectionId: string | null;
+  status: EmailJobStatus | null;
+  read: boolean;
+  label: string;
+}
+export interface MailSearchPage {
+  rows: MailSearchRow[];
+  nextCursor: string | null;
+}
+
+/** One recipient rule for the browser and API, including follow-ups to own Sent mail. */
+export function resolveMailReplyRecipients(
+  message: {
+    fromEmail: string;
+    replyTo?: string[];
+    to: string[];
+    cc: string[];
+  },
+  ownAddresses: string[],
+  replyAll: boolean
+) {
+  const own = new Set(ownAddresses.map((email) => email.toLowerCase()));
+  const unique = (addresses: string[]) => [
+    ...new Set(addresses.map((email) => email.toLowerCase())),
+  ];
+  const othersTo = message.to.filter((email) => !own.has(email.toLowerCase()));
+  const othersCc = message.cc.filter((email) => !own.has(email.toLowerCase()));
+  const primary = own.has(message.fromEmail.toLowerCase())
+    ? othersTo.length
+      ? othersTo
+      : othersCc.length
+        ? othersCc
+        : message.to.length
+          ? message.to
+          : [message.fromEmail]
+    : message.replyTo?.length
+      ? message.replyTo
+      : [message.fromEmail];
+  const to = replyAll
+    ? unique([...primary, ...message.to]).filter((email) => !own.has(email))
+    : unique(primary);
+  return {
+    to,
+    cc: replyAll
+      ? unique(message.cc).filter(
+          (email) => !own.has(email) && !to.includes(email)
+        )
+      : [],
+  };
+}
+
+/** Separate per-open-composer identity; no draft contents travel with presence. */
+export const replyPresenceSchema = z.object({ clientId: z.string().uuid() });

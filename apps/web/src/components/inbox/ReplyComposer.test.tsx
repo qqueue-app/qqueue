@@ -28,6 +28,10 @@ vi.mock("../editor/BodyEditor.js", () => ({
 }));
 vi.mock("../../lib/api.js", () => ({
   api: {
+    touchReplyPresence: vi.fn().mockResolvedValue({
+      expiresAt: new Date(Date.now() + 45000).toISOString(),
+    }),
+    leaveReplyPresence: vi.fn().mockResolvedValue({ left: true }),
     listMailSignatures: vi.fn().mockResolvedValue([]),
     listEmailDrafts: vi.fn(),
     getEmailDraft: vi.fn(),
@@ -502,4 +506,20 @@ it("keeps newer writing beside file bytes when an older upload attempt fails", a
   } finally {
     db.restore();
   }
+});
+
+it("keeps composing available when best-effort reply presence fails", async () => {
+  mocked.touchReplyPresence.mockRejectedValueOnce(
+    new Error("coordination unavailable")
+  );
+  renderReply();
+  expect(
+    await screen.findByText(/Replying status is unavailable/)
+  ).toBeInTheDocument();
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Reply to Customer" }),
+    "Unsent writing stays editable"
+  );
+  expect(screen.getByRole("button", { name: "Send reply" })).toBeEnabled();
+  expect(mocked.replyToInboundMessage).not.toHaveBeenCalled();
 });

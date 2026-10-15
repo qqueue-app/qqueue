@@ -1,7 +1,9 @@
 import { PageContainer } from "../../components/PageContainer.js";
-import { FormEvent, useEffect, useState } from "react";
-import { KeyRound, Mail, Trash2 } from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { KeyRound, Mail, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "../../components/PageHeader.js";
 import { CopyableSecret } from "../../components/settings/CopyableSecret.js";
 import {
@@ -30,7 +32,8 @@ import {
   type OrganizationMember,
 } from "../../lib/api.js";
 import { useSession } from "../../lib/session-context.js";
-import { useApiMutation } from "../../lib/use-api.js";
+import { useApiMutation, useOrgQuery } from "../../lib/use-api.js";
+import { qk } from "../../lib/query-client.js";
 
 type InviteRole = "OWNER" | "ADMIN" | "MEMBER";
 
@@ -70,70 +73,79 @@ export function TeamSettings() {
     }
   );
 
-  const [members, setMembers] = useState<OrganizationMember[]>([]);
-  const [invites, setInvites] = useState<OrganizationInvite[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const orgRef = useRef(currentOrganizationId);
+  orgRef.current = currentOrganizationId;
+  const membersQuery = useOrgQuery(
+    currentOrganizationId,
+    qk.members(currentOrganizationId ?? ""),
+    (id) => api.listOrganizationMembers(id),
+    { enabled: canManage }
+  );
+  const invitesQuery = useOrgQuery(
+    currentOrganizationId,
+    qk.invites(currentOrganizationId ?? ""),
+    (id) => api.listInvites(id),
+    { enabled: canManage }
+  );
+  const members = membersQuery.data ?? [];
+  const invites = invitesQuery.data ?? [];
+  const loading = membersQuery.isPending || invitesQuery.isPending;
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<InviteRole>("MEMBER");
   const [inviting, setInviting] = useState(false);
-  const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null);
+  const [createdInvite, setCreatedInvite] = useState<{
+    organizationId: string;
+    inviteId: string;
+    url: string;
+    emailQueued: boolean;
+  } | null>(null);
   const [savingRoleFor, setSavingRoleFor] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<OrganizationMember | null>(
     null
   );
   const [removing, setRemoving] = useState(false);
-
+  const createdInviteUrl =
+    createdInvite && createdInvite.organizationId === currentOrganizationId
+      ? createdInvite.url
+      : null;
   useEffect(() => {
-    if (!currentOrganizationId || !canManage) {
-      setMembers([]);
-      setInvites([]);
-      return;
-    }
+    setCreatedInvite(null);
+    setInviteEmail("");
+    setInviteRole("MEMBER");
+    setRemoveTarget(null);
+  }, [currentOrganizationId]);
 
-    let cancelled = false;
-    setLoading(true);
-    Promise.all([
-      api.listOrganizationMembers(currentOrganizationId),
-      api.listInvites(currentOrganizationId),
-    ])
-      .then(([memberList, inviteList]) => {
-        if (cancelled) return;
-        setMembers(memberList);
-        setInvites(inviteList);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          toast.error(
-            error instanceof Error ? error.message : "Unable to load team"
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentOrganizationId, canManage]);
+  async function refreshTeam(organizationId: string) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: qk.members(organizationId) }),
+      queryClient.invalidateQueries({ queryKey: qk.invites(organizationId) }),
+    ]);
+  }
 
   const ownerCount = members.filter((m) => m.role === "OWNER").length;
 
-  async function createInvite(event: FormEvent) {
-    event.preventDefault();
-    if (!currentOrganizationId) return;
+  async function issueInvite(email: string, role: InviteRole) {
+    const organizationId = currentOrganizationId;
+    if (!organizationId) return;
     setInviting(true);
     try {
-      const result = await api.createInvite({
-        organizationId: currentOrganizationId,
-        email: inviteEmail.trim(),
-        role: inviteRole,
+      const result = await api.createInvite({ organizationId, email, role });
+      await refreshTeam(organizationId);
+      if (orgRef.current !== organizationId) return;
+      setCreatedInvite({
+        organizationId,
+        inviteId: result.invite.id,
+        url: result.acceptUrl,
+        emailQueued: result.emailQueued,
       });
-      setInvites((current) => [result.invite, ...current]);
-      setCreatedInviteUrl(result.acceptUrl);
       setInviteEmail("");
       setInviteRole("MEMBER");
-      toast.success(`Invitation sent to ${result.invite.email}.`);
+      toast.success(
+        result.emailQueued
+          ? `Invitation email queued for ${result.invite.email}.`
+          : "Invitation created. Share the link below; its email couldn't be queued."
+      );
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Unable to create invitation"
@@ -143,10 +155,18 @@ export function TeamSettings() {
     }
   }
 
+  function createInvite(event: FormEvent) {
+    event.preventDefault();
+    void issueInvite(inviteEmail.trim(), inviteRole);
+  }
+
   async function revokeInvite(invite: OrganizationInvite) {
     try {
       await api.revokeInvite(invite.id);
-      setInvites((current) => current.filter((i) => i.id !== invite.id));
+      setCreatedInvite((current) =>
+        current?.inviteId === invite.id ? null : current
+      );
+      await refreshTeam(invite.organizationId);
       toast.success("Invitation revoked.");
     } catch (error) {
       toast.error(
@@ -159,14 +179,8 @@ export function TeamSettings() {
     if (!currentOrganizationId || role === member.role) return;
     setSavingRoleFor(member.userId);
     try {
-      const updated = await api.updateMemberRole(
-        currentOrganizationId,
-        member.userId,
-        role
-      );
-      setMembers((current) =>
-        current.map((m) => (m.userId === updated.userId ? updated : m))
-      );
+      await api.updateMemberRole(currentOrganizationId, member.userId, role);
+      await refreshTeam(currentOrganizationId);
       toast.success(`Role updated to ${titleCaseRole(role)}.`);
     } catch (error) {
       toast.error(
@@ -182,9 +196,7 @@ export function TeamSettings() {
     setRemoving(true);
     try {
       await api.removeMember(currentOrganizationId, removeTarget.userId);
-      setMembers((current) =>
-        current.filter((m) => m.userId !== removeTarget.userId)
-      );
+      await refreshTeam(currentOrganizationId);
       toast.success("Member removed.");
       setRemoveTarget(null);
     } catch (error) {
@@ -247,7 +259,11 @@ export function TeamSettings() {
             {createdInviteUrl ? (
               <CopyableSecret
                 title="Invitation link"
-                description="We emailed this link to the invitee. You can also share it directly."
+                description={
+                  createdInvite?.emailQueued
+                    ? "The invitation email is queued. You can also share this link directly."
+                    : "The invitation email could not be queued. Share this link directly or try resending."
+                }
                 value={createdInviteUrl}
                 copiedMessage="Invite link copied."
                 failureMessage="Unable to copy invite link."
@@ -307,8 +323,29 @@ export function TeamSettings() {
 
           <FormSection
             title="Members"
-            description="Owners can do anything. Admins manage the team and sending. Members send with the accounts they've been granted."
+            description="Owners and admins manage this organization. Members read and send with assigned accounts. Instance administration is a separate permission."
           >
+            <p className="mb-4 text-ui text-text-secondary">
+              After your teammate accepts,{" "}
+              <Link className="underline" to="/settings/mailboxes">
+                assign a mailbox
+              </Link>{" "}
+              so they can read and send. Sign-in reset links recover a QQueue
+              account; mailbox passwords are managed separately by your mail
+              administrator.
+            </p>
+            {membersQuery.isError || invitesQuery.isError ? (
+              <div role="alert" className="mb-4 text-ui text-warn">
+                Couldn't refresh the team. Previously loaded people may still
+                appear.
+                <Button
+                  variant="secondary"
+                  onClick={() => void refreshTeam(currentOrganizationId!)}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : null}
             {loading ? (
               <div className="flex items-center gap-2 text-ui text-text-secondary">
                 <Spinner />
@@ -417,8 +454,13 @@ export function TeamSettings() {
                     key={invite.id}
                     className="flex min-h-touch items-center gap-3 border-b border-border py-3"
                   >
-                    <div className="min-w-0 flex-1 truncate text-body text-text">
-                      {invite.email}
+                    <div className="min-w-0 flex-1 text-body text-text">
+                      <p className="truncate">{invite.email}</p>
+                      <p className="text-meta text-text-secondary">
+                        {new Date(invite.expiresAt).getTime() <= Date.now()
+                          ? "Expired — resend to renew"
+                          : `Expires ${new Date(invite.expiresAt).toLocaleDateString()}`}
+                      </p>
                     </div>
                     <Badge variant={roleBadgeVariant(invite.role)}>
                       {titleCaseRole(invite.role)}
@@ -427,6 +469,18 @@ export function TeamSettings() {
                       rowLabel={invite.email}
                       className="shrink-0"
                       actions={[
+                        {
+                          label: `Resend invitation to ${invite.email}`,
+                          icon: RotateCw,
+                          primary: true,
+                          disabled:
+                            inviting || (invite.role === "OWNER" && !isOwner),
+                          onSelect: () =>
+                            void issueInvite(
+                              invite.email,
+                              invite.role as InviteRole
+                            ),
+                        },
                         {
                           label: `Revoke invitation for ${invite.email}`,
                           icon: Trash2,

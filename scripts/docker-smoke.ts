@@ -638,6 +638,14 @@ async function main() {
       .expect(200);
     if (secondPage.body.data.data.length !== 1)
       throw new Error("Inbox pagination skipped a message");
+    // Real PostgreSQL union search: literal queries, complete cursor boundaries,
+    // and private SYSTEM exclusion are not established by query mocks.
+    const searchOne=await request(app).get(`/api/v1/mail-search?organizationId=${organizationId}&q=Question&limit=1`).set("Authorization",auth).expect(200);
+    const searchTwo=await request(app).get(`/api/v1/mail-search?organizationId=${organizationId}&q=Question&limit=1&cursor=${encodeURIComponent(searchOne.body.data.nextCursor)}`).set("Authorization",auth).expect(200);
+    if(searchOne.body.data.rows[0].id===searchTwo.body.data.rows[0].id) throw new Error("Unified search repeated a page boundary");
+    const privateSearch=await request(app).get(`/api/v1/mail-search?organizationId=${organizationId}&q=private-reset-token`).set("Authorization",auth).expect(200);
+    if(privateSearch.body.data.rows.length) throw new Error("Unified search exposed SYSTEM content");
+    await request(app).get(`/api/v1/mail-search?organizationId=${organizationId}&q=changed&cursor=${encodeURIComponent(searchOne.body.data.nextCursor)}`).set("Authorization",auth).expect(400);
     await request(app)
       .patch("/api/v1/inbox/messages/read")
       .set("Authorization", auth)

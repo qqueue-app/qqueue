@@ -1251,3 +1251,28 @@ Folder selection and mailbox/search/read filters are URL state so deep links
 and browser history recover the same list context. Imported Sent and Drafts are
 readable through this reader; durable user-initiated moves, remote draft editing,
 and integration with the delivery archive remain separate work in the handoff.
+
+## Unified Mail Reading and Best-effort Reply Presence (2026-10-15)
+
+Search, Sent, Drafts and Outbox use the everyday reading pane and focused/phone
+flow. Search scopes received and outgoing records by current grants, excludes
+SYSTEM mail, keeps personal drafts private and deduplicates imported/pipeline
+copies within a mailbox by Message-ID. Bound cursor pages include the caller
+and filters; advanced reports and old filtered URLs retain their existing paths.
+Imported remote drafts are readable, but editing them remains a separate decision
+and implementation rather than pretending they are personal QQueue drafts.
+
+Reply presence is a renewable PostgreSQL lease per user/open composer, attached
+to the message being answered and read across its authorized conversation. The
+45-second indicator contains no writing, expires without a successful close,
+and never locks delivery. Current membership and read grants determine who may
+appear. Concurrent tabs by the same person are visible as well. Draft revisions
+and durable send acceptance remain the correctness controls when presence is
+unavailable or teammates choose to send simultaneously.
+
+Team role/grant changes lock the organization before checking current authority
+and owner count. Removing a member clears mailbox and provisioning grants in the
+same transaction, while retaining personal writing and accepted delivery intent.
+Invitation renewal serializes token replacement and acceptance consumes a valid
+pending token atomically. Queue acceptance and manual invitation-link fallback
+are reported separately from actual email delivery.

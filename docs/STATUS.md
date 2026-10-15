@@ -36,8 +36,13 @@ accepted intent, reconcile ambiguous server outcomes and keep cached writing.
 Editable reply recipients, forward drafts with original private attachments,
 recoverable reply files, saved-version comparison and simpler mail formatting
 are now implemented. Personal per-sending-account signatures and protected
-draft opening/retry are implemented as well. External-draft editing, unified
-received/sent search, team coordination and broader acceptance remain. See
+draft opening/retry are implemented as well. Unified received/sent search and
+Sent/Drafts/Outbox reading panes now include imported Sent mail, mailbox scoping,
+URL state and stable pagination. Concurrent reply indicators, invitation renewal,
+honest invitation delivery status and atomic team/grant changes are implemented.
+Actual browser offline reply recovery also exposed and verified a backup lookup
+fix. External-draft editing, bounded long-conversation loading and broader
+acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer
 to the earlier email-operations scope.

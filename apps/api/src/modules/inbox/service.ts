@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { resolveMailReplyRecipients } from "@qqueue/shared";
 import type {
   InboxAccountInput,
   InboxAccountUpdateInput,
@@ -19,6 +20,8 @@ import { prisma } from "../../lib/prisma.js";
 import { storage } from "../../lib/storage.js";
 import { inboxSyncQueue } from "../../queues/inbox-sync.queue.js";
 import { manualEmailService } from "../manual-email/service.js";
+
+import { replyPresenceService } from "./presence-service.js";
 
 const messageInclude = {
   locations: {
@@ -397,7 +400,12 @@ export const inboxService = {
       },
       select: { id: true, name: true },
     });
+    const replyPresence = await replyPresenceService
+      .list(organizationId, seed.inboxAccountId, [...messages.keys()])
+      .then((participants) => ({ available: true, participants }))
+      .catch(() => ({ available: false, participants: [] }));
     return {
+      replyPresence,
       messages: await withDsnAttribution(
         organizationId,
         [...messages.values()].sort(
@@ -814,30 +822,13 @@ export const inboxService = {
         "missing_smtp_connection"
       );
     }
-    const ownAddresses = new Set(
-      [message.inboxAccount.email, connection.fromEmail].map((email) =>
-        email.toLowerCase()
-      )
+    const recipients = resolveMailReplyRecipients(
+      { ...message, to: message.to ?? [], cc: message.cc ?? [] },
+      [message.inboxAccount.email, connection.fromEmail],
+      Boolean(input.replyAll)
     );
-    const replyRecipients = message.replyTo?.length
-      ? message.replyTo
-      : [message.fromEmail];
-    const to = input.replyAll
-      ? [
-          ...new Set(
-            [...replyRecipients, ...(message.to ?? [])].map((email) =>
-              email.toLowerCase()
-            )
-          ),
-        ].filter((email) => !ownAddresses.has(email))
-      : replyRecipients;
-    const cc = input.replyAll
-      ? (message.cc ?? []).filter(
-          (email) =>
-            !ownAddresses.has(email.toLowerCase()) &&
-            !to.includes(email.toLowerCase())
-        )
-      : undefined;
+    const to = recipients.to;
+    const cc = recipients.cc.length ? recipients.cc : undefined;
 
     const result = await manualEmailService.send(
       {

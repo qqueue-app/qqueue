@@ -4,10 +4,10 @@ import { prismaMock } from "../../test/prisma-mock.js";
 // Invite mail rides the shared send pipeline; mock it at that seam.
 const pipelineSend = vi.fn().mockResolvedValue({
   id: "job_invite",
-  status: "QUEUED"
+  status: "QUEUED",
 });
 vi.mock("../transactional-email/service.js", () => ({
-  transactionalEmailService: { send: pipelineSend }
+  transactionalEmailService: { send: pipelineSend },
 }));
 
 const { invitationService } = await import("./service.js");
@@ -21,28 +21,31 @@ const smtpConnection = {
   organizationId: "org_1",
   fromEmail: "no-reply@example.com",
   fromName: "QQueue",
-  isDefault: true
+  isDefault: true,
 };
 
 beforeEach(() => {
   pipelineSend.mockClear();
+  prismaMock.organizationInvite.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe("invitationService.create", () => {
   it("issues an invite when the actor is an OWNER and emails the link", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.organizationMember.findFirst.mockResolvedValue(null);
     prismaMock.organizationInvite.create.mockResolvedValue({
       id: "inv_1",
       email: "new@example.com",
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.organization.findUnique.mockResolvedValue({
-      name: "Acme"
+      name: "Acme",
     } as never);
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue(smtpConnection as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
 
     const result = await invitationService.create(
       { organizationId: "org_1", email: "New@Example.com", role: "MEMBER" },
@@ -52,8 +55,9 @@ describe("invitationService.create", () => {
     expect(result.invite).toEqual({
       id: "inv_1",
       email: "new@example.com",
-      role: "MEMBER"
+      role: "MEMBER",
     });
+    expect(result.emailQueued).toBe(true);
     expect(result.acceptUrl).toContain("/accept-invite?token=");
     // Email is lower-cased before persisting.
     const createArg = prismaMock.organizationInvite.create.mock.calls[0][0];
@@ -70,15 +74,17 @@ describe("invitationService.create", () => {
 
   it("still returns the invite when no SMTP connection exists", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
     prismaMock.organizationMember.findFirst.mockResolvedValue(null);
     prismaMock.organizationInvite.create.mockResolvedValue({
       id: "inv_2",
       email: "new@example.com",
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
-    prismaMock.organization.findUnique.mockResolvedValue({ name: "Acme" } as never);
+    prismaMock.organization.findUnique.mockResolvedValue({
+      name: "Acme",
+    } as never);
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
 
     const result = await invitationService.create(
@@ -87,12 +93,13 @@ describe("invitationService.create", () => {
     );
 
     expect(result.acceptUrl).toContain("/accept-invite?token=");
+    expect(result.emailQueued).toBe(false);
     expect(pipelineSend).not.toHaveBeenCalled();
   });
 
   it("rejects a MEMBER actor with 403", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
 
     await expect(
@@ -105,7 +112,7 @@ describe("invitationService.create", () => {
 
   it("forbids an ADMIN from inviting a new OWNER", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
 
     await expect(
@@ -118,15 +125,19 @@ describe("invitationService.create", () => {
 
   it("rejects inviting someone who is already a member", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.organizationMember.findFirst.mockResolvedValue({
-      id: "mem_1"
+      id: "mem_1",
     } as never);
 
     await expect(
       invitationService.create(
-        { organizationId: "org_1", email: "already@example.com", role: "MEMBER" },
+        {
+          organizationId: "org_1",
+          email: "already@example.com",
+          role: "MEMBER",
+        },
         "user_1"
       )
     ).rejects.toMatchObject({ statusCode: 409 });
@@ -141,33 +152,33 @@ describe("invitationService.accept", () => {
       email: "new@example.com",
       role: "MEMBER",
       status: "PENDING",
-      expiresAt: future
+      expiresAt: future,
     } as never);
     prismaMock.user.findUnique.mockResolvedValue(null);
     prismaMock.user.create.mockResolvedValue({
       id: "user_9",
       email: "new@example.com",
       name: "New",
-      createdAt: new Date(0)
+      createdAt: new Date(0),
     } as never);
     prismaMock.organizationMember.create.mockResolvedValue({} as never);
     prismaMock.organizationInvite.update.mockResolvedValue({} as never);
     prismaMock.organization.findUnique.mockResolvedValue({
       id: "org_1",
-      name: "Acme"
+      name: "Acme",
     } as never);
 
     const result = await invitationService.accept({
       token: "a-valid-looking-token",
       password: "password123",
-      name: "New"
+      name: "New",
     });
 
     expect(result.requiresSignIn).toBe(false);
     expect(result.user?.id).toBe("user_9");
     expect(result.tokens?.accessToken).toEqual(expect.any(String));
     expect(prismaMock.organizationMember.create).toHaveBeenCalledWith({
-      data: { organizationId: "org_1", userId: "user_9", role: "MEMBER" }
+      data: { organizationId: "org_1", userId: "user_9", role: "MEMBER" },
     });
   });
 
@@ -178,11 +189,11 @@ describe("invitationService.accept", () => {
       email: "existing@example.com",
       role: "ADMIN",
       status: "PENDING",
-      expiresAt: future
+      expiresAt: future,
     } as never);
     prismaMock.user.findUnique.mockResolvedValue({
       id: "user_5",
-      email: "existing@example.com"
+      email: "existing@example.com",
     } as never);
     // getMembership → not yet a member
     prismaMock.organizationMember.findUnique.mockResolvedValue(null);
@@ -190,11 +201,11 @@ describe("invitationService.accept", () => {
     prismaMock.organizationInvite.update.mockResolvedValue({} as never);
     prismaMock.organization.findUnique.mockResolvedValue({
       id: "org_1",
-      name: "Acme"
+      name: "Acme",
     } as never);
 
     const result = await invitationService.accept({
-      token: "a-valid-looking-token"
+      token: "a-valid-looking-token",
     });
 
     expect(result.requiresSignIn).toBe(true);
@@ -210,23 +221,23 @@ describe("invitationService.accept", () => {
       email: "existing@example.com",
       role: "ADMIN",
       status: "PENDING",
-      expiresAt: future
+      expiresAt: future,
     } as never);
     prismaMock.user.findUnique.mockResolvedValue({
       id: "user_5",
-      email: "existing@example.com"
+      email: "existing@example.com",
     } as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.organizationInvite.update.mockResolvedValue({} as never);
     prismaMock.organization.findUnique.mockResolvedValue({
       id: "org_1",
-      name: "Acme"
+      name: "Acme",
     } as never);
 
     const result = await invitationService.accept({
-      token: "a-valid-looking-token"
+      token: "a-valid-looking-token",
     });
 
     expect(result.requiresSignIn).toBe(true);
@@ -241,7 +252,7 @@ describe("invitationService.accept", () => {
       email: "new@example.com",
       role: "MEMBER",
       status: "PENDING",
-      expiresAt: past
+      expiresAt: past,
     } as never);
 
     await expect(
@@ -256,7 +267,7 @@ describe("invitationService.accept", () => {
       email: "new@example.com",
       role: "MEMBER",
       status: "PENDING",
-      expiresAt: future
+      expiresAt: future,
     } as never);
     prismaMock.user.findUnique.mockResolvedValue(null);
 
@@ -273,7 +284,7 @@ describe("invitationService.lookup", () => {
       role: "MEMBER",
       status: "PENDING",
       expiresAt: future,
-      organization: { name: "Acme" }
+      organization: { name: "Acme" },
     } as never);
     prismaMock.user.findUnique.mockResolvedValue(null);
 
@@ -282,7 +293,7 @@ describe("invitationService.lookup", () => {
       email: "new@example.com",
       role: "MEMBER",
       organizationName: "Acme",
-      hasAccount: false
+      hasAccount: false,
     });
   });
 
@@ -299,14 +310,14 @@ describe("invitationService.revoke", () => {
     prismaMock.organizationInvite.findUnique.mockResolvedValue({
       id: "inv_1",
       organizationId: "org_1",
-      status: "PENDING"
+      status: "PENDING",
     } as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.organizationInvite.update.mockResolvedValue({
       id: "inv_1",
-      status: "REVOKED"
+      status: "REVOKED",
     } as never);
 
     const result = await invitationService.revoke("inv_1", "user_1");
@@ -317,10 +328,10 @@ describe("invitationService.revoke", () => {
     prismaMock.organizationInvite.findUnique.mockResolvedValue({
       id: "inv_1",
       organizationId: "org_1",
-      status: "ACCEPTED"
+      status: "ACCEPTED",
     } as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
 
     await expect(
@@ -334,4 +345,41 @@ describe("invitationService.revoke", () => {
       invitationService.revoke("missing", "user_1")
     ).rejects.toMatchObject({ statusCode: 404 });
   });
+});
+
+it("returns a usable invitation link when the delivery pipeline rejects queuing", async () => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "OWNER",
+  } as never);
+  prismaMock.organizationMember.findFirst.mockResolvedValue(null);
+  prismaMock.organizationInvite.create.mockResolvedValue({
+    id: "inv_failed",
+  } as never);
+  prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+    smtpConnection as never
+  );
+  pipelineSend.mockRejectedValueOnce(new Error("queue unavailable"));
+  const result = await invitationService.create(
+    { organizationId: "org_1", email: "new@example.com", role: "MEMBER" },
+    "user_1"
+  );
+  expect(result.emailQueued).toBe(false);
+  expect(result.acceptUrl).toContain("/accept-invite?token=");
+});
+
+it("rejects a token revoked after lookup before adding any member", async () => {
+  prismaMock.organizationInvite.findUnique.mockResolvedValue({
+    id: "i1",
+    organizationId: "org_1",
+    email: "existing@example.com",
+    role: "MEMBER",
+    status: "PENDING",
+    expiresAt: future,
+  } as never);
+  prismaMock.user.findUnique.mockResolvedValue({ id: "existing" } as never);
+  prismaMock.organizationInvite.updateMany.mockResolvedValue({ count: 0 });
+  await expect(
+    invitationService.accept({ token: "looked-up-before-revoke" })
+  ).rejects.toMatchObject({ statusCode: 400 });
+  expect(prismaMock.organizationMember.create).not.toHaveBeenCalled();
 });

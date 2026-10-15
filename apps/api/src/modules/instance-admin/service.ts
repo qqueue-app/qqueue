@@ -16,7 +16,7 @@ import type {
   MailDomainDnsStatus,
 } from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
-import { getMembership } from "../../lib/org-access.js";
+import { getMembership, lockOrganizationTeam } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { getMailcowClient } from "../mailcow/client.js";
 import {
@@ -186,7 +186,10 @@ export const instanceAdminService = {
           },
           orderBy: [{ role: "asc" }, { createdAt: "asc" }],
         },
-        orgMailDomains: { select: { domain: true }, orderBy: { domain: "asc" } },
+        orgMailDomains: {
+          select: { domain: true },
+          orderBy: { domain: "asc" },
+        },
         smtpConnections: {
           select: { id: true, name: true, fromEmail: true, isDefault: true },
           orderBy: [{ isDefault: "desc" }, { name: "asc" }],
@@ -271,7 +274,8 @@ export const instanceAdminService = {
           // A failed read must not blank the list; the domain's own DNS panel
           // reports the real state.
           .catch(() => false);
-        const assigned = assignments.get(domain.domain_name.toLowerCase()) ?? [];
+        const assigned =
+          assignments.get(domain.domain_name.toLowerCase()) ?? [];
         return {
           domain: domain.domain_name,
           ownership: assigned.length > 0 ? "CLAIMED" : "UNCLAIMED",
@@ -433,7 +437,9 @@ export const instanceAdminService = {
     const organizations = await resolveOrganizations([
       ...new Set(input.organizationIds),
     ]);
-    const wanted = new Set(organizations.map((organization) => organization.id));
+    const wanted = new Set(
+      organizations.map((organization) => organization.id)
+    );
 
     const current = await prisma.orgMailDomain.findMany({
       where: { domain: normalized },
@@ -636,7 +642,11 @@ export const instanceAdminService = {
         user: { select: { id: true, email: true, name: true } },
         organization: { select: { id: true, name: true } },
       },
-      orderBy: [{ organizationId: "asc" }, { userId: "asc" }, { domain: "asc" }],
+      orderBy: [
+        { organizationId: "asc" },
+        { userId: "asc" },
+        { domain: "asc" },
+      ],
     });
   },
 
@@ -695,24 +705,34 @@ export const instanceAdminService = {
     }
 
     // Idempotent: re-granting is a no-op rather than an error.
-    return prisma.mailDomainGrant.upsert({
-      where: {
-        organizationId_userId_domain: {
+    return prisma.$transaction(async (tx) => {
+      await lockOrganizationTeam(tx, input.organizationId);
+      if (!(await getMembership(input.userId, input.organizationId, tx))) {
+        throw new HttpError(
+          400,
+          "That user is no longer a member of this organization",
+          "validation_error"
+        );
+      }
+      return tx.mailDomainGrant.upsert({
+        where: {
+          organizationId_userId_domain: {
+            organizationId: input.organizationId,
+            userId: input.userId,
+            domain,
+          },
+        },
+        create: {
           organizationId: input.organizationId,
           userId: input.userId,
           domain,
         },
-      },
-      create: {
-        organizationId: input.organizationId,
-        userId: input.userId,
-        domain,
-      },
-      update: {},
-      include: {
-        user: { select: { id: true, email: true, name: true } },
-        organization: { select: { id: true, name: true } },
-      },
+        update: {},
+        include: {
+          user: { select: { id: true, email: true, name: true } },
+          organization: { select: { id: true, name: true } },
+        },
+      });
     });
   },
 
@@ -746,7 +766,9 @@ export const instanceAdminService = {
     input: InstanceMuteCreateInput
   ): Promise<InstanceAdminMute> {
     const target =
-      input.scope === "DOMAIN" ? input.target.trim().toLowerCase() : input.target;
+      input.scope === "DOMAIN"
+        ? input.target.trim().toLowerCase()
+        : input.target;
 
     const row = await prisma.instanceAdminMute.upsert({
       where: {

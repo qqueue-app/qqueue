@@ -26,6 +26,8 @@ vi.mock("../pages/Login.js", () => ({
 vi.mock("../pages/Legal.js", () => ({
   LegalPage: ({ kind }: { kind: string }) => <div>Legal {kind}</div>,
 }));
+vi.mock("../pages/MailFolder.js",()=>({MailFolder:({view}:{view:string})=><div>Mail folder {view}</div>}));
+vi.mock("../pages/Sent.js",()=>({Sent:()=> <div>Delivery archive</div>}));
 vi.mock("../pages/EmailStudio.js", () => ({ EmailStudio: () => <div /> }));
 vi.mock("../pages/Inbox.js", () => ({ Inbox: () => <div>Inbox page</div> }));
 vi.mock("../pages/SMTPConnections.js", () => ({
@@ -174,4 +176,12 @@ describe("AppRoutes", () => {
     );
     expect(await screen.findByText(text)).toBeInTheDocument();
   });
+});
+
+
+it.each([["/sent","SENT"],["/drafts","DRAFTS"],["/outbox","OUTBOX"],["/search","ALL"]])("opens the reading workspace at %s",async(path,view)=>{
+ renderWithProviders(<MemoryRouter initialEntries={[path]}><AppRoutes/></MemoryRouter>,{withRouter:false});expect(await screen.findByText(`Mail folder ${view}`)).toBeInTheDocument();
+});
+it("preserves an existing sent report bookmark",async()=>{
+ renderWithProviders(<MemoryRouter initialEntries={["/sent?origin=CAMPAIGN&outcome=failed"]}><AppRoutes/></MemoryRouter>,{withRouter:false});expect(await screen.findByText("Delivery archive")).toBeInTheDocument();
 });

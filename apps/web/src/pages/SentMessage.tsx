@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  ArrowLeft,
   Ban,
   BarChart3,
   CheckCircle2,
@@ -39,6 +40,7 @@ import {
 } from "../lib/sent-email.js";
 import { useSession } from "../lib/session-context.js";
 import { useOrgQuery } from "../lib/use-api.js";
+import { IconButton } from "../components/ui/icon-button.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
 import { Skeleton } from "../components/ui/skeleton.js";
@@ -163,8 +165,37 @@ function resolveInlineImages(
  * — every open would create an open — so the tracked version is the one nobody
  * on this side ever sees.
  */
-export function SentMessage() {
-  const { id } = useParams<{ id: string }>();
+export function SentMessage({
+  messageId,
+  embedded = false,
+  backLabel = "Sent",
+  onBack,
+}: {
+  messageId?: string;
+  embedded?: boolean;
+  backLabel?: string;
+  onBack?: () => void;
+} = {}) {
+  const params = useParams<{ id: string }>();
+  const id = messageId ?? params.id;
+  const Content = embedded ? EmbeddedContent : PageContainer;
+  function heading(title: string, description: string) {
+    return embedded ? (
+      <header className="sticky top-0 z-10 border-b border-border bg-surface px-4 py-3 sm:px-6">
+        <IconButton label={`Back to ${backLabel}`} onClick={onBack}>
+          <ArrowLeft />
+        </IconButton>
+        <h2 className="mt-2 break-words text-title font-semibold">{title}</h2>
+        <p className="mt-1 text-meta text-text-secondary">{description}</p>
+      </header>
+    ) : (
+      <PageHeader
+        title={title}
+        description={description}
+        breadcrumb={{ label: "Sent", to: "/sent" }}
+      />
+    );
+  }
   const { currentOrganizationId: organizationId } = useSession();
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
@@ -176,9 +207,12 @@ export function SentMessage() {
 
   const emailQuery = useOrgQuery(
     organizationId,
-    qk.sentMessage(organizationId ?? "", id ?? ""),
-    (orgId) => api.getSentEmail(id!, orgId),
-    { enabled: Boolean(id) }
+    embedded
+      ? qk.outgoingMail(organizationId ?? "", id ?? "")
+      : qk.sentMessage(organizationId ?? "", id ?? ""),
+    (orgId) =>
+      embedded ? api.outgoingMail(id!, orgId) : api.getSentEmail(id!, orgId),
+    { enabled: Boolean(id), refetchInterval: embedded ? 5000 : false }
   );
 
   const email = emailQuery.data;
@@ -280,15 +314,11 @@ export function SentMessage() {
   if (emailQuery.isPending) {
     return (
       <>
-        <PageHeader
-          title="Sent email"
-          description="Opening this message."
-          breadcrumb={{ label: "Sent", to: "/sent" }}
-        />
-        <PageContainer className="space-y-4">
+        {heading("Message", "Opening this message.")}
+        <Content className="space-y-4">
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-64 w-full" />
-        </PageContainer>
+        </Content>
       </>
     );
   }
@@ -296,23 +326,37 @@ export function SentMessage() {
   if (!email) {
     return (
       <>
-        <PageHeader
-          title="Sent email"
-          description="This message isn't in your archive."
-          breadcrumb={{ label: "Sent", to: "/sent" }}
-        />
-        <PageContainer>
+        {heading("Message", "This message could not be loaded.")}
+        <Content>
           <EmptyState
             icon={Send}
-            title="Message not found"
-            description="It may have been deleted, or it went out from a mailbox you don't have access to."
+            title={
+              emailQuery.isError
+                ? "Couldn't load this message"
+                : "Message not found"
+            }
+            description="Your mail may still be available. Retry loading it, or return to the list."
             action={
-              <Button asChild variant="outline">
-                <Link to="/sent">Back to Sent</Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => void emailQuery.refetch()}
+                >
+                  Try opening again
+                </Button>
+                {embedded ? (
+                  <Button variant="ghost" onClick={onBack}>
+                    Back to {backLabel}
+                  </Button>
+                ) : (
+                  <Button asChild variant="outline">
+                    <Link to="/sent">Back to Sent</Link>
+                  </Button>
+                )}
+              </div>
             }
           />
-        </PageContainer>
+        </Content>
       </>
     );
   }
@@ -323,13 +367,15 @@ export function SentMessage() {
 
   return (
     <>
-      <PageHeader
-        title={email.subject || "(no subject)"}
-        description={`${ORIGIN_LABEL[email.origin]} · ${formatFullDate(sentAt)}`}
-        breadcrumb={{ label: "Sent", to: "/sent" }}
-      />
+      {heading(
+        email.subject || "(no subject)",
+        email.scheduledAt &&
+          ["PENDING", "QUEUED", "PROCESSING"].includes(email.status)
+          ? `Scheduled for ${formatFullDate(email.scheduledAt)}`
+          : `${ORIGIN_LABEL[email.origin]} · ${formatFullDate(sentAt)}`
+      )}
 
-      <PageContainer className="space-y-6">
+      <Content className="space-y-6">
         {email.recipients?.length ? (
           <section
             className="rounded-card border border-border bg-surface p-4"
@@ -569,7 +615,7 @@ export function SentMessage() {
             </p>
           ) : null}
         </section>
-      </PageContainer>
+      </Content>
 
       <AttachmentPreviewDialog
         preview={preview}
@@ -611,4 +657,14 @@ function AddressList({ addresses }: { addresses: string[] }) {
       ))}
     </ul>
   );
+}
+
+function EmbeddedContent({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("p-4 sm:p-6", className)}>{children}</div>;
 }

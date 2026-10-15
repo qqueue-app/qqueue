@@ -29,6 +29,10 @@ export interface SentOutcome {
  * a row has one line to say it and "Bounced" matters more than "Delivered".
  */
 export function outcomeOf(email: SentEmail): SentOutcome {
+  if (email.status === "PENDING" || email.status === "QUEUED")
+    return { label: "Queued", variant: "neutral" };
+  if (email.status === "PROCESSING")
+    return { label: "Sending", variant: "accent" };
   if (email.status === "SUPPRESSED")
     return { label: "Not sent — recipients blocked", variant: "warn" };
   if (email.status === "CANCELLED")

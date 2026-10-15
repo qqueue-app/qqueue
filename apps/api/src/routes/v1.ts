@@ -18,6 +18,7 @@ import {
   invitationPublicRouter,
   invitationRouter,
 } from "../modules/invitations/routes.js";
+import { mailSearchRouter } from "../modules/mail-search/routes.js";
 import { mailPreferenceRouter } from "../modules/mail-preferences/routes.js";
 import { manualEmailRouter } from "../modules/manual-email/routes.js";
 import { recurringSendRouter } from "../modules/recurring-sends/routes.js";
@@ -107,6 +108,7 @@ v1Router.use("/campaigns", campaignRouter);
 v1Router.use("/manual-email", manualEmailRouter);
 v1Router.use("/email-drafts", emailDraftRouter);
 v1Router.use("/mail-preferences", mailPreferenceRouter);
+v1Router.use("/mail-search", mailSearchRouter);
 // Outbox: mail that has been accepted but not yet delivered, in product terms
 // (subjects, addresses, sending account) rather than the raw BullMQ jobs the
 // queue-operations dashboard exposes. Any member can view and cancel.

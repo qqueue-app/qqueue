@@ -20,6 +20,12 @@ vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
   api: {
+    touchReplyPresence: vi
+      .fn()
+      .mockResolvedValue({
+        expiresAt: new Date(Date.now() + 45000).toISOString(),
+      }),
+    leaveReplyPresence: vi.fn().mockResolvedValue({ left: true }),
     listInboxAccounts: vi.fn(),
     listInboxFolders: vi.fn(),
     recentInboxMoves: vi.fn(),
@@ -1122,4 +1128,22 @@ describe("forwarding from a conversation", () => {
       mockedApi.prepareInboundForward.mock.calls[1][2]
     );
   });
+});
+
+it("retries a deep-linked embedded conversation without fetching an unrelated inbox page", async () => {
+  setup([makeMessage()]);
+  mockedApi.getInboxConversation
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({ messages: [makeMessage()], outgoing: [] });
+  const user = userEvent.setup();
+  renderWithProviders(<Inbox embedded backLabel="Search mail" />, {
+    route: "/search?message=m1",
+  });
+  await user.click(
+    await screen.findByRole("button", { name: "Try opening again" })
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Quarterly numbers" })
+  ).toBeInTheDocument();
+  expect(mockedApi.listInboundMessages).not.toHaveBeenCalled();
 });

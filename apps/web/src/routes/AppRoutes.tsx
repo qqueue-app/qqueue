@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "../layouts/DashboardLayout.js";
 import { SetupGate } from "../components/SetupGate.js";
 import { Skeleton } from "../components/ui/skeleton.js";
@@ -126,6 +126,7 @@ const Inbox = lazy(() =>
     default: module.Inbox,
   }))
 );
+const MailFolder=lazy(()=>import("../pages/MailFolder.js").then(module=>({default:module.MailFolder})));
 const Drafts = lazy(() =>
   import("../pages/Drafts.js").then((module) => ({
     default: module.Drafts,
@@ -208,6 +209,11 @@ function RouteFallback() {
   );
 }
 
+function SentEntry() {
+  const [params]=useSearchParams();
+  return ["origin","outcome","account","days","page"].some(key=>params.has(key)) ? <Sent/> : <MailFolder view="SENT"/>;
+}
+
 export function AppRoutes() {
   return (
     <Suspense fallback={<RouteFallback />}>
@@ -235,10 +241,14 @@ export function AppRoutes() {
           {/* Bookmarks and old links to the stats-first home. */}
           <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="/email-studio" element={<EmailStudio />} />
-          <Route path="/drafts" element={<Drafts />} />
-          <Route path="/outbox" element={<Outbox />} />
+          <Route path="/drafts" element={<MailFolder view="DRAFTS" />} />
+          <Route path="/drafts/manage" element={<Drafts />} />
+          <Route path="/outbox" element={<MailFolder view="OUTBOX" />} />
+          <Route path="/outbox/manage" element={<Outbox />} />
           {/* The archive the outbox drains into. */}
-          <Route path="/sent" element={<Sent />} />
+          <Route path="/sent" element={<SentEntry />} />
+          <Route path="/sent/activity" element={<Sent />} />
+          <Route path="/search" element={<MailFolder view="ALL" />} />
           <Route path="/sent/:id" element={<SentMessage />} />
           {/* The standalone Send Email page was merged into Email Studio. */}
           <Route

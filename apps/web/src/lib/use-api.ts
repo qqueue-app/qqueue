@@ -80,6 +80,8 @@ export interface ApiMutationOptions<TData, TVariables> extends Omit<
 > {
   /** Toasted on success. Pass a function to build it from the result. */
   successMessage?: string | ((data: TData, variables: TVariables) => string);
+  /** Best-effort coordination can report failure inline without interrupting writing. */
+  silentError?: boolean;
   /** Toasted on failure, unless the API supplied a more specific message. */
   errorMessage?: string;
   /** Query keys to invalidate once the mutation settles. */
@@ -98,6 +100,7 @@ export function useApiMutation<TData, TVariables = void>(
   {
     successMessage,
     errorMessage: fallbackError = "Something went wrong.",
+    silentError = false,
     invalidates,
     onSuccess,
     onError,
@@ -128,7 +131,7 @@ export function useApiMutation<TData, TVariables = void>(
       await onSuccess?.(data, variables);
     },
     onError: (error, variables) => {
-      toast.error(errorMessage(error, fallbackError));
+      if (!silentError) toast.error(errorMessage(error, fallbackError));
       onError?.(error, variables);
     },
     ...options,

@@ -1,12 +1,14 @@
+import type { Prisma } from "@prisma/client";
 import type {
   OrganizationBrandingInput,
   OrganizationInput,
-  UserRole
+  UserRole,
 } from "@qqueue/shared";
 import {
   assertOrgAccess,
   assertOrgRole,
-  getMembership
+  getMembership,
+  lockOrganizationTeam,
 } from "../../lib/org-access.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -14,7 +16,7 @@ import { prisma } from "../../lib/prisma.js";
 const memberUserSelect = {
   id: true,
   email: true,
-  name: true
+  name: true,
 };
 
 type OrganizationMemberWithOrganization = {
@@ -32,14 +34,14 @@ export const organizationService = {
     const members = await prisma.organizationMember.findMany({
       where: { userId },
       include: { organization: true },
-      orderBy: { organization: { createdAt: "desc" } }
+      orderBy: { organization: { createdAt: "desc" } },
     });
 
     return members.map((member: OrganizationMemberWithOrganization) => ({
       id: member.organization.id,
       name: member.organization.name,
       createdAt: member.organization.createdAt,
-      role: member.role
+      role: member.role,
     }));
   },
 
@@ -57,11 +59,11 @@ export const organizationService = {
           select: {
             id: true,
             email: true,
-            name: true
-          }
-        }
+            name: true,
+          },
+        },
       },
-      orderBy: [{ role: "asc" }, { createdAt: "asc" }]
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     });
   },
 
@@ -85,7 +87,7 @@ export const organizationService = {
   async create(input: OrganizationInput, userId: string) {
     const elsewhere = await prisma.organizationMember.findFirst({
       where: { userId, role: { in: ["OWNER", "ADMIN"] } },
-      select: { id: true }
+      select: { id: true },
     });
     if (!elsewhere) {
       throw new HttpError(
@@ -101,10 +103,10 @@ export const organizationService = {
         members: {
           create: {
             userId,
-            role: "OWNER"
-          }
-        }
-      }
+            role: "OWNER",
+          },
+        },
+      },
     });
 
     return { ...organization, role: "OWNER" as const };
@@ -114,7 +116,7 @@ export const organizationService = {
     await assertOrgRole(userId, id, ["OWNER", "ADMIN"]);
     return prisma.organization.update({
       where: { id },
-      data: input
+      data: input,
     });
   },
 
@@ -133,8 +135,8 @@ export const organizationService = {
         logoUrl: true,
         accentColor: true,
         footerNote: true,
-        brandingEnabled: true
-      }
+        brandingEnabled: true,
+      },
     });
 
     if (!organization) {
@@ -158,8 +160,8 @@ export const organizationService = {
         logoUrl: true,
         accentColor: true,
         footerNote: true,
-        brandingEnabled: true
-      }
+        brandingEnabled: true,
+      },
     });
   },
 
@@ -177,32 +179,39 @@ export const organizationService = {
     actorUserId: string,
     role: UserRole
   ) {
-    const actor = await assertOrgRole(actorUserId, organizationId, [
-      "OWNER",
-      "ADMIN"
-    ]);
+    return prisma.$transaction(async (tx) => {
+      await lockOrganizationTeam(tx, organizationId);
+      const actor = await assertOrgRole(
+        actorUserId,
+        organizationId,
+        ["OWNER", "ADMIN"],
+        tx
+      );
 
-    const target = await getMembership(targetUserId, organizationId);
-    if (!target) {
-      throw new HttpError(404, "Member not found in this organization");
-    }
+      const target = await getMembership(targetUserId, organizationId, tx);
+      if (!target) {
+        throw new HttpError(404, "Member not found in this organization");
+      }
 
-    if (actor.role === "ADMIN" && target.role === "OWNER") {
-      throw new HttpError(403, "Admins cannot change an owner's role");
-    }
+      if (actor.role === "ADMIN" && target.role === "OWNER") {
+        throw new HttpError(403, "Admins cannot change an owner's role");
+      }
 
-    if (role === "OWNER" && actor.role !== "OWNER") {
-      throw new HttpError(403, "Only an owner can grant the owner role");
-    }
+      if (role === "OWNER" && actor.role !== "OWNER") {
+        throw new HttpError(403, "Only an owner can grant the owner role");
+      }
 
-    if (target.role === "OWNER" && role !== "OWNER") {
-      await assertNotLastOwner(organizationId);
-    }
+      if (target.role === "OWNER" && role !== "OWNER") {
+        await assertNotLastOwner(organizationId, tx);
+      }
 
-    return prisma.organizationMember.update({
-      where: { organizationId_userId: { organizationId, userId: targetUserId } },
-      data: { role },
-      include: { user: { select: memberUserSelect } }
+      return tx.organizationMember.update({
+        where: {
+          organizationId_userId: { organizationId, userId: targetUserId },
+        },
+        data: { role },
+        include: { user: { select: memberUserSelect } },
+      });
     });
   },
 
@@ -213,36 +222,54 @@ export const organizationService = {
     targetUserId: string,
     actorUserId: string
   ) {
-    const actor = await assertOrgRole(actorUserId, organizationId, [
-      "OWNER",
-      "ADMIN"
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await lockOrganizationTeam(tx, organizationId);
+      const actor = await assertOrgRole(
+        actorUserId,
+        organizationId,
+        ["OWNER", "ADMIN"],
+        tx
+      );
 
-    const target = await getMembership(targetUserId, organizationId);
-    if (!target) {
-      throw new HttpError(404, "Member not found in this organization");
-    }
+      const target = await getMembership(targetUserId, organizationId, tx);
+      if (!target) {
+        throw new HttpError(404, "Member not found in this organization");
+      }
 
-    if (actor.role === "ADMIN" && target.role === "OWNER") {
-      throw new HttpError(403, "Admins cannot remove an owner");
-    }
+      if (actor.role === "ADMIN" && target.role === "OWNER") {
+        throw new HttpError(403, "Admins cannot remove an owner");
+      }
 
-    if (target.role === "OWNER") {
-      await assertNotLastOwner(organizationId);
-    }
+      if (target.role === "OWNER") {
+        await assertNotLastOwner(organizationId, tx);
+      }
 
-    await prisma.organizationMember.delete({
-      where: { organizationId_userId: { organizationId, userId: targetUserId } }
+      await tx.organizationMember.delete({
+        where: {
+          organizationId_userId: { organizationId, userId: targetUserId },
+        },
+      });
+      const scope = { organizationId, userId: targetUserId };
+      await tx.smtpConnectionGrant.deleteMany({ where: scope });
+      await tx.inboxAccountGrant.deleteMany({ where: scope });
+      await tx.mailDomainGrant.deleteMany({ where: scope });
+      await tx.replyPresence.deleteMany({ where: scope });
     });
-  }
+  },
 };
 
 // Reject an operation that would leave an organization with no OWNER.
-async function assertNotLastOwner(organizationId: string) {
-  const ownerCount = await prisma.organizationMember.count({
-    where: { organizationId, role: "OWNER" }
+async function assertNotLastOwner(
+  organizationId: string,
+  tx: Prisma.TransactionClient
+) {
+  const ownerCount = await tx.organizationMember.count({
+    where: { organizationId, role: "OWNER" },
   });
   if (ownerCount <= 1) {
-    throw new HttpError(400, "An organization must always have at least one owner");
+    throw new HttpError(
+      400,
+      "An organization must always have at least one owner"
+    );
   }
 }

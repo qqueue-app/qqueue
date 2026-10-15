@@ -4,7 +4,11 @@ import type { Prisma } from "@prisma/client";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { hashPassword } from "../../lib/crypto.js";
-import { assertOrgRole, getMembership } from "../../lib/org-access.js";
+import {
+  assertOrgRole,
+  getMembership,
+  lockOrganizationTeam,
+} from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { createAuthTokens } from "../../lib/tokens.js";
 import { persistRefreshToken } from "../../lib/refresh-tokens.js";
@@ -24,7 +28,7 @@ const inviteSelect = {
   expiresAt: true,
   acceptedAt: true,
   createdAt: true,
-  invitedBy: { select: { id: true, email: true, name: true } }
+  invitedBy: { select: { id: true, email: true, name: true } },
 } satisfies Prisma.OrganizationInviteSelect;
 
 function hashInviteToken(token: string) {
@@ -53,26 +57,34 @@ async function sendInviteEmail(params: {
 }) {
   const connection = await prisma.sMTPConnection.findFirst({
     where: { organizationId: params.organizationId },
-    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }]
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
   });
 
   if (!connection) {
     console.warn(
       `[invitations] Skipping invite email to ${params.email}: organization ${params.organizationId} has no SMTP connection.`
     );
-    return;
+    return { queued: false };
   }
 
+  const safeName = params.organizationName.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        char
+      ]!
+  );
   await transactionalEmailService.send({
     organizationId: params.organizationId,
     smtpConnectionId: connection.id,
     to: params.email,
     subject: `You've been invited to join ${params.organizationName} on QQueue`,
     text: `Hi,\n\nYou've been invited to join "${params.organizationName}" on QQueue. Use the link below within the next 7 days to accept and set up your account:\n\n${params.acceptUrl}\n\nIf you weren't expecting this, you can safely ignore this email.`,
-    html: `<p>Hi,</p><p>You've been invited to join <strong>${params.organizationName}</strong> on QQueue. Use the link below within the next 7 days to accept and set up your account:</p><p><a href="${params.acceptUrl}">Accept your invitation</a></p><p>If you weren't expecting this, you can safely ignore this email.</p>`,
+    html: `<p>Hi,</p><p>You've been invited to join <strong>${safeName}</strong> on QQueue. Use the link below within the next 7 days to accept and set up your account:</p><p><a href="${params.acceptUrl}">Accept your invitation</a></p><p>If you weren't expecting this, you can safely ignore this email.</p>`,
     origin: "SYSTEM",
-    createdByUserId: params.invitedByUserId
+    createdByUserId: params.invitedByUserId,
   });
+  return { queued: true };
 }
 
 export const invitationService = {
@@ -82,10 +94,11 @@ export const invitationService = {
    * email so resends refresh the token and expiry instead of piling up.
    */
   async create(input: InviteCreateInput, invitedByUserId: string) {
-    const membership = await assertOrgRole(invitedByUserId, input.organizationId, [
-      "OWNER",
-      "ADMIN"
-    ]);
+    const membership = await assertOrgRole(
+      invitedByUserId,
+      input.organizationId,
+      ["OWNER", "ADMIN"]
+    );
 
     if (input.role === "OWNER" && membership.role !== "OWNER") {
       throw new HttpError(403, "Only an owner can invite another owner");
@@ -96,63 +109,79 @@ export const invitationService = {
     const existingMember = await prisma.organizationMember.findFirst({
       where: {
         organizationId: input.organizationId,
-        user: { email }
-      }
+        user: { email },
+      },
     });
     if (existingMember) {
-      throw new HttpError(409, "That person is already a member of this organization");
+      throw new HttpError(
+        409,
+        "That person is already a member of this organization"
+      );
     }
 
     const token = randomBytes(32).toString("base64url");
     const tokenHash = hashInviteToken(token);
     const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
 
-    const invite = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Supersede any still-pending invite for this email/org.
-      await tx.organizationInvite.updateMany({
-        where: {
-          organizationId: input.organizationId,
-          email,
-          status: "PENDING"
-        },
-        data: { status: "REVOKED" }
-      });
-
-      return tx.organizationInvite.create({
-        data: {
-          organizationId: input.organizationId,
-          email,
-          role: input.role,
-          tokenHash,
+    const invite = await prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        await lockOrganizationTeam(tx, input.organizationId);
+        const currentActor = await assertOrgRole(
           invitedByUserId,
-          expiresAt
-        },
-        select: inviteSelect
-      });
-    });
+          input.organizationId,
+          ["OWNER", "ADMIN"],
+          tx
+        );
+        if (input.role === "OWNER" && currentActor.role !== "OWNER") {
+          throw new HttpError(403, "Only an owner can invite another owner");
+        }
+        // Supersede any still-pending invite for this email/org.
+        await tx.organizationInvite.updateMany({
+          where: {
+            organizationId: input.organizationId,
+            email,
+            status: "PENDING",
+          },
+          data: { status: "REVOKED" },
+        });
+
+        return tx.organizationInvite.create({
+          data: {
+            organizationId: input.organizationId,
+            email,
+            role: input.role,
+            tokenHash,
+            invitedByUserId,
+            expiresAt,
+          },
+          select: inviteSelect,
+        });
+      }
+    );
 
     const acceptUrl = buildAcceptUrl(token);
     const organization = await prisma.organization.findUnique({
       where: { id: input.organizationId },
-      select: { name: true }
+      select: { name: true },
     });
 
-    await sendInviteEmail({
+    const delivery = await sendInviteEmail({
       organizationId: input.organizationId,
       organizationName: organization?.name ?? "an organization",
       email,
       acceptUrl,
-      invitedByUserId
+      invitedByUserId,
     }).catch((error) => {
       console.error(
         `[invitations] Failed to send invite email to ${email}:`,
         error instanceof Error ? error.message : error
       );
+      return { queued: false };
     });
 
     // The acceptUrl is returned only to the authenticated inviter, so exposing
     // it is safe and lets them share the link directly when email is unavailable.
-    return { invite, acceptUrl };
+    return { invite, acceptUrl, emailQueued: delivery.queued };
   },
 
   async list(organizationId: string, userId: string) {
@@ -160,14 +189,14 @@ export const invitationService = {
     return prisma.organizationInvite.findMany({
       where: { organizationId, status: "PENDING" },
       select: inviteSelect,
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
   },
 
   async revoke(id: string, userId: string) {
     const existing = await prisma.organizationInvite.findUnique({
       where: { id },
-      select: { id: true, organizationId: true, status: true }
+      select: { id: true, organizationId: true, status: true },
     });
 
     if (!existing) {
@@ -180,11 +209,23 @@ export const invitationService = {
       throw new HttpError(400, "Only pending invitations can be revoked");
     }
 
-    return prisma.organizationInvite.update({
-      where: { id },
-      data: { status: "REVOKED" },
-      select: inviteSelect
-    });
+    return prisma.organizationInvite
+      .update({
+        where: { id, status: "PENDING" },
+        data: { status: "REVOKED" },
+        select: inviteSelect,
+      })
+      .catch((error: unknown) => {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2025"
+        ) {
+          throw new HttpError(400, "Only pending invitations can be revoked");
+        }
+        throw error;
+      });
   },
 
   /**
@@ -200,8 +241,8 @@ export const invitationService = {
         role: true,
         status: true,
         expiresAt: true,
-        organization: { select: { name: true } }
-      }
+        organization: { select: { name: true } },
+      },
     });
 
     if (
@@ -214,7 +255,7 @@ export const invitationService = {
 
     const existingUser = await prisma.user.findUnique({
       where: { email: invite.email },
-      select: { id: true }
+      select: { id: true },
     });
 
     return {
@@ -223,7 +264,7 @@ export const invitationService = {
       organizationName: invite.organization.name,
       expiresAt: invite.expiresAt,
       // The accept page shows password fields only for brand-new accounts.
-      hasAccount: Boolean(existingUser)
+      hasAccount: Boolean(existingUser),
     };
   },
 
@@ -236,7 +277,7 @@ export const invitationService = {
    */
   async accept(input: InviteAcceptInput) {
     const invite = await prisma.organizationInvite.findUnique({
-      where: { tokenHash: hashInviteToken(input.token) }
+      where: { tokenHash: hashInviteToken(input.token) },
     });
 
     if (
@@ -248,39 +289,43 @@ export const invitationService = {
     }
 
     const existingUser = await prisma.user.findUnique({
-      where: { email: invite.email }
+      where: { email: invite.email },
     });
 
     // Existing account: grant membership (if not already a member) and ask them
     // to sign in. Do not issue tokens for an account we haven't authenticated.
     if (existingUser) {
-      const alreadyMember = await getMembership(existingUser.id, invite.organizationId);
-
-      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        if (!alreadyMember) {
-          await tx.organizationMember.create({
-            data: {
-              organizationId: invite.organizationId,
-              userId: existingUser.id,
-              role: invite.role
-            }
-          });
+      const alreadyMember = await prisma.$transaction(
+        async (tx: Prisma.TransactionClient) => {
+          await lockOrganizationTeam(tx, invite.organizationId);
+          await consumeInvite(tx, invite.id);
+          const member = await getMembership(
+            existingUser.id,
+            invite.organizationId,
+            tx
+          );
+          if (!member) {
+            await tx.organizationMember.create({
+              data: {
+                organizationId: invite.organizationId,
+                userId: existingUser.id,
+                role: invite.role,
+              },
+            });
+          }
+          return Boolean(member);
         }
-        await tx.organizationInvite.update({
-          where: { id: invite.id },
-          data: { status: "ACCEPTED", acceptedAt: new Date() }
-        });
-      });
+      );
 
       const organization = await prisma.organization.findUnique({
         where: { id: invite.organizationId },
-        select: { id: true, name: true }
+        select: { id: true, name: true },
       });
 
       return {
         organization,
         requiresSignIn: true,
-        alreadyMember: Boolean(alreadyMember)
+        alreadyMember: Boolean(alreadyMember),
       };
     }
 
@@ -293,30 +338,27 @@ export const invitationService = {
 
     const { user, organization } = await prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
+        await lockOrganizationTeam(tx, invite.organizationId);
+        await consumeInvite(tx, invite.id);
         const createdUser = await tx.user.create({
           data: {
             email: invite.email,
             name: input.name,
-            passwordHash
-          }
+            passwordHash,
+          },
         });
 
         await tx.organizationMember.create({
           data: {
             organizationId: invite.organizationId,
             userId: createdUser.id,
-            role: invite.role
-          }
-        });
-
-        await tx.organizationInvite.update({
-          where: { id: invite.id },
-          data: { status: "ACCEPTED", acceptedAt: new Date() }
+            role: invite.role,
+          },
         });
 
         const org = await tx.organization.findUnique({
           where: { id: invite.organizationId },
-          select: { id: true, name: true }
+          select: { id: true, name: true },
         });
 
         return { user: createdUser, organization: org };
@@ -331,12 +373,22 @@ export const invitationService = {
         id: user.id,
         email: user.email,
         name: user.name,
-        createdAt: user.createdAt.toISOString()
+        createdAt: user.createdAt.toISOString(),
       },
       organization,
       role: invite.role,
       requiresSignIn: false,
-      tokens
+      tokens,
     };
-  }
+  },
 };
+
+async function consumeInvite(tx: Prisma.TransactionClient, id: string) {
+  const now = new Date();
+  const changed = await tx.organizationInvite.updateMany({
+    where: { id, status: "PENDING", expiresAt: { gt: now } },
+    data: { status: "ACCEPTED", acceptedAt: now },
+  });
+  if (changed.count !== 1)
+    throw new HttpError(400, "This invitation is invalid or has expired");
+}

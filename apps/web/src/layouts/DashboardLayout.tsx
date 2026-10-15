@@ -6,6 +6,7 @@ import {
   FileEdit,
   MailCheck,
   Send,
+  Search,
   PenSquare,
   Users,
   List,
@@ -49,6 +50,7 @@ const navSections: NavSection[] = [
         activePaths: ["/"],
       },
       { to: "/email-studio", label: "Compose", icon: PenSquare },
+      { to: "/search", label: "Search mail", icon: Search },
       { to: "/sent", label: "Sent", icon: MailCheck },
       { to: "/drafts", label: "Drafts", icon: FileEdit },
       { to: "/outbox", label: "Outbox", icon: Send },
@@ -65,7 +67,7 @@ const navSections: NavSection[] = [
   {
     heading: "Audience",
     items: [
-      { to: "/contacts", label: "Contacts", icon: Users },
+      { to: "/contacts", label: "Contacts", icon: Users, advanced: true },
       // Not `end`: the Smart tab lives at /campaigns/lists/smart and has to
       // keep this item lit.
       { to: "/campaigns/lists", label: "Lists", icon: List, advanced: true },

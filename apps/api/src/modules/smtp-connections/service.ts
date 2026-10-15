@@ -1,17 +1,21 @@
 import { SMTPProvider } from "@qqueue/email-engine";
 import type {
   SMTPConnectionInput,
-  SMTPConnectionUpdateInput
+  SMTPConnectionUpdateInput,
 } from "@qqueue/shared";
 import {
   SECRET_DECRYPTION_MESSAGE,
   SecretDecryptionError,
   decryptSecret,
-  encryptSecret
+  encryptSecret,
 } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
 import { findPairedInboxAccountId } from "../../lib/mailbox-access.js";
-import { assertOrgRole, getMembership } from "../../lib/org-access.js";
+import {
+  assertOrgRole,
+  getMembership,
+  lockOrganizationTeam,
+} from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { describeSmtpVerifyError } from "./verify-error.js";
 
@@ -27,7 +31,7 @@ export const smtpConnectionSelect = {
   replyTo: true,
   isDefault: true,
   createdAt: true,
-  updatedAt: true
+  updatedAt: true,
 };
 
 /**
@@ -86,13 +90,13 @@ export async function normalizeDefault(
   if (isDefault) {
     await db.sMTPConnection.updateMany({
       where: { organizationId },
-      data: { isDefault: false }
+      data: { isDefault: false },
     });
     return true;
   }
 
   const existingDefault = await db.sMTPConnection.findFirst({
-    where: { organizationId, isDefault: true }
+    where: { organizationId, isDefault: true },
   });
 
   return !existingDefault;
@@ -114,9 +118,9 @@ function toProvider(
     secure: connection.secure,
     auth: {
       user: decryptSecret(connection.usernameEncrypted),
-      pass: decryptSecret(connection.passwordEncrypted)
+      pass: decryptSecret(connection.passwordEncrypted),
     },
-    ...timeouts
+    ...timeouts,
   });
 }
 
@@ -140,7 +144,7 @@ export async function verifyConnection(
   try {
     await toProvider(connection, {
       connectionTimeout: timeoutMs,
-      greetingTimeout: timeoutMs
+      greetingTimeout: timeoutMs,
     }).verify();
   } catch (error) {
     if (error instanceof SecretDecryptionError) {
@@ -155,7 +159,7 @@ export async function verifyConnection(
 // full record (including encrypted secrets) for internal use.
 async function findOwned(id: string, userId: string) {
   const connection = await prisma.sMTPConnection.findFirst({
-    where: { id, organization: { members: { some: { userId } } } }
+    where: { id, organization: { members: { some: { userId } } } },
   });
   if (!connection) {
     throw new HttpError(404, "SMTP connection not found");
@@ -168,7 +172,7 @@ export const smtpConnectionService = {
     return prisma.sMTPConnection.findMany({
       where: { organizationId },
       select: smtpConnectionSelect,
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
   },
 
@@ -176,7 +180,7 @@ export const smtpConnectionService = {
     await findOwned(id, userId);
     return prisma.sMTPConnection.findUnique({
       where: { id },
-      select: smtpConnectionSelect
+      select: smtpConnectionSelect,
     });
   },
 
@@ -189,7 +193,7 @@ export const smtpConnectionService = {
       port: input.port,
       secure: input.secure,
       usernameEncrypted,
-      passwordEncrypted
+      passwordEncrypted,
     });
 
     const isDefault = await normalizeDefault(
@@ -209,9 +213,9 @@ export const smtpConnectionService = {
         fromEmail: input.fromEmail,
         fromName: input.fromName,
         replyTo: normalizeReplyTo(input.replyTo) ?? null,
-        isDefault
+        isDefault,
       },
-      select: smtpConnectionSelect
+      select: smtpConnectionSelect,
     });
   },
 
@@ -235,7 +239,7 @@ export const smtpConnectionService = {
         port: input.port ?? existing.port,
         secure: input.secure ?? existing.secure,
         usernameEncrypted,
-        passwordEncrypted
+        passwordEncrypted,
       });
     } else {
       // No handshake, but the stored secrets still have to be readable. An
@@ -263,9 +267,9 @@ export const smtpConnectionService = {
         fromEmail: input.fromEmail,
         fromName: input.fromName,
         replyTo: normalizeReplyTo(input.replyTo),
-        isDefault
+        isDefault,
       },
-      select: smtpConnectionSelect
+      select: smtpConnectionSelect,
     });
   },
 
@@ -313,7 +317,7 @@ export const smtpConnectionService = {
     return prisma.sMTPConnection.findMany({
       where: { organizationId, grants: { some: { userId } } },
       select: smtpConnectionSelect,
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
   },
 
@@ -334,26 +338,12 @@ export const smtpConnectionService = {
     return prisma.smtpConnectionGrant.findMany({
       where: { smtpConnectionId: id },
       include: { user: { select: { id: true, email: true, name: true } } },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "asc" },
     });
   },
 
   async addGrant(id: string, userId: string, granteeUserId: string) {
     const connection = await findOwned(id, userId);
-    await assertOrgRole(userId, connection.organizationId, ["OWNER", "ADMIN"]);
-
-    const granteeMembership = await getMembership(
-      granteeUserId,
-      connection.organizationId
-    );
-    if (!granteeMembership) {
-      throw new HttpError(
-        400,
-        "That user is not a member of this organization",
-        "validation_error"
-      );
-    }
-
     // A mailbox that only sends (no IMAP account for the same address) grants
     // send alone; there is simply nothing to read.
     const inboxAccountId = await findPairedInboxAccountId(
@@ -362,65 +352,80 @@ export const smtpConnectionService = {
     );
 
     // Idempotent: re-granting is a no-op rather than an error.
-    const [grant] = await prisma.$transaction([
-      prisma.smtpConnectionGrant.upsert({
+    return prisma.$transaction(async (tx) => {
+      await lockOrganizationTeam(tx, connection.organizationId);
+      await assertOrgRole(
+        userId,
+        connection.organizationId,
+        ["OWNER", "ADMIN"],
+        tx
+      );
+
+      const granteeMembership = await getMembership(
+        granteeUserId,
+        connection.organizationId,
+        tx
+      );
+      if (!granteeMembership) {
+        throw new HttpError(
+          400,
+          "That user is not a member of this organization",
+          "validation_error"
+        );
+      }
+
+      const grant = await tx.smtpConnectionGrant.upsert({
         where: {
           smtpConnectionId_userId: {
             smtpConnectionId: id,
-            userId: granteeUserId
-          }
+            userId: granteeUserId,
+          },
         },
         create: {
           organizationId: connection.organizationId,
           smtpConnectionId: id,
-          userId: granteeUserId
+          userId: granteeUserId,
         },
         update: {},
-        include: { user: { select: { id: true, email: true, name: true } } }
-      }),
-      ...(inboxAccountId
-        ? [
-            prisma.inboxAccountGrant.upsert({
-              where: {
-                inboxAccountId_userId: {
-                  inboxAccountId,
-                  userId: granteeUserId
-                }
-              },
-              create: {
-                organizationId: connection.organizationId,
-                inboxAccountId,
-                userId: granteeUserId
-              },
-              update: {}
-            })
-          ]
-        : [])
-    ]);
-
-    return grant;
+        include: { user: { select: { id: true, email: true, name: true } } },
+      });
+      if (inboxAccountId)
+        await tx.inboxAccountGrant.upsert({
+          where: {
+            inboxAccountId_userId: { inboxAccountId, userId: granteeUserId },
+          },
+          create: {
+            organizationId: connection.organizationId,
+            inboxAccountId,
+            userId: granteeUserId,
+          },
+          update: {},
+        });
+      return grant;
+    });
   },
 
   async removeGrant(id: string, userId: string, granteeUserId: string) {
     const connection = await findOwned(id, userId);
-    await assertOrgRole(userId, connection.organizationId, ["OWNER", "ADMIN"]);
-
     const inboxAccountId = await findPairedInboxAccountId(
       connection.organizationId,
       connection.fromEmail
     );
-
-    await prisma.$transaction([
-      prisma.smtpConnectionGrant.deleteMany({
-        where: { smtpConnectionId: id, userId: granteeUserId }
-      }),
-      ...(inboxAccountId
-        ? [
-            prisma.inboxAccountGrant.deleteMany({
-              where: { inboxAccountId, userId: granteeUserId }
-            })
-          ]
-        : [])
-    ]);
-  }
+    await prisma.$transaction(async (tx) => {
+      await lockOrganizationTeam(tx, connection.organizationId);
+      await assertOrgRole(
+        userId,
+        connection.organizationId,
+        ["OWNER", "ADMIN"],
+        tx
+      );
+      await tx.smtpConnectionGrant.deleteMany({
+        where: { smtpConnectionId: id, userId: granteeUserId },
+      });
+      if (inboxAccountId)
+        await tx.inboxAccountGrant.deleteMany({
+          where: { inboxAccountId, userId: granteeUserId },
+        });
+    });
+  },
 };

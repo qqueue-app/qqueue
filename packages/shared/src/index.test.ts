@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  resolveMailReplyRecipients,
   abTestConfigSchema,
   applyVariables,
   base64DecodedBytes,
@@ -1610,4 +1611,18 @@ describe("mailboxDomain", () => {
     // page down.
     expect(mailboxDomain("not-an-address")).toBe("");
   });
+});
+
+
+describe("mail reply recipient defaults",()=>{
+ it("targets original recipients for a follow-up to your own sent message",()=>{
+  expect(resolveMailReplyRecipients({fromEmail:"support@example.com",replyTo:["support@example.com"],to:["customer@example.com"],cc:["copy@example.com"]},["support@example.com"],false)).toEqual({to:["customer@example.com"],cc:[]});
+ });
+ it("deduplicates Reply all while excluding the selected mailbox and aliases",()=>{
+  expect(resolveMailReplyRecipients({fromEmail:"sender@example.com",replyTo:["answers@example.com"],to:["support@example.com","other@example.com"],cc:["OTHER@example.com","copy@example.com","alias@example.com"]},["support@example.com","alias@example.com"],true)).toEqual({to:["answers@example.com","other@example.com"],cc:["copy@example.com"]});
+ });
+ it("supports Cc-only sent mail and a deliberately self-addressed message",()=>{
+  expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:[],cc:["cc@example.com"]},["own@example.com"],false)).toEqual({to:["cc@example.com"],cc:[]});
+  expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:["own@example.com"],cc:[]},["own@example.com"],false)).toEqual({to:["own@example.com"],cc:[]});
+ });
 });

@@ -1,4 +1,6 @@
 import type {
+  MailSearchInput,
+  MailSearchPage,
   PersonalMailSignature,
   MailSignatureInput,
   MailboxView,
@@ -301,7 +303,14 @@ export interface InboundAttachment {
   contentId?: string | null;
 }
 
+export interface ReplyPresence {
+  clientId: string;
+  userId: string;
+  name: string;
+  expiresAt: string;
+}
 export interface InboxConversation {
+  replyPresence?: { available: boolean; participants: ReplyPresence[] };
   messages: InboundMessage[];
   outgoing: {
     id: string;
@@ -667,7 +676,15 @@ export interface SentEmail {
   to: string[];
   ccCount: number;
   bccCount: number;
-  status: "SENT" | "FAILED" | "UNCERTAIN" | "SUPPRESSED" | "CANCELLED";
+  status:
+    | "PENDING"
+    | "QUEUED"
+    | "PROCESSING"
+    | "SENT"
+    | "FAILED"
+    | "UNCERTAIN"
+    | "SUPPRESSED"
+    | "CANCELLED";
   origin: "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
   sentAt?: string | null;
   createdAt: string;
@@ -738,6 +755,7 @@ export interface SentEmailEvent {
  * subjects has no use for 25 rendered emails.
  */
 export interface SentEmailDetail extends SentEmail {
+  scheduledAt?: string | null;
   recipients?: RecipientDelivery[];
   /**
    * The body as stored — before the send worker injected tracking and appended
@@ -2423,13 +2441,14 @@ export const api = {
   },
 
   createInvite(input: { organizationId: string; email: string; role: string }) {
-    return request<{ invite: OrganizationInvite; acceptUrl: string }>(
-      "/api/v1/invitations",
-      {
-        method: "POST",
-        body: JSON.stringify(input),
-      }
-    );
+    return request<{
+      invite: OrganizationInvite;
+      acceptUrl: string;
+      emailQueued: boolean;
+    }>("/api/v1/invitations", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
 
   revokeInvite(id: string) {
@@ -2578,6 +2597,26 @@ export const api = {
       `/api/v1/inbox/messages/${encodeURIComponent(id)}/conversation?organizationId=${encodeURIComponent(organizationId)}`
     );
   },
+  touchReplyPresence(
+    messageId: string,
+    organizationId: string,
+    clientId: string
+  ) {
+    return request<{ expiresAt: string }>(
+      `/api/v1/inbox/messages/${encodeURIComponent(messageId)}/reply-presence`,
+      { method: "PUT", body: JSON.stringify({ organizationId, clientId }) }
+    );
+  },
+  leaveReplyPresence(
+    messageId: string,
+    organizationId: string,
+    clientId: string
+  ) {
+    return request<{ left: boolean }>(
+      `/api/v1/inbox/messages/${encodeURIComponent(messageId)}/reply-presence`,
+      { method: "DELETE", body: JSON.stringify({ organizationId, clientId }) }
+    );
+  },
   syncInbox(organizationId: string, inboxAccountId?: string) {
     return request<{ queued: number }>("/api/v1/inbox/sync", {
       method: "POST",
@@ -2680,6 +2719,23 @@ export const api = {
 
   deleteRecurringSend(id: string) {
     return request<void>(`/api/v1/recurring-sends/${id}`, { method: "DELETE" });
+  },
+
+  searchMail(organizationId: string, input: Partial<MailSearchInput>) {
+    const query = new URLSearchParams({ organizationId });
+    for (const [key, value] of Object.entries(input))
+      if (value !== undefined) query.set(key, String(value));
+    return request<MailSearchPage>(`/api/v1/mail-search?${query}`);
+  },
+  searchableMailboxes(organizationId: string) {
+    return request<{ email: string; name: string }[]>(
+      `/api/v1/mail-search/mailboxes?organizationId=${encodeURIComponent(organizationId)}`
+    );
+  },
+  outgoingMail(id: string, organizationId: string) {
+    return request<SentEmailDetail>(
+      `/api/v1/mail-search/outgoing/${encodeURIComponent(id)}?organizationId=${encodeURIComponent(organizationId)}`
+    );
   },
 
   listMailSignatures(organizationId: string) {

@@ -14,16 +14,16 @@ const queueStub = vi.hoisted(() => () => ({
   getJobs: vi.fn().mockResolvedValue([]),
   getJobCounts: vi.fn().mockResolvedValue({}),
   upsertJobScheduler: vi.fn().mockResolvedValue(undefined),
-  removeJobScheduler: vi.fn().mockResolvedValue(undefined)
+  removeJobScheduler: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("./queues/email-sending.queue.js", () => ({
-  emailSendingQueue: queueStub()
+  emailSendingQueue: queueStub(),
 }));
 vi.mock("./queues/campaign-processing.queue.js", () => ({
-  campaignProcessingQueue: queueStub()
+  campaignProcessingQueue: queueStub(),
 }));
 vi.mock("./queues/webhook-delivery.queue.js", () => ({
-  webhookDeliveryQueue: queueStub()
+  webhookDeliveryQueue: queueStub(),
 }));
 
 const { createApp } = await import("./app.js");
@@ -36,7 +36,7 @@ const auth = `Bearer ${accessToken}`;
 beforeEach(() => {
   // Default: user_1 is an OWNER of org_1 (used by requireOrgMembership).
   prismaMock.organizationMember.findUnique.mockResolvedValue({
-    role: "OWNER"
+    role: "OWNER",
   } as never);
 });
 
@@ -91,11 +91,11 @@ describe("auth routes", () => {
       id: "user_1",
       email: "a@b.com",
       name: "A",
-      createdAt: new Date(0)
+      createdAt: new Date(0),
     } as never);
     prismaMock.organization.create.mockResolvedValue({
       id: "org_1",
-      name: "Acme"
+      name: "Acme",
     } as never);
 
     const res = await request(app)
@@ -141,7 +141,7 @@ describe("requireAuth on protected routes", () => {
 describe("organizations controller", () => {
   it("returns 404 when the org is not found", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.organization.findUnique.mockResolvedValue(null);
     const res = await request(app)
@@ -153,11 +153,11 @@ describe("organizations controller", () => {
   it("creates an organization (201)", async () => {
     // Owning or administering one organization is what lets you start another.
     prismaMock.organizationMember.findFirst.mockResolvedValue({
-      id: "member_1"
+      id: "member_1",
     } as never);
     prismaMock.organization.create.mockResolvedValue({
       id: "org_1",
-      name: "Acme"
+      name: "Acme",
     } as never);
     const res = await request(app)
       .post("/api/v1/organizations")
@@ -266,7 +266,7 @@ describe("templates routes", () => {
         organizationId: "org_1",
         name: "N",
         subject: "S",
-        html: "<p>H</p>"
+        html: "<p>H</p>",
       });
     expect(res.status).toBe(200);
   });
@@ -285,7 +285,7 @@ describe("contact-lists routes", () => {
     prismaMock.contactList.create.mockResolvedValue({
       id: "l1",
       members: [],
-      _count: { members: 0, campaigns: 0 }
+      _count: { members: 0, campaigns: 0 },
     } as never);
     const res = await request(app)
       .post("/api/v1/contact-lists")
@@ -382,7 +382,6 @@ describe("tracking routes (public)", () => {
     const res = await request(app).get(`/api/v1/track/click/${token}`);
     expect(res.status).toBe(400);
   });
-
 });
 
 // Phase 3: the inbound ESP webhook ships disabled; these tests flip the flag
@@ -425,7 +424,7 @@ describe("inbound ESP webhook", () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       id: "job_1",
       organizationId: "org_1",
-      toEmail: "x@y.com"
+      toEmail: "x@y.com",
     } as never);
     prismaMock.emailEvent.create.mockResolvedValue({ id: "e1" } as never);
     const res = await request(app)
@@ -462,8 +461,8 @@ describe("contacts CSV routes", () => {
         firstName: null,
         lastName: null,
         tags: [],
-        status: "ACTIVE"
-      }
+        status: "ACTIVE",
+      },
     ] as never);
 
     const res = await request(app)
@@ -480,7 +479,7 @@ describe("contacts CSV routes", () => {
     expect(res.body.data).toMatchObject({
       totalRows: 2,
       newCount: 1,
-      duplicateCount: 1
+      duplicateCount: 1,
     });
     expect(prismaMock.contact.create).not.toHaveBeenCalled();
   });
@@ -511,8 +510,8 @@ describe("contacts CSV routes", () => {
         lastName: "Bee",
         status: "ACTIVE",
         tags: ["vip"],
-        createdAt: new Date("2026-01-01T00:00:00.000Z")
-      }
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
     ] as never);
 
     const res = await request(app)
@@ -563,17 +562,19 @@ describe("unsubscribe routes (public)", () => {
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
     // Suppression stored lowercase even for a mixed-case token payload.
-    expect(prismaMock.suppression.upsert.mock.calls[0][0].create).toMatchObject({
-      organizationId: "org_1",
-      email: "u@x.com",
-      reason: "UNSUBSCRIBE"
-    });
+    expect(prismaMock.suppression.upsert.mock.calls[0][0].create).toMatchObject(
+      {
+        organizationId: "org_1",
+        email: "u@x.com",
+        reason: "UNSUBSCRIBE",
+      }
+    );
     expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
       where: {
         organizationId: "org_1",
-        email: { equals: "U@x.com", mode: "insensitive" }
+        email: { equals: "U@x.com", mode: "insensitive" },
       },
-      data: { status: "UNSUBSCRIBED" }
+      data: { status: "UNSUBSCRIBED" },
     });
   });
 
@@ -586,7 +587,7 @@ describe("unsubscribe routes (public)", () => {
 describe("error-handler integration", () => {
   it("maps a Prisma P2025 thrown in a handler to 404", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     // Shaped like the generated client's real error (see lib/prisma-error.ts):
     // it originates in the client's CJS runtime copy, not the ESM one this
@@ -595,7 +596,7 @@ describe("error-handler integration", () => {
       Object.assign(new Error("nope"), {
         name: "PrismaClientKnownRequestError",
         code: "P2025",
-        clientVersion: "6.0.0"
+        clientVersion: "6.0.0",
       })
     );
     const res = await request(app)
@@ -615,7 +616,7 @@ describe("auth login/refresh success", () => {
       name: "A",
       passwordHash: await hashPassword("password123"),
       createdAt: new Date(0),
-      members: []
+      members: [],
     } as never);
     const res = await request(app)
       .post("/api/v1/auth/login")
@@ -624,17 +625,20 @@ describe("auth login/refresh success", () => {
   });
 
   it("refreshes tokens", async () => {
-    const { refreshToken } = createAuthTokens({ id: "user_1", email: "a@b.com" });
+    const { refreshToken } = createAuthTokens({
+      id: "user_1",
+      email: "a@b.com",
+    });
     // Phase 5: refresh also requires a live server-side token row.
     prismaMock.refreshToken.findUnique.mockResolvedValue({
       id: "rt_1",
       userId: "user_1",
       expiresAt: new Date(Date.now() + 60_000),
-      revokedAt: null
+      revokedAt: null,
     } as never);
     prismaMock.user.findUnique.mockResolvedValue({
       id: "user_1",
-      email: "a@b.com"
+      email: "a@b.com",
     } as never);
     const res = await request(app)
       .post("/api/v1/auth/refresh")
@@ -662,7 +666,7 @@ describe("campaigns mutations", () => {
     contactListId: "list_1",
     cronExpression: null,
     timezone: null,
-    scheduledAt: null
+    scheduledAt: null,
   };
 
   it("creates a campaign (201)", async () => {
@@ -736,7 +740,7 @@ describe("campaigns mutations", () => {
   it("pauses and resumes a campaign", async () => {
     prismaMock.campaign.findFirst.mockResolvedValue({
       ...owned,
-      status: "SCHEDULED"
+      status: "SCHEDULED",
     } as never);
     prismaMock.campaign.update.mockResolvedValue(owned as never);
     const pauseRes = await request(app)
@@ -747,7 +751,7 @@ describe("campaigns mutations", () => {
     prismaMock.campaign.findFirst.mockResolvedValue({
       ...owned,
       status: "PAUSED",
-      scheduledAt: new Date("2000-01-01T00:00:00.000Z")
+      scheduledAt: new Date("2000-01-01T00:00:00.000Z"),
     } as never);
     const resumeRes = await request(app)
       .post("/api/v1/campaigns/c1/resume")
@@ -770,8 +774,12 @@ describe("campaigns mutations", () => {
 
 describe("smtp-connections mutations", () => {
   it("returns a connection when found", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue({ id: "s1" } as never);
-    prismaMock.sMTPConnection.findUnique.mockResolvedValue({ id: "s1" } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "s1",
+    } as never);
+    prismaMock.sMTPConnection.findUnique.mockResolvedValue({
+      id: "s1",
+    } as never);
     const res = await request(app)
       .get("/api/v1/smtp-connections/s1")
       .set("Authorization", auth);
@@ -781,7 +789,7 @@ describe("smtp-connections mutations", () => {
   it("deletes a connection (204) as OWNER", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       id: "s1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.sMTPConnection.delete.mockResolvedValue({ id: "s1" } as never);
     const res = await request(app)
@@ -793,7 +801,7 @@ describe("smtp-connections mutations", () => {
   // Phase 3 acceptance: sending-account writes are OWNER/ADMIN only.
   it("returns 403 when a MEMBER tries to create a connection", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     const res = await request(app)
       .post("/api/v1/smtp-connections")
@@ -805,11 +813,11 @@ describe("smtp-connections mutations", () => {
 
   it("returns 403 when a MEMBER tries to delete a connection", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       id: "s1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     const res = await request(app)
       .delete("/api/v1/smtp-connections/s1")
@@ -823,11 +831,11 @@ describe("smtp-connections mutations", () => {
 describe("suppressions delete authorization", () => {
   it("deletes as ADMIN (204)", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
     prismaMock.suppression.findFirst.mockResolvedValue({
       id: "sup_1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     const res = await request(app)
       .delete("/api/v1/suppressions/sup_1")
@@ -837,11 +845,11 @@ describe("suppressions delete authorization", () => {
 
   it("returns 403 for a MEMBER", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.suppression.findFirst.mockResolvedValue({
       id: "sup_1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     const res = await request(app)
       .delete("/api/v1/suppressions/sup_1")
@@ -861,7 +869,7 @@ describe("templates mutations", () => {
         organizationId: "org_1",
         name: "N",
         subject: "S",
-        html: "<p>H</p>"
+        html: "<p>H</p>",
       });
     expect(res.status).toBe(201);
   });
@@ -888,7 +896,7 @@ describe("contact-lists mutations", () => {
     prismaMock.contactList.findFirst.mockResolvedValue({
       id: "l1",
       members: [],
-      _count: { members: 0, campaigns: 0 }
+      _count: { members: 0, campaigns: 0 },
     } as never);
     const res = await request(app)
       .get("/api/v1/contact-lists/l1")
@@ -899,12 +907,12 @@ describe("contact-lists mutations", () => {
   it("updates a list", async () => {
     prismaMock.contactList.findFirst.mockResolvedValue({
       id: "l1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.contactList.update.mockResolvedValue({
       id: "l1",
       members: [],
-      _count: { members: 0, campaigns: 0 }
+      _count: { members: 0, campaigns: 0 },
     } as never);
     const res = await request(app)
       .put("/api/v1/contact-lists/l1")
@@ -938,9 +946,11 @@ describe("contacts update", () => {
 describe("organizations get/update success", () => {
   it("returns an organization when found", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
-    prismaMock.organization.findUnique.mockResolvedValue({ id: "org_1" } as never);
+    prismaMock.organization.findUnique.mockResolvedValue({
+      id: "org_1",
+    } as never);
     const res = await request(app)
       .get("/api/v1/organizations/org_1")
       .set("Authorization", auth);
@@ -949,7 +959,7 @@ describe("organizations get/update success", () => {
 
   it("updates an organization", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.organization.update.mockResolvedValue({ id: "org_1" } as never);
     const res = await request(app)
@@ -966,11 +976,11 @@ describe("transactional-email send", () => {
       id: "smtp_1",
       organizationId: "org_1",
       fromEmail: "from@b.com",
-      fromName: null
+      fromName: null,
     } as never);
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
     const res = await request(app)
       .post("/api/v1/transactional-email/send")
@@ -980,8 +990,8 @@ describe("transactional-email send", () => {
         to: "x@y.com",
         subject: "Hi",
         text: "Body",
-        scheduledAt: "2999-01-01T00:00:00.000Z"
-    });
+        scheduledAt: "2999-01-01T00:00:00.000Z",
+      });
     expect(res.status).toBe(202);
     expect(res.body).toEqual({ data: { id: "job_1", status: "QUEUED" } });
   });
@@ -989,18 +999,18 @@ describe("transactional-email send", () => {
   it("accepts an API key without organizationId in the request body", async () => {
     prismaMock.apiKey.findFirst.mockResolvedValue({
       id: "api_key_1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.apiKey.update.mockResolvedValue({ id: "api_key_1" } as never);
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       id: "smtp_1",
       organizationId: "org_1",
       fromEmail: "from@b.com",
-      fromName: null
+      fromName: null,
     } as never);
     prismaMock.emailJob.create.mockResolvedValue({
       id: "job_1",
-      status: "QUEUED"
+      status: "QUEUED",
     } as never);
 
     const res = await request(app)
@@ -1010,14 +1020,14 @@ describe("transactional-email send", () => {
         to: "x@y.com",
         subject: "Hi",
         text: "Body",
-        scheduledAt: "2999-01-01T00:00:00.000Z"
+        scheduledAt: "2999-01-01T00:00:00.000Z",
       });
 
     expect(res.status).toBe(202);
     expect(res.body).toEqual({ data: { id: "job_1", status: "QUEUED" } });
-    expect(prismaMock.emailJob.create.mock.calls[0][0].data.organizationId).toBe(
-      "org_1"
-    );
+    expect(
+      prismaMock.emailJob.create.mock.calls[0][0].data.organizationId
+    ).toBe("org_1");
   });
 });
 
@@ -1027,7 +1037,7 @@ describe("api key routes", () => {
       id: "api_key_1",
       organizationId: "org_1",
       userId: "user_1",
-      name: "Production"
+      name: "Production",
     } as never);
 
     const res = await request(app)
@@ -1054,11 +1064,11 @@ describe("api key routes", () => {
   it("revokes an API key", async () => {
     prismaMock.apiKey.findFirst.mockResolvedValue({
       id: "api_key_1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.apiKey.update.mockResolvedValue({
       id: "api_key_1",
-      revokedAt: new Date(0)
+      revokedAt: new Date(0),
     } as never);
 
     const res = await request(app)
@@ -1080,7 +1090,7 @@ describe("queue-operations RBAC", () => {
 
   it("allows an owner to view the queue summary", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     const res = await request(app)
       .get("/api/v1/queue-operations?organizationId=org_1")
@@ -1091,7 +1101,7 @@ describe("queue-operations RBAC", () => {
 
   it("allows an admin to view the queue summary", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
     const res = await request(app)
       .get("/api/v1/queue-operations?organizationId=org_1")
@@ -1101,7 +1111,7 @@ describe("queue-operations RBAC", () => {
 
   it("denies a normal member (403) on the summary", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     const res = await request(app)
       .get("/api/v1/queue-operations?organizationId=org_1")
@@ -1111,7 +1121,7 @@ describe("queue-operations RBAC", () => {
 
   it("denies a normal member (403) on retry", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     const res = await request(app)
       .post("/api/v1/queue-operations/email-sending/jobs/job_1/retry")
@@ -1122,7 +1132,7 @@ describe("queue-operations RBAC", () => {
 
   it("lets an owner reach the retry handler (404 for an unknown job)", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     const res = await request(app)
       .post("/api/v1/queue-operations/email-sending/jobs/job_1/retry")
@@ -1141,9 +1151,11 @@ describe("invitations routes", () => {
     prismaMock.organizationInvite.create.mockResolvedValue({
       id: "inv_1",
       email: "new@x.com",
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
-    prismaMock.organization.findUnique.mockResolvedValue({ name: "Acme" } as never);
+    prismaMock.organization.findUnique.mockResolvedValue({
+      name: "Acme",
+    } as never);
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
 
     const res = await request(app)
@@ -1157,7 +1169,7 @@ describe("invitations routes", () => {
 
   it("denies a normal member issuing an invitation (403)", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     const res = await request(app)
       .post("/api/v1/invitations")
@@ -1179,11 +1191,11 @@ describe("invitations routes", () => {
     prismaMock.organizationInvite.findUnique.mockResolvedValue({
       id: "inv_1",
       organizationId: "org_1",
-      status: "PENDING"
+      status: "PENDING",
     } as never);
     prismaMock.organizationInvite.update.mockResolvedValue({
       id: "inv_1",
-      status: "REVOKED"
+      status: "REVOKED",
     } as never);
     const res = await request(app)
       .delete("/api/v1/invitations/inv_1")
@@ -1198,14 +1210,17 @@ describe("invitations routes", () => {
       role: "MEMBER",
       status: "PENDING",
       expiresAt: future,
-      organization: { name: "Acme" }
+      organization: { name: "Acme" },
     } as never);
     prismaMock.user.findUnique.mockResolvedValue(null);
     const res = await request(app).get(
       "/api/v1/invitations/lookup?token=a-token-that-is-long-enough"
     );
     expect(res.status).toBe(200);
-    expect(res.body.data).toMatchObject({ organizationName: "Acme", hasAccount: false });
+    expect(res.body.data).toMatchObject({
+      organizationName: "Acme",
+      hasAccount: false,
+    });
   });
 
   it("returns 400 for a lookup without a token", async () => {
@@ -1214,26 +1229,27 @@ describe("invitations routes", () => {
   });
 
   it("accepts an invitation for a new account without auth (public)", async () => {
+    prismaMock.organizationInvite.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.organizationInvite.findUnique.mockResolvedValue({
       id: "inv_1",
       organizationId: "org_1",
       email: "new@x.com",
       role: "MEMBER",
       status: "PENDING",
-      expiresAt: future
+      expiresAt: future,
     } as never);
     prismaMock.user.findUnique.mockResolvedValue(null);
     prismaMock.user.create.mockResolvedValue({
       id: "user_9",
       email: "new@x.com",
       name: null,
-      createdAt: new Date(0)
+      createdAt: new Date(0),
     } as never);
     prismaMock.organizationMember.create.mockResolvedValue({} as never);
     prismaMock.organizationInvite.update.mockResolvedValue({} as never);
     prismaMock.organization.findUnique.mockResolvedValue({
       id: "org_1",
-      name: "Acme"
+      name: "Acme",
     } as never);
 
     const res = await request(app)
@@ -1253,7 +1269,7 @@ describe("organization member routes", () => {
       .mockResolvedValueOnce({ role: "MEMBER" } as never);
     prismaMock.organizationMember.update.mockResolvedValue({
       userId: "user_2",
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
     const res = await request(app)
       .patch("/api/v1/organizations/org_1/members/user_2")

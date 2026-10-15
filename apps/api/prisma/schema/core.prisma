@@ -163,6 +163,7 @@ model User {
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
+  replyPresences      ReplyPresence[]
   mailSignatures      MailSignature[]
   inboxMoves          InboxMove[]
   inboxMoveBatches    InboxMoveBatch[]
@@ -272,6 +273,7 @@ model Organization {
   brandingEnabled      Boolean               @default(true)
   members              OrganizationMember[]
   invites              OrganizationInvite[]
+  replyPresences       ReplyPresence[]
   mailSignatures       MailSignature[]
   smtpConnections      SMTPConnection[]
   smtpConnectionGrants SmtpConnectionGrant[]
@@ -1213,6 +1215,7 @@ model InboundMessage {
   inboxAccount         InboxAccount             @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
   emailJob             EmailJob?                @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
   locations            InboundMessageLocation[]
+  replyPresences       ReplyPresence[]
   moves                InboxMove[]
   attachments          InboundAttachment[]
   createdAt            DateTime                 @default(now())
@@ -1326,4 +1329,21 @@ model MailSignature {
 
   @@unique([userId, smtpConnectionId])
   @@index([organizationId, userId])
+}
+
+/// A renewable reply indicator, never a send lock or a copy of draft contents.
+model ReplyPresence {
+  id               String         @id @default(cuid())
+  organizationId   String
+  userId           String
+  clientId         String
+  inboundMessageId String
+  expiresAt        DateTime
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inboundMessage   InboundMessage @relation(fields: [inboundMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId, clientId])
+  @@index([inboundMessageId, expiresAt])
+  @@index([expiresAt])
 }

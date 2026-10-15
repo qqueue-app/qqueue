@@ -137,6 +137,7 @@ describe("TeamSettings", () => {
         createdAt: "2026-01-01",
         invitedBy: null,
       },
+      emailQueued: true,
       acceptUrl: "http://localhost:5173/accept-invite?token=xyz",
     });
 
@@ -259,4 +260,87 @@ describe("TeamSettings", () => {
     renderWithProviders(<TeamSettings />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"));
   });
+});
+
+it("renews an expired invitation and describes email failure without claiming delivery", async () => {
+  mockedApi.listInvites.mockResolvedValue([
+    { ...invites[0], expiresAt: "2020-01-01" },
+  ]);
+  mockedApi.createInvite.mockResolvedValue({
+    invite: invites[0],
+    acceptUrl: "http://localhost/accept-invite?token=renewed",
+    emailQueued: false,
+  });
+  renderWithProviders(<TeamSettings />);
+  expect(
+    await screen.findByText("Expired — resend to renew")
+  ).toBeInTheDocument();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Resend invitation to pending@x.com" })
+  );
+  await waitFor(() =>
+    expect(mockedApi.createInvite).toHaveBeenCalledWith({
+      organizationId: "org_1",
+      email: "pending@x.com",
+      role: "MEMBER",
+    })
+  );
+  expect(
+    await screen.findByText(/Share this link directly or try resending/)
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "assign a mailbox" })
+  ).toHaveAttribute("href", "/settings/mailboxes");
+  expect(
+    screen.getByText(/mailbox passwords are managed separately/)
+  ).toBeInTheDocument();
+});
+it("retries a failed team load instead of presenting an empty team as success", async () => {
+  mockedApi.listOrganizationMembers
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue(members);
+  renderWithProviders(<TeamSettings />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn't refresh the team"
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("teammate@x.com")).toBeInTheDocument();
+});
+it("keeps organization administrators separate from instance administrators", async () => {
+  sessionRef.current.currentOrganization!.role = "ADMIN";
+  mockedApi.listInvites.mockResolvedValue([{ ...invites[0], role: "OWNER" }]);
+  renderWithProviders(<TeamSettings />);
+  await screen.findByText("teammate@x.com");
+  expect(
+    screen.getByRole("button", { name: "Resend invitation to pending@x.com" })
+  ).toBeDisabled();
+  expect(
+    screen.getByText(/Instance administration is a separate permission/)
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: /Instance administration/ })
+  ).not.toBeInTheDocument();
+});
+
+it("removes the displayed invitation link when that invitation is revoked", async () => {
+  mockedApi.createInvite.mockResolvedValue({
+    invite: invites[0],
+    acceptUrl: "http://localhost/accept-invite?token=discarded",
+    emailQueued: false,
+  });
+  mockedApi.revokeInvite.mockResolvedValue({});
+  renderWithProviders(<TeamSettings />);
+  await screen.findByText("pending@x.com");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Resend invitation to pending@x.com" })
+  );
+  await screen.findByText(/accept-invite\?token=discarded/);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Revoke invitation for pending@x.com" })
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByText(/accept-invite\?token=discarded/)
+    ).not.toBeInTheDocument()
+  );
 });

@@ -85,9 +85,10 @@ beforeEach(() => {
   prismaMock.instanceAdminMute.findMany.mockResolvedValue([] as never);
   prismaMock.mailDomainGrant.findMany.mockResolvedValue([] as never);
   prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
-  prismaMock.$transaction.mockImplementation(
-    async (arg: unknown) =>
-      Array.isArray(arg) ? await Promise.all(arg) : await (arg as () => unknown)()
+  prismaMock.$transaction.mockImplementation(async (arg: unknown) =>
+    Array.isArray(arg)
+      ? await Promise.all(arg)
+      : await (arg as (tx: typeof prismaMock) => unknown)(prismaMock)
   );
 });
 
@@ -367,9 +368,9 @@ describe("instanceAdminService.createDomain", () => {
       { ...ACME, domain_name: "new.test" },
     ]);
 
-    await expect(instanceAdminService.createDomain(input)).rejects.toMatchObject(
-      { statusCode: 409, code: "conflict" }
-    );
+    await expect(
+      instanceAdminService.createDomain(input)
+    ).rejects.toMatchObject({ statusCode: 409, code: "conflict" });
   });
 
   it("still creates the domain when DKIM generation fails", async () => {

@@ -345,7 +345,8 @@ export const sentService = {
   async get(
     id: string,
     organizationId: string,
-    userId: string
+    userId: string,
+    includePending = false
   ): Promise<SentEmailDetail> {
     const access = await resolveMailboxAccess(userId, organizationId);
 
@@ -354,10 +355,14 @@ export const sentService = {
         id,
         organizationId,
         NOT: { origin: "SYSTEM" },
-        OR: [
-          { groupStatus: null, status: { in: [...ARCHIVED_STATUSES] } },
-          { groupStatus: { in: [...ARCHIVED_STATUSES] } },
-        ],
+        ...(includePending
+          ? {}
+          : {
+              OR: [
+                { groupStatus: null, status: { in: [...ARCHIVED_STATUSES] } },
+                { groupStatus: { in: [...ARCHIVED_STATUSES] } },
+              ],
+            }),
         AND: [emailJobScope(access)],
       },
       select: {
@@ -375,6 +380,7 @@ export const sentService = {
         sendGroupId: true,
         origin: true,
         sentAt: true,
+        scheduledAt: true,
         createdAt: true,
         messageId: true,
         campaignId: true,
@@ -461,6 +467,7 @@ export const sentService = {
 
     return {
       ...summary,
+      scheduledAt: job.scheduledAt?.toISOString() ?? null,
       html: job.html,
       text: job.text,
       cc: job.visibleTo?.length ? job.visibleCc : job.cc,

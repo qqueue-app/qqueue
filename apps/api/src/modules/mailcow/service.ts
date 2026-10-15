@@ -13,7 +13,7 @@ import type {
 import { env } from "../../config/env.js";
 import { encryptSecret } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
-import { getMembership } from "../../lib/org-access.js";
+import { getMembership, lockOrganizationTeam } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
 import {
   normalizeDefault,
@@ -338,6 +338,17 @@ async function connectMailbox(
   const passwordEncrypted = encryptSecret(appPassword);
 
   const created = await prisma.$transaction(async (tx) => {
+    await lockOrganizationTeam(tx, organizationId);
+    if (
+      input.assignToUserId &&
+      !(await getMembership(input.assignToUserId, organizationId, tx))
+    ) {
+      throw new HttpError(
+        400,
+        "That user is no longer a member of this organization",
+        "validation_error"
+      );
+    }
     const isDefault = await normalizeDefault(organizationId, undefined, tx);
     const connection = await tx.sMTPConnection.create({
       data: {

@@ -11,7 +11,7 @@ const toast = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast }));
 
 vi.mock("../lib/api.js", () => ({
-  api: { getSentEmail: vi.fn(), downloadAttachment: vi.fn() },
+  api: { getSentEmail: vi.fn(), outgoingMail: vi.fn(), downloadAttachment: vi.fn() },
 }));
 
 vi.mock("../lib/session-context.js", () => ({
@@ -32,6 +32,7 @@ import { SentMessage } from "./SentMessage.js";
 
 const mockedApi = api as unknown as {
   getSentEmail: ReturnType<typeof vi.fn>;
+  outgoingMail: ReturnType<typeof vi.fn>;
   downloadAttachment: ReturnType<typeof vi.fn>;
 };
 
@@ -328,7 +329,7 @@ describe("SentMessage", () => {
     mockedApi.getSentEmail.mockRejectedValue(new Error("Email not found"));
     renderWithProviders(<SentMessage />);
 
-    expect(await screen.findByText("Message not found")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load this message")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Back to Sent" })
     ).toHaveAttribute("href", "/sent");
@@ -479,4 +480,11 @@ describe("SentMessage history", () => {
     ).toBeInTheDocument();
     expect(within(rows[1]).getByText("Delivered")).toBeInTheDocument();
   });
+});
+
+
+it("reads a queued message without labelling it sent",async()=>{
+ mockedApi.outgoingMail.mockResolvedValue(detail({status:"QUEUED",delivered:false,sentAt:null,events:[],recipients:[],scheduledAt:"2026-10-16T10:00:00Z"}));
+ const back=vi.fn();const user=userEvent.setup();renderWithProviders(<SentMessage messageId="job_1" embedded backLabel="Outbox" onBack={back}/>);
+ expect(await screen.findByText("Queued")).toBeInTheDocument();expect(screen.getByText(/Scheduled for/)).toBeInTheDocument();await user.click(screen.getByRole("button",{name:"Back to Outbox"}));expect(back).toHaveBeenCalledOnce();
 });

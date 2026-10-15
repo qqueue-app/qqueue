@@ -3,6 +3,8 @@ import { requireOrgMembership } from "../../middleware/require-org.js";
 import { requireOrgRole } from "../../middleware/require-org-role.js";
 import { inboxController } from "./controller.js";
 
+import { replyPresenceController } from "./presence-controller.js";
+
 export const inboxRouter = Router();
 inboxRouter.post(
   "/messages/:id/forward",
@@ -110,4 +112,15 @@ inboxRouter.get(
   "/messages/:id/attachments/:attachmentId",
   requireOrgMembership,
   inboxController.downloadAttachment
+);
+
+inboxRouter.put(
+  "/messages/:id/reply-presence",
+  requireOrgMembership,
+  replyPresenceController.touch
+);
+inboxRouter.delete(
+  "/messages/:id/reply-presence",
+  requireOrgMembership,
+  replyPresenceController.leave
 );
