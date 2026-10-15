@@ -1,3 +1,5 @@
+import type { MailboxView, InboxFolder } from "@qqueue/shared";
+export type { MailboxView, InboxFolder } from "@qqueue/shared";
 const uploadIdentities = new WeakMap<File, Map<string, string>>();
 import { clearSession, getSession, updateTokens } from "./session.js";
 
@@ -232,6 +234,14 @@ export interface InboxAccount {
 }
 
 export interface InboundMessage {
+  flagged?: boolean;
+  flagPending?: boolean;
+  flagSyncError?: string | null;
+  locations?: Array<{
+    id: string;
+    inboxFolderId: string;
+    folder: { path: string; name: string; role: string };
+  }>;
   bodyStatus?: "AVAILABLE" | "UNAVAILABLE";
   bodyError?: string | null;
   contentImportPending?: boolean;
@@ -2478,12 +2488,32 @@ export const api = {
     );
   },
 
+  listInboxFolders(organizationId: string, inboxAccountId?: string) {
+    const params = new URLSearchParams({ organizationId });
+    if (inboxAccountId) params.set("inboxAccountId", inboxAccountId);
+    return request<InboxFolder[]>(`/api/v1/inbox/folders?${params}`);
+  },
+  markInboundMessageFlagged(
+    id: string,
+    organizationId: string,
+    flagged: boolean
+  ) {
+    return request<InboundMessage>(
+      `/api/v1/inbox/messages/${encodeURIComponent(id)}/flag`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ organizationId, flagged }),
+      }
+    );
+  },
   listInboundMessages(input: {
     organizationId: string;
     q?: string;
     read?: "read" | "unread" | "all";
     cursor?: string;
     inboxAccountId?: string;
+    folderId?: string;
+    view?: MailboxView;
   }) {
     const params = new URLSearchParams({
       organizationId: input.organizationId,
@@ -2491,6 +2521,8 @@ export const api = {
     if (input.q) params.set("q", input.q);
     if (input.read) params.set("read", input.read);
     if (input.cursor) params.set("cursor", input.cursor);
+    if (input.folderId) params.set("folderId", input.folderId);
+    if (input.view) params.set("view", input.view);
     if (input.inboxAccountId)
       params.set("inboxAccountId", input.inboxAccountId);
     return request<InboundMessageList>(

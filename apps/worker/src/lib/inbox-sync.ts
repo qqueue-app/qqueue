@@ -4,6 +4,7 @@ import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { env } from "../config/env.js";
 import { decryptSecret } from "./crypto.js";
 import { applyDsnBounce, parseDsn } from "./dsn.js";
+import { discoverFolders, matchesRemoteIdentity } from "./inbox-folders.js";
 import { synchronizeReadState } from "./inbox-read-state.js";
 import { logger } from "./logger.js";
 import { prisma } from "./prisma.js";
@@ -11,6 +12,7 @@ import { notifyNewInboundMessage } from "./push.js";
 import { storage } from "./storage.js";
 
 type InboxAccount = Awaited<ReturnType<typeof getActiveInboxAccounts>>[number];
+type SyncedAccount = InboxAccount & { folderId: string; folderRole: string };
 
 function addressList(value?: AddressObject | AddressObject[]) {
   const objects = Array.isArray(value) ? value : value ? [value] : [];
@@ -177,56 +179,56 @@ export async function storeAttachments(input: {
 
 async function recoverAttachments(
   client: ImapFlow,
-  account: InboxAccount,
+  account: SyncedAccount,
   assertAlive: () => void,
   abortSignal: AbortSignal
 ) {
-  const messages = await prisma.inboundMessage.findMany({
+  const locations = await prisma.inboundMessageLocation.findMany({
     where: {
-      inboxAccountId: account.id,
-      contentImportPending: true,
-      imapUidValidity: account.uidValidity,
+      inboxFolderId: account.folderId,
+      present: true,
+      uidValidity: account.uidValidity ?? "",
+      message: { contentImportPending: true },
     },
-    select: { id: true, messageId: true, imapUid: true, bodyStatus: true },
+    include: { message: true },
     take: 10,
     orderBy: [
-      { contentAttemptedAt: { sort: "asc", nulls: "first" } },
+      { message: { contentAttemptedAt: { sort: "asc", nulls: "first" } } },
       { id: "asc" },
     ],
   });
-  for (const message of messages) {
+  for (const location of locations) {
+    const message = location.message;
     assertAlive();
     await prisma.inboundMessage.updateMany({
       where: { id: message.id },
       data: { contentAttemptedAt: new Date() },
     });
-    if (!message.imapUid) continue;
     try {
       const remote = await client.fetchOne(
-        message.imapUid,
+        location.uid,
         { source: true, envelope: true },
         { uid: true }
       );
       assertAlive();
-      const remoteIdentity =
-        remote &&
-        (remote.envelope?.messageId ??
-          `${account.id}:${account.uidValidity}:${message.imapUid}`);
-      const legacyIdentity =
-        remote &&
-        !remote.envelope?.messageId &&
-        message.messageId === `${account.id}:${message.imapUid}`;
       if (
         !remote ||
         !remote.source ||
-        (remoteIdentity !== message.messageId && !legacyIdentity)
+        !matchesRemoteIdentity({
+          messageId: message.messageId,
+          remoteMessageId: remote.envelope?.messageId,
+          accountId: account.id,
+          folderId: account.folderId,
+          uidValidity: location.uidValidity,
+          uid: location.uid,
+        })
       )
         continue;
       const mail = await simpleParser(remote.source);
       if (message.bodyStatus === "UNAVAILABLE")
         await storeParsedMessage({
           account,
-          uid: message.imapUid,
+          uid: location.uid,
           mail: { ...mail, messageId: message.messageId },
           flags: remote.flags,
           internalDate: remote.internalDate,
@@ -253,7 +255,7 @@ async function recoverAttachments(
 }
 
 async function storeParsedMessage(input: {
-  account: InboxAccount;
+  account: SyncedAccount;
   uid: number;
   flags?: Set<string>;
   internalDate?: Date | string;
@@ -273,8 +275,31 @@ async function storeParsedMessage(input: {
     bodyUnavailable,
   } = input;
   const messageId =
-    mail.messageId ?? `${account.id}:${account.uidValidity}:${uid}`;
+    mail.messageId ??
+    `${account.id}:${account.folderId}:${account.uidValidity}:${uid}`;
   input.assertAlive?.();
+  if (
+    account.folderRole !== "INBOX" &&
+    (await prisma.emailJob.findFirst({
+      where: {
+        organizationId: account.organizationId,
+        messageId,
+        origin: "SYSTEM",
+        ...(account.folderRole === "SENT"
+          ? {}
+          : {
+              NOT: {
+                toEmail: {
+                  equals: account.email,
+                  mode: "insensitive" as const,
+                },
+              },
+            }),
+      },
+      select: { id: true },
+    }))
+  )
+    return;
   const references = normalizeReferences(mail);
   const outbound = await findOutboundThread({
     organizationId: account.organizationId,
@@ -304,8 +329,68 @@ async function storeParsedMessage(input: {
         messageId,
       },
     },
-    select: { id: true, bodyStatus: true },
+    select: {
+      id: true,
+      bodyStatus: true,
+      readAt: true,
+      readRevision: true,
+      readPending: true,
+      flagged: true,
+      flagRevision: true,
+      flagPending: true,
+    },
   });
+  // Existing logical messages keep their shared state when another folder copy
+  // appears. A stale copy becomes pending rather than undoing a teammate action.
+  async function storeLocation(
+    id: string,
+    readAt: Date | null,
+    readRevision: number,
+    flagged: boolean,
+    flagRevision: number
+  ) {
+    const sameRead = Boolean(readAt) === seen;
+    const sameFlag = flagged === (flags?.has("\\Flagged") ?? false);
+    const previous = await prisma.inboundMessageLocation.findUnique({
+      where: {
+        inboxFolderId_uidValidity_uid: {
+          inboxFolderId: account.folderId,
+          uidValidity: account.uidValidity!,
+          uid,
+        },
+      },
+    });
+    await prisma.inboundMessageLocation.upsert({
+      where: {
+        inboxFolderId_uidValidity_uid: {
+          inboxFolderId: account.folderId,
+          uidValidity: account.uidValidity!,
+          uid,
+        },
+      },
+      create: {
+        inboundMessageId: id,
+        inboxFolderId: account.folderId,
+        uidValidity: account.uidValidity!,
+        uid,
+        remoteSeen: seen,
+        remoteFlagged: flags?.has("\\Flagged") ?? false,
+        readAppliedRevision: sameRead ? readRevision : 0,
+        flagAppliedRevision: sameFlag ? flagRevision : 0,
+      },
+      update: { inboundMessageId: id, present: true, observedAt: new Date() },
+    });
+    if (!previous?.present && !sameRead)
+      await prisma.inboundMessage.updateMany({
+        where: { id, readRevision },
+        data: { readPending: true },
+      });
+    if (!previous?.present && !sameFlag)
+      await prisma.inboundMessage.updateMany({
+        where: { id, flagRevision },
+        data: { flagPending: true },
+      });
+  }
   if (bodyUnavailable && existing?.bodyStatus === "AVAILABLE") {
     await prisma.inboundMessage.updateMany({
       where: { id: existing.id },
@@ -315,6 +400,13 @@ async function storeParsedMessage(input: {
         contentImportPending: true,
       },
     });
+    await storeLocation(
+      existing.id,
+      existing.readAt,
+      existing.readRevision,
+      existing.flagged,
+      existing.flagRevision
+    );
     return;
   }
 
@@ -343,6 +435,7 @@ async function storeParsedMessage(input: {
       html: typeof mail.html === "string" ? mail.html : undefined,
       receivedAt,
       readAt: seen ? receivedAt : undefined,
+      flagged: flags?.has("\\Flagged") ?? false,
       imapUid: uid,
       imapUidValidity: account.uidValidity,
       isDsn: Boolean(dsn),
@@ -376,6 +469,13 @@ async function storeParsedMessage(input: {
     },
   });
 
+  await storeLocation(
+    stored.id,
+    stored.readAt,
+    stored.readRevision,
+    stored.flagged,
+    stored.flagRevision
+  );
   if (!bodyUnavailable)
     await storeAttachments({
       organizationId: account.organizationId,
@@ -409,7 +509,14 @@ async function storeParsedMessage(input: {
   // re-synced UID is not news, and a message already flagged \Seen was read in
   // another client — alerting on any of those trains people to ignore the
   // alerts. Push is best-effort: a failure here must never fail the sync.
-  if (!existing && !dsn && !seen && !historical) {
+  if (
+    !existing &&
+    !dsn &&
+    !seen &&
+    !historical &&
+    !bodyUnavailable &&
+    account.folderRole === "INBOX"
+  ) {
     try {
       await notifyNewInboundMessage({
         organizationId: account.organizationId,
@@ -481,7 +588,6 @@ async function syncLockedInboxAccount(account: InboxAccount) {
     socketTimeout: 30_000,
   });
 
-  let maxSeenUid = account.lastSeenUid ?? 0;
   const deadline = Date.now() + 240_000;
   const abortSignal = AbortSignal.timeout(240_000);
   const close = () => client.close();
@@ -496,173 +602,66 @@ async function syncLockedInboxAccount(account: InboxAccount) {
 
   try {
     await client.connect();
-    const mailbox = await client.mailboxOpen(account.mailbox, {
-      readOnly: false,
-    });
-    const uidValidity = mailbox.uidValidity?.toString();
-    const reset = Boolean(uidValidity && account.uidValidity !== uidValidity);
-    if (reset) maxSeenUid = 0;
-    const currentAccount = {
-      ...account,
-      uidValidity: uidValidity ?? account.uidValidity,
-      flagsCursor: reset ? 0 : account.flagsCursor,
-    };
-
-    const batch = Math.max(1, Math.min(100, env.INBOX_SYNC_MAX_MESSAGES));
-    async function countMatches(query: SearchObject) {
-      const result = await client.search(query, {
-        uid: true,
-        returnOptions: ["COUNT"],
-      });
-      if (!result)
-        throw new Error("The mail server did not confirm its message search.");
-      // ImapFlow falls back to UID SEARCH for servers without ESEARCH. Bodies
-      // remain bounded even when that compatibility response lists more UIDs.
-      if (Array.isArray(result)) return result.length;
-      if (typeof result.count !== "number")
-        throw new Error("The mail server did not return a message count.");
-      return result.count;
-    }
-    async function uidWindow(
-      first: number,
-      last: number,
-      accepts: (uid: number) => boolean
-    ) {
-      const uids: number[] = [];
-      if (first > last) return uids;
-      for await (const message of client.fetch(`${first}:${last}`, {
-        uid: true,
-      }))
-        if (accepts(message.uid)) uids.push(message.uid);
-      return uids.sort((a, b) => a - b);
-    }
-    async function importUids(uids: number[], historical: boolean) {
-      if (!uids.length) return;
-      for await (const message of client.fetch(
-        uids,
-        {
-          uid: true,
-          flags: true,
-          internalDate: true,
-          source: true,
-          envelope: true,
+    const folders = await discoverFolders(
+      client,
+      account.id,
+      account.mailbox,
+      assertAlive
+    );
+    const primary = folders.find((folder) => folder.path === account.mailbox);
+    // Keep daily inbox checks responsive and rotate other folders behind it.
+    // Every folder keeps independent cursors; one large folder cannot consume
+    // an unbounded body import or restart all other folders on every check.
+    const selected = [
+      ...(primary ? [primary] : []),
+      ...folders.filter((folder) => folder.id !== primary?.id).slice(0, 1),
+    ];
+    if (!primary)
+      await prisma.inboxAccount.update({
+        where: { id: account.id },
+        data: {
+          lastSyncError:
+            "The configured folder is no longer on the mail server. Its cached messages are retained.",
         },
-        { uid: true }
-      )) {
-        const envelope = message.envelope;
-        const mail: ParsedMail = message.source
-          ? await simpleParser(message.source)
-          : {
-              headers: new Map(),
-              headerLines: [],
-              html: false,
-              attachments: [],
-              messageId: envelope?.messageId,
-              subject: envelope?.subject,
-              date: envelope?.date,
-              from: {
-                value: (envelope?.from ?? []).map((entry) => ({
-                  ...entry,
-                  name: entry.name ?? "",
-                })),
-                html: "",
-                text: "",
-              },
-              to: {
-                value: (envelope?.to ?? []).map((entry) => ({
-                  ...entry,
-                  name: entry.name ?? "",
-                })),
-                html: "",
-                text: "",
-              },
-              cc: {
-                value: (envelope?.cc ?? []).map((entry) => ({
-                  ...entry,
-                  name: entry.name ?? "",
-                })),
-                html: "",
-                text: "",
-              },
-            };
-        await storeParsedMessage({
-          account: currentAccount,
-          uid: message.uid,
-          flags: message.flags,
-          internalDate: message.internalDate,
-          mail,
-          historical,
-          bodyUnavailable: !message.source,
-          assertAlive,
-          abortSignal,
-        });
-      }
-    }
-    let historyBeforeUid = account.historyBeforeUid ?? 0;
-    const initial = reset || !account.lastSeenUid;
-    if (!mailbox.exists) historyBeforeUid = 0;
-    else if (initial) {
-      const uids = await uidWindow(
-        Math.max(1, mailbox.exists - batch + 1),
-        mailbox.exists,
-        () => true
-      );
-      await importUids(uids, false);
-      maxSeenUid = Math.max(mailbox.uidNext - 1, uids.at(-1) ?? 0);
-      historyBeforeUid = uids.length ? uids[0] - 1 : 0;
-    } else if (account.lastSeenUid! + 1 < mailbox.uidNext) {
-      const count = await countMatches({
-        uid: `${account.lastSeenUid! + 1}:*`,
       });
-      if (count) {
-        const first = Math.max(1, mailbox.exists - count + 1);
-        const uids = await uidWindow(
-          first,
-          Math.min(mailbox.exists, first + batch - 1),
-          (uid) => uid > account.lastSeenUid!
+    let primaryError: unknown;
+    for (const folder of selected) {
+      assertAlive();
+      try {
+        await syncOpenedFolder(
+          client,
+          {
+            ...account,
+            mailbox: folder.path,
+            folderId: folder.id,
+            folderRole: folder.role,
+            uidValidity: folder.uidValidity,
+            lastSeenUid: folder.lastSeenUid,
+            historyBeforeUid: folder.historyBeforeUid,
+            flagsCursor: folder.flagsCursor,
+          },
+          account.mailbox,
+          assertAlive,
+          abortSignal
         );
-        await importUids(uids, false);
-        if (uids.length)
-          maxSeenUid =
-            count <= batch
-              ? Math.max(mailbox.uidNext - 1, uids.at(-1)!)
-              : uids.at(-1)!;
-      } else maxSeenUid = mailbox.uidNext - 1;
-    }
-    // Put durable teammate actions ahead of older bodies and file recovery.
-    for (let round = 0; round < 3; round++)
-      if (!(await synchronizeReadState(client, currentAccount))) break;
-    if (!initial && historyBeforeUid > 0 && mailbox.exists) {
-      const count = await countMatches({ uid: `1:${historyBeforeUid}` });
-      if (!count) historyBeforeUid = 0;
-      else {
-        const uids = await uidWindow(
-          Math.max(1, count - batch + 1),
-          count,
-          (uid) => uid <= historyBeforeUid
+      } catch (error) {
+        await prisma.inboxFolder.update({
+          where: { id: folder.id },
+          data: {
+            lastSyncedAt: new Date(),
+            lastSyncError:
+              "Could not check this folder. Its saved history will resume on the next check.",
+          },
+        });
+        if (folder.id === primary?.id) primaryError = error;
+        assertAlive();
+        logger.warn(
+          { inboxFolderId: folder.id, err: error },
+          "folder sync will retry"
         );
-        await importUids(uids, true);
-        if (uids.length) historyBeforeUid = uids[0] - 1;
       }
     }
-
-    await recoverAttachments(client, currentAccount, assertAlive, abortSignal);
-
-    for (let round = 0; round < 3; round++) {
-      if (!(await synchronizeReadState(client, currentAccount))) break;
-    }
-
-    assertAlive();
-    await prisma.inboxAccount.update({
-      where: { id: account.id },
-      data: {
-        lastSyncedAt: new Date(),
-        historyBeforeUid,
-        lastSeenUid: reset ? maxSeenUid : maxSeenUid || account.lastSeenUid,
-        uidValidity,
-        lastSyncError: null,
-      },
-    });
+    if (primaryError) throw primaryError;
   } catch (error) {
     await prisma.inboxAccount.update({
       where: { id: account.id },
@@ -676,6 +675,220 @@ async function syncLockedInboxAccount(account: InboxAccount) {
     abortSignal.removeEventListener("abort", close);
     client.close();
   }
+}
+
+async function syncOpenedFolder(
+  client: ImapFlow,
+  account: SyncedAccount,
+  configuredMailbox: string,
+  assertAlive: () => void,
+  abortSignal: AbortSignal
+) {
+  let maxSeenUid = account.lastSeenUid ?? 0;
+  const mailbox = await client.mailboxOpen(account.mailbox, {
+    readOnly: false,
+  });
+  const uidValidity = mailbox.uidValidity?.toString();
+  if (!uidValidity)
+    throw new Error("The server did not confirm this folder's UID validity.");
+  await prisma.inboundMessageLocation.updateMany({
+    where: {
+      inboxFolderId: account.folderId,
+      uidValidity: { not: uidValidity },
+      present: true,
+    },
+    data: { present: false },
+  });
+  const reset = Boolean(uidValidity && account.uidValidity !== uidValidity);
+  if (reset) maxSeenUid = 0;
+  const currentAccount = {
+    ...account,
+    uidValidity: uidValidity ?? account.uidValidity,
+    flagsCursor: reset ? 0 : account.flagsCursor,
+  };
+
+  const batch = Math.max(1, Math.min(100, env.INBOX_SYNC_MAX_MESSAGES));
+  async function countMatches(query: SearchObject) {
+    const result = await client.search(query, {
+      uid: true,
+      returnOptions: ["COUNT"],
+    });
+    if (!result)
+      throw new Error("The mail server did not confirm its message search.");
+    // ImapFlow falls back to UID SEARCH for servers without ESEARCH. Bodies
+    // remain bounded even when that compatibility response lists more UIDs.
+    if (Array.isArray(result)) return result.length;
+    if (typeof result.count !== "number")
+      throw new Error("The mail server did not return a message count.");
+    return result.count;
+  }
+  async function uidWindow(
+    first: number,
+    last: number,
+    accepts: (uid: number) => boolean
+  ) {
+    const uids: number[] = [];
+    if (first > last) return uids;
+    for await (const message of client.fetch(`${first}:${last}`, {
+      uid: true,
+    }))
+      if (accepts(message.uid)) uids.push(message.uid);
+    return uids.sort((a, b) => a - b);
+  }
+  async function importUids(uids: number[], historical: boolean) {
+    if (!uids.length) return;
+    for await (const message of client.fetch(
+      uids,
+      {
+        uid: true,
+        flags: true,
+        internalDate: true,
+        source: true,
+        envelope: true,
+      },
+      { uid: true }
+    )) {
+      const envelope = message.envelope;
+      const mail: ParsedMail = message.source
+        ? await simpleParser(message.source)
+        : {
+            headers: new Map(),
+            headerLines: [],
+            html: false,
+            attachments: [],
+            messageId: envelope?.messageId,
+            subject: envelope?.subject,
+            date: envelope?.date,
+            from: {
+              value: (envelope?.from ?? []).map((entry) => ({
+                ...entry,
+                name: entry.name ?? "",
+              })),
+              html: "",
+              text: "",
+            },
+            to: {
+              value: (envelope?.to ?? []).map((entry) => ({
+                ...entry,
+                name: entry.name ?? "",
+              })),
+              html: "",
+              text: "",
+            },
+            cc: {
+              value: (envelope?.cc ?? []).map((entry) => ({
+                ...entry,
+                name: entry.name ?? "",
+              })),
+              html: "",
+              text: "",
+            },
+          };
+      await storeParsedMessage({
+        account: currentAccount,
+        uid: message.uid,
+        flags: message.flags,
+        internalDate: message.internalDate,
+        mail,
+        historical,
+        bodyUnavailable: !message.source,
+        assertAlive,
+        abortSignal,
+      });
+    }
+  }
+  let historyBeforeUid = account.historyBeforeUid ?? 0;
+  const initial = reset || !account.lastSeenUid;
+  if (!mailbox.exists) historyBeforeUid = 0;
+  else if (initial) {
+    const uids = await uidWindow(
+      Math.max(1, mailbox.exists - batch + 1),
+      mailbox.exists,
+      () => true
+    );
+    await importUids(uids, account.folderRole !== "INBOX");
+    maxSeenUid = Math.max(mailbox.uidNext - 1, uids.at(-1) ?? 0);
+    historyBeforeUid = uids.length ? uids[0] - 1 : 0;
+  } else if (account.lastSeenUid! + 1 < mailbox.uidNext) {
+    const count = await countMatches({
+      uid: `${account.lastSeenUid! + 1}:*`,
+    });
+    if (count) {
+      const first = Math.max(1, mailbox.exists - count + 1);
+      const uids = await uidWindow(
+        first,
+        Math.min(mailbox.exists, first + batch - 1),
+        (uid) => uid > account.lastSeenUid!
+      );
+      await importUids(uids, account.folderRole !== "INBOX");
+      if (uids.length)
+        maxSeenUid =
+          count <= batch
+            ? Math.max(mailbox.uidNext - 1, uids.at(-1)!)
+            : uids.at(-1)!;
+    } else maxSeenUid = mailbox.uidNext - 1;
+  }
+  // Put durable teammate actions ahead of older bodies and file recovery.
+  for (let round = 0; round < 3; round++)
+    if (
+      !(await synchronizeReadState(client, {
+        id: account.folderId,
+        inboxAccountId: account.id,
+        uidValidity,
+        flagsCursor: currentAccount.flagsCursor,
+      }))
+    )
+      break;
+  if (!initial && historyBeforeUid > 0 && mailbox.exists) {
+    const count = await countMatches({ uid: `1:${historyBeforeUid}` });
+    if (!count) historyBeforeUid = 0;
+    else {
+      const uids = await uidWindow(
+        Math.max(1, count - batch + 1),
+        count,
+        (uid) => uid <= historyBeforeUid
+      );
+      await importUids(uids, true);
+      if (uids.length) historyBeforeUid = uids[0] - 1;
+    }
+  }
+
+  await recoverAttachments(client, currentAccount, assertAlive, abortSignal);
+
+  for (let round = 0; round < 3; round++) {
+    if (
+      !(await synchronizeReadState(client, {
+        id: account.folderId,
+        inboxAccountId: account.id,
+        uidValidity,
+        flagsCursor: currentAccount.flagsCursor,
+      }))
+    )
+      break;
+  }
+
+  assertAlive();
+  await prisma.inboxFolder.update({
+    where: { id: account.folderId },
+    data: {
+      lastSyncedAt: new Date(),
+      historyBeforeUid,
+      lastSeenUid: reset ? maxSeenUid : maxSeenUid || account.lastSeenUid,
+      uidValidity,
+      lastSyncError: null,
+    },
+  });
+  if (account.mailbox === configuredMailbox)
+    await prisma.inboxAccount.update({
+      where: { id: account.id },
+      data: {
+        lastSyncedAt: new Date(),
+        lastSeenUid: maxSeenUid,
+        uidValidity,
+        historyBeforeUid,
+        lastSyncError: null,
+      },
+    });
 }
 
 export async function syncInboxAccounts(inboxAccountId?: string) {

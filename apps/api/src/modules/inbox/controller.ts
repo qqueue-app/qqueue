@@ -6,6 +6,7 @@ import {
   inboundMessageReplySchema,
   inboundMessageStoreSchema,
   inboundBulkReadSchema,
+  inboundFlagSchema,
 } from "@qqueue/shared";
 import { z } from "zod";
 import { inboxService } from "./service.js";
@@ -20,6 +21,29 @@ const markReadSchema = z.object({
 });
 
 export const inboxController = {
+  async listFolders(req: Request, res: Response) {
+    const query = z
+      .object({ inboxAccountId: z.string().min(1).optional() })
+      .parse(req.query);
+    res.json({
+      data: await inboxService.listFolders(
+        req.organizationId!,
+        req.userId!,
+        query.inboxAccountId
+      ),
+    });
+  },
+  async markFlagged(req: Request, res: Response) {
+    const input = inboundFlagSchema.parse(req.body);
+    res.json({
+      data: await inboxService.markFlagged(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!,
+        input.flagged
+      ),
+    });
+  },
   async retryContent(req: Request, res: Response) {
     res.status(202).json({
       data: await inboxService.retryContent(

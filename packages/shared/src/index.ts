@@ -241,6 +241,19 @@ export interface DomainThrottle {
 
 export type InboxAccountStatus = "ACTIVE" | "DISABLED";
 
+export interface InboxFolder {
+  id: string;
+  inboxAccountId: string;
+  path: string;
+  name: string;
+  role: string;
+  isPrimary: boolean;
+  present: boolean;
+  lastSyncedAt?: string | null;
+  historyBeforeUid?: number | null;
+  lastSyncError?: string | null;
+}
+
 export interface InboxAccount {
   id: string;
   organizationId: string;
@@ -261,6 +274,14 @@ export interface InboxAccount {
 }
 
 export interface InboundMessage {
+  flagged?: boolean;
+  flagPending?: boolean;
+  flagSyncError?: string | null;
+  locations?: Array<{
+    id: string;
+    inboxFolderId: string;
+    folder: { path: string; name: string; role: string };
+  }>;
   bodyStatus?: "AVAILABLE" | "UNAVAILABLE";
   bodyError?: string | null;
   contentImportPending?: boolean;
@@ -1486,9 +1507,25 @@ export type InboundMessageStoreInput = z.infer<
   typeof inboundMessageStoreSchema
 >;
 
+export const mailboxViewSchema = z.enum([
+  "INBOX",
+  "SENT",
+  "DRAFTS",
+  "ARCHIVE",
+  "TRASH",
+  "JUNK",
+  "OTHER",
+  "ALL",
+  "FLAGGED",
+]);
+export type MailboxView = z.infer<typeof mailboxViewSchema>;
+export const inboundFlagSchema = z.object({ flagged: z.boolean() });
+
 export const inboundMessageQuerySchema = z.object({
   organizationId: z.string().min(1),
   inboxAccountId: z.string().min(1).optional(),
+  folderId: z.string().min(1).optional(),
+  view: mailboxViewSchema.optional(),
   q: z.string().trim().min(1).optional(),
   read: z.enum(["read", "unread", "all"]).default("all").optional(),
   cursor: z.string().min(1).optional(),

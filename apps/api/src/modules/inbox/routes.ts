@@ -4,6 +4,12 @@ import { requireOrgRole } from "../../middleware/require-org-role.js";
 import { inboxController } from "./controller.js";
 
 export const inboxRouter = Router();
+inboxRouter.get("/folders", requireOrgMembership, inboxController.listFolders);
+inboxRouter.patch(
+  "/messages/:id/flag",
+  requireOrgMembership,
+  inboxController.markFlagged
+);
 inboxRouter.post("/sync", requireOrgMembership, inboxController.requestSync);
 inboxRouter.post(
   "/messages/:id/content/retry",

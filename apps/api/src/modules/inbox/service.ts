@@ -21,6 +21,14 @@ import { inboxSyncQueue } from "../../queues/inbox-sync.queue.js";
 import { manualEmailService } from "../manual-email/service.js";
 
 const messageInclude = {
+  locations: {
+    where: { present: true, folder: { present: true } },
+    select: {
+      id: true,
+      inboxFolderId: true,
+      folder: { select: { path: true, name: true, role: true } },
+    },
+  },
   emailJob: {
     select: {
       id: true,
@@ -118,7 +126,109 @@ function replyReferences(message: {
   ];
 }
 
+function inboxFolderScope(
+  view = "INBOX",
+  folderId?: string
+): Prisma.InboundMessageWhereInput {
+  if (folderId)
+    return {
+      locations: {
+        some: {
+          inboxFolderId: folderId,
+          present: true,
+          folder: { present: true },
+        },
+      },
+    };
+  if (view === "ALL") return {};
+  if (view === "FLAGGED") return { flagged: true };
+  if (view === "INBOX")
+    return {
+      OR: [
+        {
+          locations: {
+            some: {
+              present: true,
+              folder: {
+                present: true,
+                OR: [{ role: "INBOX" }, { isPrimary: true }],
+              },
+            },
+          },
+        },
+        // Admin-imported mail without a verified server location remains readable.
+        { locations: { none: {} } },
+      ],
+    };
+  return {
+    locations: {
+      some: { present: true, folder: { present: true, role: view } },
+    },
+  };
+}
+
 export const inboxService = {
+  async listFolders(
+    organizationId: string,
+    userId: string,
+    inboxAccountId?: string
+  ) {
+    const access = await resolveMailboxAccess(userId, organizationId);
+    return prisma.inboxFolder.findMany({
+      where: {
+        inboxAccount: {
+          organizationId,
+          ...(access.unrestricted
+            ? {}
+            : { id: { in: access.inboxAccountIds } }),
+          ...(inboxAccountId ? { AND: [{ id: inboxAccountId }] } : {}),
+        },
+      },
+      select: {
+        id: true,
+        inboxAccountId: true,
+        path: true,
+        name: true,
+        role: true,
+        isPrimary: true,
+        present: true,
+        lastSyncedAt: true,
+        historyBeforeUid: true,
+        lastSyncError: true,
+      },
+      orderBy: [{ role: "asc" }, { path: "asc" }],
+    });
+  },
+  async markFlagged(
+    messageId: string,
+    organizationId: string,
+    userId: string,
+    flagged: boolean
+  ) {
+    const access = await resolveMailboxAccess(userId, organizationId);
+    const changed = await prisma.inboundMessage.updateMany({
+      where: { id: messageId, organizationId, ...inboundMessageScope(access) },
+      data: {
+        flagged,
+        flagRevision: { increment: 1 },
+        flagPending: true,
+        flagSyncError: null,
+      },
+    });
+    if (!changed.count)
+      throw new HttpError(404, "Message not found", "not_found");
+    const message = await prisma.inboundMessage.findFirst({
+      where: { id: messageId, organizationId },
+      include: messageInclude,
+    });
+    if (message)
+      await this.requestSync(
+        organizationId,
+        userId,
+        message.inboxAccountId
+      ).catch(() => undefined);
+    return message;
+  },
   async requestSync(
     organizationId: string,
     userId: string,
@@ -560,6 +670,7 @@ export const inboxService = {
         organizationId,
         readAt: null,
         isDsn: false,
+        AND: [inboxFolderScope()],
         ...inboundMessageScope(access),
       },
       take: CAP + 1,
@@ -585,6 +696,7 @@ export const inboxService = {
         : {}),
       ...(query.read === "read" ? { readAt: { not: null } } : {}),
       ...(query.read === "unread" ? { readAt: null } : {}),
+      AND: [inboxFolderScope(query.view, query.folderId)],
     };
 
     if (query.q) {

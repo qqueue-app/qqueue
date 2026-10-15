@@ -1,3 +1,4 @@
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   renderWithProviders,
   screen,
@@ -20,6 +21,8 @@ vi.mock("sonner", () => ({ toast }));
 vi.mock("../lib/api.js", () => ({
   api: {
     listInboxAccounts: vi.fn(),
+    listInboxFolders: vi.fn(),
+    markInboundMessageFlagged: vi.fn(),
     getInboxConversation: vi.fn(),
     markInboundMessagesRead: vi.fn(),
     syncInbox: vi.fn(),
@@ -93,6 +96,8 @@ function makeMessage(overrides: Record<string, unknown> = {}) {
 
 function setup(messages: Record<string, unknown>[]) {
   mockedApi.getInboxConversation.mockResolvedValue({ messages, outgoing: [] });
+  mockedApi.listInboxFolders.mockResolvedValue([]);
+  mockedApi.markInboundMessageFlagged.mockResolvedValue({} as never);
   mockedApi.markInboundMessagesRead.mockResolvedValue({
     updated: messages.length,
   });
@@ -121,7 +126,9 @@ function setup(messages: Record<string, unknown>[]) {
 
 /** The conversation's row in the list. */
 async function findRow(subject = /Quarterly numbers/) {
-  return screen.findByRole("button", { name: subject });
+  return screen.findByRole("button", {
+    name: (name) => subject.test(name) && !name.startsWith("More actions for"),
+  });
 }
 
 /**
@@ -826,9 +833,7 @@ describe("Inbox bulk actions and history", () => {
     await user.click(
       await screen.findByRole("button", { name: "Load older mail" })
     );
-    expect(
-      await screen.findByRole("button", { name: /Older mail/ })
-    ).toBeInTheDocument();
+    expect(await findRow(/Older mail/)).toBeInTheDocument();
     expect(mockedApi.listInboundMessages).toHaveBeenCalledWith(
       expect.objectContaining({ cursor: "m1" })
     );
@@ -934,6 +939,125 @@ describe("Inbox accounts", () => {
       expect(mockedApi.deleteInboxAccount).toHaveBeenCalledWith(
         "acc_1",
         "org_1"
+      )
+    );
+  });
+});
+
+function HistoryControls() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <>
+      <button onClick={() => navigate(-1)}>Browser history back</button>
+      <output aria-label="Current URL">{location.search}</output>
+    </>
+  );
+}
+describe("mail folder navigation and shared flags", () => {
+  it("restores URL-owned mailbox, folder, search and read filters through browser history", async () => {
+    setup([makeMessage()]);
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Inbox />
+        <HistoryControls />
+      </>,
+      { route: "/inbox?view=ARCHIVE&mailbox=acc_1&q=invoice&read=unread" }
+    );
+    await findRow();
+    expect(
+      screen.getByRole("heading", { name: "Archive" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search mail" })).toHaveValue(
+      "invoice"
+    );
+    expect(mockedApi.listInboundMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        view: "ARCHIVE",
+        inboxAccountId: "acc_1",
+        q: "invoice",
+        read: "unread",
+      })
+    );
+    await user.click(screen.getByRole("button", { name: /^read$/i }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+        "read=read"
+      )
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Browser history back" })
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^unread$/i })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+    );
+    expect(screen.getByRole("searchbox", { name: "Search mail" })).toHaveValue(
+      "invoice"
+    );
+  });
+  it("requests the chosen folder without marking any message read", async () => {
+    setup([]);
+    const user = userEvent.setup();
+    renderWithProviders(<Inbox />);
+    await user.click(
+      screen.getByRole("combobox", { name: "Choose mail folder" })
+    );
+    await user.click(
+      screen.getByRole("option", { name: "Trash", exact: true })
+    );
+    await waitFor(() =>
+      expect(mockedApi.listInboundMessages).toHaveBeenCalledWith(
+        expect.objectContaining({ view: "TRASH" })
+      )
+    );
+    expect(mockedApi.markInboundMessageRead).not.toHaveBeenCalled();
+  });
+  it("offers retry when folder discovery cannot load", async () => {
+    setup([]);
+    mockedApi.listInboxFolders.mockRejectedValueOnce(new Error("offline"));
+    const user = userEvent.setup();
+    renderWithProviders(<Inbox />);
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(mockedApi.listInboxFolders).toHaveBeenCalledTimes(2)
+    );
+  });
+  it("flags the selected logical message and shows pending mailbox writeback", async () => {
+    setup([
+      makeMessage({ flagPending: true, flagSyncError: "Mailbox is offline" }),
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<Inbox />);
+    await openRow(user);
+    expect(screen.getByText("Mailbox is offline")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Flag message", exact: true })
+    );
+    await waitFor(() =>
+      expect(mockedApi.markInboundMessageFlagged).toHaveBeenCalledWith(
+        "m1",
+        "org_1",
+        true
+      )
+    );
+  });
+  it("removes a shared flag from the selected message", async () => {
+    setup([makeMessage({ flagged: true })]);
+    const user = userEvent.setup();
+    renderWithProviders(<Inbox />);
+    await openRow(user);
+    await user.click(
+      screen.getByRole("button", { name: "Remove flag", exact: true })
+    );
+    await waitFor(() =>
+      expect(mockedApi.markInboundMessageFlagged).toHaveBeenCalledWith(
+        "m1",
+        "org_1",
+        false
       )
     );
   });

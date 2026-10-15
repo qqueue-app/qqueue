@@ -8,6 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./service.js", () => ({
   inboxService: {
     listAccounts: vi.fn(),
+    listFolders: vi.fn(),
+    markFlagged: vi.fn(),
     createAccount: vi.fn(),
     updateAccount: vi.fn(),
     deleteAccount: vi.fn(),
@@ -481,5 +483,43 @@ describe("inboxController.replyToMessage", () => {
         mockRes()
       )
     ).rejects.toThrow("Inbound message not found");
+  });
+});
+
+describe("folder and flag contracts", () => {
+  it("pins folder reads to the authorized organization", async () => {
+    const req = {
+      organizationId: "org_1",
+      userId: "usr_1",
+      query: { organizationId: "foreign", inboxAccountId: "inbox_1" },
+    } as unknown as Request;
+    vi.mocked(inboxService.listFolders).mockResolvedValue([]);
+    await inboxController.listFolders(req, mockRes());
+    expect(inboxService.listFolders).toHaveBeenCalledWith(
+      "org_1",
+      "usr_1",
+      "inbox_1"
+    );
+  });
+  it("accepts false as flag removal and rejects truthy strings", async () => {
+    const req = {
+      organizationId: "org_1",
+      userId: "usr_1",
+      params: { id: "m1" },
+      body: { flagged: false },
+    } as unknown as Request;
+    await inboxController.markFlagged(req, mockRes());
+    expect(inboxService.markFlagged).toHaveBeenCalledWith(
+      "m1",
+      "org_1",
+      "usr_1",
+      false
+    );
+    await expect(
+      inboxController.markFlagged(
+        { ...req, body: { flagged: "false" } } as Request,
+        mockRes()
+      )
+    ).rejects.toThrow();
   });
 });

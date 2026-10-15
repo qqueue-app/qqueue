@@ -191,12 +191,59 @@ Acceptance evidence:
 - Full typecheck, lint, build, tests and unmodified coverage gates passed.
   Disposable PostgreSQL migration drift and SMTP smoke checks also passed.
 
+## Folder locations and shared flags (2026-10-15)
+
+Implemented:
+
+- Discover selectable IMAP folders and server special-use roles without removing
+  cached mail when folders disappear. An additive migration preserves the
+  configured folder, UID-validity namespaces, import cursors and pending actions.
+- Store logical message identity separately from folder locations. Copies share
+  one body and shared read/flag revisions; each folder has independent recent,
+  older-history and flag-scan cursors. Checks prioritize the configured folder
+  and rotate a secondary folder within the account time budget.
+- Apply Seen and Flagged actions to all current copies. An external flag
+  transition becomes a new conditional shared revision, so a stale copy cannot
+  undo it. Reused UIDs are verified before writes; expunges and external moves
+  retire locations while retaining cached writing. Missing flags are not treated
+  as flag removal, and failed actions remain visible for retry.
+- Read server Sent, Drafts, Archive, Trash, Junk and custom folders through the
+  existing conversation reader, with private attachments. Folder selection and
+  mailbox/search/read filters live in the URL. The redundant column chooser is
+  removed from the compact conversation list. QQueue-generated private SYSTEM
+  sends are excluded from imported Sent and non-recipient folder copies.
+- Folder reads, folder-scoped/all-mail searches and flag mutations retain
+  mailbox grants. The web app consumes the new folder contracts from the shared
+  workspace package; no external dependency versions changed.
+
+Acceptance evidence:
+
+- Live IMAP discovery recognized special-use Sent and Drafts. Copying the
+  synthetic acceptance message into a temporary folder produced two remote
+  locations and one logical message. Shared Flagged changes reached both
+  copies; another IMAP client's Seen/Flagged removals converged across them
+  without a stale-copy overwrite.
+- Moving only that temporary copy into Trash reconciled both locations while
+  retaining its writing and the original Inbox copy. The temporary copy and
+  empty test folder were removed after verifying that the original remained.
+- Against disposable PostgreSQL, a MEMBER with no mailbox grants was denied
+  folder results, all-mail search results and flag mutation. Regression tests
+  also cover folder UID namespaces, missing folders, interrupted discovery,
+  primary-folder failures, revision races and URL filter history.
+- Chrome verified folder selection, browser Back, flag on/off controls and the
+  pending-sync status clearing after writeback. A 440px phone viewport verified
+  the single-screen flow and folder selection by keyboard. This is browser
+  emulation; physical keyboard/safe-area/assistive-technology acceptance remains.
+- Full typecheck, lint, build, tests and unmodified coverage gates passed, as did
+  disposable PostgreSQL migration drift/SMTP smoke, dependency license audit and
+  the cloud boundary check.
+
 ## Required before calling the primary-client goal complete
 
-1. **IMAP folders and history:** folder discovery,
-   Archive, Trash/restore, move and flags, external Sent and external Drafts. The
-   current importer still reads one configured folder. Validate UID-validity
-   replacement, large mailboxes and interrupted import against real services.
+1. **IMAP folder operations:** durable user-initiated Archive, Trash/restore and
+   moves; external-draft editing/reconciliation and integration of imported Sent
+   with the logical delivery archive. Validate UID-validity replacement, large
+   mailboxes and interrupted import against real services.
 2. **Draft/composer recovery:** editable reply recipients, forwarding with original
    attachments, per-account signatures, simpler advanced-editor controls, a clear
    recovery workflow for conflicting versions, and reply upload recovery. Verify

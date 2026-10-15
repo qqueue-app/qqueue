@@ -11,6 +11,21 @@ const h = vi.hoisted(() => {
       uidNext: number;
       uidValidity?: bigint;
     },
+    currentPath: "INBOX",
+    paths: ["INBOX"],
+    byFolder: {} as Record<
+      string,
+      {
+        exists: number;
+        uidNext: number;
+        uidValidity: bigint;
+        messages: Array<{
+          uid: number;
+          source?: string;
+          envelope?: { messageId?: string };
+        }>;
+      }
+    >,
     messages: [] as Array<{
       uid: number;
       flags?: Set<string>;
@@ -40,17 +55,31 @@ const h = vi.hoisted(() => {
         throw state.connectError;
       }
     }
-    async mailboxOpen() {
-      return state.mailbox;
+    async list() {
+      return state.paths.map((path) => ({
+        path,
+        name: path,
+        flags: new Set<string>(),
+        specialUse: path === "Sent" ? "\\Sent" : undefined,
+      }));
+    }
+    async mailboxOpen(path: string) {
+      state.currentPath = path;
+      if (state.byFolder[path]) return state.byFolder[path];
+      return {
+        ...state.mailbox,
+        uidValidity: state.mailbox.uidValidity ?? 99n,
+      };
     }
     async search(query: { uid?: string }) {
       const [first, last] = (query.uid ?? "1:*")
         .split(":")
         .map((value) => (value === "*" ? Infinity : Number(value)));
       return {
-        count: state.messages.filter(
-          (message) => message.uid >= first && message.uid <= last
-        ).length,
+        count: (
+          state.byFolder[state.currentPath]?.messages ?? state.messages
+        ).filter((message) => message.uid >= first && message.uid <= last)
+          .length,
       };
     }
     async *fetch(
@@ -59,7 +88,9 @@ const h = vi.hoisted(() => {
       options?: { uid?: boolean }
     ) {
       state.fetches.push({ range, source: query.source, uid: options?.uid });
-      for (const [index, message] of state.messages.entries()) {
+      for (const [index, message] of (
+        state.byFolder[state.currentPath]?.messages ?? state.messages
+      ).entries()) {
         const included = Array.isArray(range)
           ? range.includes(message.uid)
           : (() => {
@@ -71,7 +102,11 @@ const h = vi.hoisted(() => {
       }
     }
     async fetchOne(uid: number) {
-      return state.messages.find((message) => message.uid === uid) ?? false;
+      return (
+        (state.byFolder[state.currentPath]?.messages ?? state.messages).find(
+          (message) => message.uid === uid
+        ) ?? false
+      );
     }
     close() {
       state.closeCalls++;
@@ -126,6 +161,17 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     ...overrides,
   } as Account;
   prismaMock.inboxAccount.findFirst.mockResolvedValue(account);
+  prismaMock.inboxFolder.findMany.mockResolvedValue(
+    [
+      {
+        id: "f1",
+        path: account.mailbox,
+        role: "INBOX",
+        ...account,
+        inboxAccountId: account.id,
+      },
+    ].map((folder) => ({ ...folder, id: "f1" })) as never
+  );
   return account;
 }
 
@@ -133,6 +179,9 @@ beforeEach(() => {
   prismaMock.$queryRaw.mockResolvedValue([{ locked: true }]);
   h.state.mailbox = { exists: 0, uidNext: 1 };
   h.state.messages = [];
+  h.state.byFolder = {};
+  h.state.paths = ["INBOX"];
+  h.state.currentPath = "INBOX";
   h.state.fetches = [];
   h.state.connectCalls = 0;
   h.state.closeCalls = 0;
@@ -141,9 +190,20 @@ beforeEach(() => {
   h.simpleParser.mockReset();
   // The upsert's return value is now used (attachments hang off the stored
   // message id), so it needs a row rather than the deep mock's undefined.
-  prismaMock.inboundMessage.upsert.mockResolvedValue({ id: "msg-1" } as never);
+  prismaMock.inboundMessage.upsert.mockImplementation(
+    async (args) =>
+      ({
+        id: "msg-1",
+        readAt: null,
+        readRevision: 1,
+        flagged: false,
+        flagRevision: 1,
+        ...args.create,
+      }) as never
+  );
   prismaMock.inboundAttachment.findMany.mockResolvedValue([] as never);
   prismaMock.inboundMessage.findMany.mockResolvedValue([]);
+  prismaMock.inboundMessageLocation.findMany.mockResolvedValue([]);
   prismaMock.inboundAttachment.create.mockImplementation(
     async (args) => ({ id: "part-1", ...args.data }) as never
   );
@@ -315,7 +375,7 @@ describe("syncInboxAccount", () => {
     ).toMatchObject({ bodyStatus: "UNAVAILABLE", contentImportPending: true });
     const upsertArg = prismaMock.inboundMessage.upsert.mock.calls[1][0];
     expect(upsertArg.create).toMatchObject({
-      messageId: "acc-1:null:19", // UID-validity-scoped fallback id
+      messageId: "acc-1:f1:99:19", // UID-validity-scoped fallback id
       emailJobId: undefined,
       fromEmail: "unknown@example.invalid",
       fromName: undefined,
@@ -792,12 +852,15 @@ describe("durable MIME recovery", () => {
     h.state.messages = [
       { uid: 5, source: "restored", envelope: { messageId: "<m@mail>" } },
     ];
-    prismaMock.inboundMessage.findMany.mockResolvedValue([
+    prismaMock.inboundMessageLocation.findMany.mockResolvedValue([
       {
-        id: "msg-1",
-        messageId: "<m@mail>",
-        imapUid: 5,
-        bodyStatus: "UNAVAILABLE",
+        uid: 5,
+        uidValidity: "99",
+        message: {
+          id: "msg-1",
+          messageId: "<m@mail>",
+          bodyStatus: "UNAVAILABLE",
+        },
       },
     ] as never);
     prismaMock.inboundMessage.findUnique.mockResolvedValue({
@@ -830,12 +893,15 @@ describe("durable MIME recovery", () => {
         envelope: { messageId: "<different@mail>" },
       },
     ];
-    prismaMock.inboundMessage.findMany.mockResolvedValue([
+    prismaMock.inboundMessageLocation.findMany.mockResolvedValue([
       {
-        id: "msg-1",
-        messageId: "<m@mail>",
-        imapUid: 5,
-        bodyStatus: "UNAVAILABLE",
+        uid: 5,
+        uidValidity: "99",
+        message: {
+          id: "msg-1",
+          messageId: "<m@mail>",
+          bodyStatus: "UNAVAILABLE",
+        },
       },
     ] as never);
     await syncInboxAccount(
@@ -879,5 +945,126 @@ describe("durable MIME recovery", () => {
     expect(prismaMock.inboundAttachment.create).toHaveBeenCalledTimes(1);
     expect(h.storage.putObject).toHaveBeenCalledTimes(1);
     expect(h.storage.putObject.mock.calls[0][0].key).toContain("1-missing.txt");
+  });
+});
+
+describe("independent folder imports", () => {
+  it("keeps identical numeric UIDs in different folder namespaces", async () => {
+    const account = makeAccount();
+    h.state.paths = ["INBOX", "Sent"];
+    h.state.byFolder = {
+      INBOX: {
+        exists: 1,
+        uidNext: 8,
+        uidValidity: 99n,
+        messages: [{ uid: 7, source: "received" }],
+      },
+      Sent: {
+        exists: 1,
+        uidNext: 8,
+        uidValidity: 101n,
+        messages: [{ uid: 7, source: "sent" }],
+      },
+    };
+    prismaMock.inboxFolder.findMany.mockResolvedValue([
+      { id: "f1", path: "INBOX", role: "INBOX", lastSeenUid: 0 },
+      { id: "f2", path: "Sent", role: "SENT", lastSeenUid: 0 },
+    ] as never);
+    h.simpleParser.mockImplementation(async (raw) => ({
+      messageId: `<${raw}@mail>`,
+      attachments: [],
+    }));
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessageLocation.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          inboxFolderId_uidValidity_uid: {
+            inboxFolderId: "f1",
+            uidValidity: "99",
+            uid: 7,
+          },
+        },
+      })
+    );
+    expect(prismaMock.inboundMessageLocation.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          inboxFolderId_uidValidity_uid: {
+            inboxFolderId: "f2",
+            uidValidity: "101",
+            uid: 7,
+          },
+        },
+      })
+    );
+    expect(prismaMock.inboxFolder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "f2" },
+        data: expect.objectContaining({ lastSeenUid: 7, uidValidity: "101" }),
+      })
+    );
+  });
+  it("does not expose QQueue system sends through external Sent import", async () => {
+    const account = makeAccount({ mailbox: "Sent" });
+    h.state.paths = ["Sent"];
+    prismaMock.inboxFolder.findMany.mockResolvedValue([
+      { id: "f1", path: "Sent", role: "SENT", lastSeenUid: 0 },
+    ] as never);
+    h.state.mailbox = { exists: 1, uidNext: 8, uidValidity: 99n };
+    h.state.messages = [{ uid: 7, source: "system" }];
+    h.simpleParser.mockResolvedValue({ messageId: "<system@mail>" });
+    prismaMock.emailJob.findFirst.mockResolvedValue({
+      id: "system_job",
+    } as never);
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessage.upsert).not.toHaveBeenCalled();
+  });
+  it("continues the rotating secondary folder after the primary import fails", async () => {
+    const account = makeAccount();
+    h.state.paths = ["INBOX", "Archive"];
+    h.state.byFolder = {
+      INBOX: {
+        exists: 1,
+        uidNext: 8,
+        uidValidity: 99n,
+        messages: [{ uid: 7, source: "failed" }],
+      },
+      Archive: {
+        exists: 1,
+        uidNext: 9,
+        uidValidity: 101n,
+        messages: [{ uid: 8, source: "archive" }],
+      },
+    };
+    prismaMock.inboxFolder.findMany.mockResolvedValue([
+      { id: "f1", path: "INBOX", role: "INBOX", lastSeenUid: 0 },
+      { id: "f2", path: "Archive", role: "ARCHIVE", lastSeenUid: 0 },
+    ] as never);
+    h.simpleParser
+      .mockRejectedValueOnce(new Error("bad primary body"))
+      .mockResolvedValue({ messageId: "<old@mail>", attachments: [] });
+    await expect(syncInboxAccount(account)).rejects.toThrow("bad primary body");
+    expect(prismaMock.inboxFolder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "f2" },
+        data: expect.objectContaining({ lastSeenUid: 8 }),
+      })
+    );
+  });
+  it("preserves cached mail when the configured folder disappears", async () => {
+    const account = makeAccount();
+    h.state.paths = [];
+    prismaMock.inboxFolder.findMany.mockResolvedValue([]);
+    await syncInboxAccount(account);
+    expect(prismaMock.inboxAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          lastSyncError: expect.stringContaining(
+            "cached messages are retained"
+          ),
+        },
+      })
+    );
+    expect(prismaMock.inboundMessage.deleteMany).not.toHaveBeenCalled();
   });
 });

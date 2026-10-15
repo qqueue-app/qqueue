@@ -3,158 +3,304 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../test/prisma-mock.js";
 import { synchronizeReadState } from "./inbox-read-state.js";
 
-const account = { id: "a1", uidValidity: "99", flagsCursor: 0 };
-const pending = {
+const folder = {
+  id: "f1",
+  inboxAccountId: "a1",
+  uidValidity: "99",
+  flagsCursor: 0,
+};
+const message = {
   id: "m1",
   messageId: "<m1@mail>",
-  imapUid: 7,
-  imapUidValidity: "99",
   readAt: new Date(),
   readRevision: 3,
+  readPending: true,
+  flagged: false,
+  flagRevision: 2,
+  flagPending: false,
 };
-function client(flags = new Set<string>()) {
+function location(overrides = {}) {
+  return {
+    id: "l1",
+    inboundMessageId: "m1",
+    uid: 7,
+    uidValidity: "99",
+    remoteSeen: true,
+    remoteFlagged: false,
+    readAppliedRevision: 2,
+    flagAppliedRevision: 2,
+    message,
+    ...overrides,
+  };
+}
+function client(
+  flags?: Set<string>,
+  identity = message.messageId,
+  exists = true
+) {
   return {
     fetchOne: vi
       .fn()
-      .mockResolvedValue({ envelope: { messageId: pending.messageId } }),
+      .mockResolvedValue(
+        exists ? { envelope: { messageId: identity } } : false
+      ),
     messageFlagsAdd: vi.fn().mockResolvedValue(true),
     messageFlagsRemove: vi.fn().mockResolvedValue(true),
     fetch: vi.fn(async function* () {
-      yield { uid: 7, flags };
+      if (exists) yield { uid: 7, flags, envelope: { messageId: identity } };
     }),
   };
 }
+function sync(imap: ReturnType<typeof client>, cursor = 0) {
+  return synchronizeReadState(imap as unknown as ImapFlow, {
+    ...folder,
+    flagsCursor: cursor,
+  });
+}
 beforeEach(() => {
-  prismaMock.inboundMessage.findMany.mockResolvedValue([] as never);
+  prismaMock.inboundMessageLocation.findMany.mockResolvedValue([]);
   prismaMock.inboundMessage.updateMany.mockResolvedValue({ count: 1 });
+  prismaMock.inboundMessageLocation.updateMany.mockResolvedValue({ count: 1 });
 });
-describe("shared IMAP read-state reconciliation", () => {
-  it.each(["a1:99:7", "a1:7"])(
-    "supports a UID-validity-verified message without an RFC Message-ID (%s)",
+describe("shared folder Seen and Flagged reconciliation", () => {
+  it.each(["a1:f1:99:7", "a1:99:7", "a1:7"])(
+    "verifies a headerless message through its folder namespace (%s)",
     async (messageId) => {
-      prismaMock.inboundMessage.findMany.mockResolvedValueOnce([
-        { ...pending, messageId },
+      prismaMock.inboundMessageLocation.findMany.mockResolvedValueOnce([
+        location({ message: { ...message, messageId } }),
       ] as never);
       const imap = client();
       imap.fetchOne.mockResolvedValue({
         envelope: { messageId: undefined },
       } as never);
-      await synchronizeReadState(imap as unknown as ImapFlow, account);
+      await sync(imap);
       expect(imap.messageFlagsAdd).toHaveBeenCalledWith(7, ["\\Seen"], {
         uid: true,
       });
+      // A missing RFC header must not match a different UID/folder namespace.
+      expect(prismaMock.inboundMessageLocation.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            inboxFolderId: "f1",
+            uidValidity: "99",
+            present: true,
+          }),
+        })
+      );
     }
   );
   it.each([true, false])(
-    "writes a pending shared read=%s action and acknowledges its exact revision",
+    "writes read=%s and acknowledges only when every current copy has the same revision",
     async (read) => {
-      prismaMock.inboundMessage.findMany.mockResolvedValueOnce([
-        { ...pending, readAt: read ? pending.readAt : null },
+      prismaMock.inboundMessageLocation.findMany.mockResolvedValueOnce([
+        location({
+          message: { ...message, readAt: read ? message.readAt : null },
+        }),
       ] as never);
       const imap = client();
-      await synchronizeReadState(imap as unknown as ImapFlow, account);
+      await sync(imap);
       expect(
         read ? imap.messageFlagsAdd : imap.messageFlagsRemove
       ).toHaveBeenCalledWith(7, ["\\Seen"], { uid: true });
       expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
-        where: { id: "m1", readRevision: 3, readPending: true },
+        where: {
+          id: "m1",
+          readRevision: 3,
+          readPending: true,
+          locations: {
+            none: {
+              present: true,
+              folder: { present: true },
+              readAppliedRevision: { not: 3 },
+            },
+          },
+        },
         data: { readPending: false, readSyncError: null },
       });
     }
   );
-  it("retains failed writeback with a visible error for retry", async () => {
-    prismaMock.inboundMessage.findMany.mockResolvedValueOnce([
-      pending,
+  it.each([true, false])(
+    "writes flagged=%s without changing Seen",
+    async (flagged) => {
+      prismaMock.inboundMessageLocation.findMany.mockResolvedValueOnce([
+        location({
+          flagAppliedRevision: 1,
+          message: {
+            ...message,
+            readPending: false,
+            flagged,
+            flagPending: true,
+          },
+        }),
+      ] as never);
+      const imap = client();
+      await sync(imap);
+      expect(
+        flagged ? imap.messageFlagsAdd : imap.messageFlagsRemove
+      ).toHaveBeenCalledWith(7, ["\\Flagged"], { uid: true });
+      expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            flagRevision: 2,
+            flagPending: true,
+          }),
+          data: { flagPending: false, flagSyncError: null },
+        })
+      );
+    }
+  );
+  it("does not repeat an already applied action while another folder copy is pending", async () => {
+    prismaMock.inboundMessageLocation.findMany.mockResolvedValueOnce([
+      location({ readAppliedRevision: 3 }),
     ] as never);
+    prismaMock.inboundMessage.updateMany.mockResolvedValue({ count: 0 });
     const imap = client();
-    imap.messageFlagsAdd.mockRejectedValue(new Error("Mailbox unavailable"));
-    await synchronizeReadState(imap as unknown as ImapFlow, account);
-    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
-      where: { id: "m1", readRevision: 3, readPending: true },
-      data: {
-        readAttemptedAt: expect.any(Date),
-        readSyncError: "Mailbox unavailable",
-      },
-    });
-    expect(prismaMock.inboundMessage.updateMany).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ readPending: false }),
-      })
-    );
-  });
-  it("never writes Seen onto a recreated mailbox's reused UID", async () => {
-    prismaMock.inboundMessage.findMany.mockResolvedValueOnce([
-      { ...pending, imapUidValidity: "98" },
-    ] as never);
-    const imap = client();
-    await synchronizeReadState(imap as unknown as ImapFlow, account);
-    expect(imap.fetchOne).not.toHaveBeenCalled();
+    expect(await sync(imap)).toBe(true);
     expect(imap.messageFlagsAdd).not.toHaveBeenCalled();
-    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
+  });
+  it.each([false, new Error("Offline"), "Disconnected"])(
+    "retains unconfirmed writes for retry (%s)",
+    async (error) => {
+      prismaMock.inboundMessageLocation.findMany.mockResolvedValueOnce([
+        location(),
+      ] as never);
+      const imap = client();
+      if (error === false) imap.messageFlagsAdd.mockResolvedValue(false);
+      else imap.messageFlagsAdd.mockRejectedValue(error);
+      await sync(imap);
+      expect(prismaMock.inboundMessageLocation.updateMany).toHaveBeenCalledWith(
+        { where: { id: "l1" }, data: { attemptedAt: expect.any(Date) } }
+      );
+      expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "m1", readRevision: 3, readPending: true },
+          data: { readSyncError: expect.any(String) },
+        })
+      );
+      expect(prismaMock.inboundMessage.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { readPending: false, readSyncError: null },
+        })
+      );
+    }
+  );
+  it.each([false, true])(
+    "never changes flags for a disappeared or reused UID (remote exists=%s)",
+    async (exists) => {
+      prismaMock.inboundMessageLocation.findMany.mockResolvedValueOnce([
+        location(),
+      ] as never);
+      const imap = client(undefined, "<different@mail>", exists);
+      await sync(imap);
+      expect(imap.messageFlagsAdd).not.toHaveBeenCalled();
+      expect(prismaMock.inboundMessageLocation.updateMany).toHaveBeenCalledWith(
+        { where: { id: "l1" }, data: { present: false } }
+      );
+    }
+  );
+  it.each([true, false])(
+    "promotes an external Seen=%s transition to a new shared revision",
+    async (seen) => {
+      prismaMock.inboundMessageLocation.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          location({
+            remoteSeen: !seen,
+            message: { ...message, readPending: false },
+          }),
+        ] as never);
+      await sync(client(new Set(seen ? ["\\Seen"] : [])));
+      expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
+        where: { id: "m1", readRevision: 3, readPending: false },
         data: {
-          readAttemptedAt: expect.any(Date),
-          readSyncError: expect.stringContaining("reconciled"),
+          readAt: seen ? expect.any(Date) : null,
+          readRevision: { increment: 1 },
+          readPending: true,
+          readSyncError: null,
         },
-      })
-    );
-  });
-  it("checks the remote message identity before applying an action", async () => {
-    prismaMock.inboundMessage.findMany.mockResolvedValueOnce([
-      pending,
-    ] as never);
-    const imap = client();
-    imap.fetchOne.mockResolvedValue({
-      envelope: { messageId: "<different@mail>" },
-    });
-    await synchronizeReadState(imap as unknown as ImapFlow, account);
-    expect(imap.messageFlagsAdd).not.toHaveBeenCalled();
-  });
-  it("reconciles external unread flags only against an unchanged, acknowledged local revision", async () => {
-    prismaMock.inboundMessage.findMany
-      .mockResolvedValueOnce([] as never)
+      });
+      expect(prismaMock.inboundMessageLocation.updateMany).toHaveBeenCalledWith(
+        { where: { id: "l1" }, data: { readAppliedRevision: 4 } }
+      );
+    }
+  );
+  it("promotes an external Flagged transition without advancing the read revision", async () => {
+    prismaMock.inboundMessageLocation.findMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { id: "m1", imapUid: 7, readRevision: 3 },
+        location({ message: { ...message, readPending: false } }),
       ] as never);
-    await synchronizeReadState(client() as unknown as ImapFlow, account);
+    expect(await sync(client(new Set(["\\Seen", "\\Flagged"])))).toBe(true);
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "m1",
-        imapUid: 7,
-        imapUidValidity: "99",
-        readRevision: 3,
-        readPending: false,
+      where: { id: "m1", flagRevision: 2, flagPending: false },
+      data: {
+        flagged: true,
+        flagRevision: { increment: 1 },
+        flagPending: true,
+        flagSyncError: null,
       },
-      data: { readAt: null, readSyncError: null },
-    });
-    expect(prismaMock.inboxAccount.update).toHaveBeenLastCalledWith({
-      where: { id: "a1" },
-      data: { flagsCursor: 0 },
     });
   });
-  it("reconciles external Seen and restarts the bounded scan at its end", async () => {
-    prismaMock.inboundMessage.findMany
-      .mockResolvedValueOnce([] as never)
-      .mockResolvedValueOnce([
-        { id: "m1", imapUid: 7, readRevision: 3 },
-      ] as never);
-    await synchronizeReadState(
-      client(new Set(["\\Seen"])) as unknown as ImapFlow,
-      account
+  it("does not acknowledge an external result when a newer action has raced it", async () => {
+    prismaMock.inboundMessageLocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([location()] as never);
+    prismaMock.inboundMessage.updateMany.mockResolvedValue({ count: 0 });
+    await sync(client(new Set()));
+    expect(
+      prismaMock.inboundMessageLocation.updateMany
+    ).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { readAppliedRevision: 4 } })
     );
-    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: { readAt: expect.any(Date), readSyncError: null },
-      })
-    );
-    prismaMock.inboundMessage.findMany.mockResolvedValue([] as never);
-    await synchronizeReadState(client() as unknown as ImapFlow, {
-      ...account,
-      flagsCursor: 7,
+  });
+  it("treats missing flags as unavailable, not as Seen and Flagged removal", async () => {
+    prismaMock.inboundMessageLocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([location()] as never);
+    await sync(client());
+    expect(prismaMock.inboundMessage.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.inboundMessageLocation.updateMany).not.toHaveBeenCalled();
+  });
+  it("retains cached content while reconciling an expunged location", async () => {
+    prismaMock.inboundMessageLocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([location()] as never);
+    await sync(client(undefined, "<other>", false));
+    expect(prismaMock.inboundMessageLocation.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["l1"] } },
+      data: { present: false },
     });
-    expect(prismaMock.inboxAccount.update).toHaveBeenLastCalledWith({
-      where: { id: "a1" },
+    expect(prismaMock.inboundMessage.deleteMany).not.toHaveBeenCalled();
+  });
+  it("rejects a reused UID during the observation scan", async () => {
+    prismaMock.inboundMessageLocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([location()] as never);
+    await sync(client(new Set(), "<other>"));
+    expect(prismaMock.inboundMessage.updateMany).not.toHaveBeenCalled();
+  });
+  it("wraps a finished folder scan and advances a full bounded page", async () => {
+    prismaMock.inboundMessageLocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    await sync(client(), 7);
+    expect(prismaMock.inboxFolder.update).toHaveBeenLastCalledWith({
+      where: { id: "f1" },
       data: { flagsCursor: 0 },
+    });
+    prismaMock.inboundMessageLocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(
+        Array.from({ length: 200 }, (_, i) =>
+          location({ id: `l${i}`, uid: i + 1 })
+        ) as never
+      );
+    await sync(client());
+    expect(prismaMock.inboxFolder.update).toHaveBeenLastCalledWith({
+      where: { id: "f1" },
+      data: { flagsCursor: 200 },
     });
   });
 });

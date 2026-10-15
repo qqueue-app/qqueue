@@ -976,6 +976,7 @@ model InboxAccount {
   flagsCursor       Int?
   historyBeforeUid  Int?
   organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  folders           InboxFolder[]
   inboundMessages   InboundMessage[]
   grants            InboxAccountGrant[]
   notifyRules       InboxNotifyRule[]
@@ -984,6 +985,54 @@ model InboxAccount {
 
   @@unique([organizationId, email])
   @@index([organizationId])
+}
+
+/// A discovered IMAP folder has its own UID namespace and durable cursors.
+model InboxFolder {
+  id               String                   @id @default(cuid())
+  inboxAccountId   String
+  path             String
+  name             String
+  role             String                   @default("OTHER")
+  specialUse       String?
+  present          Boolean                  @default(true)
+  isPrimary        Boolean                  @default(false)
+  uidValidity      String?
+  lastSeenUid      Int?
+  historyBeforeUid Int?
+  flagsCursor      Int?
+  lastSyncedAt     DateTime?
+  lastSyncError    String?
+  inboxAccount     InboxAccount             @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
+  locations        InboundMessageLocation[]
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@unique([inboxAccountId, path])
+  @@index([inboxAccountId, present, lastSyncedAt])
+}
+
+/// Message identity is separate from a folder location: the same message may
+/// have several copies, and no UID from one folder is valid in another.
+model InboundMessageLocation {
+  id                  String         @id @default(cuid())
+  inboundMessageId    String
+  inboxFolderId       String
+  uid                 Int
+  uidValidity         String
+  present             Boolean        @default(true)
+  remoteSeen          Boolean        @default(false)
+  remoteFlagged       Boolean        @default(false)
+  readAppliedRevision Int            @default(0)
+  flagAppliedRevision Int            @default(0)
+  attemptedAt         DateTime?
+  observedAt          DateTime       @default(now())
+  message             InboundMessage @relation(fields: [inboundMessageId], references: [id], onDelete: Cascade)
+  folder              InboxFolder    @relation(fields: [inboxFolderId], references: [id], onDelete: Cascade)
+
+  @@unique([inboxFolderId, uidValidity, uid])
+  @@index([inboundMessageId, present])
+  @@index([inboxFolderId, present, attemptedAt])
 }
 
 /// Who may *read* a mailbox. The read-side counterpart to SmtpConnectionGrant,
@@ -1063,42 +1112,47 @@ model InboxNotifyRule {
 // Replies are anchored to sent mail by matching In-Reply-To/References against
 // EmailJob.messageId.
 model InboundMessage {
-  id                   String              @id @default(cuid())
+  id                   String                   @id @default(cuid())
   organizationId       String
   inboxAccountId       String
   emailJobId           String?
   messageId            String
   inReplyTo            String?
-  references           String[]            @default([])
+  references           String[]                 @default([])
   fromEmail            String
   fromName             String?
-  replyTo              String[]            @default([])
-  to                   String[]            @default([])
-  cc                   String[]            @default([])
+  replyTo              String[]                 @default([])
+  to                   String[]                 @default([])
+  cc                   String[]                 @default([])
   subject              String
   text                 String?
   html                 String?
   receivedAt           DateTime
   readAt               DateTime?
-  readRevision         Int                 @default(1)
-  readPending          Boolean             @default(false)
+  readRevision         Int                      @default(1)
+  readPending          Boolean                  @default(false)
   readSyncError        String?
   readAttemptedAt      DateTime?
   imapUidValidity      String?
   imapUid              Int?
-  contentImportPending Boolean             @default(false)
+  flagged              Boolean                  @default(false)
+  flagRevision         Int                      @default(1)
+  flagPending          Boolean                  @default(false)
+  flagSyncError        String?
+  contentImportPending Boolean                  @default(false)
   contentAttemptedAt   DateTime?
-  bodyStatus           String              @default("AVAILABLE")
+  bodyStatus           String                   @default("AVAILABLE")
   bodyError            String?
   /// True when the sync worker recognized this message as a delivery status
   /// notification (bounce report) and fed it into bounce accounting. Lets the
   /// inbox list separate bounce noise from human mail.
-  isDsn                Boolean             @default(false)
-  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  inboxAccount         InboxAccount        @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
-  emailJob             EmailJob?           @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  isDsn                Boolean                  @default(false)
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboxAccount         InboxAccount             @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
+  emailJob             EmailJob?                @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  locations            InboundMessageLocation[]
   attachments          InboundAttachment[]
-  createdAt            DateTime            @default(now())
+  createdAt            DateTime                 @default(now())
 
   @@unique([inboxAccountId, messageId])
   @@index([organizationId, receivedAt])

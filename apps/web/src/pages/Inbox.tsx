@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Reply,
   Trash2,
+  Flag,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "../components/EmptyState.js";
@@ -26,6 +27,7 @@ import {
   api,
   type InboundAttachment,
   type InboundMessage,
+  type MailboxView,
 } from "../lib/api.js";
 import { formatFullDate, formatMailDate, formatBytes } from "../lib/format.js";
 import { useInboundInlineImages } from "../lib/inbound-inline-images.js";
@@ -57,6 +59,17 @@ import {
 } from "../components/ui/select.js";
 
 type ReadFilter = "all" | "unread" | "read";
+const folderLabels: Record<MailboxView, string> = {
+  INBOX: "Inbox",
+  SENT: "Mailbox Sent",
+  DRAFTS: "Mailbox Drafts",
+  ARCHIVE: "Archive",
+  TRASH: "Trash",
+  JUNK: "Junk",
+  OTHER: "Other folders",
+  ALL: "All mailbox mail",
+  FLAGGED: "Flagged",
+};
 
 interface ConversationThread {
   threadKey: string;
@@ -204,10 +217,43 @@ function InboxWorkspace() {
     });
   }
 
-  const [accountFilter, setAccountFilter] = useState("all");
-  const [readFilter, setReadFilter] = useState<ReadFilter>("all");
-  const [search, setSearch] = useState("");
-  const [submittedSearch, setSubmittedSearch] = useState("");
+  const accountFilter = searchParams.get("mailbox") ?? "all";
+  const readParam = searchParams.get("read");
+  const readFilter: ReadFilter =
+    readParam === "read" || readParam === "unread" ? readParam : "all";
+  const viewParam = searchParams.get("view") ?? "INBOX";
+  const view = (
+    Object.hasOwn(folderLabels, viewParam) ? viewParam : "INBOX"
+  ) as MailboxView;
+  const folderId = searchParams.get("folder") ?? undefined;
+  const submittedSearch = searchParams.get("q") ?? "";
+  const [search, setSearch] = useState(submittedSearch);
+  useEffect(() => setSearch(submittedSearch), [submittedSearch]);
+  function updateFilters(values: Record<string, string | undefined>) {
+    setOpenedThread(null);
+    setReplyTarget(null);
+    scrollPosition.current = 0;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("message");
+      next.delete("replyDraft");
+      for (const [key, value] of Object.entries(values)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
+      return next;
+    });
+  }
+  const setAccountFilter = (value: string) =>
+    updateFilters({
+      mailbox: value === "all" ? undefined : value,
+      folder: undefined,
+    });
+  const setReadFilter = (value: ReadFilter) =>
+    updateFilters({ read: value === "all" ? undefined : value });
+  const setSubmittedSearch = (value: string) => {
+    if (value !== submittedSearch) updateFilters({ q: value || undefined });
+  };
   /*
     The conversation being read, captured at the moment it was opened.
 
@@ -241,7 +287,15 @@ function InboxWorkspace() {
     q: submittedSearch,
     read: readFilter,
     inboxAccountId: accountFilter === "all" ? undefined : accountFilter,
+    folderId,
+    view,
   };
+  const foldersQuery = useOrgQuery(
+    organizationId,
+    qk.inboxFolders(organizationId ?? "", messageFilters.inboxAccountId),
+    (id) => api.listInboxFolders(id, messageFilters.inboxAccountId),
+    { refetchInterval: 15_000 }
+  );
   const messagesQuery = useOrgInfiniteQuery(
     organizationId,
     qk.inboundMessages(organizationId ?? "", messageFilters),
@@ -251,6 +305,8 @@ function InboxWorkspace() {
         q: submittedSearch || undefined,
         read: readFilter,
         inboxAccountId: messageFilters.inboxAccountId,
+        folderId,
+        view,
         cursor,
       })
   );
@@ -335,6 +391,20 @@ function InboxWorkspace() {
         ["inbound-messages", organizationId ?? ""],
         // The nav badge reads its own query; keep the two in step.
         qk.inboxUnreadCount(organizationId ?? ""),
+      ],
+    }
+  );
+  const flag = useApiMutation(
+    (message: InboundMessage) =>
+      api.markInboundMessageFlagged(
+        message.id,
+        organizationId as string,
+        !message.flagged
+      ),
+    {
+      invalidates: [
+        ["inbound-messages", organizationId ?? ""],
+        ["inbox-conversation", organizationId ?? ""],
       ],
     }
   );
@@ -616,10 +686,27 @@ function InboxWorkspace() {
               className="-ml-1 inline-flex min-h-touch items-center gap-field rounded-control px-1 text-ui font-medium text-text-secondary transition-colors duration-fast ease-out hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <ArrowLeft className="h-4 w-4" />
-              Inbox
+              {folderLabels[view]}
             </button>
 
             <div className="ml-auto flex shrink-0 items-center gap-1">
+              <IconButton
+                label={
+                  selectedThread.latestMessage.flagged
+                    ? "Remove flag"
+                    : "Flag message"
+                }
+                disabled={flag.isPending}
+                onClick={() => flag.mutate(selectedThread.latestMessage)}
+              >
+                <Flag
+                  className={
+                    selectedThread.latestMessage.flagged
+                      ? "fill-current text-primary"
+                      : undefined
+                  }
+                />
+              </IconButton>
               <IconButton
                 label="Mark as unread"
                 onClick={() => {
@@ -654,6 +741,12 @@ function InboxWorkspace() {
             <p className="mt-1 truncate text-ui text-text-secondary">
               {selectedThread.senderName} · {selectedThread.senderEmail}
             </p>
+            {selectedThread.latestMessage.flagPending ? (
+              <p role="status" className="text-meta text-text-tertiary">
+                {selectedThread.latestMessage.flagSyncError ??
+                  "Flag change is waiting to sync with the mailbox."}
+              </p>
+            ) : null}
           </div>
         </div>
       </header>
@@ -978,7 +1071,12 @@ function InboxWorkspace() {
         <div className="mx-auto w-full max-w-page px-4 pb-3 pt-4 sm:px-6">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <h1 className="text-section font-semibold text-text">Inbox</h1>
+              <h1 className="text-section font-semibold text-text">
+                {folderId
+                  ? (foldersQuery.data?.find((folder) => folder.id === folderId)
+                      ?.name ?? "Folder")
+                  : folderLabels[view]}
+              </h1>
               <p className="text-meta text-text-tertiary" data-numeric>
                 {unreadCount > 0
                   ? `${unreadCount} unread of ${filteredMessages.length}`
@@ -1016,6 +1114,80 @@ function InboxWorkspace() {
                 width and the rest follows underneath.
               */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Select
+              value={folderId ? `folder:${folderId}` : `view:${view}`}
+              onValueChange={(value) => {
+                updateFilters(
+                  value.startsWith("folder:")
+                    ? { folder: value.slice(7) }
+                    : {
+                        folder: undefined,
+                        view:
+                          value.slice(5) === "INBOX"
+                            ? undefined
+                            : value.slice(5),
+                      }
+                );
+              }}
+            >
+              <SelectTrigger aria-label="Choose mail folder" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(
+                  [
+                    "INBOX",
+                    "ARCHIVE",
+                    "TRASH",
+                    "SENT",
+                    "DRAFTS",
+                    "JUNK",
+                    "FLAGGED",
+                    "ALL",
+                  ] as const
+                ).map((value) => (
+                  <SelectItem key={value} value={`view:${value}`}>
+                    {folderLabels[value]}
+                  </SelectItem>
+                ))}
+                {(foldersQuery.data ?? [])
+                  .filter((folder) => folder.present || folder.id === folderId)
+                  .map((folder) => (
+                    <SelectItem
+                      key={folder.id}
+                      value={`folder:${folder.id}`}
+                      disabled={!folder.present}
+                    >
+                      {folder.path} ·{" "}
+                      {accounts.find(
+                        (account) => account.id === folder.inboxAccountId
+                      )?.email ?? "Mailbox"}
+                      {folder.present ? "" : " (unavailable)"}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            {foldersQuery.isError ? (
+              <p role="alert" className="text-meta text-err">
+                Couldn't load folders.{" "}
+                <Button
+                  variant="ghost"
+                  onClick={() => void foldersQuery.refetch()}
+                >
+                  Try again
+                </Button>
+              </p>
+            ) : null}
+            {folderId &&
+            foldersQuery.data?.find((folder) => folder.id === folderId)
+              ?.lastSyncError ? (
+              <p role="alert" className="text-meta text-err">
+                {
+                  foldersQuery.data.find((folder) => folder.id === folderId)
+                    ?.lastSyncError
+                }
+              </p>
+            ) : null}
             <form
               className="w-full sm:w-auto"
               onSubmit={(event) => {
@@ -1186,6 +1358,7 @@ function InboxWorkspace() {
                 id: "conversation",
                 header: "Conversation",
                 enableSorting: false,
+                enableHiding: false,
                 cell: ({ row }) => renderThread(row.original),
               },
               {
@@ -1210,6 +1383,13 @@ function InboxWorkspace() {
                             ),
                             read: row.original.unreadCount > 0,
                           }),
+                      },
+                      {
+                        label: row.original.latestMessage.flagged
+                          ? "Remove flag"
+                          : "Flag message",
+                        icon: Flag,
+                        onSelect: () => flag.mutate(row.original.latestMessage),
                       },
                     ]}
                   />

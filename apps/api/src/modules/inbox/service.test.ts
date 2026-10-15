@@ -545,3 +545,154 @@ describe("inboxService mailbox scope", () => {
     expect(manualEmailServiceMock.send).not.toHaveBeenCalled();
   });
 });
+
+describe("folder and shared flag access", () => {
+  it("limits folder discovery results to granted mailboxes, including an explicit account filter", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER",
+    } as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([
+      { inboxAccountId: "inbox_1" },
+    ] as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([]);
+    prismaMock.inboxFolder.findMany.mockResolvedValue([]);
+    await inboxService.listFolders("org_1", "user_1", "foreign_inbox");
+    expect(prismaMock.inboxFolder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          inboxAccount: {
+            organizationId: "org_1",
+            id: { in: ["inbox_1"] },
+            AND: [{ id: "foreign_inbox" }],
+          },
+        },
+      })
+    );
+    await inboxService.listFolders("org_1", "user_1");
+    expect(prismaMock.inboxFolder.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: {
+          inboxAccount: { organizationId: "org_1", id: { in: ["inbox_1"] } },
+        },
+      })
+    );
+  });
+  it.each(["ARCHIVE", "SENT", "DRAFTS", "TRASH", "ALL", "FLAGGED"])(
+    "keeps %s mail searches scoped to the organization and account grants",
+    async (view) => {
+      prismaMock.organizationMember.findUnique.mockResolvedValue({
+        role: "MEMBER",
+      } as never);
+      prismaMock.inboxAccountGrant.findMany.mockResolvedValue([
+        { inboxAccountId: "inbox_1" },
+      ] as never);
+      prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([]);
+      prismaMock.inboundMessage.findMany.mockResolvedValue([]);
+      await inboxService.listMessages(
+        { organizationId: "org_1", view, q: "invoice", limit: 25 } as never,
+        "user_1"
+      );
+      expect(prismaMock.inboundMessage.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            organizationId: "org_1",
+            inboxAccountId: { in: ["inbox_1"] },
+          }),
+        })
+      );
+      const where =
+        prismaMock.inboundMessage.findMany.mock.calls.at(-1)![0].where!;
+      expect(where.AND).toEqual([
+        view === "ALL"
+          ? {}
+          : view === "FLAGGED"
+            ? { flagged: true }
+            : {
+                locations: {
+                  some: {
+                    present: true,
+                    folder: { present: true, role: view },
+                  },
+                },
+              },
+      ]);
+    }
+  );
+  it("does not let a foreign folder ID bypass a member's message scope", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER",
+    } as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([]);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([]);
+    prismaMock.inboundMessage.findMany.mockResolvedValue([]);
+    await inboxService.listMessages(
+      { organizationId: "org_1", folderId: "foreign_folder", limit: 25 },
+      "user_1"
+    );
+    expect(prismaMock.inboundMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          inboxAccountId: { in: [] },
+          AND: [
+            {
+              locations: {
+                some: {
+                  inboxFolderId: "foreign_folder",
+                  present: true,
+                  folder: { present: true },
+                },
+              },
+            },
+          ],
+        }),
+      })
+    );
+  });
+  it("rejects flag writes when mailbox access is missing", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER",
+    } as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([]);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([]);
+    prismaMock.inboundMessage.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      inboxService.markFlagged("m1", "org_1", "user_1", true)
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "m1",
+          organizationId: "org_1",
+          inboxAccountId: { in: [] },
+        },
+      })
+    );
+  });
+  it("keeps a new flag revision durable if immediate sync dispatch fails", async () => {
+    prismaMock.inboundMessage.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.inboundMessage.findFirst.mockResolvedValue({
+      id: "m1",
+      inboxAccountId: "inbox_1",
+      flagPending: true,
+    } as never);
+    const sync = vi
+      .spyOn(inboxService, "requestSync")
+      .mockRejectedValueOnce(new Error("Redis down"));
+    try {
+      await expect(
+        inboxService.markFlagged("m1", "org_1", "user_1", false)
+      ).resolves.toMatchObject({ flagPending: true });
+      expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
+        where: { id: "m1", organizationId: "org_1" },
+        data: {
+          flagged: false,
+          flagRevision: { increment: 1 },
+          flagPending: true,
+          flagSyncError: null,
+        },
+      });
+    } finally {
+      sync.mockRestore();
+    }
+  });
+});

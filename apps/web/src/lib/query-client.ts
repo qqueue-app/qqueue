@@ -103,6 +103,8 @@ export const qk = {
   sentMessage: (orgId: string, id: string) =>
     ["sent", orgId, "message", id] as const,
 
+  inboxFolders: (orgId: string, accountId?: string) =>
+    ["inbox-folders", orgId, accountId ?? "all"] as const,
   inboxAccounts: (orgId: string) => ["inbox-accounts", orgId] as const,
   inboxConversation: (orgId: string, messageId: string) =>
     ["inbox-conversation", orgId, messageId] as const,

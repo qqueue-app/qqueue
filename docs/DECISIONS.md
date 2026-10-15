@@ -1228,3 +1228,26 @@ lock lease. The budget closes IMAP, cancels in-flight object writes, and checks
 again after parsing before storing content or advancing cursors. Unavailable
 content remains pending for a subsequent check. This does not replace provider
 and large-message acceptance; the handoff records those limits.
+
+## Folder Locations and Shared Flags (2026-10-15)
+
+A logical message and its IMAP locations have separate records. Each folder owns
+its UID-validity namespace and recent/history/flag cursors; a copied message
+retains one logical identity and shared state. Discovery preserves configured
+folder progress on upgrade. Disappearing folders and expunged locations never
+delete cached writing. The configured folder is checked first and another
+folder rotates behind it, keeping body work bounded within the account lease.
+
+Seen and Flagged are shared per mailbox. Each location remembers the last
+observed flags and the exact shared revisions it has applied. External changes
+are recognized as transitions, promoted with conditional revision writes, and
+then propagated to other current copies. Acknowledgement requires every current
+copy to have applied the same revision. Otherwise an unchanged old copy could
+undo a teammate's action merely by being scanned later. Remote identity is
+verified before writes; missing flags are an unavailable response, not a flag
+removal.
+
+Folder selection and mailbox/search/read filters are URL state so deep links
+and browser history recover the same list context. Imported Sent and Drafts are
+readable through this reader; durable user-initiated moves, remote draft editing,
+and integration with the delivery archive remain separate work in the handoff.
