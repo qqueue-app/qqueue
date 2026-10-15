@@ -117,9 +117,15 @@ describe("sentService.list", () => {
           OR: [
             {
               groupStatus: null,
-              status: { in: ["SENT", "FAILED", "UNCERTAIN"] },
+              status: {
+                in: ["SENT", "FAILED", "UNCERTAIN", "SUPPRESSED", "CANCELLED"],
+              },
             },
-            { groupStatus: { in: ["SENT", "FAILED", "UNCERTAIN"] } },
+            {
+              groupStatus: {
+                in: ["SENT", "FAILED", "UNCERTAIN", "SUPPRESSED", "CANCELLED"],
+              },
+            },
           ],
         },
       ],
@@ -183,9 +189,15 @@ describe("sentService.list", () => {
         OR: [
           {
             groupStatus: null,
-            status: { in: ["SENT", "FAILED", "UNCERTAIN"] },
+            status: {
+              in: ["SENT", "FAILED", "UNCERTAIN", "SUPPRESSED", "CANCELLED"],
+            },
           },
-          { groupStatus: { in: ["SENT", "FAILED", "UNCERTAIN"] } },
+          {
+            groupStatus: {
+              in: ["SENT", "FAILED", "UNCERTAIN", "SUPPRESSED", "CANCELLED"],
+            },
+          },
         ],
       });
     }
@@ -477,9 +489,15 @@ describe("sentService.get", () => {
         OR: [
           {
             groupStatus: null,
-            status: { in: ["SENT", "FAILED", "UNCERTAIN"] },
+            status: {
+              in: ["SENT", "FAILED", "UNCERTAIN", "SUPPRESSED", "CANCELLED"],
+            },
           },
-          { groupStatus: { in: ["SENT", "FAILED", "UNCERTAIN"] } },
+          {
+            groupStatus: {
+              in: ["SENT", "FAILED", "UNCERTAIN", "SUPPRESSED", "CANCELLED"],
+            },
+          },
         ],
       }
     );

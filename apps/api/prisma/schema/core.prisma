@@ -151,27 +151,27 @@ enum InboxAccountStatus {
 }
 
 model User {
-  id                  String               @id @default(cuid())
-  email               String               @unique
+  id                  String                @id @default(cuid())
+  email               String                @unique
   name                String?
   passwordHash        String?
   // Instance administrator: may edit InstanceSettings (registration policy,
   // env status view). Set for the first user created on a fresh install;
   // backfilled for OWNERs of the oldest organization on existing installs.
-  isInstanceAdmin     Boolean              @default(false)
+  isInstanceAdmin     Boolean               @default(false)
   members             OrganizationMember[]
   apiKeys             ApiKey[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
-  invitesSent         OrganizationInvite[] @relation("InvitesSent")
+  invitesSent         OrganizationInvite[]  @relation("InvitesSent")
   smtpGrants          SmtpConnectionGrant[]
   inboxGrants         InboxAccountGrant[]
   mailDomainGrants    MailDomainGrant[]
   instanceAdminMutes  InstanceAdminMute[]
   pushSubscriptions   PushSubscription[]
   inboxNotifyRules    InboxNotifyRule[]
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 }
 
 /// A Web Push endpoint registered by one installed client (browser profile or
@@ -248,73 +248,73 @@ model PasswordResetToken {
 }
 
 model Organization {
-  id                String               @id @default(cuid())
-  name              String
+  id                   String                @id @default(cuid())
+  name                 String
   // Email branding, applied to outbound mail (see EmailBranding in
   // @qqueue/email-engine). Every field is nullable and every one is opt-in:
   // null renders no header, no copyright line, and no address block, so mail
   // from a self-hosted install is never stamped with a name its owner did not
   // choose. `accentColor` defaults to the engine's own accent when unset.
-  brandName         String?
-  logoUrl           String?
-  accentColor       String?
+  brandName            String?
+  logoUrl              String?
+  accentColor          String?
   // Small print under the footer — in practice a postal address, which
   // anti-spam law expects on bulk mail.
-  footerNote        String?
+  footerNote           String?
   // Whether branding is applied to outgoing mail automatically. Off leaves a
   // template's own HTML exactly as authored, for senders who design a complete
   // email themselves and want no frame added around it. The address and the
   // unsubscribe link are NOT covered by this switch: both are compliance
   // obligations on bulk mail rather than decoration.
-  brandingEnabled   Boolean              @default(true)
-  members           OrganizationMember[]
-  invites           OrganizationInvite[]
-  smtpConnections   SMTPConnection[]
+  brandingEnabled      Boolean               @default(true)
+  members              OrganizationMember[]
+  invites              OrganizationInvite[]
+  smtpConnections      SMTPConnection[]
   smtpConnectionGrants SmtpConnectionGrant[]
-  inboxAccountGrants InboxAccountGrant[]
-  mailDomainGrants  MailDomainGrant[]
-  orgMailDomains    OrgMailDomain[]
-  contacts          Contact[]
-  contactLists      ContactList[]
-  suppressions      Suppression[]
-  suppressionPolicy SuppressionPolicy?
-  domainThrottles   DomainThrottle[]
-  segments          Segment[]
-  templates         Template[]
-  campaigns         Campaign[]
-  emailJobs         EmailJob[]
-  emailDrafts       EmailDraft[]
-  emailAttachments  EmailAttachment[]
-  imageAssets       ImageAsset[]
-  inboxAccounts     InboxAccount[]
-  inboxNotifyRules  InboxNotifyRule[]
-  inboundMessages   InboundMessage[]
-  inboundAttachments InboundAttachment[]
-  recurringSends    RecurringSend[]
-  emailEvents       EmailEvent[]
-  apiKeys           ApiKey[]
-  webhookEndpoints  WebhookEndpoint[]
-  webhookDeliveries WebhookDelivery[]
+  inboxAccountGrants   InboxAccountGrant[]
+  mailDomainGrants     MailDomainGrant[]
+  orgMailDomains       OrgMailDomain[]
+  contacts             Contact[]
+  contactLists         ContactList[]
+  suppressions         Suppression[]
+  suppressionPolicy    SuppressionPolicy?
+  domainThrottles      DomainThrottle[]
+  segments             Segment[]
+  templates            Template[]
+  campaigns            Campaign[]
+  emailJobs            EmailJob[]
+  emailDrafts          EmailDraft[]
+  emailAttachments     EmailAttachment[]
+  imageAssets          ImageAsset[]
+  inboxAccounts        InboxAccount[]
+  inboxNotifyRules     InboxNotifyRule[]
+  inboundMessages      InboundMessage[]
+  inboundAttachments   InboundAttachment[]
+  recurringSends       RecurringSend[]
+  emailEvents          EmailEvent[]
+  apiKeys              ApiKey[]
+  webhookEndpoints     WebhookEndpoint[]
+  webhookDeliveries    WebhookDelivery[]
   // Cloud (Phase 7) back-references — defined in cloud.prisma. Relation metadata
   // only; no AGPL obligation attaches to these fields.
-  subscription      Subscription?
-  usageCounters     UsageCounter[]
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  subscription         Subscription?
+  usageCounters        UsageCounter[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 }
 
 model OrganizationMember {
-  id             String       @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
   userId         String
-  role           UserRole     @default(MEMBER)
+  role           UserRole         @default(MEMBER)
   /// Which of this org's incoming mail may notify this person's devices. Lives
   /// on the membership rather than on PushSubscription so the answer is the
   /// same on every device they own, and survives adding or losing one.
   notifyLevel    InboxNotifyLevel @default(ALL)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt      DateTime     @default(now())
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime         @default(now())
 
   @@unique([organizationId, userId])
 }
@@ -910,9 +910,9 @@ model EmailAttachment {
   emailDraft      EmailDraft?  @relation(fields: [emailDraftId], references: [id], onDelete: SetNull)
   createdAt       DateTime     @default(now())
 
+  @@unique([organizationId, createdByUserId, uploadId])
   @@index([organizationId])
   @@index([emailJobId])
-  @@unique([organizationId, createdByUserId, uploadId])
   @@index([emailDraftId])
 }
 
@@ -958,22 +958,23 @@ model EmailEvent {
 // Inbox module. Accounts are read-only IMAP connection records used by the sync
 // worker; credentials are encrypted like SMTP secrets.
 model InboxAccount {
-  id                String             @id @default(cuid())
+  id                String              @id @default(cuid())
   organizationId    String
   name              String
   email             String
   host              String
   port              Int
-  secure            Boolean            @default(true)
+  secure            Boolean             @default(true)
   usernameEncrypted String
   passwordEncrypted String
-  mailbox           String             @default("INBOX")
-  status            InboxAccountStatus @default(ACTIVE)
+  mailbox           String              @default("INBOX")
+  status            InboxAccountStatus  @default(ACTIVE)
   lastSyncedAt      DateTime?
   lastSeenUid       Int?
   uidValidity       String?
   lastSyncError     String?
   flagsCursor       Int?
+  historyBeforeUid  Int?
   organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboundMessages   InboundMessage[]
   grants            InboxAccountGrant[]
@@ -1062,43 +1063,48 @@ model InboxNotifyRule {
 // Replies are anchored to sent mail by matching In-Reply-To/References against
 // EmailJob.messageId.
 model InboundMessage {
-  id                     String                 @id @default(cuid())
-  organizationId         String
-  inboxAccountId         String
-  emailJobId             String?
-  messageId              String
-  inReplyTo              String?
-  references             String[]               @default([])
-  fromEmail              String
-  fromName               String?
-  replyTo                String[]               @default([])
-  to                     String[]               @default([])
-  cc                     String[]               @default([])
-  subject                String
-  text                   String?
-  html                   String?
-  receivedAt             DateTime
-  readAt                 DateTime?
-  readRevision           Int                    @default(1)
-  readPending            Boolean                @default(false)
-  readSyncError          String?
-  readAttemptedAt        DateTime?
-  imapUidValidity        String?
-  imapUid                Int?
+  id                   String              @id @default(cuid())
+  organizationId       String
+  inboxAccountId       String
+  emailJobId           String?
+  messageId            String
+  inReplyTo            String?
+  references           String[]            @default([])
+  fromEmail            String
+  fromName             String?
+  replyTo              String[]            @default([])
+  to                   String[]            @default([])
+  cc                   String[]            @default([])
+  subject              String
+  text                 String?
+  html                 String?
+  receivedAt           DateTime
+  readAt               DateTime?
+  readRevision         Int                 @default(1)
+  readPending          Boolean             @default(false)
+  readSyncError        String?
+  readAttemptedAt      DateTime?
+  imapUidValidity      String?
+  imapUid              Int?
+  contentImportPending Boolean             @default(false)
+  contentAttemptedAt   DateTime?
+  bodyStatus           String              @default("AVAILABLE")
+  bodyError            String?
   /// True when the sync worker recognized this message as a delivery status
   /// notification (bounce report) and fed it into bounce accounting. Lets the
   /// inbox list separate bounce noise from human mail.
-  isDsn                  Boolean                @default(false)
-  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  inboxAccount           InboxAccount           @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
-  emailJob               EmailJob?              @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
-  attachments            InboundAttachment[]
-  createdAt              DateTime               @default(now())
+  isDsn                Boolean             @default(false)
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inboxAccount         InboxAccount        @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
+  emailJob             EmailJob?           @relation(fields: [emailJobId], references: [id], onDelete: SetNull)
+  attachments          InboundAttachment[]
+  createdAt            DateTime            @default(now())
 
   @@unique([inboxAccountId, messageId])
   @@index([organizationId, receivedAt])
   @@index([organizationId, readAt])
   @@index([inboxAccountId, readPending, readAttemptedAt])
+  @@index([inboxAccountId, contentImportPending])
   @@index([emailJobId])
   @@index([inReplyTo])
 }
@@ -1120,12 +1126,16 @@ model InboundAttachment {
   contentType      String
   size             Int
   storageKey       String
+  partIndex        Int?
+  storageStatus    String         @default("AVAILABLE")
+  storageError     String?
   contentId        String?
   isInline         Boolean        @default(false)
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboundMessage   InboundMessage @relation(fields: [inboundMessageId], references: [id], onDelete: Cascade)
   createdAt        DateTime       @default(now())
 
+  @@unique([inboundMessageId, partIndex])
   @@index([organizationId])
   @@index([inboundMessageId])
 }

@@ -23,6 +23,7 @@ vi.mock("../lib/api.js", () => ({
     getInboxConversation: vi.fn(),
     markInboundMessagesRead: vi.fn(),
     syncInbox: vi.fn(),
+    retryInboundContent: vi.fn(),
     listEmailDrafts: vi.fn(),
     getEmailDraft: vi.fn(),
     createEmailDraft: vi.fn(),
@@ -146,6 +147,40 @@ beforeEach(() => {
 });
 
 describe("Inbox mailbox access", () => {
+  it("shows failed files and queues an authorized retry without offering a broken download", async () => {
+    const user = userEvent.setup();
+    setup([
+      makeMessage({
+        contentImportPending: true,
+        attachments: [
+          {
+            id: "file1",
+            filename: "large.zip",
+            size: 30_000_000,
+            contentType: "application/zip",
+            isInline: false,
+            storageStatus: "TOO_LARGE",
+            storageError: "Ask an administrator to raise the limit.",
+          },
+        ],
+      }),
+    ]);
+    mockedApi.retryInboundContent.mockResolvedValue({ queued: true });
+    renderWithProviders(<Inbox />);
+    await openRow(user);
+    expect(
+      await screen.findByText(
+        "large.zip: Ask an administrator to raise the limit."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /large.zip/ })).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: "Retry loading attachments" })
+    );
+    await waitFor(() =>
+      expect(mockedApi.retryInboundContent).toHaveBeenCalledWith("m1", "org_1")
+    );
+  });
   it("directs a member without a mailbox to their administrator", async () => {
     session.role = "MEMBER";
     mockedApi.listInboxAccounts.mockResolvedValue([]);
@@ -533,7 +568,7 @@ describe("Inbox attachments", () => {
     );
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Couldn't open that file.");
+      expect(toast.error).toHaveBeenCalledWith("nope");
     });
   });
 });

@@ -142,9 +142,58 @@ Acceptance evidence:
 - Full typecheck, lint, build, tests and unmodified coverage gates passed, as
   did dependency license audit and the cloud boundary check.
 
+## Older history and MIME recovery (2026-10-15)
+
+Implemented:
+
+- Recent and older mail bodies import in batches capped at 100. Sparse or
+  expunged UIDs do not turn that limit into a permanent history cutoff. The
+  durable history cursor resumes after interruption and reaches zero when the
+  configured folder is backfilled. Historical messages do not trigger new-mail
+  push notifications or apply old DSNs as new suppression-policy changes.
+- Missing bodies and unavailable/oversized MIME parts remain visible. The
+  message reader exposes recovery and disables unavailable downloads. Missing
+  cached objects become recoverable errors, with mailbox grants enforced on
+  downloads and retry requests. Recovery verifies UID-validity and message
+  identity, reuses metadata/storage keys, and preserves shared read state.
+- Existing imports get a one-time recovery pass on upgrade because earlier
+  versions could silently skip parts. Matching legacy file metadata is adopted
+  without duplicating available files; previously missing parts still import.
+- A per-check time budget closes IMAP and cancels object uploads before the
+  account lock lease expires. A timeout retains the last completed cursor for
+  the next check. Failure attempts rotate so one broken location cannot starve
+  all other pending content.
+- A missing original body blocks reply delivery until the original headers can
+  be recovered. Messages without an RFC Message-ID use a UID-validity-scoped
+  local identity; verified legacy identities retain read-state compatibility.
+- Blocked and cancelled delivery attempts remain findable in Sent with explicit
+  outcomes, so completing a composer draft cannot hide its writing.
+- The editor and reload partitioner preserve typed leading spaces consistently,
+  so reopening writing does not unnecessarily freeze rich-text paragraphs.
+
+Acceptance evidence:
+
+- With the real provider and an isolated receiving account, the first check
+  imported three recent messages. Subsequent checks backfilled all fourteen
+  messages in its configured INBOX and completed the history cursor. This was a
+  small mailbox, not a large-history stress test.
+- Removing only the synthetic message's cached file from disposable MinIO made
+  its authenticated download return an explicit recoverable error. Chrome
+  displayed the unavailable part and its retry control. Live IMAP recovery
+  restored the exact original bytes with the same metadata row and storage key;
+  the reader enabled the recovered file again without a page reload.
+- Chrome's final build saved a rich-text draft, preserved its leading space in
+  HTML source, and reopened it as editable rich text. No delivery was requested.
+- Regression tests exercise bounded sparse UID imports, interrupted history,
+  parsing past the time budget, legacy part adoption, repeated failed-part
+  recovery, missing-body recovery without undoing read state, UID identity
+  mismatch, unavailable-file UI, and unauthorized retry requests.
+- Full typecheck, lint, build, tests and unmodified coverage gates passed.
+  Disposable PostgreSQL migration drift and SMTP smoke checks also passed.
+
 ## Required before calling the primary-client goal complete
 
-1. **IMAP folders and history:** complete older-history backfill, folder discovery,
+1. **IMAP folders and history:** folder discovery,
    Archive, Trash/restore, move and flags, external Sent and external Drafts. The
    current importer still reads one configured folder. Validate UID-validity
    replacement, large mailboxes and interrupted import against real services.
@@ -152,8 +201,9 @@ Acceptance evidence:
    attachments, per-account signatures, simpler advanced-editor controls, a clear
    recovery workflow for conflicting versions, and reply upload recovery. Verify
    concurrent tabs/devices, interrupted uploads and device storage failures.
-3. **Inbound attachment recovery:** show unavailable/oversized parts and retry
-   storage failures without duplicates, including missing inline content.
+3. **Inbound content acceptance:** stress large/complex MIME messages, missing
+   inline parts, real interrupted network/storage uploads and recovery when
+   messages move or disappear in another client.
 4. **Team coordination:** concurrent reply presence; streamline invitations,
    mailbox assignment, resend and recovery-address workflows. Mailbox-password
    recovery remains distinct from QQueue sign-in reset links.
@@ -165,7 +215,9 @@ Acceptance evidence:
    and safe areas, accessibility/assistive technology, large histories and multiple
    teammates with different read/send grants and administrator roles. The live
    check above used one provided mailbox and a self-addressed synthetic message;
-   it does not prove these other scenarios.
+   it does not prove these other scenarios. The user confirmed that no additional
+   controlled recipient mailboxes are available, so live multi-recipient
+   acceptance remains an external gap.
 
 ## Verification
 

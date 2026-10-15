@@ -40,6 +40,8 @@ const messageInclude = {
       // The reader needs this to match an inline part to the `cid:` reference
       // in the body HTML; without it embedded images render broken.
       contentId: true,
+      storageStatus: true,
+      storageError: true,
     },
     orderBy: { createdAt: "asc" },
   },
@@ -318,6 +320,7 @@ export const inboxService = {
         status: true,
         lastSyncedAt: true,
         lastSeenUid: true,
+        historyBeforeUid: true,
         lastSyncError: true,
         createdAt: true,
         updatedAt: true,
@@ -635,6 +638,13 @@ export const inboxService = {
       throw new HttpError(404, "Inbound message not found", "not_found");
     }
 
+    if (message.bodyStatus === "UNAVAILABLE")
+      throw new HttpError(
+        409,
+        "Reload this message before sending a reply so its original message identity and recipients can be recovered.",
+        "conflict"
+      );
+
     // A reply must use the receiving mailbox's identity unless the sender
     // deliberately chose another permitted account. Never fall back to the org default.
     const connection = await prisma.sMTPConnection.findFirst({
@@ -817,7 +827,61 @@ export const inboxService = {
       throw new HttpError(404, "Attachment not found", "not_found");
     }
 
-    const body = await storage.getObject(attachment.storageKey);
+    if (attachment.storageStatus && attachment.storageStatus !== "AVAILABLE")
+      throw new HttpError(
+        409,
+        attachment.storageError ??
+          "This file is not available yet. Retry loading its attachments.",
+        "conflict"
+      );
+
+    let body;
+    try {
+      body = await storage.getObject(attachment.storageKey);
+    } catch {
+      await prisma.inboundAttachment.update({
+        where: { id },
+        data: {
+          storageStatus: "UNAVAILABLE",
+          storageError:
+            "The stored file could not be loaded. Retry loading its attachments.",
+        },
+      });
+      await prisma.inboundMessage.updateMany({
+        where: { id: attachment.inboundMessageId },
+        data: { contentImportPending: true },
+      });
+      throw new HttpError(
+        503,
+        "The stored file could not be loaded. It will retry from the mailbox; you can also retry loading its attachments.",
+        "attachment_unavailable"
+      );
+    }
     return { attachment, body };
+  },
+
+  async retryContent(id: string, organizationId: string, userId: string) {
+    const access = await resolveMailboxAccess(userId, organizationId);
+    const message = await prisma.inboundMessage.findFirst({
+      where: { id, organizationId, ...inboundMessageScope(access) },
+      include: { inboxAccount: true },
+    });
+    if (!message) throw new HttpError(404, "Message not found", "not_found");
+    if (!message.imapUid || message.inboxAccount.status !== "ACTIVE")
+      throw new HttpError(
+        409,
+        "Reconnect this mailbox before retrying its files.",
+        "conflict"
+      );
+    await prisma.inboundMessage.updateMany({
+      where: { id, organizationId },
+      data: { contentImportPending: true, contentAttemptedAt: null },
+    });
+    await this.requestSync(
+      organizationId,
+      userId,
+      message.inboxAccountId
+    ).catch(() => undefined);
+    return { queued: true };
   },
 };

@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
-import { ImapFlow } from "imapflow";
+import { ImapFlow, type SearchObject } from "imapflow";
 import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { env } from "../config/env.js";
 import { decryptSecret } from "./crypto.js";
@@ -72,84 +71,184 @@ function sanitizeFilename(name: string): string {
   return cleaned.slice(0, 200);
 }
 
-/**
- * Persist a received message's attachments: blob to object storage, metadata to
- * Postgres. Runs after the message row exists so rows can hang off its id.
- *
- * Replaces any existing rows for the message rather than adding to them —
- * storeParsedMessage upserts, so a re-sync of the same UID must not accumulate
- * duplicate attachments.
- *
- * Oversized parts are skipped rather than failing the whole sync: one 200MB
- * attachment must not wedge a mailbox and block every later message.
- */
-async function storeAttachments(input: {
+/** Keep every MIME part visible, including files that could not be stored. */
+export async function storeAttachments(input: {
   organizationId: string;
   inboundMessageId: string;
   mail: ParsedMail;
+  assertAlive?: () => void;
+  abortSignal?: AbortSignal;
 }) {
   const { organizationId, inboundMessageId, mail } = input;
-  const parts = mail.attachments ?? [];
-
   const existing = await prisma.inboundAttachment.findMany({
     where: { inboundMessageId },
-    select: { id: true },
   });
-  if (existing.length > 0) {
-    return;
-  }
-  if (parts.length === 0) {
-    return;
-  }
-
-  for (const part of parts) {
-    const content = part.content;
-    if (!content || content.length === 0) {
-      continue;
-    }
-    if (content.length > env.INBOUND_ATTACHMENT_MAX_BYTES) {
-      logger.warn(
-        { inboundMessageId, bytes: content.length },
-        "skipping oversized inbound attachment"
-      );
-      continue;
-    }
-
+  const claimedLegacy = new Set<string>();
+  let pending = false;
+  for (const [partIndex, part] of (mail.attachments ?? []).entries()) {
+    input.assertAlive?.();
     const filename = sanitizeFilename(
       part.filename ?? part.cid ?? "attachment"
     );
-    const storageKey = `inbound/${organizationId}/${randomUUID()}-${filename}`;
-
+    const contentType = part.contentType || "application/octet-stream";
+    const content = part.content;
+    const size = content?.length ?? part.size ?? 0;
+    // Legacy rows have no MIME index. Adopt only a matching part, once, so an
+    // upgrade neither duplicates good files nor mistakes a skipped part for one.
+    let row =
+      existing.find((file) => file.partIndex === partIndex) ??
+      existing.find(
+        (file) =>
+          file.partIndex === null &&
+          !claimedLegacy.has(file.id) &&
+          file.filename === filename &&
+          file.contentType === contentType &&
+          file.size === size &&
+          file.contentId === (part.cid ?? null)
+      );
+    if (row && row.partIndex === null) {
+      claimedLegacy.add(row.id);
+      await prisma.inboundAttachment.update({
+        where: { id: row.id },
+        data: { partIndex },
+      });
+    }
+    if (row?.storageStatus === "AVAILABLE") continue;
+    const oversized = size > env.INBOUND_ATTACHMENT_MAX_BYTES;
+    const storageKey =
+      row?.storageKey ??
+      `inbound/${organizationId}/${inboundMessageId}/${partIndex}-${filename}`;
+    const unavailable = oversized ? "TOO_LARGE" : "UNAVAILABLE";
+    const storageError = oversized
+      ? `This file exceeds this instance's ${env.INBOUND_ATTACHMENT_MAX_BYTES}-byte attachment limit. Ask an administrator to raise the limit, then retry.`
+      : "This file has not finished loading from the mailbox. Retry when the connection is available.";
+    if (!row)
+      row = await prisma.inboundAttachment.create({
+        data: {
+          organizationId,
+          inboundMessageId,
+          partIndex,
+          filename,
+          contentType,
+          size,
+          storageKey,
+          contentId: part.cid ?? null,
+          isInline: part.contentDisposition === "inline",
+          storageStatus: unavailable,
+          storageError,
+        },
+      });
+    else
+      await prisma.inboundAttachment.update({
+        where: { id: row.id },
+        data: { storageStatus: unavailable, storageError },
+      });
+    if (oversized) continue;
+    if (!content) {
+      pending = true;
+      continue;
+    }
     try {
       await storage.putObject({
         key: storageKey,
         body: content,
-        contentType: part.contentType || "application/octet-stream",
+        contentType,
+        abortSignal: input.abortSignal,
+      });
+      input.assertAlive?.();
+      await prisma.inboundAttachment.update({
+        where: { id: row.id },
+        data: { storageStatus: "AVAILABLE", storageError: null },
       });
     } catch (error) {
-      // Storage is best-effort here; losing one blob shouldn't cost us the
-      // message body we already stored.
-      logger.error(
+      pending = true;
+      logger.warn(
         { inboundMessageId, err: error },
-        "failed to store inbound attachment"
+        "inbound attachment remains available for retry"
       );
-      continue;
     }
+  }
+  input.assertAlive?.();
+  await prisma.inboundMessage.updateMany({
+    where: { id: inboundMessageId },
+    data: { contentImportPending: pending },
+  });
+}
 
-    await prisma.inboundAttachment.create({
-      data: {
-        organizationId,
-        inboundMessageId,
-        filename,
-        contentType: part.contentType || "application/octet-stream",
-        size: content.length,
-        storageKey,
-        contentId: part.cid ?? null,
-        // mailparser reports "inline" for parts the sender meant to render
-        // (usually cid: images) rather than list as downloads.
-        isInline: part.contentDisposition === "inline",
-      },
+async function recoverAttachments(
+  client: ImapFlow,
+  account: InboxAccount,
+  assertAlive: () => void,
+  abortSignal: AbortSignal
+) {
+  const messages = await prisma.inboundMessage.findMany({
+    where: {
+      inboxAccountId: account.id,
+      contentImportPending: true,
+      imapUidValidity: account.uidValidity,
+    },
+    select: { id: true, messageId: true, imapUid: true, bodyStatus: true },
+    take: 10,
+    orderBy: [
+      { contentAttemptedAt: { sort: "asc", nulls: "first" } },
+      { id: "asc" },
+    ],
+  });
+  for (const message of messages) {
+    assertAlive();
+    await prisma.inboundMessage.updateMany({
+      where: { id: message.id },
+      data: { contentAttemptedAt: new Date() },
     });
+    if (!message.imapUid) continue;
+    try {
+      const remote = await client.fetchOne(
+        message.imapUid,
+        { source: true, envelope: true },
+        { uid: true }
+      );
+      assertAlive();
+      const remoteIdentity =
+        remote &&
+        (remote.envelope?.messageId ??
+          `${account.id}:${account.uidValidity}:${message.imapUid}`);
+      const legacyIdentity =
+        remote &&
+        !remote.envelope?.messageId &&
+        message.messageId === `${account.id}:${message.imapUid}`;
+      if (
+        !remote ||
+        !remote.source ||
+        (remoteIdentity !== message.messageId && !legacyIdentity)
+      )
+        continue;
+      const mail = await simpleParser(remote.source);
+      if (message.bodyStatus === "UNAVAILABLE")
+        await storeParsedMessage({
+          account,
+          uid: message.imapUid,
+          mail: { ...mail, messageId: message.messageId },
+          flags: remote.flags,
+          internalDate: remote.internalDate,
+          historical: true,
+          assertAlive,
+          abortSignal,
+        });
+      else
+        await storeAttachments({
+          organizationId: account.organizationId,
+          inboundMessageId: message.id,
+          mail,
+          assertAlive,
+          abortSignal,
+        });
+    } catch (error) {
+      assertAlive();
+      logger.warn(
+        { inboundMessageId: message.id, err: error },
+        "inbound attachment recovery will retry"
+      );
+    }
   }
 }
 
@@ -159,9 +258,23 @@ async function storeParsedMessage(input: {
   flags?: Set<string>;
   internalDate?: Date | string;
   mail: ParsedMail;
+  historical?: boolean;
+  bodyUnavailable?: boolean;
+  assertAlive?: () => void;
+  abortSignal?: AbortSignal;
 }) {
-  const { account, uid, flags, internalDate, mail } = input;
-  const messageId = mail.messageId ?? `${account.id}:${uid}`;
+  const {
+    account,
+    uid,
+    flags,
+    internalDate,
+    mail,
+    historical,
+    bodyUnavailable,
+  } = input;
+  const messageId =
+    mail.messageId ?? `${account.id}:${account.uidValidity}:${uid}`;
+  input.assertAlive?.();
   const references = normalizeReferences(mail);
   const outbound = await findOutboundThread({
     organizationId: account.organizationId,
@@ -191,9 +304,21 @@ async function storeParsedMessage(input: {
         messageId,
       },
     },
-    select: { id: true },
+    select: { id: true, bodyStatus: true },
   });
+  if (bodyUnavailable && existing?.bodyStatus === "AVAILABLE") {
+    await prisma.inboundMessage.updateMany({
+      where: { id: existing.id },
+      data: {
+        imapUid: uid,
+        imapUidValidity: account.uidValidity,
+        contentImportPending: true,
+      },
+    });
+    return;
+  }
 
+  input.assertAlive?.();
   const stored = await prisma.inboundMessage.upsert({
     where: {
       inboxAccountId_messageId: {
@@ -221,6 +346,11 @@ async function storeParsedMessage(input: {
       imapUid: uid,
       imapUidValidity: account.uidValidity,
       isDsn: Boolean(dsn),
+      contentImportPending: true,
+      bodyStatus: bodyUnavailable ? "UNAVAILABLE" : "AVAILABLE",
+      bodyError: bodyUnavailable
+        ? "The mail server did not return this message body. Reload the message to retry."
+        : null,
     },
     update: {
       emailJobId: outbound?.id,
@@ -238,20 +368,28 @@ async function storeParsedMessage(input: {
       imapUid: uid,
       imapUidValidity: account.uidValidity,
       isDsn: Boolean(dsn),
+      contentImportPending: true,
+      bodyStatus: bodyUnavailable ? "UNAVAILABLE" : "AVAILABLE",
+      bodyError: bodyUnavailable
+        ? "The mail server did not return this message body. Reload the message to retry."
+        : null,
     },
   });
 
-  await storeAttachments({
-    organizationId: account.organizationId,
-    inboundMessageId: stored.id,
-    mail,
-  });
+  if (!bodyUnavailable)
+    await storeAttachments({
+      organizationId: account.organizationId,
+      inboundMessageId: stored.id,
+      mail,
+      assertAlive: input.assertAlive,
+      abortSignal: input.abortSignal,
+    });
 
   // First sighting only: the unique (inboxAccountId, messageId) row is the
   // idempotency key, so a duplicate or re-synced DSN never double-counts a
   // bounce. Failures are contained — a weird DSN must not wedge the mailbox
   // and block every later message.
-  if (dsn && !existing) {
+  if (dsn && !existing && !historical) {
     try {
       await applyDsnBounce({
         organizationId: account.organizationId,
@@ -271,7 +409,7 @@ async function storeParsedMessage(input: {
   // re-synced UID is not news, and a message already flagged \Seen was read in
   // another client — alerting on any of those trains people to ignore the
   // alerts. Push is best-effort: a failure here must never fail the sync.
-  if (!existing && !dsn && !seen) {
+  if (!existing && !dsn && !seen && !historical) {
     try {
       await notifyNewInboundMessage({
         organizationId: account.organizationId,
@@ -344,6 +482,17 @@ async function syncLockedInboxAccount(account: InboxAccount) {
   });
 
   let maxSeenUid = account.lastSeenUid ?? 0;
+  const deadline = Date.now() + 240_000;
+  const abortSignal = AbortSignal.timeout(240_000);
+  const close = () => client.close();
+  abortSignal.addEventListener("abort", close, { once: true });
+  const assertAlive = () => {
+    abortSignal.throwIfAborted();
+    if (Date.now() >= deadline)
+      throw new Error(
+        "Mailbox import time limit reached; its saved cursors will resume on the next check."
+      );
+  };
 
   try {
     await client.connect();
@@ -359,46 +508,156 @@ async function syncLockedInboxAccount(account: InboxAccount) {
       flagsCursor: reset ? 0 : account.flagsCursor,
     };
 
-    const startUid =
-      !reset && account.lastSeenUid && account.lastSeenUid > 0
-        ? account.lastSeenUid + 1
-        : Math.max(1, mailbox.uidNext - env.INBOX_SYNC_MAX_MESSAGES);
-
-    if (mailbox.exists > 0 && startUid < mailbox.uidNext) {
+    const batch = Math.max(1, Math.min(100, env.INBOX_SYNC_MAX_MESSAGES));
+    async function countMatches(query: SearchObject) {
+      const result = await client.search(query, {
+        uid: true,
+        returnOptions: ["COUNT"],
+      });
+      if (!result)
+        throw new Error("The mail server did not confirm its message search.");
+      // ImapFlow falls back to UID SEARCH for servers without ESEARCH. Bodies
+      // remain bounded even when that compatibility response lists more UIDs.
+      if (Array.isArray(result)) return result.length;
+      if (typeof result.count !== "number")
+        throw new Error("The mail server did not return a message count.");
+      return result.count;
+    }
+    async function uidWindow(
+      first: number,
+      last: number,
+      accepts: (uid: number) => boolean
+    ) {
+      const uids: number[] = [];
+      if (first > last) return uids;
+      for await (const message of client.fetch(`${first}:${last}`, {
+        uid: true,
+      }))
+        if (accepts(message.uid)) uids.push(message.uid);
+      return uids.sort((a, b) => a - b);
+    }
+    async function importUids(uids: number[], historical: boolean) {
+      if (!uids.length) return;
       for await (const message of client.fetch(
-        `${startUid}:*`,
+        uids,
         {
           uid: true,
           flags: true,
           internalDate: true,
           source: true,
+          envelope: true,
         },
         { uid: true }
       )) {
-        if (!message.source) {
-          continue;
-        }
-
-        const mail = await simpleParser(message.source);
+        const envelope = message.envelope;
+        const mail: ParsedMail = message.source
+          ? await simpleParser(message.source)
+          : {
+              headers: new Map(),
+              headerLines: [],
+              html: false,
+              attachments: [],
+              messageId: envelope?.messageId,
+              subject: envelope?.subject,
+              date: envelope?.date,
+              from: {
+                value: (envelope?.from ?? []).map((entry) => ({
+                  ...entry,
+                  name: entry.name ?? "",
+                })),
+                html: "",
+                text: "",
+              },
+              to: {
+                value: (envelope?.to ?? []).map((entry) => ({
+                  ...entry,
+                  name: entry.name ?? "",
+                })),
+                html: "",
+                text: "",
+              },
+              cc: {
+                value: (envelope?.cc ?? []).map((entry) => ({
+                  ...entry,
+                  name: entry.name ?? "",
+                })),
+                html: "",
+                text: "",
+              },
+            };
         await storeParsedMessage({
           account: currentAccount,
           uid: message.uid,
           flags: message.flags,
           internalDate: message.internalDate,
           mail,
+          historical,
+          bodyUnavailable: !message.source,
+          assertAlive,
+          abortSignal,
         });
-        maxSeenUid = Math.max(maxSeenUid, message.uid);
       }
     }
+    let historyBeforeUid = account.historyBeforeUid ?? 0;
+    const initial = reset || !account.lastSeenUid;
+    if (!mailbox.exists) historyBeforeUid = 0;
+    else if (initial) {
+      const uids = await uidWindow(
+        Math.max(1, mailbox.exists - batch + 1),
+        mailbox.exists,
+        () => true
+      );
+      await importUids(uids, false);
+      maxSeenUid = Math.max(mailbox.uidNext - 1, uids.at(-1) ?? 0);
+      historyBeforeUid = uids.length ? uids[0] - 1 : 0;
+    } else if (account.lastSeenUid! + 1 < mailbox.uidNext) {
+      const count = await countMatches({
+        uid: `${account.lastSeenUid! + 1}:*`,
+      });
+      if (count) {
+        const first = Math.max(1, mailbox.exists - count + 1);
+        const uids = await uidWindow(
+          first,
+          Math.min(mailbox.exists, first + batch - 1),
+          (uid) => uid > account.lastSeenUid!
+        );
+        await importUids(uids, false);
+        if (uids.length)
+          maxSeenUid =
+            count <= batch
+              ? Math.max(mailbox.uidNext - 1, uids.at(-1)!)
+              : uids.at(-1)!;
+      } else maxSeenUid = mailbox.uidNext - 1;
+    }
+    // Put durable teammate actions ahead of older bodies and file recovery.
+    for (let round = 0; round < 3; round++)
+      if (!(await synchronizeReadState(client, currentAccount))) break;
+    if (!initial && historyBeforeUid > 0 && mailbox.exists) {
+      const count = await countMatches({ uid: `1:${historyBeforeUid}` });
+      if (!count) historyBeforeUid = 0;
+      else {
+        const uids = await uidWindow(
+          Math.max(1, count - batch + 1),
+          count,
+          (uid) => uid <= historyBeforeUid
+        );
+        await importUids(uids, true);
+        if (uids.length) historyBeforeUid = uids[0] - 1;
+      }
+    }
+
+    await recoverAttachments(client, currentAccount, assertAlive, abortSignal);
 
     for (let round = 0; round < 3; round++) {
       if (!(await synchronizeReadState(client, currentAccount))) break;
     }
 
+    assertAlive();
     await prisma.inboxAccount.update({
       where: { id: account.id },
       data: {
         lastSyncedAt: new Date(),
+        historyBeforeUid,
         lastSeenUid: reset ? maxSeenUid : maxSeenUid || account.lastSeenUid,
         uidValidity,
         lastSyncError: null,
@@ -414,6 +673,7 @@ async function syncLockedInboxAccount(account: InboxAccount) {
     });
     throw error;
   } finally {
+    abortSignal.removeEventListener("abort", close);
     client.close();
   }
 }

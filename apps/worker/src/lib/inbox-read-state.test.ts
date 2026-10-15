@@ -29,6 +29,22 @@ beforeEach(() => {
   prismaMock.inboundMessage.updateMany.mockResolvedValue({ count: 1 });
 });
 describe("shared IMAP read-state reconciliation", () => {
+  it.each(["a1:99:7", "a1:7"])(
+    "supports a UID-validity-verified message without an RFC Message-ID (%s)",
+    async (messageId) => {
+      prismaMock.inboundMessage.findMany.mockResolvedValueOnce([
+        { ...pending, messageId },
+      ] as never);
+      const imap = client();
+      imap.fetchOne.mockResolvedValue({
+        envelope: { messageId: undefined },
+      } as never);
+      await synchronizeReadState(imap as unknown as ImapFlow, account);
+      expect(imap.messageFlagsAdd).toHaveBeenCalledWith(7, ["\\Seen"], {
+        uid: true,
+      });
+    }
+  );
   it.each([true, false])(
     "writes a pending shared read=%s action and acknowledges its exact revision",
     async (read) => {

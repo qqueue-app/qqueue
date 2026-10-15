@@ -7,7 +7,7 @@ import {
   buildHolder,
   stripInventedMarkers,
   unwrapInventedParagraphs,
-  wrapTopLevelInline
+  wrapTopLevelInline,
 } from "./html-dom";
 import { decodeRaw, encodeRaw } from "./raw-html-extension";
 
@@ -28,7 +28,9 @@ const MAX_PASSES = 60;
  * have round-tripped perfectly well.
  */
 function roundTrip(holder: HTMLElement, schema: Schema): HTMLElement {
-  const parsed = PMDOMParser.fromSchema(schema).parse(holder);
+  const parsed = PMDOMParser.fromSchema(schema).parse(holder, {
+    preserveWhitespace: true,
+  });
   const fragment = DOMSerializer.fromSchema(schema).serializeFragment(
     parsed.content
   );

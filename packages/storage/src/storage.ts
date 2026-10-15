@@ -4,7 +4,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
-  S3Client
+  S3Client,
 } from "@aws-sdk/client-s3";
 
 export interface StorageConfig {
@@ -25,11 +25,15 @@ export interface PutObjectInput {
   key: string;
   body: Buffer | Uint8Array | string;
   contentType?: string;
+  abortSignal?: AbortSignal;
 }
 
 /** Minimal surface of S3Client used here — lets tests inject a fake. */
 export interface S3Like {
-  send(command: unknown): Promise<unknown>;
+  send(
+    command: unknown,
+    options?: { abortSignal?: AbortSignal }
+  ): Promise<unknown>;
 }
 
 interface GetObjectResponse {
@@ -55,8 +59,8 @@ export class StorageClient {
         forcePathStyle: config.forcePathStyle ?? Boolean(config.endpoint),
         credentials: {
           accessKeyId: config.accessKeyId,
-          secretAccessKey: config.secretAccessKey
-        }
+          secretAccessKey: config.secretAccessKey,
+        },
       });
   }
 
@@ -87,13 +91,15 @@ export class StorageClient {
   }
 
   async putObject(input: PutObjectInput): Promise<void> {
+    input.abortSignal?.throwIfAborted();
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: input.key,
         Body: input.body,
-        ContentType: input.contentType
-      })
+        ContentType: input.contentType,
+      }),
+      input.abortSignal ? { abortSignal: input.abortSignal } : undefined
     );
   }
 

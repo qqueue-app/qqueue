@@ -20,6 +20,15 @@ const markReadSchema = z.object({
 });
 
 export const inboxController = {
+  async retryContent(req: Request, res: Response) {
+    res.status(202).json({
+      data: await inboxService.retryContent(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!
+      ),
+    });
+  },
   async requestSync(req: Request, res: Response) {
     const input = z
       .object({ inboxAccountId: z.string().min(1).optional() })

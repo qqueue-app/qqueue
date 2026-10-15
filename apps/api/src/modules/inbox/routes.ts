@@ -5,6 +5,11 @@ import { inboxController } from "./controller.js";
 
 export const inboxRouter = Router();
 inboxRouter.post("/sync", requireOrgMembership, inboxController.requestSync);
+inboxRouter.post(
+  "/messages/:id/content/retry",
+  requireOrgMembership,
+  inboxController.retryContent
+);
 
 inboxRouter.get(
   "/accounts",

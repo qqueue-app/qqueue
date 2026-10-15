@@ -383,6 +383,16 @@ function InboxWorkspace() {
       ],
     }
   );
+  const retryFiles = useApiMutation(
+    (messageId: string) =>
+      api.retryInboundContent(messageId, organizationId as string),
+    {
+      successMessage:
+        "Loading attachments again. Keep this conversation open to follow their status.",
+      errorMessage: "Couldn't retry these files.",
+      onSuccess: () => void conversationQuery.refetch(),
+    }
+  );
 
   function openThread(thread: ConversationThread) {
     scrollPosition.current = readingPane
@@ -523,8 +533,11 @@ function InboxWorkspace() {
       } else {
         downloadBlob(blob, file.filename);
       }
-    } catch {
-      toast.error("Couldn't open that file.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't open that file."
+      );
+      void conversationQuery.refetch();
     } finally {
       setOpeningId(null);
     }
@@ -624,6 +637,9 @@ function InboxWorkspace() {
               </IconButton>
               <IconButton
                 label="Reply"
+                disabled={
+                  selectedThread.latestMessage.bodyStatus === "UNAVAILABLE"
+                }
                 onClick={() => setReplyTarget(selectedThread.latestMessage)}
               >
                 <Reply />
@@ -757,6 +773,7 @@ function InboxWorkspace() {
                   </div>
                   <IconButton
                     label={`Reply to this message from ${senderName(message)}`}
+                    disabled={message.bodyStatus === "UNAVAILABLE"}
                     onClick={() => setReplyTarget(message)}
                   >
                     <Reply />
@@ -841,15 +858,23 @@ function InboxWorkspace() {
                   to render in the body) are filtered out so a signature logo
                   doesn't look like an attachment.
                 */}
-                {(message.attachments ?? []).filter((file) => !file.isInline)
-                  .length > 0 ? (
+                {(message.attachments ?? []).filter(
+                  (file) =>
+                    !file.isInline ||
+                    (file.storageStatus && file.storageStatus !== "AVAILABLE")
+                ).length > 0 ? (
                   <div className="mt-4 border-t border-border pt-3">
                     <div className="mb-2 text-meta font-medium uppercase tracking-eyebrow text-text-tertiary">
                       Attachments
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {(message.attachments ?? [])
-                        .filter((file) => !file.isInline)
+                        .filter(
+                          (file) =>
+                            !file.isInline ||
+                            (file.storageStatus &&
+                              file.storageStatus !== "AVAILABLE")
+                        )
                         .map((file) => (
                           <Hint
                             key={file.id}
@@ -863,7 +888,13 @@ function InboxWorkspace() {
                               type="button"
                               size="sm"
                               variant="outline"
-                              disabled={openingId === file.id}
+                              disabled={
+                                openingId === file.id ||
+                                Boolean(
+                                  file.storageStatus &&
+                                  file.storageStatus !== "AVAILABLE"
+                                )
+                              }
                               onClick={() =>
                                 void openAttachment(message.id, file)
                               }
@@ -889,12 +920,47 @@ function InboxWorkspace() {
                     </div>
                   </div>
                 ) : null}
+                {message.contentImportPending ||
+                (message.attachments ?? []).some(
+                  (file) =>
+                    file.storageStatus && file.storageStatus !== "AVAILABLE"
+                ) ? (
+                  <div
+                    role="alert"
+                    className="mt-3 space-y-2 text-ui text-warn"
+                  >
+                    <p>
+                      {message.bodyStatus === "UNAVAILABLE"
+                        ? (message.bodyError ??
+                          "This message body is still loading.")
+                        : "Some attachments are still loading or need attention."}
+                    </p>
+                    {(message.attachments ?? [])
+                      .filter((file) => file.storageError)
+                      .map((file) => (
+                        <p key={file.id}>
+                          {file.filename}: {file.storageError}
+                        </p>
+                      ))}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={retryFiles.isPending}
+                      onClick={() => retryFiles.mutate(message.id)}
+                    >
+                      {message.bodyStatus === "UNAVAILABLE"
+                        ? "Reload message and files"
+                        : "Retry loading attachments"}
+                    </Button>
+                  </div>
+                ) : null}
               </article>
             );
           })}
 
         <Button
           variant="secondary"
+          disabled={selectedThread.latestMessage.bodyStatus === "UNAVAILABLE"}
           onClick={() => setReplyTarget(selectedThread.latestMessage)}
         >
           <Reply /> Write a reply
@@ -1024,6 +1090,13 @@ function InboxWorkspace() {
                 <span className="truncate">
                   Last checked {formatFullDate(selectedAccount.lastSyncedAt)}
                 </span>
+                {selectedAccount.status === "ACTIVE" &&
+                (selectedAccount.historyBeforeUid === null ||
+                  (selectedAccount.historyBeforeUid ?? 0) > 0) ? (
+                  <span className="text-meta">
+                    Older mail is importing in the background.
+                  </span>
+                ) : null}
                 {canManageMailboxes ? (
                   <IconButton
                     label={`Disconnect ${selectedAccount.email}`}

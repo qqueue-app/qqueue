@@ -19,14 +19,18 @@ import { prisma } from "../../lib/prisma.js";
 /*
   The archive holds terminal outcomes only.
 
-  SENT and FAILED are the two states a job reaches after the pipeline has had
-  its say, so they are the two the sent view shows — a failed attempt is still
-  something you tried to send, and hiding it would make "I sent that yesterday,
-  where is it?" unanswerable. CANCELLED never left (it is pulled back from the
-  outbox) and SUPPRESSED was never attempted (it belongs to Suppressions), so
-  neither appears here.
+  Keep every terminal attempt findable, including blocked and cancelled mail.
+  An accepted composer draft is completed atomically, so hiding those jobs
+  would hide the user's writing from both Drafts and the mail history. Their
+  explicit outcome labels distinguish them from mail actually sent to SMTP.
 */
-const ARCHIVED_STATUSES = ["SENT", "FAILED", "UNCERTAIN"] as const;
+const ARCHIVED_STATUSES = [
+  "SENT",
+  "FAILED",
+  "UNCERTAIN",
+  "SUPPRESSED",
+  "CANCELLED",
+] as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

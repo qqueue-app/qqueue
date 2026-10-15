@@ -439,12 +439,25 @@ describe("RichTextEditor", () => {
       const html = onChange.mock.calls.at(-1)?.[0] as string;
       expect(html).toContain("data-qq-button");
       expect(html).toContain("<table");
-      expect(partitionForSchema(html).frozen).toBe(0);
+      expect(partitionForSchema(html).frozen, html).toBe(0);
     });
   });
 
   // Class-based styling would be stripped by Gmail and Outlook, so a table
   // inserted from the toolbar carries its borders as inline styles.
+  it("keeps leading spaces in typed paragraphs when reopened", async () => {
+    const html = '<ol><li><p><strong> text</strong></p><hr><p>Hello</p></li></ol>';
+    expect(partitionForSchema(html).frozen).toBe(0);
+    const { rerender } = renderWithProviders(<RichTextEditor value={html} onChange={() => {}} />);
+    await waitFor(() => {
+      expect(document.querySelector(".tiptap strong")?.textContent).toBe(" text");
+    });
+    rerender(<RichTextEditor value="<p><strong> another</strong></p>" onChange={() => {}} />);
+    await waitFor(() => {
+      expect(document.querySelector(".tiptap strong")?.textContent).toBe(" another");
+    });
+  });
+
   it("gives a table inserted from the toolbar inline borders", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RichTextEditor value="<p>Hi</p>" onChange={() => {}} />);

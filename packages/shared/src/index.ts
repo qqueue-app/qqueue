@@ -95,6 +95,7 @@ export type EmailEventType =
   | "FAILED";
 export type EmailOrigin = "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
 export type ApiErrorCode =
+  | "attachment_unavailable"
   | "draft_completed"
   | "draft_conflict"
   | "send_conflict"
@@ -252,12 +253,17 @@ export interface InboxAccount {
   status: InboxAccountStatus;
   lastSyncedAt?: string | null;
   lastSeenUid?: number | null;
+  /** Zero means older-history import has reached the start of this mailbox. */
+  historyBeforeUid?: number | null;
   lastSyncError?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface InboundMessage {
+  bodyStatus?: "AVAILABLE" | "UNAVAILABLE";
+  bodyError?: string | null;
+  contentImportPending?: boolean;
   readPending?: boolean;
   readSyncError?: string | null;
   id: string;
@@ -2580,7 +2586,7 @@ export interface SentEmail {
   to: string[];
   ccCount: number;
   bccCount: number;
-  /** Only ever SENT or FAILED — the archive holds terminal outcomes. */
+  /** Terminal delivery outcomes, including mail that was blocked or cancelled. */
   status: EmailJobStatus;
   origin: EmailOrigin;
   /** Null for a job that failed before the provider accepted it. */

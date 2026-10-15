@@ -487,6 +487,10 @@ function EmailStudioWorkspace() {
             toast.error(
               "The email could not be delivered — check the outbox for details."
             );
+          } else if (status.status === "SUPPRESSED") {
+            toast.error(
+              "Not sent — the recipients are blocked. Your email is kept in Sent with its delivery outcomes."
+            );
           }
           return;
         }

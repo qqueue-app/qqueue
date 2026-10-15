@@ -214,6 +214,7 @@ export interface DomainThrottleList {
 }
 
 export interface InboxAccount {
+  historyBeforeUid?: number | null;
   id: string;
   organizationId: string;
   name: string;
@@ -231,6 +232,9 @@ export interface InboxAccount {
 }
 
 export interface InboundMessage {
+  bodyStatus?: "AVAILABLE" | "UNAVAILABLE";
+  bodyError?: string | null;
+  contentImportPending?: boolean;
   readPending?: boolean;
   readSyncError?: string | null;
   id: string;
@@ -267,6 +271,8 @@ export interface InboundAttachment {
   filename: string;
   contentType: string;
   size: number;
+  storageStatus?: "AVAILABLE" | "UNAVAILABLE" | "TOO_LARGE";
+  storageError?: string | null;
   /** Sender marked this part for display in the body rather than as a download. */
   isInline: boolean;
   /** MIME Content-ID, as referenced by `cid:` URLs in the body HTML. */
@@ -639,7 +645,7 @@ export interface SentEmail {
   to: string[];
   ccCount: number;
   bccCount: number;
-  status: "SENT" | "FAILED" | "UNCERTAIN";
+  status: "SENT" | "FAILED" | "UNCERTAIN" | "SUPPRESSED" | "CANCELLED";
   origin: "CAMPAIGN" | "TRANSACTIONAL" | "MANUAL" | "SYSTEM";
   sentAt?: string | null;
   createdAt: string;
@@ -2508,6 +2514,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ organizationId, inboxAccountId }),
     });
+  },
+  retryInboundContent(messageId: string, organizationId: string) {
+    return request<{ queued: boolean }>(
+      `/api/v1/inbox/messages/${encodeURIComponent(messageId)}/content/retry`,
+      { method: "POST", body: JSON.stringify({ organizationId }) }
+    );
   },
 
   markInboundMessagesRead(

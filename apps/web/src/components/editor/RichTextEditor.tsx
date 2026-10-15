@@ -402,6 +402,9 @@ export function RichTextEditor({
     // about a different editor than the one on screen.
     extensions: createExtensions({ placeholder }),
     content: value,
+    // Keep typed leading spaces when reopening a paragraph. The partitioner
+    // uses the same parser option so editor output remains editable.
+    parseOptions: { preserveWhitespace: true },
     // The toolbar reads editor.isActive(...) during render for its active
     // states (bold, alignment, "Edit button", the table controls). Tiptap v3
     // defaults this to false, which leaves every one of those stale — the
@@ -443,7 +446,10 @@ export function RichTextEditor({
     if (!editor || value === loaded.current) return;
     loaded.current = value;
     edited.current = false;
-    editor.commands.setContent(value, { emitUpdate: false });
+    editor.commands.setContent(value, {
+      emitUpdate: false,
+      parseOptions: { preserveWhitespace: true },
+    });
   }, [value, editor]);
 
   // Raw blocks are plain DOM inside a node view, with no React tree of their

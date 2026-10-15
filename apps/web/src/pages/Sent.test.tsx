@@ -144,6 +144,17 @@ describe("Sent", () => {
 
     expect(await screen.findByText("Failed")).toBeInTheDocument();
   });
+  it.each([
+    ["SUPPRESSED", "Not sent — recipients blocked"],
+    ["CANCELLED", "Cancelled"],
+  ])("keeps %s mail findable with an honest outcome", async (status, label) => {
+    mockedApi.listSentEmails.mockResolvedValue(
+      page([{ ...email, status, delivered: false, sentAt: null }])
+    );
+    renderSent();
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    expect(screen.getByText(email.subject)).toBeInTheDocument();
+  });
 
   it("opens on the mail you wrote yourself", async () => {
     renderSent();
@@ -203,7 +214,10 @@ describe("Sent", () => {
     await user.click(await screen.findByRole("option", { name: "Bounced" }));
 
     await waitFor(() =>
-      expect(lastQuery()).toMatchObject({ outcome: "bounced", origin: "MANUAL" })
+      expect(lastQuery()).toMatchObject({
+        outcome: "bounced",
+        origin: "MANUAL",
+      })
     );
   });
 
@@ -226,7 +240,9 @@ describe("Sent", () => {
     await screen.findByText("Friday update");
 
     await user.click(screen.getByLabelText("When"));
-    await user.click(await screen.findByRole("option", { name: "Last 7 days" }));
+    await user.click(
+      await screen.findByRole("option", { name: "Last 7 days" })
+    );
     await waitFor(() => expect(lastQuery()).toMatchObject({ days: 7 }));
 
     await user.click(screen.getByLabelText("Type"));
@@ -270,7 +286,9 @@ describe("Sent", () => {
     await screen.findByText("Friday update");
 
     expect(screen.getByText(/Page 1 of 5 · 120 emails/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Previous page" })
+    ).toBeDisabled();
   });
 
   it("does not offer column sorting it could not honour", async () => {

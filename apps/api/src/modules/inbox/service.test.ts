@@ -42,6 +42,19 @@ beforeEach(() => {
 });
 
 describe("inboxService", () => {
+  it("keeps reply delivery blocked until a missing original body is recovered", async () => {
+    prismaMock.inboundMessage.findFirst.mockResolvedValue({
+      id: "m1",
+      bodyStatus: "UNAVAILABLE",
+    } as never);
+    await expect(
+      inboxService.replyToMessage("m1", "user_1", {
+        organizationId: "org_1",
+        html: "<p>Reply</p>",
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(manualEmailServiceMock.send).not.toHaveBeenCalled();
+  });
   it("reconnects a disabled inbox in place without losing its message relationships", async () => {
     prismaMock.inboxAccount.findUnique.mockResolvedValue({
       id: "existing_inbox",
@@ -325,6 +338,39 @@ describe("inboxService", () => {
 });
 
 describe("inboxService.downloadAttachment", () => {
+  it("shows an unavailable part without trying to download a nonexistent blob", async () => {
+    storageMock.getObject.mockClear();
+    prismaMock.inboundAttachment.findFirst.mockResolvedValue({
+      storageStatus: "TOO_LARGE",
+      storageError: "Ask an administrator to raise the limit.",
+    } as never);
+    await expect(
+      inboxService.downloadAttachment("att_1", "user_1", "org_1")
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: "Ask an administrator to raise the limit.",
+    });
+    expect(storageMock.getObject).not.toHaveBeenCalled();
+  });
+  it("marks a missing stored blob for durable recovery from its mailbox", async () => {
+    prismaMock.inboundAttachment.findFirst.mockResolvedValue({
+      id: "att_1",
+      inboundMessageId: "m1",
+      storageStatus: "AVAILABLE",
+      storageKey: "missing",
+    } as never);
+    storageMock.getObject.mockRejectedValueOnce(new Error("Missing object"));
+    await expect(
+      inboxService.downloadAttachment("att_1", "user_1", "org_1")
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: "attachment_unavailable",
+    });
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
+      where: { id: "m1" },
+      data: { contentImportPending: true },
+    });
+  });
   it("scopes the lookup to the mailboxes the caller can read", async () => {
     prismaMock.inboundAttachment.findFirst.mockResolvedValue({
       id: "att_1",
@@ -367,6 +413,48 @@ describe("inboxService.downloadAttachment", () => {
     ).rejects.toThrow("Attachment not found");
     // The blob is never fetched for an attachment the caller can't see.
     expect(storageMock.getObject).not.toHaveBeenCalled();
+  });
+});
+
+describe("inboxService.retryContent", () => {
+  it("rejects a message outside the reader's mailbox grants", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER",
+    } as never);
+    prismaMock.inboxAccountGrant.findMany.mockResolvedValue([
+      { inboxAccountId: "allowed" },
+    ] as never);
+    prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([]);
+    prismaMock.inboundMessage.findFirst.mockResolvedValue(null);
+    await expect(
+      inboxService.retryContent("private", "org_1", "user_1")
+    ).rejects.toMatchObject({ statusCode: 404 });
+    expect(
+      prismaMock.inboundMessage.findFirst.mock.calls[0][0].where
+    ).toMatchObject({ inboxAccountId: { in: ["allowed"] } });
+    expect(prismaMock.inboundMessage.updateMany).not.toHaveBeenCalled();
+  });
+  it("retains a recovery request even when queue dispatch fails", async () => {
+    prismaMock.inboundMessage.findFirst.mockResolvedValue({
+      id: "m1",
+      imapUid: 12,
+      inboxAccountId: "acc_1",
+      inboxAccount: { status: "ACTIVE" },
+    } as never);
+    const sync = vi
+      .spyOn(inboxService, "requestSync")
+      .mockRejectedValueOnce(new Error("Redis unavailable"));
+    try {
+      await expect(
+        inboxService.retryContent("m1", "org_1", "user_1")
+      ).resolves.toEqual({ queued: true });
+      expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith({
+        where: { id: "m1", organizationId: "org_1" },
+        data: { contentImportPending: true, contentAttemptedAt: null },
+      });
+    } finally {
+      sync.mockRestore();
+    }
   });
 });
 

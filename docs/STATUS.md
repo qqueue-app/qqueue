@@ -26,8 +26,9 @@ outcomes, atomic draft completion and send acceptance, server draft revisions,
 upload retry identities, and shared IMAP read-state writeback/reconciliation.
 Desktop Inbox now has a fixed 200px navigation sidebar, a compact independently
 scrolling conversation list, and an adjacent reader; Focused mail remains an
-account/device preference and phones retain the single-screen flow. Full folder
-sync, older-history backfill, forwarding, signatures, and broader attachment,
+account/device preference and phones retain the single-screen flow. A subsequent
+batch adds bounded older-history backfill and visible/retryable inbound body and
+attachment failures. Full folder sync, forwarding, signatures, and broader attachment,
 team and device acceptance remain. See
 [Organization email client readiness](ORG_EMAIL_READINESS.md) for the implemented
 scope and remaining acceptance work. The historical beta assessments below refer

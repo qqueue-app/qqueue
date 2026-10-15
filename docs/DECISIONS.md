@@ -1203,3 +1203,28 @@ List and reader scroll independently. Focused mail is a personal preference
 stored per signed-in account on the current device. Phones show one screen at
 a time. This scope follows the approved prototype and the narrower, fixed
 sidebar requested in the Outlook reference.
+
+## Bounded Mail Import and Recoverable MIME Parts (2026-10-15)
+
+INBOX_SYNC_MAX_MESSAGES is now a per-check body batch size, capped at 100, rather
+than a lifetime history limit. Initial sync prioritizes recent messages; a
+durable older-history cursor then backfills the configured folder. Bounded
+sequence metadata windows resolve actual UIDs, so large UID gaps do not require
+a body download for every absent number. ESEARCH counts avoid full UID lists
+where supported; legacy servers use ImapFlow's UID SEARCH compatibility path.
+Historical imports do not alert as new mail or apply old bounce notices as new
+suppression changes.
+
+Every MIME attachment has a stable part index and explicit availability. Failed
+or oversized files retain metadata and a useful explanation instead of silently
+disappearing. Existing imports receive a recovery pass on upgrade; a matching
+legacy part keeps its original file and row. Private recovery checks the remote
+message identity and UID-validity, reuses the stored object key, and leaves
+shared read state untouched. A missing body stays visible and prevents sending
+a reply with incomplete original headers.
+
+Mailbox checks have a four-minute work budget inside the ten-minute account
+lock lease. The budget closes IMAP, cancels in-flight object writes, and checks
+again after parsing before storing content or advancing cursors. Unavailable
+content remains pending for a subsequent check. This does not replace provider
+and large-message acceptance; the handoff records those limits.

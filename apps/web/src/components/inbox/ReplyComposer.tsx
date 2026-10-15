@@ -262,7 +262,13 @@ export function ReplyComposer({
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!empty && !uploading && !send.isPending) send.mutate();
+    if (
+      !empty &&
+      !uploading &&
+      !send.isPending &&
+      message.bodyStatus !== "UNAVAILABLE"
+    )
+      send.mutate();
   }
 
   return (
@@ -284,6 +290,12 @@ export function ReplyComposer({
             <p className="break-words text-ui">
               <strong>From:</strong> {mailboxEmail}
             </p>
+            {message.bodyStatus === "UNAVAILABLE" ? (
+              <p role="alert" className="text-ui text-warn">
+                Reload the original message before sending this reply. Your
+                draft can still be saved.
+              </p>
+            ) : null}
             <p className="break-words text-ui">
               <strong>To:</strong> {recipient}
             </p>
@@ -400,6 +412,7 @@ export function ReplyComposer({
             form="message-reply-form"
             disabled={
               empty ||
+              message.bodyStatus === "UNAVAILABLE" ||
               send.isPending ||
               uploading ||
               draftQuery.isPending ||

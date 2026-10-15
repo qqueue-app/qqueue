@@ -7,7 +7,7 @@ const config = {
   accessKeyId: "key",
   secretAccessKey: "secret",
   endpoint: "http://localhost:9100",
-  forcePathStyle: true
+  forcePathStyle: true,
 };
 
 function commandName(command: unknown): string {
@@ -19,6 +19,46 @@ function commandInput(command: unknown): Record<string, unknown> {
 }
 
 describe("StorageClient", () => {
+  it("does not start an upload after its caller has cancelled", async () => {
+    const send = vi.fn();
+    const client = new StorageClient(config, { send });
+    const controller = new AbortController();
+    controller.abort(new Error("Import cancelled"));
+    await expect(
+      client.putObject({
+        key: "part",
+        body: "bytes",
+        abortSignal: controller.signal,
+      })
+    ).rejects.toThrow("Import cancelled");
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("passes cancellation through to an upload already in progress", async () => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const client = new StorageClient(config, {
+      send: (_command, options) =>
+        new Promise((_resolve, reject) => {
+          options!.abortSignal!.addEventListener(
+            "abort",
+            () => reject(options!.abortSignal!.reason),
+            { once: true }
+          );
+          started();
+        }),
+    });
+    const upload = client.putObject({
+      key: "part",
+      body: "bytes",
+      abortSignal: controller.signal,
+    });
+    await ready;
+    controller.abort(new Error("Import interrupted"));
+    await expect(upload).rejects.toThrow("Import interrupted");
+  });
   it("putObject sends a PutObjectCommand with the bucket, key, body and type", async () => {
     const send = vi.fn().mockResolvedValue({});
     const fake: S3Like = { send };
@@ -27,7 +67,7 @@ describe("StorageClient", () => {
     await storage.putObject({
       key: "org/o1/file.pdf",
       body: Buffer.from("hello"),
-      contentType: "application/pdf"
+      contentType: "application/pdf",
     });
 
     expect(send).toHaveBeenCalledTimes(1);
@@ -36,14 +76,14 @@ describe("StorageClient", () => {
     expect(commandInput(command)).toMatchObject({
       Bucket: "qqueue-attachments",
       Key: "org/o1/file.pdf",
-      ContentType: "application/pdf"
+      ContentType: "application/pdf",
     });
   });
 
   it("getObject returns the object bytes as a Buffer", async () => {
     const bytes = new TextEncoder().encode("file-contents");
     const send = vi.fn().mockResolvedValue({
-      Body: { transformToByteArray: () => Promise.resolve(bytes) }
+      Body: { transformToByteArray: () => Promise.resolve(bytes) },
     });
     const storage = new StorageClient(config, { send });
 
@@ -73,7 +113,7 @@ describe("StorageClient", () => {
     expect(commandName(command)).toBe("DeleteObjectCommand");
     expect(commandInput(command)).toMatchObject({
       Bucket: "qqueue-attachments",
-      Key: "org/o1/file.pdf"
+      Key: "org/o1/file.pdf",
     });
   });
 
@@ -90,7 +130,9 @@ describe("StorageClient", () => {
   it("ensureBucket creates the bucket when HeadBucket fails", async () => {
     const send = vi
       .fn()
-      .mockRejectedValueOnce(Object.assign(new Error("not found"), { name: "NotFound" }))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("not found"), { name: "NotFound" })
+      )
       .mockResolvedValueOnce({});
     const storage = new StorageClient(config, { send });
 

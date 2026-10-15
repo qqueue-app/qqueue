@@ -37,7 +37,15 @@ export async function synchronizeReadState(
         { envelope: true },
         { uid: true }
       );
-      if (!remote || remote.envelope?.messageId !== message.messageId)
+      const remoteIdentity =
+        remote &&
+        (remote.envelope?.messageId ??
+          `${account.id}:${account.uidValidity}:${message.imapUid}`);
+      const legacyIdentity =
+        remote &&
+        !remote.envelope?.messageId &&
+        message.messageId === `${account.id}:${message.imapUid}`;
+      if (!remote || (remoteIdentity !== message.messageId && !legacyIdentity))
         throw new Error(
           "The message is no longer at this mail-server location. Check for new mail to reconcile it."
         );
