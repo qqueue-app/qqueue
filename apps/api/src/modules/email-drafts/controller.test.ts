@@ -8,6 +8,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./service.js", () => ({
   emailDraftService: {
     list: vi.fn(),
+    sourceStatus: vi.fn(),
+    reviewSource: vi.fn(),
     get: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
@@ -194,4 +196,30 @@ describe("emailDraftController.delete", () => {
     expect(res.status).toHaveBeenCalledWith(204);
     expect(res.send).toHaveBeenCalled();
   });
+});
+
+it("scopes external source review to the private draft owner and validates its displayed version", async () => {
+  const request = {
+    params: { id: "d1" },
+    userId: "u1",
+    body: { expectedRevision: 4, expectedVersion: "v2" },
+  } as unknown as Request;
+  const res = mockRes();
+  vi.mocked(emailDraftService.sourceStatus).mockResolvedValue({
+    state: "UPDATED",
+  } as never);
+  await emailDraftController.sourceStatus(request, res);
+  expect(emailDraftService.sourceStatus).toHaveBeenCalledWith("d1", "u1");
+  await emailDraftController.reviewSource(request, res);
+  expect(emailDraftService.reviewSource).toHaveBeenCalledWith(
+    "d1",
+    "u1",
+    request.body
+  );
+  await expect(
+    emailDraftController.reviewSource(
+      { ...request, body: { expectedRevision: 0 } } as Request,
+      res
+    )
+  ).rejects.toThrow();
 });

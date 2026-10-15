@@ -7,6 +7,8 @@ import type {
   InboxFolder,
   InboxMoveInput,
   InboxMoveBatchSummary,
+  MailboxDraftStatus,
+  MailboxDraftSource,
 } from "@qqueue/shared";
 export type {
   MailboxView,
@@ -248,6 +250,7 @@ export interface InboxAccount {
 }
 
 export interface InboundMessage {
+  remoteDraftVersion?: string | null;
   flagged?: boolean;
   flagPending?: boolean;
   flagSyncError?: string | null;
@@ -566,6 +569,7 @@ export interface Template {
 
 export interface EmailAttachment {
   id: string;
+  cid?: string | null;
   filename: string;
   contentType: string;
   size: number;
@@ -590,6 +594,7 @@ export interface ImageAsset {
 }
 
 export interface EmailDraft {
+  mailboxDraftSource?: MailboxDraftSource | null;
   revision: number;
   clientId?: string | null;
   completedSendId?: string | null;
@@ -2420,6 +2425,35 @@ export const api = {
 
   getEmailDraft(id: string) {
     return request<EmailDraft>(`/api/v1/email-drafts/${id}`);
+  },
+  getMailboxDraftSource(id: string) {
+    return request<MailboxDraftStatus>(
+      `/api/v1/email-drafts/${id}/mailbox-source`
+    );
+  },
+  reviewMailboxDraftSource(
+    id: string,
+    expectedRevision: number,
+    expectedVersion: string
+  ) {
+    return request<EmailDraft>(
+      `/api/v1/email-drafts/${id}/mailbox-source/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedRevision, expectedVersion }),
+      }
+    );
+  },
+  prepareMailboxDraftCopy(
+    id: string,
+    organizationId: string,
+    clientId: string,
+    expectedVersion: string
+  ) {
+    return request<EmailDraft>(
+      `/api/v1/inbox/messages/${id}/draft-copy?organizationId=${encodeURIComponent(organizationId)}`,
+      { method: "POST", body: JSON.stringify({ clientId, expectedVersion }) }
+    );
   },
 
   listOrganizationMembers(organizationId: string) {

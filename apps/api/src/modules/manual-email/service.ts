@@ -23,6 +23,10 @@ import {
 } from "../../lib/mailbox-access.js";
 
 import { transactionalEmailService } from "../transactional-email/service.js";
+import {
+  mailboxDraftSource,
+  mailboxDraftStatus,
+} from "../../lib/mailbox-draft-source.js";
 
 interface RecipientSource {
   organizationId: string;
@@ -337,6 +341,9 @@ export const manualEmailService = {
         });
         if (legacy)
           return { id: legacy.id, status: legacy.groupStatus ?? legacy.status };
+        let sourceThread:
+          | { inReplyTo?: string; references: string[] }
+          | undefined;
         if (input.draftId) {
           await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"draft:" + input.draftId}, 0))`;
           const draft = await db.emailDraft.findFirst({
@@ -377,6 +384,25 @@ export const manualEmailService = {
               "draft_conflict"
             );
           }
+          if (draft.mailboxDraftSource) {
+            const source = mailboxDraftSource(draft.mailboxDraftSource);
+            const status = await mailboxDraftStatus(
+              source,
+              input.organizationId,
+              userId,
+              db
+            );
+            if (!status.reviewed)
+              throw new HttpError(
+                409,
+                "The original mailbox draft changed or is unavailable. Review the mailbox draft in Compose before sending your private copy.",
+                "mailbox_draft_conflict"
+              );
+            sourceThread = {
+              inReplyTo: source.inReplyTo,
+              references: source.references,
+            };
+          }
         }
         const recipients = await resolveRecipients(input);
         const deliveries = [
@@ -397,6 +423,7 @@ export const manualEmailService = {
           const result = await transactionalEmailService.send(
             {
               ...input,
+              ...(sourceThread ?? {}),
               html,
               to: delivery.to,
               cc: [],

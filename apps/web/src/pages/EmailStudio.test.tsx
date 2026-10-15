@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { installFakeIndexedDB } from "../test/fake-indexeddb.js";
 import { savePendingDraft, listPendingDrafts } from "../lib/offline-drafts.js";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const toast = vi.hoisted(() => ({
@@ -1238,4 +1238,43 @@ it("ignores a late rejected save from writing replaced through conflict review",
   } finally {
     view.unmount();
   }
+});
+
+it("retains a loaded draft’s URL for reload and does not reapply it over newer writing", async () => {
+  vi.clearAllMocks();
+  session.current = { currentOrganizationId: "org_1" };
+  setup();
+  mockedApi.getEmailDraft.mockResolvedValue({
+    id: "stable9",
+    organizationId: "org_1",
+    revision: 2,
+    subject: "Saved exact draft",
+    html: "<p>Saved writing</p>",
+    to: [],
+    cc: [],
+    bcc: [],
+    listIds: [],
+    attachments: [],
+  });
+  function Location() {
+    return <output aria-label="Editing URL">{useLocation().search}</output>;
+  }
+  const user = userEvent.setup();
+  const view = renderWithProviders(
+    <>
+      <EmailStudio />
+      <Location />
+    </>,
+    { route: "/email-studio?draft=stable9" }
+  );
+  const subject = await screen.findByRole("textbox", { name: "Subject" });
+  await waitFor(() => expect(subject).toHaveValue("Saved exact draft"));
+  expect(screen.getByLabelText("Editing URL")).toHaveTextContent(
+    "draft=stable9"
+  );
+  await user.clear(subject);
+  await user.type(subject, "Newer unsaved writing");
+  await view.queryClient.invalidateQueries({ queryKey: ["email-draft"] });
+  expect(subject).toHaveValue("Newer unsaved writing");
+  expect(mockedApi.getEmailDraft).toHaveBeenCalledTimes(1);
 });

@@ -98,6 +98,7 @@ export type ApiErrorCode =
   | "attachment_unavailable"
   | "draft_completed"
   | "draft_conflict"
+  | "mailbox_draft_conflict"
   | "send_conflict"
   | "attachment_conflict"
   | "invalid_api_key"
@@ -1558,12 +1559,19 @@ export interface InboxMoveBatchSummary {
 
 export const inboundFlagSchema = z.object({ flagged: z.boolean() });
 
-export const inboxConversationWindowSchema = z.object({
-  paged: z.literal("true").optional(),
-  before: z.string().min(1).max(200).optional(),
-  after: z.string().min(1).max(200).optional(),
-}).refine(input => !(input.before && input.after), "Choose one conversation page direction.");
-export type InboxConversationWindowInput = z.infer<typeof inboxConversationWindowSchema>;
+export const inboxConversationWindowSchema = z
+  .object({
+    paged: z.literal("true").optional(),
+    before: z.string().min(1).max(200).optional(),
+    after: z.string().min(1).max(200).optional(),
+  })
+  .refine(
+    (input) => !(input.before && input.after),
+    "Choose one conversation page direction."
+  );
+export type InboxConversationWindowInput = z.infer<
+  typeof inboxConversationWindowSchema
+>;
 
 export const inboundMessageQuerySchema = z.object({
   organizationId: z.string().min(1),
@@ -1584,6 +1592,44 @@ export const inboundForwardSchema = z.object({
   clientId: z.string().min(1).max(128),
 });
 export type InboundForwardInput = z.infer<typeof inboundForwardSchema>;
+
+export const mailboxDraftCopySchema = inboundForwardSchema.extend({
+  expectedVersion: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type MailboxDraftCopyInput = z.infer<typeof mailboxDraftCopySchema>;
+export const mailboxDraftReviewSchema = z.object({
+  expectedRevision: z.number().int().positive(),
+  expectedVersion: z.string().min(1).max(128),
+});
+export type MailboxDraftReviewInput = z.infer<typeof mailboxDraftReviewSchema>;
+export const mailboxDraftSourceSchema = z.object({
+  messageId: z.string(),
+  version: z.string(),
+  reviewedVersion: z.string(),
+  inReplyTo: z.string().optional(),
+  references: z.array(z.string()),
+});
+export type MailboxDraftSource = z.infer<typeof mailboxDraftSourceSchema>;
+export interface MailboxDraftStatus {
+  state: "UNCHANGED" | "UPDATED" | "UNAVAILABLE" | "LOADING";
+  currentVersion: string;
+  reviewed: boolean;
+  source?: {
+    id: string;
+    subject: string;
+    html: string | null;
+    text: string | null;
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    attachments: {
+      id: string;
+      filename: string;
+      size: number;
+      cid?: string | null;
+    }[];
+  };
+}
 
 export const inboundMessageReplySchema = z
   .object({

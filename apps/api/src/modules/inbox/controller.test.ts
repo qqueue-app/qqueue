@@ -24,6 +24,10 @@ vi.mock("./service.js", () => ({
 vi.mock("./forward-service.js", () => ({
   inboxForwardService: { prepare: vi.fn() },
 }));
+vi.mock("./draft-copy-service.js", () => ({
+  inboxDraftCopyService: { prepare: vi.fn() },
+}));
+const { inboxDraftCopyService } = await import("./draft-copy-service.js");
 const { inboxForwardService } = await import("./forward-service.js");
 
 const { inboxController } = await import("./controller.js");
@@ -602,4 +606,34 @@ it("validates conversation page direction before passing the authorized scope to
       res
     )
   ).rejects.toThrow("Choose one conversation page direction");
+});
+
+it("validates and prepares an external draft copy in the pinned organization", async () => {
+  const req = {
+    params: { id: "m1" },
+    organizationId: "org1",
+    userId: "u1",
+    body: { clientId: "copy1", expectedVersion: "a".repeat(64) },
+  } as unknown as Request;
+  const res = mockRes();
+  vi.mocked(inboxDraftCopyService.prepare).mockResolvedValue({
+    id: "d1",
+  } as never);
+  await inboxController.prepareDraftCopy(req, res);
+  expect(inboxDraftCopyService.prepare).toHaveBeenCalledWith(
+    "m1",
+    "org1",
+    "u1",
+    req.body
+  );
+  expect(res.status).toHaveBeenCalledWith(201);
+  await expect(
+    inboxController.prepareDraftCopy(
+      {
+        ...req,
+        body: { clientId: "copy1", expectedVersion: "invalid" },
+      } as Request,
+      res
+    )
+  ).rejects.toThrow();
 });

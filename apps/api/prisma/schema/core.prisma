@@ -883,6 +883,8 @@ model EmailDraft {
   listIds          String[]          @default([])
   replyTo          String?
   variables        Json?
+  /// Server-owned provenance for a private copy of an externally saved draft.
+  mailboxDraftSource Json?
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   attachments      EmailAttachment[]
   createdAt        DateTime          @default(now())
@@ -1205,6 +1207,12 @@ model InboundMessage {
   flagSyncError        String?
   contentImportPending Boolean                  @default(false)
   contentAttemptedAt   DateTime?
+  /// Version of an imported mailbox draft; QQueue edits a private copy.
+  remoteDraftVersion     String?
+  remoteDraftFolderId    String?
+  remoteDraftUid         Int?
+  remoteDraftUidValidity String?
+  remoteDraftBcc         String[]                 @default([])
   bodyStatus           String                   @default("AVAILABLE")
   bodyError            String?
   /// True when the sync worker recognized this message as a delivery status
@@ -1246,6 +1254,8 @@ model InboundAttachment {
   contentType      String
   size             Int
   storageKey       String
+  /// Draft file versions use immutable content-addressed object keys.
+  contentHash      String?
   partIndex        Int?
   storageStatus    String         @default("AVAILABLE")
   storageError     String?

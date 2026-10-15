@@ -874,6 +874,23 @@ export const inboxService = {
       throw new HttpError(404, "Inbound message not found", "not_found");
     }
 
+    if (
+      message.remoteDraftVersion &&
+      (await prisma.inboundMessageLocation.findFirst({
+        where: {
+          inboundMessageId: message.id,
+          present: true,
+          folder: { present: true, role: "DRAFTS" },
+        },
+        select: { id: true },
+      }))
+    )
+      throw new HttpError(
+        409,
+        "Continue this mailbox draft as a private copy instead of replying to it.",
+        "mailbox_draft_conflict"
+      );
+
     if (message.bodyStatus === "UNAVAILABLE")
       throw new HttpError(
         409,

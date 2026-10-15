@@ -587,11 +587,77 @@ Acceptance evidence:
   emulation/layout evidence, not physical keyboard or assistive-technology
   acceptance. All exact synthetic fixture records were removed afterward.
 
+## Continuing externally saved drafts as private copies (2026-10-15)
+
+Implemented:
+
+- A message in a discovered Drafts folder offers Continue as private copy.
+  QQueue preserves its rich/plain writing, To/Cc/Bcc, Reply-To, original reply
+  chain and private attachments, including inline Content-IDs. Read and send
+  grants both apply. Unsupported file counts, oversized/missing files and
+  multiple Reply-To addresses fail explicitly rather than creating a partial
+  draft. The original mailbox draft is kept, including after sending the copy;
+  this is stated beside the composer. QQueue does not overwrite, delete or
+  claim exclusive ownership of another client's draft.
+- Imported sources have a raw-source version and an exact folder/UID namespace.
+  Older UIDs in that namespace cannot overwrite newer writing. Changed draft
+  parts use content-addressed private keys and replacement metadata; earlier
+  personal copies retain their original bytes. The additive migration marks
+  existing mailbox drafts for complete source recovery, including Bcc.
+- Preparation retries reuse one personal identity. Preparation rechecks the
+  complete source/file snapshot before acceptance. Later changes expose a frozen
+  review of the last synced original, including recipients and files. Keep my
+  private copy acknowledges that exact reviewed source against the personal
+  draft revision; opening the latest creates another copy after preserving the
+  current writing. Removed or inaccessible originals need an explicit choice
+  without revealing revoked mailbox content. Incomplete imports cannot be
+  acknowledged as complete.
+- Sending rechecks the source on the server before creating jobs. An unreviewed
+  change stops the send, while an already accepted request still recovers its
+  existing job. The copied source reply chain comes from server-owned provenance
+  and delivery uses the existing MANUAL pipeline. These checks compare the
+  **last synced** mailbox state: they cannot establish that another mail app has
+  not sent the original since the last check. The original remains a separate
+  draft in that app, so the interface explains the duplicate-send risk.
+- Private inline-image previews use authenticated file routes and local blob
+  URLs, block remote trackers and retain literal `cid:` links in saved/sent
+  HTML. Failed preview downloads have a visible retry. Loading a saved draft now
+  keeps its exact draft URL for reload without background refetch replacing
+  newer writing. Inbox dates sit above the ellipsis; the selected row has a
+  background rather than an outline, with visible keyboard focus retained.
+
+Acceptance evidence:
+
+- Real IMAP APPEND imported three controlled versions with the same Message-ID.
+  Changed writing, Bcc removal, replaced files and removal of an inline part
+  reconciled together. The older private copy retained its exact original file
+  and MIME Content-ID. An unreviewed-source send returned 409 and created no
+  jobs. Actual HTTP checks verified preparation replay, a separate latest copy,
+  deliberate keep preserving old writing and rejection of a stale review.
+- One imported third-version copy was delivered to the sole controlled mailbox
+  through the normal MANUAL pipeline. SMTP recorded SENT; actual IMAP retrieval
+  found one received Message-ID with the original reply chain, `cid:` image and
+  exact text-file bytes. Replaying the accepted request retained one job. The
+  original remained in the mailbox Drafts folder. This is one observed self-send,
+  not proof of exactly-once SMTP or distinct-recipient To/Cc/Bcc acceptance.
+- Chrome opened the imported draft through Mailbox Drafts, continued it in
+  Compose with its current recipients/text/file, and reviewed a newer original
+  while retaining the older private writing. Native reload testing exposed the
+  draft-URL issue fixed above; the final build then reloaded the exact saved
+  copy with both files. Its private inline-image preview rendered through an
+  authenticated blob URL. The composer and review sheet fit a 440px phone
+  viewport; this is layout emulation, not physical keyboard/device acceptance.
+  Full typecheck, lint, build, tests and unchanged coverage thresholds passed. Fresh Docker smoke passed sending, grants and
+  migration drift; the separate disposable acceptance database also reports no
+  schema difference. Concurrency and unavailable-file cases have automated
+  regression coverage; physical-device acceptance remains separate.
+
 ## Required before calling the primary-client goal complete
 
-1. **IMAP folder operations:** external-draft editing/reconciliation. Validate
-   UID-validity replacement, large
-   mailboxes and interrupted import against real services.
+1. **IMAP recovery acceptance:** validate UID-validity replacement, large
+   mailboxes and interrupted import against real services. External drafts now
+   continue as explicitly separate personal copies; editing the original IMAP
+   draft in place is not supported.
 2. **Draft/composer recovery:** broaden actual concurrent-device, interrupted
    upload, lost-response and storage-failure acceptance across navigation and
    organization changes.

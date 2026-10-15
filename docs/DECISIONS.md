@@ -1338,3 +1338,31 @@ the full response they understand until refreshed. Metadata limits fail explicit
 rather than pretending a truncated conversation is complete. Local/URL page state
 can therefore change independently of message identity, shared read revisions,
 reply drafts and accepted move intent.
+
+
+## External Mailbox Drafts Continue as Explicit Private Copies (2026-10-15)
+
+Externally saved drafts are shared mailbox content, while EmailDraft is personal
+writing. Continue as private copy preserves that boundary: importing a version
+never silently overwrites personal writing, and sending the copy neither deletes
+nor marks the original as sent. This also avoids presenting unsupported IMAP
+round-trip editing as successful. The UI states that the original remains and
+can still be sent from another app.
+
+A source hash and exact folder/UID namespace identify the cached version.
+Preparation verifies all private bytes, then rechecks the complete source under
+a database row lock before creating a personal draft with a stable retry ID.
+Changed remote file parts use immutable content-addressed storage keys. Saved
+personal files therefore keep the bytes their writing referred to even after
+another client replaces or removes those parts.
+
+Server-owned provenance preserves threading and the source version separately
+from user-editable variables. Sending requires the last synced source to match
+an explicitly reviewed version; missing/revoked sources need a deliberate keep
+choice without exposing inaccessible content. A further source or personal-draft
+change rejects that choice. Accepted-send replay precedes this check, preserving
+recovery when the source changes after a response is lost. This is cached-state
+reconciliation, not a cross-client send lock or an exactly-once SMTP guarantee.
+
+Private inline previews authenticate attachment downloads and resolve Content-ID
+links only for display; saved HTML retains the MIME links, never local blob URLs.

@@ -10,10 +10,12 @@ import {
   inboundFlagSchema,
   inboxMoveSchema,
   inboundForwardSchema,
+  mailboxDraftCopySchema,
 } from "@qqueue/shared";
 import { z } from "zod";
 import { inboxService } from "./service.js";
 import { inboxForwardService } from "./forward-service.js";
+import { inboxDraftCopyService } from "./draft-copy-service.js";
 import { inboxMoveService } from "./move-service.js";
 
 const markReadSchema = z.object({
@@ -26,6 +28,18 @@ const markReadSchema = z.object({
 });
 
 export const inboxController = {
+  async prepareDraftCopy(req: Request, res: Response) {
+    res
+      .status(201)
+      .json({
+        data: await inboxDraftCopyService.prepare(
+          String(req.params.id),
+          req.organizationId!,
+          req.userId!,
+          mailboxDraftCopySchema.parse(req.body)
+        ),
+      });
+  },
   async prepareForward(req: Request, res: Response) {
     res.status(201).json({
       data: await inboxForwardService.prepare(

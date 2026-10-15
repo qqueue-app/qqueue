@@ -7,6 +7,11 @@ import { replyPresenceController } from "./presence-controller.js";
 
 export const inboxRouter = Router();
 inboxRouter.post(
+  "/messages/:id/draft-copy",
+  requireOrgMembership,
+  inboxController.prepareDraftCopy
+);
+inboxRouter.post(
   "/messages/:id/forward",
   requireOrgMembership,
   inboxController.prepareForward

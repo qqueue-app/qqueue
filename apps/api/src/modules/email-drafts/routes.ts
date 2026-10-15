@@ -7,6 +7,11 @@ export const emailDraftRouter = Router();
 emailDraftRouter.get("/", requireOrgMembership, emailDraftController.list);
 emailDraftRouter.post("/", requireOrgMembership, emailDraftController.create);
 // Resource-addressed routes scope by the authenticated user in the service.
+emailDraftRouter.get("/:id/mailbox-source", emailDraftController.sourceStatus);
+emailDraftRouter.post(
+  "/:id/mailbox-source/review",
+  emailDraftController.reviewSource
+);
 emailDraftRouter.get("/:id", emailDraftController.get);
 emailDraftRouter.put("/:id", emailDraftController.update);
 emailDraftRouter.delete("/:id", emailDraftController.delete);

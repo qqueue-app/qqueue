@@ -73,6 +73,8 @@ import {
 } from "../components/inbox/SignatureControl.js";
 import { useOrgQuery } from "../lib/use-api.js";
 import { qk } from "../lib/query-client.js";
+import { PrivateMailPreview } from "../components/inbox/PrivateMailPreview.js";
+import { MailboxDraftReview } from "../components/inbox/MailboxDraftReview.js";
 import { DraftConflictReview } from "../components/inbox/DraftConflictReview.js";
 import { RecipientField } from "../components/inbox/RecipientField.js";
 import { Badge } from "../components/ui/badge.js";
@@ -157,7 +159,11 @@ function EmailStudioWorkspace() {
   const { currentOrganizationId: organizationId, user } = useSession();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedDraftId = searchParams.get("draft");
+  const [loadedDraftLink, setLoadedDraftLink] = useState<string | null>(null);
+  const requestedDraftId =
+    searchParams.get("draft") === loadedDraftLink
+      ? null
+      : searchParams.get("draft");
   const requestedDraft = useOrgQuery(
     organizationId,
     qk.composerDraft(
@@ -165,7 +171,14 @@ function EmailStudioWorkspace() {
       user?.id ?? "",
       requestedDraftId ?? ""
     ),
-    () => api.getEmailDraft(requestedDraftId!),
+    async () => {
+      const draft = await api.getEmailDraft(requestedDraftId!);
+      if (draft.organizationId && draft.organizationId !== organizationId)
+        throw new Error(
+          "This draft belongs to another organization. Switch to that organization to open it."
+        );
+      return draft;
+    },
     { enabled: Boolean(requestedDraftId), staleTime: 0 }
   );
   const requestedRestoreId = searchParams.get("restore");
@@ -494,6 +507,15 @@ function EmailStudioWorkspace() {
   }, [load]);
 
   function resetComposer() {
+    setLoadedDraftLink(null);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("draft");
+        return next;
+      },
+      { replace: true }
+    );
     setSMTPConnectionId(DEFAULT_SMTP);
     setTemplateId(NO_TEMPLATE);
     setSubject("");
@@ -1183,6 +1205,7 @@ function EmailStudioWorkspace() {
       const saved = await saveDraft(true);
       if (!saved) preserveWriting.current();
     }
+    setLoadedDraftLink(null);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.set("draft", summary.id);
@@ -1199,14 +1222,7 @@ function EmailStudioWorkspace() {
     )
       return;
     applyDraft(requestedDraft.data);
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.delete("draft");
-        return next;
-      },
-      { replace: true }
-    );
+    setLoadedDraftLink(requestedDraft.data.id);
   }, [requestedDraftId, requestedDraft.data, applyDraft, setSearchParams]);
 
   async function confirmDeleteDraft() {
@@ -1306,6 +1322,12 @@ function EmailStudioWorkspace() {
 
     let scheduledAtIso: string | undefined;
     if (recurring) {
+      if (draftVariables.qqueueMailboxDraftCopy === true) {
+        toast.error(
+          "A mailbox draft copy can be sent once. Start a new email for recurring sends."
+        );
+        return;
+      }
       const cron = buildCron(recurrence);
       if (!describeCron(cron)) {
         toast.error("Enter a valid schedule.");
@@ -1598,6 +1620,41 @@ function EmailStudioWorkspace() {
               disabled={sending || openingDraft || Boolean(acceptedSendId)}
               className="min-w-0 space-y-6"
             >
+              {draftId &&
+              user &&
+              organizationId &&
+              draftVariables.qqueueMailboxDraftCopy === true ? (
+                <MailboxDraftReview
+                  key={draftId}
+                  organizationId={organizationId}
+                  userId={user.id}
+                  draftId={draftId}
+                  onOpen={loadDraft}
+                  onKeep={async (version) => {
+                    const id = draftId;
+                    const saved = await saveDraft(true);
+                    if (saved !== id || draftIdentity.current.id !== id)
+                      throw new Error(
+                        "Save this private copy before reviewing the original."
+                      );
+                    const revision = draftIdentity.current.revision;
+                    const reviewed = await api.reviewMailboxDraftSource(
+                      id,
+                      revision,
+                      version
+                    );
+                    if (
+                      draftIdentity.current.id === id &&
+                      draftIdentity.current.revision === revision
+                    ) {
+                      draftIdentity.current = {
+                        id,
+                        revision: reviewed.revision,
+                      };
+                    }
+                  }}
+                />
+              ) : null}
               {noSmtp ? (
                 <div className="rounded-card border border-border bg-warn-bg px-4 py-3 text-ui leading-5 text-warn">
                   <p className="font-medium">No sending account yet</p>
@@ -1878,6 +1935,13 @@ function EmailStudioWorkspace() {
                         sending || openingDraft || Boolean(acceptedSendId)
                       }
                     />
+                    {draftVariables.qqueueMailboxDraftCopy === true &&
+                    attachments.some((file) => file.cid) ? (
+                      <p className="text-meta text-text-secondary">
+                        Inline images remain private files. Use Preview to see
+                        them in the message.
+                      </p>
+                    ) : null}
                     <BodyEditor
                       disabled={
                         sending || openingDraft || Boolean(acceptedSendId)
@@ -2359,10 +2423,23 @@ function EmailStudioWorkspace() {
                   </div>
                 ) : null}
               </dl>
-              <EmailPreviewFrame
-                html={preview.html}
-                data-testid="composer-preview"
-              />
+              {draftVariables.qqueueMailboxDraftCopy === true &&
+              organizationId &&
+              user ? (
+                <PrivateMailPreview
+                  html={preview.html}
+                  files={attachments}
+                  organizationId={organizationId}
+                  userId={user.id}
+                  version={draftId ?? "current"}
+                  title="Private mailbox draft preview"
+                />
+              ) : (
+                <EmailPreviewFrame
+                  html={preview.html}
+                  data-testid="composer-preview"
+                />
+              )}
             </div>
           ) : null}
         </DialogContent>

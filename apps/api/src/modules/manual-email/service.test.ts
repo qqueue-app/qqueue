@@ -96,6 +96,90 @@ describe("manualEmailService.resolveRecipients", () => {
 });
 
 describe("manualEmailService.send", () => {
+  function copiedDraft() {
+    const source = {
+      messageId: "external1",
+      version: "v1",
+      reviewedVersion: "v1",
+      inReplyTo: "<parent>",
+      references: ["<ancestor>", "<parent>"],
+    };
+    prismaMock.emailDraft.findFirst.mockResolvedValue({
+      id: "d1",
+      revision: 4,
+      mailboxDraftSource: source,
+    } as never);
+    prismaMock.emailAttachment.findMany.mockResolvedValue([]);
+    prismaMock.emailDraft.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.inboundMessage.findFirst.mockResolvedValue({
+      id: "external1",
+      remoteDraftVersion: "v1",
+      remoteDraftFolderId: "folder1",
+      remoteDraftUid: 7,
+      remoteDraftUidValidity: "99",
+      bodyStatus: "AVAILABLE",
+      contentImportPending: false,
+      attachments: [],
+      to: [],
+      cc: [],
+      remoteDraftBcc: [],
+    } as never);
+    prismaMock.inboundMessageLocation.findFirst.mockResolvedValue({
+      id: "location1",
+    } as never);
+    return {
+      organizationId: "org_1",
+      draftId: "d1",
+      expectedRevision: 4,
+      to: ["to@example.test"],
+      subject: "Copy",
+      html: "<p>Private writing</p>",
+    };
+  }
+  it("preserves the source reply chain through the existing manual pipeline", async () => {
+    await manualEmailService.send(
+      { ...copiedDraft(), inReplyTo: "<forged>" },
+      "user_1"
+    );
+    expect(send.mock.calls[0][0]).toMatchObject({
+      origin: "MANUAL",
+      createdByUserId: "user_1",
+      inReplyTo: "<parent>",
+      references: ["<ancestor>", "<parent>"],
+    });
+  });
+  it.each(["v2", null])(
+    "blocks an unreviewed original change before creating jobs: %s",
+    async (version) => {
+      const input = copiedDraft();
+      prismaMock.inboundMessage.findFirst.mockResolvedValue({
+        id: "external1",
+        remoteDraftVersion: version,
+      } as never);
+      await expect(
+        manualEmailService.send(input, "user_1")
+      ).rejects.toMatchObject({ code: "mailbox_draft_conflict" });
+      expect(send).not.toHaveBeenCalled();
+      expect(prismaMock.emailDraft.updateMany).not.toHaveBeenCalled();
+    }
+  );
+  it("recovers an already accepted copy before checking a subsequently changed source", async () => {
+    const input = copiedDraft();
+    await manualEmailService.send(input, "user_1");
+    const requestHash = send.mock.calls[0][0].requestHash;
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED",
+      requestHash,
+    } as never);
+    prismaMock.inboundMessage.findFirst.mockClear().mockResolvedValue(null);
+    await expect(manualEmailService.send(input, "user_1")).resolves.toEqual({
+      id: "job_1",
+      status: "QUEUED",
+    });
+    expect(prismaMock.inboundMessage.findFirst).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
   it("throws when no recipients resolve", async () => {
     await expect(
       manualEmailService.send(

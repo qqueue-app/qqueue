@@ -1,8 +1,29 @@
 import type { Request, Response } from "express";
-import { emailDraftSchema, emailDraftUpdateSchema } from "@qqueue/shared";
+import {
+  emailDraftSchema,
+  emailDraftUpdateSchema,
+  mailboxDraftReviewSchema,
+} from "@qqueue/shared";
 import { emailDraftService } from "./service.js";
 
 export const emailDraftController = {
+  async sourceStatus(req: Request, res: Response) {
+    res.json({
+      data: await emailDraftService.sourceStatus(
+        String(req.params.id),
+        req.userId!
+      ),
+    });
+  },
+  async reviewSource(req: Request, res: Response) {
+    res.json({
+      data: await emailDraftService.reviewSource(
+        String(req.params.id),
+        req.userId!,
+        mailboxDraftReviewSchema.parse(req.body)
+      ),
+    });
+  },
   async list(req: Request, res: Response) {
     // organizationId is verified and pinned by requireOrgMembership.
     const drafts = await emailDraftService.list(
@@ -43,5 +64,5 @@ export const emailDraftController = {
   async delete(req: Request, res: Response) {
     await emailDraftService.delete(String(req.params.id), req.userId!);
     res.status(204).send();
-  }
+  },
 };

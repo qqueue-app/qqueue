@@ -74,6 +74,13 @@ const folderLabels: Record<MailboxView, string> = {
   FLAGGED: "Flagged",
 };
 
+function isMailboxDraft(message: InboundMessage) {
+  return (
+    message.locations?.some((location) => location.folder.role === "DRAFTS") ??
+    false
+  );
+}
+
 interface ConversationThread {
   threadKey: string;
   messages: InboundMessage[];
@@ -312,6 +319,40 @@ function InboxWorkspace({
         "Couldn't prepare the forward. Your original message is kept.",
       onSuccess: (draft, messageId) => {
         forwardIds.current.delete(messageId);
+        if (
+          getSession().currentOrganizationId &&
+          getSession().currentOrganizationId !== organizationId
+        )
+          return;
+        navigate(`/email-studio?draft=${encodeURIComponent(draft.id)}`);
+      },
+    }
+  );
+
+  const draftCopyIds = useRef(new Map<string, string>());
+  const continueDraft = useApiMutation(
+    async (message: InboundMessage) => {
+      if (!organizationId || !message.remoteDraftVersion)
+        throw new Error(
+          "Wait for the mailbox draft to finish loading, then refresh it."
+        );
+      const key = `${organizationId}:${message.id}:${message.remoteDraftVersion}`;
+      let clientId = draftCopyIds.current.get(key);
+      if (!clientId) {
+        clientId = crypto.randomUUID();
+        draftCopyIds.current.set(key, clientId);
+      }
+      return api.prepareMailboxDraftCopy(
+        message.id,
+        organizationId,
+        clientId,
+        message.remoteDraftVersion
+      );
+    },
+    {
+      errorMessage:
+        "Couldn’t prepare your private copy. The original draft is kept.",
+      onSuccess: (draft) => {
         if (
           getSession().currentOrganizationId &&
           getSession().currentOrganizationId !== organizationId
@@ -723,16 +764,16 @@ function InboxWorkspace({
     accounts.find((account) => account.id === accountFilter) ??
     (accounts.length === 1 ? accounts[0] : undefined);
 
-  function renderThread(thread: ConversationThread) {
+  function renderThread(thread: ConversationThread, showDate = true) {
     const unread = thread.unreadCount > 0;
     return (
       <button
         type="button"
         onClick={() => openThread(thread)}
         className={cn(
-          "flex min-h-touch w-full items-start gap-3 rounded-control p-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "flex min-h-touch w-full items-start gap-3 rounded-control p-2 text-left focus-visible:bg-accent focus-visible:underline focus-visible:underline-offset-4 focus-visible:outline-none",
           selectedThread?.threadKey === thread.threadKey
-            ? "bg-brand/10 ring-1 ring-brand/20"
+            ? "bg-brand/10"
             : unread
               ? "bg-surface"
               : "bg-transparent"
@@ -760,9 +801,14 @@ function InboxWorkspace({
             <Badge variant="warn">Unattributed</Badge>
           ) : null}
         </span>
-        <span className="shrink-0 text-meta text-text-secondary">
-          {formatMailDate(thread.latestMessage.receivedAt)}
-        </span>
+        {showDate ? (
+          <time
+            dateTime={thread.latestMessage.receivedAt}
+            className="shrink-0 text-meta text-text-secondary"
+          >
+            {formatMailDate(thread.latestMessage.receivedAt)}
+          </time>
+        ) : null}
       </button>
     );
   }
@@ -827,7 +873,8 @@ function InboxWorkspace({
               <IconButton
                 label="Reply"
                 disabled={
-                  selectedThread.latestMessage.bodyStatus === "UNAVAILABLE"
+                  selectedThread.latestMessage.bodyStatus === "UNAVAILABLE" ||
+                  isMailboxDraft(selectedThread.latestMessage)
                 }
                 onClick={() => setReplyTarget(selectedThread.latestMessage)}
               >
@@ -1031,7 +1078,8 @@ function InboxWorkspace({
                   label={`Reply to this message from ${senderName(message)}`}
                   disabled={
                     message.bodyLoaded === false ||
-                    message.bodyStatus === "UNAVAILABLE"
+                    message.bodyStatus === "UNAVAILABLE" ||
+                    isMailboxDraft(message)
                   }
                   onClick={() => setReplyTarget(message)}
                 >
@@ -1048,6 +1096,28 @@ function InboxWorkspace({
                 >
                   <Forward />
                 </IconButton>
+                {isMailboxDraft(message) ? (
+                  <div className="w-full space-y-2 rounded-control bg-accent p-3 text-ui">
+                    <p>
+                      This draft was saved in another mail app. Continue as a
+                      private copy; the original stays in the mailbox.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={
+                        continueDraft.isPending ||
+                        !message.remoteDraftVersion ||
+                        message.bodyLoaded === false ||
+                        message.contentImportPending ||
+                        message.bodyStatus === "UNAVAILABLE"
+                      }
+                      onClick={() => continueDraft.mutate(message)}
+                    >
+                      Continue as private copy
+                    </Button>
+                  </div>
+                ) : null}
                 {message.emailJob ? (
                   <Hint
                     label={`This is a reply to the email "${message.emailJob.subject}" that you sent`}
@@ -1230,7 +1300,10 @@ function InboxWorkspace({
 
         <Button
           variant="secondary"
-          disabled={selectedThread.latestMessage.bodyStatus === "UNAVAILABLE"}
+          disabled={
+            selectedThread.latestMessage.bodyStatus === "UNAVAILABLE" ||
+            isMailboxDraft(selectedThread.latestMessage)
+          }
           onClick={() => setReplyTarget(selectedThread.latestMessage)}
         >
           <Reply /> Write a reply
@@ -1547,7 +1620,7 @@ function InboxWorkspace({
         ) : (
           <DataGrid
             label="Inbox conversations"
-            className="[&_table]:table-fixed [&_th:first-child]:w-12 [&_th:last-child]:w-12"
+            className="[&_table]:table-fixed [&_th:first-child]:w-12 [&_th:last-child]:w-24"
             stickyHeader={false}
             data={threads}
             getRowId={(thread) => thread.threadKey}
@@ -1557,7 +1630,7 @@ function InboxWorkspace({
                 header: "Conversation",
                 enableSorting: false,
                 enableHiding: false,
-                cell: ({ row }) => renderThread(row.original),
+                cell: ({ row }) => renderThread(row.original, false),
               },
               {
                 id: "actions",
@@ -1565,39 +1638,51 @@ function InboxWorkspace({
                 enableSorting: false,
                 meta: { pinned: true },
                 cell: ({ row }) => (
-                  <RowActions
-                    rowLabel={row.original.subject}
-                    actions={[
-                      {
-                        label: row.original.unreadCount
-                          ? "Mark as read"
-                          : "Mark as unread",
-                        icon: Mail,
-                        primary: true,
-                        onSelect: () =>
-                          markMany.mutate({
-                            ids: row.original.messages.map(
-                              (message) => message.id
-                            ),
-                            read: row.original.unreadCount > 0,
-                          }),
-                      },
-                      {
-                        label: row.original.latestMessage.flagged
-                          ? "Remove flag"
-                          : "Flag message",
-                        icon: Flag,
-                        onSelect: () => flag.mutate(row.original.latestMessage),
-                      },
-                    ]}
-                  />
+                  <div className="flex flex-col items-end gap-1">
+                    <time
+                      dateTime={row.original.latestMessage.receivedAt}
+                      title={formatFullDate(
+                        row.original.latestMessage.receivedAt
+                      )}
+                      className="pr-1 text-meta text-text-secondary"
+                    >
+                      {formatMailDate(row.original.latestMessage.receivedAt)}
+                    </time>
+                    <RowActions
+                      rowLabel={row.original.subject}
+                      actions={[
+                        {
+                          label: row.original.unreadCount
+                            ? "Mark as read"
+                            : "Mark as unread",
+                          icon: Mail,
+                          primary: true,
+                          onSelect: () =>
+                            markMany.mutate({
+                              ids: row.original.messages.map(
+                                (message) => message.id
+                              ),
+                              read: row.original.unreadCount > 0,
+                            }),
+                        },
+                        {
+                          label: row.original.latestMessage.flagged
+                            ? "Remove flag"
+                            : "Flag message",
+                          icon: Flag,
+                          onSelect: () =>
+                            flag.mutate(row.original.latestMessage),
+                        },
+                      ]}
+                    />
+                  </div>
                 ),
               },
             ]}
             searchable={false}
             enableSelection
             paginated={false}
-            renderMobileRow={renderThread}
+            renderMobileRow={(thread) => renderThread(thread)}
             bulkActions={(rows, clear) => (
               <>
                 <Button

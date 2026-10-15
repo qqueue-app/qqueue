@@ -48,6 +48,7 @@ vi.mock("../lib/api.js", () => ({
     markInboundMessageRead: vi.fn(),
     replyToInboundMessage: vi.fn(),
     prepareInboundForward: vi.fn(),
+    prepareMailboxDraftCopy: vi.fn(),
     createInboxAccount: vi.fn(),
     deleteInboxAccount: vi.fn(),
     downloadInboundAttachment: vi.fn(),
@@ -1222,4 +1223,38 @@ it("pages ten rendered bodies while marking all conversation members read once a
   );
   await screen.findByText("Messages 16–25 of 25");
   expect(screen.getAllByTitle(/^Message from/)).toHaveLength(10);
+});
+
+it("continues an imported mailbox draft as a private copy and never replies to itself", async () => {
+  const user = userEvent.setup();
+  const draft = makeMessage({
+    remoteDraftVersion: "a".repeat(64),
+    locations: [
+      {
+        id: "l1",
+        inboxFolderId: "folder1",
+        folder: { path: "Drafts", name: "Drafts", role: "DRAFTS" },
+      },
+    ],
+  });
+  setup([draft]);
+  mockedApi.prepareMailboxDraftCopy.mockResolvedValue({ id: "private1" });
+  renderWithProviders(<Inbox />, { route: "/inbox?message=m1" });
+  const continueButton = await screen.findByRole("button", {
+    name: "Continue as private copy",
+  });
+  expect(
+    screen.getByRole("button", { name: "Reply to this message from Sender" })
+  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Write a reply" })).toBeDisabled();
+  await user.click(continueButton);
+  await waitFor(() =>
+    expect(mockedApi.prepareMailboxDraftCopy).toHaveBeenCalledWith(
+      "m1",
+      "org_1",
+      expect.any(String),
+      "a".repeat(64)
+    )
+  );
+  expect(mockedApi.replyToInboundMessage).not.toHaveBeenCalled();
 });

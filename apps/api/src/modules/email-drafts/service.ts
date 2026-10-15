@@ -1,14 +1,94 @@
 import { createHash } from "node:crypto";
 import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import type { InputJsonValue } from "@prisma/client/runtime/library";
-import type { EmailDraftInput, EmailDraftUpdateInput } from "@qqueue/shared";
+import type {
+  EmailDraftInput,
+  EmailDraftUpdateInput,
+  MailboxDraftReviewInput,
+} from "@qqueue/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { assertMayUseConnection } from "../../lib/send-as.js";
+import {
+  mailboxDraftSource,
+  mailboxDraftStatus,
+} from "../../lib/mailbox-draft-source.js";
 
 // Drafts are personal: a user only ever sees and edits their own. Scoping every
 // query by createdByUserId enforces that even between members of the same org.
 export const emailDraftService = {
+  async sourceStatus(id: string, userId: string) {
+    return prisma.$transaction(async (db) => {
+      const draft = await db.emailDraft.findFirst({
+        where: { id, createdByUserId: userId, deletedAt: null },
+      });
+      if (!draft?.mailboxDraftSource)
+        throw new HttpError(404, "Mailbox draft copy not found", "not_found");
+      return mailboxDraftStatus(
+        mailboxDraftSource(draft.mailboxDraftSource),
+        draft.organizationId,
+        userId,
+        db
+      );
+    });
+  },
+  async reviewSource(
+    id: string,
+    userId: string,
+    input: MailboxDraftReviewInput
+  ) {
+    return prisma.$transaction(async (db) => {
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"draft:" + id},0))`;
+      const draft = await db.emailDraft.findFirst({
+        where: { id, createdByUserId: userId, deletedAt: null },
+      });
+      if (!draft?.mailboxDraftSource)
+        throw new HttpError(404, "Mailbox draft copy not found", "not_found");
+      const source = mailboxDraftSource(draft.mailboxDraftSource);
+      const status = await mailboxDraftStatus(
+        source,
+        draft.organizationId,
+        userId,
+        db
+      );
+      if (
+        draft.completedSendId ||
+        draft.revision !== input.expectedRevision ||
+        status.state === "LOADING" ||
+        status.currentVersion !== input.expectedVersion
+      )
+        throw new HttpError(
+          409,
+          "The saved writing or mailbox draft changed again. Review its latest version before choosing.",
+          "mailbox_draft_conflict"
+        );
+      const updated = await db.emailDraft.updateMany({
+        where: {
+          id,
+          createdByUserId: userId,
+          revision: input.expectedRevision,
+          deletedAt: null,
+          completedSendId: null,
+        },
+        data: {
+          mailboxDraftSource: {
+            ...source,
+            reviewedVersion: status.currentVersion,
+          },
+          revision: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1)
+        throw new HttpError(
+          409,
+          "This private copy changed while you were reviewing it. Reopen it to compare the writing.",
+          "draft_conflict"
+        );
+      return db.emailDraft.findFirstOrThrow({
+        where: { id, createdByUserId: userId },
+      });
+    });
+  },
   list(organizationId: string, userId: string) {
     return prisma.emailDraft.findMany({
       where: {
@@ -27,7 +107,13 @@ export const emailDraftService = {
       // Include attachment metadata so resuming a draft restores its files.
       include: {
         attachments: {
-          select: { id: true, filename: true, contentType: true, size: true },
+          select: {
+            id: true,
+            filename: true,
+            contentType: true,
+            size: true,
+            cid: true,
+          },
           orderBy: { createdAt: "asc" },
         },
       },

@@ -28,7 +28,13 @@ describe("emailDraftService", () => {
       where: { id: "d1", createdByUserId: "user_1", deletedAt: null },
       include: {
         attachments: {
-          select: { id: true, filename: true, contentType: true, size: true },
+          select: {
+            id: true,
+            filename: true,
+            contentType: true,
+            size: true,
+            cid: true,
+          },
           orderBy: { createdAt: "asc" },
         },
       },

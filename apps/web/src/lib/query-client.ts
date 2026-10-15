@@ -130,6 +130,15 @@ export const qk = {
 
   inboxMoveBatch: (orgId: string, id: string) =>
     ["inbox-move-batch", orgId, id] as const,
+  privateInlineParts: (
+    orgId: string,
+    userId: string,
+    source: string,
+    version: string,
+    ids: string[]
+  ) => ["private-inline-parts", orgId, userId, source, version, ids] as const,
+  mailboxDraftSource: (orgId: string, userId: string, draftId: string) =>
+    ["mailbox-draft-source", orgId, userId, draftId] as const,
   inboxMoves: (orgId: string, messageId: string) =>
     ["inbox-moves", orgId, messageId] as const,
   inboxFolders: (orgId: string, accountId?: string) =>

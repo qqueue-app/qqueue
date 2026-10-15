@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../test/prisma-mock.js";
 
@@ -389,7 +390,7 @@ describe("syncInboxAccount", () => {
       cc: [],
       subject: "",
       references: [],
-      html: undefined,
+      html: null,
       receivedAt: new Date("2026-03-01T00:00:00.000Z"), // from internalDate
       readAt: undefined, // no \Seen flag
       imapUid: 19,
@@ -1072,5 +1073,188 @@ describe("independent folder imports", () => {
       })
     );
     expect(prismaMock.inboundMessage.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("versioned imported mailbox drafts", () => {
+  function draftFolder() {
+    const account = makeAccount({ mailbox: "Drafts" });
+    h.state.paths = ["Drafts"];
+    h.state.mailbox = { exists: 1, uidNext: 8, uidValidity: 99n };
+    h.state.messages = [{ uid: 7, source: "new draft source" }];
+    prismaMock.inboxFolder.findMany.mockResolvedValue([
+      { id: "f1", path: "Drafts", role: "DRAFTS", lastSeenUid: 0 },
+    ] as never);
+    h.simpleParser.mockResolvedValue({
+      messageId: "<external-draft>",
+      html: "<p>New writing</p>",
+      bcc: { value: [{ address: "hidden@example.test" }] },
+      attachments: [],
+    });
+    return account;
+  }
+  it("imports Bcc and exact source identity without treating a new draft as received mail", async () => {
+    const account = draftFolder();
+    await syncInboxAccount(account);
+    expect(h.simpleParser).toHaveBeenCalledWith("new draft source", {
+      keepCidLinks: true,
+    });
+    const hash = createHash("sha256").update("new draft source").digest("hex");
+    expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          remoteDraftVersion: hash,
+          remoteDraftFolderId: "f1",
+          remoteDraftUid: 7,
+          remoteDraftUidValidity: "99",
+          remoteDraftBcc: ["hidden@example.test"],
+        }),
+      })
+    );
+    expect(prismaMock.inboundMessageLocation.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ contentHash: hash }),
+      })
+    );
+  });
+  it("clears removed rich text and reply headers rather than retaining a previous draft version", async () => {
+    const account = draftFolder();
+    h.simpleParser.mockResolvedValue({
+      messageId: "<external-draft>",
+      text: "Plain replacement",
+      html: false,
+      attachments: [],
+    });
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          html: null,
+          text: "Plain replacement",
+          inReplyTo: null,
+          remoteDraftBcc: [],
+        }),
+      })
+    );
+  });
+  it("keeps a draft’s current writing when a non-draft copy shares its Message-ID", async () => {
+    const account = makeAccount();
+    h.state.mailbox = { exists: 1, uidNext: 8, uidValidity: 99n };
+    h.state.messages = [{ uid: 7, source: "older non-draft source" }];
+    h.simpleParser.mockResolvedValue({
+      messageId: "<external-draft>",
+      html: "<p>Old writing</p>",
+      attachments: [],
+    });
+    prismaMock.inboundMessage.findUnique.mockResolvedValue({
+      id: "msg-1",
+      remoteDraftVersion: "newest",
+      remoteDraftFolderId: "draft-folder",
+      remoteDraftUid: 8,
+      remoteDraftUidValidity: "99",
+      readAt: null,
+      readRevision: 1,
+      flagged: false,
+      flagRevision: 1,
+    } as never);
+    prismaMock.inboundMessageLocation.findFirst.mockResolvedValue({
+      id: "present-draft",
+    } as never);
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessage.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.inboundMessageLocation.upsert).toHaveBeenCalled();
+  });
+  it("does not replace a newer draft with a backfilled lower UID in the same namespace", async () => {
+    const account = draftFolder();
+    prismaMock.inboundMessage.findUnique.mockResolvedValue({
+      id: "msg-1",
+      remoteDraftVersion: "newest",
+      remoteDraftFolderId: "f1",
+      remoteDraftUid: 8,
+      remoteDraftUidValidity: "99",
+      readAt: null,
+      readRevision: 1,
+      flagged: false,
+      flagRevision: 1,
+    } as never);
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessage.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.inboundMessageLocation.upsert).toHaveBeenCalled();
+  });
+  it("accepts a new UID-validity namespace even when its numeric UID is lower", async () => {
+    const account = draftFolder();
+    prismaMock.inboundMessage.findUnique.mockResolvedValue({
+      id: "msg-1",
+      remoteDraftVersion: "previous-namespace",
+      remoteDraftFolderId: "f1",
+      remoteDraftUid: 800,
+      remoteDraftUidValidity: "98",
+      readAt: null,
+      readRevision: 1,
+      flagged: false,
+      flagRevision: 1,
+    } as never);
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessage.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          html: "<p>New writing</p>",
+          remoteDraftUid: 7,
+          remoteDraftUidValidity: "99",
+        }),
+      })
+    );
+  });
+  it("stores changed draft file bytes under a new immutable key and replaces obsolete current metadata", async () => {
+    prismaMock.inboundAttachment.findMany.mockResolvedValue([
+      {
+        id: "old-file",
+        partIndex: 0,
+        storageStatus: "AVAILABLE",
+        storageKey: "old-private-key",
+        contentHash: "old-hash",
+        filename: "old.txt",
+        contentType: "text/plain",
+        size: 3,
+        contentId: null,
+        isInline: false,
+      },
+    ] as never);
+    await storeAttachments({
+      organizationId: "org-1",
+      inboundMessageId: "msg-1",
+      replaceDraftParts: true,
+      mail: {
+        attachments: [
+          {
+            filename: "new.txt",
+            contentType: "text/plain",
+            content: Buffer.from("new bytes"),
+            contentDisposition: "attachment",
+          },
+        ],
+      } as never,
+    });
+    const key = h.storage.putObject.mock.calls[0][0].key;
+    expect(key).not.toBe("old-private-key");
+    expect(key).toContain(
+      createHash("sha256").update("new bytes").digest("hex")
+    );
+    expect(prismaMock.inboundAttachment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "old-file" },
+        data: expect.objectContaining({
+          filename: "new.txt",
+          size: 9,
+          storageKey: key,
+        }),
+      })
+    );
+    expect(prismaMock.inboundAttachment.deleteMany).toHaveBeenCalledWith({
+      where: {
+        inboundMessageId: "msg-1",
+        OR: [{ partIndex: { notIn: [0] } }, { partIndex: null }],
+      },
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow, type SearchObject } from "imapflow";
 import { type AddressObject, type ParsedMail, simpleParser } from "mailparser";
 import { env } from "../config/env.js";
@@ -83,6 +83,7 @@ export async function storeAttachments(input: {
   mail: ParsedMail;
   assertAlive?: () => void;
   abortSignal?: AbortSignal;
+  replaceDraftParts?: boolean;
 }) {
   const { organizationId, inboundMessageId, mail } = input;
   const existing = await prisma.inboundAttachment.findMany({
@@ -118,11 +119,28 @@ export async function storeAttachments(input: {
         data: { partIndex },
       });
     }
-    if (row?.storageStatus === "AVAILABLE") continue;
+    const contentHash =
+      input.replaceDraftParts && content
+        ? createHash("sha256").update(content).digest("hex")
+        : undefined;
+    const sameDraftPart =
+      row?.contentHash === contentHash &&
+      row?.filename === filename &&
+      row?.contentType === contentType &&
+      row?.size === size &&
+      row?.contentId === (part.cid ?? null) &&
+      row?.isInline === (part.contentDisposition === "inline");
+    if (
+      row?.storageStatus === "AVAILABLE" &&
+      (!input.replaceDraftParts || sameDraftPart)
+    )
+      continue;
     const oversized = size > env.INBOUND_ATTACHMENT_MAX_BYTES;
     const storageKey =
-      row?.storageKey ??
-      `inbound/${organizationId}/${inboundMessageId}/${partIndex}-${filename}`;
+      input.replaceDraftParts && contentHash
+        ? `inbound/${organizationId}/${inboundMessageId}/${partIndex}-${contentHash}-${filename}`
+        : (row?.storageKey ??
+          `inbound/${organizationId}/${inboundMessageId}/${partIndex}-${filename}`);
     const unavailable = oversized ? "TOO_LARGE" : "UNAVAILABLE";
     const storageError = oversized
       ? `This file exceeds this instance's ${env.INBOUND_ATTACHMENT_MAX_BYTES}-byte attachment limit. Ask an administrator to raise the limit, then retry.`
@@ -137,6 +155,7 @@ export async function storeAttachments(input: {
           contentType,
           size,
           storageKey,
+          contentHash,
           contentId: part.cid ?? null,
           isInline: part.contentDisposition === "inline",
           storageStatus: unavailable,
@@ -146,7 +165,21 @@ export async function storeAttachments(input: {
     else
       await prisma.inboundAttachment.update({
         where: { id: row.id },
-        data: { storageStatus: unavailable, storageError },
+        data: {
+          storageStatus: unavailable,
+          storageError,
+          ...(input.replaceDraftParts
+            ? {
+                filename,
+                contentType,
+                size,
+                storageKey,
+                contentHash,
+                contentId: part.cid ?? null,
+                isInline: part.contentDisposition === "inline",
+              }
+            : {}),
+        },
       });
     if (oversized) continue;
     if (!content) {
@@ -172,6 +205,22 @@ export async function storeAttachments(input: {
         "inbound attachment remains available for retry"
       );
     }
+  }
+  if (input.replaceDraftParts) {
+    input.assertAlive?.();
+    await prisma.inboundAttachment.deleteMany({
+      where: {
+        inboundMessageId,
+        OR: [
+          {
+            partIndex: {
+              notIn: (mail.attachments ?? []).map((_, index) => index),
+            },
+          },
+          { partIndex: null },
+        ],
+      },
+    });
   }
   input.assertAlive?.();
   await prisma.inboundMessage.updateMany({
@@ -229,12 +278,19 @@ async function recoverAttachments(
         })
       )
         continue;
-      const mail = await simpleParser(remote.source);
-      if (message.bodyStatus === "UNAVAILABLE")
+      const mail =
+        account.folderRole === "DRAFTS"
+          ? await simpleParser(remote.source, { keepCidLinks: true })
+          : await simpleParser(remote.source);
+      if (
+        message.bodyStatus === "UNAVAILABLE" ||
+        account.folderRole === "DRAFTS"
+      )
         await storeParsedMessage({
           account,
           uid: location.uid,
           mail: { ...mail, messageId: message.messageId },
+          source: remote.source,
           flags: remote.flags,
           internalDate: remote.internalDate,
           historical: true,
@@ -265,6 +321,7 @@ async function storeParsedMessage(input: {
   flags?: Set<string>;
   internalDate?: Date | string;
   mail: ParsedMail;
+  source?: Buffer | string;
   historical?: boolean;
   bodyUnavailable?: boolean;
   assertAlive?: () => void;
@@ -308,7 +365,7 @@ async function storeParsedMessage(input: {
   const references = normalizeReferences(mail);
   const outbound = await findOutboundThread({
     organizationId: account.organizationId,
-    inReplyTo: mail.inReplyTo,
+    inReplyTo: mail.inReplyTo ?? null,
     references,
   });
   const from = firstAddress(mail.from);
@@ -337,6 +394,10 @@ async function storeParsedMessage(input: {
     select: {
       id: true,
       bodyStatus: true,
+      remoteDraftVersion: true,
+      remoteDraftFolderId: true,
+      remoteDraftUid: true,
+      remoteDraftUidValidity: true,
       readAt: true,
       readRevision: true,
       readPending: true,
@@ -378,12 +439,22 @@ async function storeParsedMessage(input: {
         inboxFolderId: account.folderId,
         uidValidity: account.uidValidity!,
         uid,
+        contentHash: input.source
+          ? createHash("sha256").update(input.source).digest("hex")
+          : undefined,
         remoteSeen: seen,
         remoteFlagged: flags?.has("\\Flagged") ?? false,
         readAppliedRevision: sameRead ? readRevision : 0,
         flagAppliedRevision: sameFlag ? flagRevision : 0,
       },
-      update: { inboundMessageId: id, present: true, observedAt: new Date() },
+      update: {
+        inboundMessageId: id,
+        present: true,
+        observedAt: new Date(),
+        contentHash: input.source
+          ? createHash("sha256").update(input.source).digest("hex")
+          : undefined,
+      },
     });
     if (!previous?.present && !sameRead)
       await prisma.inboundMessage.updateMany({
@@ -395,6 +466,36 @@ async function storeParsedMessage(input: {
         where: { id, flagRevision },
         data: { flagPending: true },
       });
+  }
+  if (existing?.remoteDraftVersion) {
+    const olderDraft =
+      account.folderRole === "DRAFTS" &&
+      existing.remoteDraftFolderId === account.folderId &&
+      existing.remoteDraftUidValidity === account.uidValidity &&
+      (existing.remoteDraftUid ?? 0) > uid;
+    const draftStillPresent =
+      account.folderRole !== "DRAFTS" &&
+      (await prisma.inboundMessageLocation.findFirst({
+        where: {
+          inboundMessageId: existing.id,
+          inboxFolderId: existing.remoteDraftFolderId!,
+          uidValidity: existing.remoteDraftUidValidity!,
+          uid: existing.remoteDraftUid!,
+          present: true,
+          folder: { present: true, role: "DRAFTS" },
+        },
+        select: { id: true },
+      }));
+    if (olderDraft || draftStillPresent) {
+      await storeLocation(
+        existing.id,
+        existing.readAt,
+        existing.readRevision,
+        existing.flagged,
+        existing.flagRevision
+      );
+      return;
+    }
   }
   if (bodyUnavailable && existing?.bodyStatus === "AVAILABLE") {
     await prisma.inboundMessage.updateMany({
@@ -415,6 +516,24 @@ async function storeParsedMessage(input: {
     return;
   }
 
+  const draftSource =
+    account.folderRole === "DRAFTS" && input.source
+      ? {
+          remoteDraftVersion: createHash("sha256")
+            .update(input.source)
+            .digest("hex"),
+          remoteDraftFolderId: account.folderId,
+          remoteDraftUid: uid,
+          remoteDraftUidValidity: account.uidValidity,
+          remoteDraftBcc: addressList(mail.bcc),
+        }
+      : {
+          remoteDraftVersion: null,
+          remoteDraftFolderId: null,
+          remoteDraftUid: null,
+          remoteDraftUidValidity: null,
+          remoteDraftBcc: [],
+        };
   input.assertAlive?.();
   const stored = await prisma.inboundMessage.upsert({
     where: {
@@ -424,11 +543,12 @@ async function storeParsedMessage(input: {
       },
     },
     create: {
+      ...draftSource,
       organizationId: account.organizationId,
       inboxAccountId: account.id,
       emailJobId: outbound?.id,
       messageId,
-      inReplyTo: mail.inReplyTo,
+      inReplyTo: mail.inReplyTo ?? null,
       references,
       fromEmail: from.email,
       fromName: from.name,
@@ -436,8 +556,8 @@ async function storeParsedMessage(input: {
       to: addressList(mail.to),
       cc: addressList(mail.cc),
       subject: mail.subject ?? "",
-      text: mail.text,
-      html: typeof mail.html === "string" ? mail.html : undefined,
+      text: mail.text ?? null,
+      html: typeof mail.html === "string" ? mail.html : null,
       receivedAt,
       readAt: seen ? receivedAt : undefined,
       flagged: flags?.has("\\Flagged") ?? false,
@@ -451,8 +571,9 @@ async function storeParsedMessage(input: {
         : null,
     },
     update: {
+      ...draftSource,
       emailJobId: outbound?.id,
-      inReplyTo: mail.inReplyTo,
+      inReplyTo: mail.inReplyTo ?? null,
       references,
       fromEmail: from.email,
       fromName: from.name,
@@ -460,8 +581,8 @@ async function storeParsedMessage(input: {
       to: addressList(mail.to),
       cc: addressList(mail.cc),
       subject: mail.subject ?? "",
-      text: mail.text,
-      html: typeof mail.html === "string" ? mail.html : undefined,
+      text: mail.text ?? null,
+      html: typeof mail.html === "string" ? mail.html : null,
       receivedAt,
       imapUid: uid,
       imapUidValidity: account.uidValidity,
@@ -486,6 +607,7 @@ async function storeParsedMessage(input: {
       organizationId: account.organizationId,
       inboundMessageId: stored.id,
       mail,
+      replaceDraftParts: account.folderRole === "DRAFTS",
       assertAlive: input.assertAlive,
       abortSignal: input.abortSignal,
     });
@@ -772,7 +894,9 @@ async function syncOpenedFolder(
     )) {
       const envelope = message.envelope;
       const mail: ParsedMail = message.source
-        ? await simpleParser(message.source)
+        ? account.folderRole === "DRAFTS"
+          ? await simpleParser(message.source, { keepCidLinks: true })
+          : await simpleParser(message.source)
         : {
             headers: new Map(),
             headerLines: [],
@@ -839,6 +963,7 @@ async function syncOpenedFolder(
         flags: message.flags,
         internalDate: message.internalDate,
         mail,
+        source: message.source,
         historical,
         bodyUnavailable: !message.source,
         assertAlive,
