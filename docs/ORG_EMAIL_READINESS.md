@@ -652,10 +652,44 @@ Acceptance evidence:
   schema difference. Concurrency and unavailable-file cases have automated
   regression coverage; physical-device acceptance remains separate.
 
+## Decode failures and real IMAP recovery (2026-10-15)
+
+Implemented:
+
+- A source that cannot be decoded now retains its IMAP envelope and a visible,
+  retryable unavailable body while later messages continue importing.
+  Deadline and connection failures still preserve the interrupted batch's cursor
+  for replay. Content retries remain bounded
+  and fair across failed messages.
+- An unavailable newer mailbox-draft source advances its authoritative UID
+  pointer while retaining cached text and Bcc. Recovering a lower UID cannot
+  clear that newer version's pending state, including before any version has
+  parsed successfully. Copy preparation and sending remain blocked until the
+  text and files of that version are ready.
+
+Acceptance evidence:
+
+- A disposable folder on the real IMAP service held 240 controlled messages.
+  Closing the actual IMAP connection after five stored bodies left those cached
+  rows intact and its cursor unchanged. Ten reconnect passes imported the full
+  history, at most the configured 25 new rows per pass, without missing or
+  duplicate logical messages.
+- Deleting and recreating that exact disposable folder produced a new real
+  UID-validity namespace. Its reused UID 1 updated the matching Message-ID rather
+  than the old UID-1 message; a new UID 2 imported separately. Prior locations
+  became absent and the 240 cached messages remained. The exact temporary remote
+  folder and database organization were removed after verification. This is a
+  bounded 240-message history, not production-scale mailbox stress.
+- Regression tests separately verify contained decoder failures, current-draft
+  source pointers, transport-interrupted cursor replay and independent folder
+  progress. All five verification gates and unchanged coverage thresholds pass.
+  This batch changes no schema or sending pipeline.
+
 ## Required before calling the primary-client goal complete
 
-1. **IMAP recovery acceptance:** validate UID-validity replacement, large
-   mailboxes and interrupted import against real services. External drafts now
+1. **IMAP recovery acceptance:** production-scale mailboxes and broader
+   provider/complex-MIME stress remain. Controlled real-service interruption,
+   reconnection, a 240-message history and UID-validity replacement now pass. External drafts now
    continue as explicitly separate personal copies; editing the original IMAP
    draft in place is not supported.
 2. **Draft/composer recovery:** broaden actual concurrent-device, interrupted

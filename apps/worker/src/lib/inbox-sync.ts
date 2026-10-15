@@ -398,6 +398,7 @@ async function storeParsedMessage(input: {
       remoteDraftFolderId: true,
       remoteDraftUid: true,
       remoteDraftUidValidity: true,
+      remoteDraftBcc: true,
       readAt: true,
       readRevision: true,
       readPending: true,
@@ -467,7 +468,7 @@ async function storeParsedMessage(input: {
         data: { flagPending: true },
       });
   }
-  if (existing?.remoteDraftVersion) {
+  if (existing?.remoteDraftFolderId && existing.remoteDraftUid != null) {
     const olderDraft =
       account.folderRole === "DRAFTS" &&
       existing.remoteDraftFolderId === account.folderId &&
@@ -497,6 +498,26 @@ async function storeParsedMessage(input: {
       return;
     }
   }
+  const draftSource =
+    account.folderRole === "DRAFTS"
+      ? {
+          remoteDraftVersion: input.source
+            ? createHash("sha256").update(input.source).digest("hex")
+            : (existing?.remoteDraftVersion ?? null),
+          remoteDraftFolderId: account.folderId,
+          remoteDraftUid: uid,
+          remoteDraftUidValidity: account.uidValidity,
+          remoteDraftBcc: bodyUnavailable
+            ? (existing?.remoteDraftBcc ?? [])
+            : addressList(mail.bcc),
+        }
+      : {
+          remoteDraftVersion: null,
+          remoteDraftFolderId: null,
+          remoteDraftUid: null,
+          remoteDraftUidValidity: null,
+          remoteDraftBcc: [],
+        };
   if (bodyUnavailable && existing?.bodyStatus === "AVAILABLE") {
     await prisma.inboundMessage.updateMany({
       where: { id: existing.id },
@@ -504,6 +525,7 @@ async function storeParsedMessage(input: {
         imapUid: uid,
         imapUidValidity: account.uidValidity,
         contentImportPending: true,
+        ...(account.folderRole === "DRAFTS" ? draftSource : {}),
       },
     });
     await storeLocation(
@@ -516,24 +538,6 @@ async function storeParsedMessage(input: {
     return;
   }
 
-  const draftSource =
-    account.folderRole === "DRAFTS" && input.source
-      ? {
-          remoteDraftVersion: createHash("sha256")
-            .update(input.source)
-            .digest("hex"),
-          remoteDraftFolderId: account.folderId,
-          remoteDraftUid: uid,
-          remoteDraftUidValidity: account.uidValidity,
-          remoteDraftBcc: addressList(mail.bcc),
-        }
-      : {
-          remoteDraftVersion: null,
-          remoteDraftFolderId: null,
-          remoteDraftUid: null,
-          remoteDraftUidValidity: null,
-          remoteDraftBcc: [],
-        };
   input.assertAlive?.();
   const stored = await prisma.inboundMessage.upsert({
     where: {
@@ -567,7 +571,7 @@ async function storeParsedMessage(input: {
       contentImportPending: true,
       bodyStatus: bodyUnavailable ? "UNAVAILABLE" : "AVAILABLE",
       bodyError: bodyUnavailable
-        ? "The mail server did not return this message body. Reload the message to retry."
+        ? "The mailbox did not return a readable message body. Reload its content to retry."
         : null,
     },
     update: {
@@ -590,7 +594,7 @@ async function storeParsedMessage(input: {
       contentImportPending: true,
       bodyStatus: bodyUnavailable ? "UNAVAILABLE" : "AVAILABLE",
       bodyError: bodyUnavailable
-        ? "The mail server did not return this message body. Reload the message to retry."
+        ? "The mailbox did not return a readable message body. Reload its content to retry."
         : null,
     },
   });
@@ -893,43 +897,56 @@ async function syncOpenedFolder(
       { uid: true }
     )) {
       const envelope = message.envelope;
-      const mail: ParsedMail = message.source
-        ? account.folderRole === "DRAFTS"
-          ? await simpleParser(message.source, { keepCidLinks: true })
-          : await simpleParser(message.source)
-        : {
-            headers: new Map(),
-            headerLines: [],
-            html: false,
-            attachments: [],
-            messageId: envelope?.messageId,
-            subject: envelope?.subject,
-            date: envelope?.date,
-            from: {
-              value: (envelope?.from ?? []).map((entry) => ({
-                ...entry,
-                name: entry.name ?? "",
-              })),
-              html: "",
-              text: "",
-            },
-            to: {
-              value: (envelope?.to ?? []).map((entry) => ({
-                ...entry,
-                name: entry.name ?? "",
-              })),
-              html: "",
-              text: "",
-            },
-            cc: {
-              value: (envelope?.cc ?? []).map((entry) => ({
-                ...entry,
-                name: entry.name ?? "",
-              })),
-              html: "",
-              text: "",
-            },
-          };
+      let parsed: ParsedMail | undefined;
+      let bodyUnavailable = !message.source;
+      if (message.source) {
+        try {
+          parsed =
+            account.folderRole === "DRAFTS"
+              ? await simpleParser(message.source, { keepCidLinks: true })
+              : await simpleParser(message.source);
+        } catch {
+          assertAlive();
+          bodyUnavailable = true;
+          logger.warn(
+            { inboxFolderId: account.folderId, uid: message.uid },
+            "message decoding failed; keeping envelope for content recovery"
+          );
+        }
+      }
+      const mail: ParsedMail = parsed ?? {
+        headers: new Map(),
+        headerLines: [],
+        html: false,
+        attachments: [],
+        messageId: envelope?.messageId,
+        subject: envelope?.subject,
+        date: envelope?.date,
+        from: {
+          value: (envelope?.from ?? []).map((entry) => ({
+            ...entry,
+            name: entry.name ?? "",
+          })),
+          html: "",
+          text: "",
+        },
+        to: {
+          value: (envelope?.to ?? []).map((entry) => ({
+            ...entry,
+            name: entry.name ?? "",
+          })),
+          html: "",
+          text: "",
+        },
+        cc: {
+          value: (envelope?.cc ?? []).map((entry) => ({
+            ...entry,
+            name: entry.name ?? "",
+          })),
+          html: "",
+          text: "",
+        },
+      };
       if (!mail.messageId) {
         const known = await prisma.inboundMessageLocation.findUnique({
           where: {
@@ -965,7 +982,7 @@ async function syncOpenedFolder(
         mail,
         source: message.source,
         historical,
-        bodyUnavailable: !message.source,
+        bodyUnavailable,
         assertAlive,
         abortSignal,
       });

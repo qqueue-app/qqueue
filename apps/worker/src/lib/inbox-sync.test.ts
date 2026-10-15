@@ -34,6 +34,7 @@ const h = vi.hoisted(() => {
       source?: Buffer | string;
       envelope?: { messageId?: string };
     }>,
+    fetchErrorAtUid: null as number | null,
     fetches: [] as Array<{
       range: string | number[];
       source?: boolean;
@@ -99,7 +100,11 @@ const h = vi.hoisted(() => {
               const identity = options?.uid ? message.uid : index + 1;
               return identity >= first && identity <= last;
             })();
-        if (included) yield query.source ? message : { uid: message.uid };
+        if (included) {
+          if (query.source && state.fetchErrorAtUid === message.uid)
+            throw new Error("Interrupted source");
+          yield query.source ? message : { uid: message.uid };
+        }
       }
     }
     async fetchOne(uid: number) {
@@ -190,6 +195,7 @@ beforeEach(() => {
   h.state.paths = ["INBOX"];
   h.state.currentPath = "INBOX";
   h.state.fetches = [];
+  h.state.fetchErrorAtUid = null;
   h.state.connectCalls = 0;
   h.state.closeCalls = 0;
   h.state.connectError = null;
@@ -773,9 +779,8 @@ describe("bounded history and import recovery", () => {
       { uid: 60, source: "raw" },
     ];
     h.state.mailbox = { exists: 2, uidNext: 100, uidValidity: 99n };
-    h.simpleParser
-      .mockResolvedValueOnce({ attachments: [] })
-      .mockRejectedValueOnce(new Error("Interrupted source"));
+    h.state.fetchErrorAtUid = 60;
+    h.simpleParser.mockResolvedValue({ attachments: [] });
     await expect(
       syncInboxAccount(
         makeAccount({
@@ -1047,10 +1052,14 @@ describe("independent folder imports", () => {
       { id: "f1", path: "INBOX", role: "INBOX", lastSeenUid: 0 },
       { id: "f2", path: "Archive", role: "ARCHIVE", lastSeenUid: 0 },
     ] as never);
-    h.simpleParser
-      .mockRejectedValueOnce(new Error("bad primary body"))
-      .mockResolvedValue({ messageId: "<old@mail>", attachments: [] });
-    await expect(syncInboxAccount(account)).rejects.toThrow("bad primary body");
+    h.state.fetchErrorAtUid = 7;
+    h.simpleParser.mockResolvedValue({
+      messageId: "<old@mail>",
+      attachments: [],
+    });
+    await expect(syncInboxAccount(account)).rejects.toThrow(
+      "Interrupted source"
+    );
     expect(prismaMock.inboxFolder.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "f2" },
@@ -1074,6 +1083,43 @@ describe("independent folder imports", () => {
     );
     expect(prismaMock.inboundMessage.deleteMany).not.toHaveBeenCalled();
   });
+});
+
+it("keeps an undecodable message visible for retry without starving later mailbox messages", async () => {
+  const account = makeAccount();
+  h.state.mailbox = { exists: 2, uidNext: 20, uidValidity: 99n };
+  h.state.messages = [
+    { uid: 18, source: "undecodable source", envelope: { messageId: "<bad>" } },
+    { uid: 19, source: "good source" },
+  ];
+  h.simpleParser
+    .mockRejectedValueOnce(new Error("MIME decoding failed"))
+    .mockResolvedValueOnce({
+      messageId: "<good>",
+      text: "Later writing",
+      attachments: [],
+    });
+  await syncInboxAccount(account);
+  const calls = prismaMock.inboundMessage.upsert.mock.calls.map(
+    ([arg]) => arg.create
+  );
+  expect(calls).toHaveLength(2);
+  expect(calls[0]).toMatchObject({
+    messageId: "<bad>",
+    bodyStatus: "UNAVAILABLE",
+    contentImportPending: true,
+    bodyError: expect.stringContaining("readable message body"),
+  });
+  expect(calls[1]).toMatchObject({
+    messageId: "<good>",
+    text: "Later writing",
+    bodyStatus: "AVAILABLE",
+  });
+  expect(prismaMock.inboxFolder.update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({ lastSeenUid: 19, lastSyncError: null }),
+    })
+  );
 });
 
 describe("versioned imported mailbox drafts", () => {
@@ -1116,6 +1162,61 @@ describe("versioned imported mailbox drafts", () => {
         create: expect.objectContaining({ contentHash: hash }),
       })
     );
+  });
+  it("keeps cached draft writing but advances its source pointer when a newer version cannot be decoded", async () => {
+    const account = draftFolder();
+    h.simpleParser.mockRejectedValue(new Error("MIME decoding failed"));
+    prismaMock.inboundMessage.findUnique.mockResolvedValue({
+      id: "msg-1",
+      bodyStatus: "AVAILABLE",
+      remoteDraftVersion: "old",
+      remoteDraftFolderId: "f1",
+      remoteDraftUid: 6,
+      remoteDraftUidValidity: "99",
+      remoteDraftBcc: ["retained@example.test"],
+      readAt: null,
+      readRevision: 1,
+      flagged: false,
+      flagRevision: 1,
+    } as never);
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessage.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.inboundMessage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          remoteDraftUid: 7,
+          remoteDraftVersion: createHash("sha256")
+            .update("new draft source")
+            .digest("hex"),
+          remoteDraftBcc: ["retained@example.test"],
+          contentImportPending: true,
+        }),
+      })
+    );
+    for (const [arg] of prismaMock.inboundMessage.updateMany.mock.calls)
+      expect(arg.data).not.toHaveProperty("html");
+    expect(h.storage.putObject).not.toHaveBeenCalled();
+  });
+  it("does not mark a pending newer draft complete by recovering a lower UID with no prior parsed version", async () => {
+    const account = draftFolder();
+    prismaMock.inboundMessage.findUnique.mockResolvedValue({
+      id: "msg-1",
+      remoteDraftVersion: null,
+      remoteDraftFolderId: "f1",
+      remoteDraftUid: 8,
+      remoteDraftUidValidity: "99",
+      readAt: null,
+      readRevision: 1,
+      flagged: false,
+      flagRevision: 1,
+    } as never);
+    await syncInboxAccount(account);
+    expect(prismaMock.inboundMessage.upsert).not.toHaveBeenCalled();
+    expect(
+      prismaMock.inboundMessage.updateMany.mock.calls.some(
+        ([arg]) => arg.data.contentImportPending === false
+      )
+    ).toBe(false);
   });
   it("clears removed rich text and reply headers rather than retaining a previous draft version", async () => {
     const account = draftFolder();
