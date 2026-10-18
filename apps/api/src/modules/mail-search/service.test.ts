@@ -147,3 +147,34 @@ describe("unified mail search", () => {
     });
   });
 });
+
+it("excludes a revoked admin's own sent mail from raw SQL search", async () => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "ADMIN",
+  } as never);
+  prismaMock.smtpConnectionGrant.findMany.mockResolvedValue([
+    { smtpConnectionId: "private-smtp" },
+  ] as never);
+  prismaMock.inboxAccountGrant.findMany.mockResolvedValue([
+    { inboxAccountId: "private-inbox" },
+  ] as never);
+  prismaMock.sMTPConnection.findMany.mockResolvedValue([
+    { id: "allowed-smtp" },
+  ] as never);
+  prismaMock.inboxAccount.findMany.mockResolvedValue([
+    { id: "allowed-inbox" },
+  ] as never);
+  prismaMock.$queryRaw.mockResolvedValue([]);
+  await mailSearchService.search(
+    "org1",
+    "admin",
+    mailSearchSchema.parse({ view: "SENT" })
+  );
+  const query = prismaMock.$queryRaw.mock.calls[0][0] as {
+    sql: string;
+    values: unknown[];
+  };
+  expect(query.sql).toContain('j."smtpConnectionId" NOT IN');
+  expect(query.values).toContain("private-smtp");
+  expect(query.values).toContain("allowed-smtp");
+});

@@ -1108,6 +1108,7 @@ export const inviteCreateSchema = z.object({
   organizationId: z.string().min(1),
   email: emailAddressSchema,
   role: userRoleSchema.default("MEMBER"),
+  smtpConnectionIds: z.array(z.string().min(1)).max(100).optional(),
 });
 
 export type InviteCreateInput = z.infer<typeof inviteCreateSchema>;

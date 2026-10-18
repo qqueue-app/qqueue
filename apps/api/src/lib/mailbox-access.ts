@@ -6,7 +6,7 @@ import { prisma } from "./prisma.js";
 /**
  * Per-mailbox access: which mailboxes a person may read, and send as.
  *
- * OWNER/ADMIN see everything in their organization. A MEMBER sees only the
+ * Owners see every mailbox; admins see all except explicitly revoked ones. Members see the
  * mailboxes an owner or admin has assigned to them — in the inbox, in the sent
  * archive, and in the outbox. This is the read-side companion to send-as
  * enforcement in lib/send-as.ts, which stays the authority on sending.
@@ -18,16 +18,18 @@ import { prisma } from "./prisma.js";
  * both are grantable and the pairing is done by address, here.
  */
 
-/** OWNER and ADMIN are never restricted; only a MEMBER is. */
+/** Owners are unrestricted; admins can have explicit mailbox denials. */
 export interface MailboxAccess {
   userId: string;
   organizationId: string;
-  /** True for OWNER/ADMIN: every mailbox in the org, no row required. */
+  /** True when every mailbox is accessible. */
   unrestricted: boolean;
   /** Readable mailboxes. Meaningless when `unrestricted`. */
   inboxAccountIds: string[];
   /** Sendable connections. Meaningless when `unrestricted`. */
   smtpConnectionIds: string[];
+  /** Admin denials also exclude messages they authored from these accounts. */
+  revokedSmtpConnectionIds?: string[];
 }
 
 /**
@@ -44,7 +46,7 @@ export async function resolveMailboxAccess(
     throw new HttpError(403, "You do not have access to this organization");
   }
 
-  if (membership.role === "OWNER" || membership.role === "ADMIN") {
+  if (membership.role === "OWNER") {
     return {
       userId,
       organizationId,
@@ -54,16 +56,53 @@ export async function resolveMailboxAccess(
     };
   }
 
+  const isAdmin = membership.role === "ADMIN";
   const [inboxGrants, smtpGrants] = await Promise.all([
     prisma.inboxAccountGrant.findMany({
-      where: { organizationId, userId },
+      where: { organizationId, userId, revoked: isAdmin },
       select: { inboxAccountId: true },
     }),
     prisma.smtpConnectionGrant.findMany({
-      where: { organizationId, userId },
+      where: { organizationId, userId, revoked: isAdmin },
       select: { smtpConnectionId: true },
     }),
   ]);
+
+  if (isAdmin) {
+    const deniedInbox = (inboxGrants ?? []).map(
+      (grant) => grant.inboxAccountId
+    );
+    const deniedSmtp = (smtpGrants ?? []).map(
+      (grant) => grant.smtpConnectionId
+    );
+    if (!deniedInbox.length && !deniedSmtp.length) {
+      return {
+        userId,
+        organizationId,
+        unrestricted: true,
+        inboxAccountIds: [],
+        smtpConnectionIds: [],
+      };
+    }
+    const [inboxes, connections] = await Promise.all([
+      prisma.inboxAccount.findMany({
+        where: { organizationId, id: { notIn: deniedInbox } },
+        select: { id: true },
+      }),
+      prisma.sMTPConnection.findMany({
+        where: { organizationId, id: { notIn: deniedSmtp } },
+        select: { id: true },
+      }),
+    ]);
+    return {
+      userId,
+      organizationId,
+      unrestricted: false,
+      inboxAccountIds: inboxes.map((account) => account.id),
+      smtpConnectionIds: connections.map((connection) => connection.id),
+      revokedSmtpConnectionIds: deniedSmtp,
+    };
+  }
 
   return {
     userId,
@@ -100,12 +139,26 @@ export function emailJobScope(
   access: MailboxAccess
 ): Prisma.EmailJobWhereInput {
   if (access.unrestricted) return {};
-  return {
+  const visible = {
     OR: [
       { smtpConnectionId: { in: access.smtpConnectionIds } },
       { createdByUserId: access.userId },
     ],
   };
+  if (access.revokedSmtpConnectionIds?.length) {
+    return {
+      AND: [
+        visible,
+        {
+          OR: [
+            { smtpConnectionId: null },
+            { smtpConnectionId: { notIn: access.revokedSmtpConnectionIds } },
+          ],
+        },
+      ],
+    };
+  }
+  return visible;
 }
 
 /** Throw unless this person may read this specific mailbox. */
@@ -200,4 +253,66 @@ export async function findPairedInboxAccountId(
     select: { id: true },
   });
   return account?.id ?? null;
+}
+
+/** A restricted admin cannot reconnect, rename another account to, or reset this address. */
+export async function assertMailboxNotRevoked(
+  userId: string,
+  organizationId: string,
+  email: string
+): Promise<void> {
+  const membership = await getMembership(userId, organizationId);
+  if (!membership)
+    throw new HttpError(403, "You do not have access to this organization");
+  if (membership.role === "OWNER") return;
+  const address = { equals: email, mode: "insensitive" as const };
+  const [smtp, inbox] = await Promise.all([
+    prisma.smtpConnectionGrant.findFirst({
+      where: {
+        organizationId,
+        userId,
+        revoked: true,
+        smtpConnection: { fromEmail: address },
+      },
+      select: { id: true },
+    }),
+    prisma.inboxAccountGrant.findFirst({
+      where: {
+        organizationId,
+        userId,
+        revoked: true,
+        inboxAccount: { email: address },
+      },
+      select: { id: true },
+    }),
+  ]);
+  if (smtp || inbox)
+    throw new HttpError(
+      403,
+      "You do not have access to this mailbox",
+      "mailbox_access_denied"
+    );
+}
+
+/** Org-wide integration/operations tools must not bypass mailbox restrictions. */
+export async function assertNoMailboxRestrictions(
+  userId: string,
+  organizationId: string
+): Promise<void> {
+  const where = {
+    organizationId,
+    userId,
+    revoked: true,
+    user: { members: { none: { organizationId, role: "OWNER" as const } } },
+  };
+  const [smtp, inbox] = await Promise.all([
+    prisma.smtpConnectionGrant.count({ where }),
+    prisma.inboxAccountGrant.count({ where }),
+  ]);
+  if (smtp || inbox)
+    throw new HttpError(
+      403,
+      "Ask an owner to manage organization-wide integrations and operations",
+      "mailbox_access_denied"
+    );
 }

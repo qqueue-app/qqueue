@@ -1,3 +1,4 @@
+import { requireUnrestrictedMailboxes } from "../../middleware/require-unrestricted-mailboxes.js";
 import { Router } from "express";
 import { requireOrgMembership } from "../../middleware/require-org.js";
 import { requireOrgRole } from "../../middleware/require-org-role.js";
@@ -10,7 +11,8 @@ export const queueOperationsRouter = Router();
 // role by passing organizationId (query for reads, body for the retry write).
 queueOperationsRouter.use(
   requireOrgMembership,
-  requireOrgRole("OWNER", "ADMIN")
+  requireOrgRole("OWNER", "ADMIN"),
+  requireUnrestrictedMailboxes
 );
 
 queueOperationsRouter.get("/", queueOperationsController.summary);

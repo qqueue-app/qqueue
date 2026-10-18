@@ -80,7 +80,7 @@ describe("inboxController.createAccount", () => {
     const res = mockRes();
 
     await inboxController.createAccount(
-      { body: validAccountBody } as Request,
+      { body: validAccountBody, userId: "usr_1" } as Request,
       res
     );
 
@@ -88,7 +88,8 @@ describe("inboxController.createAccount", () => {
       expect.objectContaining({
         organizationId: "org_1",
         host: "imap.example.com",
-      })
+      }),
+      "usr_1"
     );
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith({ data: created });
@@ -101,6 +102,7 @@ describe("inboxController.createAccount", () => {
 
     await inboxController.createAccount(
       {
+        userId: "usr_1",
         body: {
           organizationId: "org_1",
           name: "Support",
@@ -114,7 +116,8 @@ describe("inboxController.createAccount", () => {
     );
 
     expect(inboxService.createAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ port: 993, secure: true, mailbox: "INBOX" })
+      expect.objectContaining({ port: 993, secure: true, mailbox: "INBOX" }),
+      "usr_1"
     );
   });
 
@@ -135,7 +138,7 @@ describe("inboxController.createAccount", () => {
 
     await expect(
       inboxController.createAccount(
-        { body: validAccountBody } as Request,
+        { body: validAccountBody, userId: "usr_1" } as Request,
         mockRes()
       )
     ).rejects.toThrow(
@@ -278,6 +281,7 @@ describe("inboxController.storeInboundMessage", () => {
 
     await inboxController.storeInboundMessage(
       {
+        userId: "usr_1",
         body: {
           organizationId: "org_1",
           inboxAccountId: "iba_1",

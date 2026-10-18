@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { SMTPProvider } from "@qqueue/email-engine";
 import type {
   SMTPConnectionInput,
@@ -17,6 +18,7 @@ import {
   lockOrganizationTeam,
 } from "../../lib/org-access.js";
 import { prisma } from "../../lib/prisma.js";
+import { assertMailboxNotRevoked } from "../../lib/mailbox-access.js";
 import { describeSmtpVerifyError } from "./verify-error.js";
 
 export const smtpConnectionSelect = {
@@ -159,7 +161,14 @@ export async function verifyConnection(
 // full record (including encrypted secrets) for internal use.
 async function findOwned(id: string, userId: string) {
   const connection = await prisma.sMTPConnection.findFirst({
-    where: { id, organization: { members: { some: { userId } } } },
+    where: {
+      id,
+      organization: { members: { some: { userId } } },
+      OR: [
+        { organization: { members: { some: { userId, role: "OWNER" } } } },
+        { grants: { none: { userId, revoked: true } } },
+      ],
+    },
   });
   if (!connection) {
     throw new HttpError(404, "SMTP connection not found");
@@ -167,8 +176,23 @@ async function findOwned(id: string, userId: string) {
   return connection;
 }
 
+async function assertGrantActorAccess(
+  tx: Prisma.TransactionClient,
+  id: string,
+  userId: string,
+  role: string
+) {
+  if (role === "OWNER") return;
+  const grant = await tx.smtpConnectionGrant.findUnique({
+    where: { smtpConnectionId_userId: { smtpConnectionId: id, userId } },
+  });
+  if (grant?.revoked)
+    throw new HttpError(403, "You do not have access to this mailbox");
+}
+
 export const smtpConnectionService = {
-  list(organizationId: string) {
+  list(organizationId: string, userId?: string) {
+    if (userId) return this.listSendable(organizationId, userId);
     return prisma.sMTPConnection.findMany({
       where: { organizationId },
       select: smtpConnectionSelect,
@@ -184,7 +208,13 @@ export const smtpConnectionService = {
     });
   },
 
-  async create(input: SMTPConnectionInput) {
+  async create(input: SMTPConnectionInput, userId?: string) {
+    if (userId)
+      await assertMailboxNotRevoked(
+        userId,
+        input.organizationId,
+        input.fromEmail
+      );
     const usernameEncrypted = encryptSecret(input.username);
     const passwordEncrypted = encryptSecret(input.password);
 
@@ -224,6 +254,12 @@ export const smtpConnectionService = {
     // Writes are OWNER/ADMIN only (the route can't check: no org id in the
     // request until the row is loaded). Non-members still get the 404 above.
     await assertOrgRole(userId, existing.organizationId, ["OWNER", "ADMIN"]);
+    if (input.fromEmail)
+      await assertMailboxNotRevoked(
+        userId,
+        existing.organizationId,
+        input.fromEmail
+      );
     // Connections stay in their original org; we never move them across tenants.
     const organizationId = existing.organizationId;
     const usernameEncrypted = input.username
@@ -303,7 +339,7 @@ export const smtpConnectionService = {
 
   /**
    * The connections this user may send as (Phase 4): every org connection for
-   * OWNER/ADMIN, only granted ones for a MEMBER. Backs the composer's account
+   * owners, non-revoked connections for admins, and grants for members. Backs the composer's account
    * picker, so a member never sees an identity that would 403 at send time.
    */
   async listSendable(organizationId: string, userId: string) {
@@ -311,18 +347,23 @@ export const smtpConnectionService = {
     if (!membership) {
       throw new HttpError(403, "You do not have access to this organization");
     }
-    if (membership.role === "OWNER" || membership.role === "ADMIN") {
-      return this.list(organizationId);
-    }
     return prisma.sMTPConnection.findMany({
-      where: { organizationId, grants: { some: { userId } } },
+      where: {
+        organizationId,
+        grants:
+          membership.role === "OWNER"
+            ? undefined
+            : membership.role === "ADMIN"
+              ? { none: { userId, revoked: true } }
+              : { some: { userId, revoked: false } },
+      },
       select: smtpConnectionSelect,
       orderBy: { createdAt: "desc" },
     });
   },
 
   /*
-    Grant management is OWNER/ADMIN, like every other connection write.
+    Owners manage admin access; admins manage members on their own mailboxes.
 
     One grant means one mailbox: access to send as an address and access to read
     what arrives at it are granted and revoked together, because that is the
@@ -354,7 +395,7 @@ export const smtpConnectionService = {
     // Idempotent: re-granting is a no-op rather than an error.
     return prisma.$transaction(async (tx) => {
       await lockOrganizationTeam(tx, connection.organizationId);
-      await assertOrgRole(
+      const actor = await assertOrgRole(
         userId,
         connection.organizationId,
         ["OWNER", "ADMIN"],
@@ -374,6 +415,13 @@ export const smtpConnectionService = {
         );
       }
 
+      if (actor.role !== "OWNER" && granteeMembership.role !== "MEMBER") {
+        throw new HttpError(
+          403,
+          "Only an owner can change an admin's mailbox access"
+        );
+      }
+      await assertGrantActorAccess(tx, id, userId, actor.role);
       const grant = await tx.smtpConnectionGrant.upsert({
         where: {
           smtpConnectionId_userId: {
@@ -386,7 +434,7 @@ export const smtpConnectionService = {
           smtpConnectionId: id,
           userId: granteeUserId,
         },
-        update: {},
+        update: { revoked: false },
         include: { user: { select: { id: true, email: true, name: true } } },
       });
       if (inboxAccountId)
@@ -399,7 +447,7 @@ export const smtpConnectionService = {
             inboxAccountId,
             userId: granteeUserId,
           },
-          update: {},
+          update: { revoked: false },
         });
       return grant;
     });
@@ -413,19 +461,69 @@ export const smtpConnectionService = {
     );
     await prisma.$transaction(async (tx) => {
       await lockOrganizationTeam(tx, connection.organizationId);
-      await assertOrgRole(
+      const actor = await assertOrgRole(
         userId,
         connection.organizationId,
         ["OWNER", "ADMIN"],
         tx
       );
-      await tx.smtpConnectionGrant.deleteMany({
-        where: { smtpConnectionId: id, userId: granteeUserId },
+      const grantee = await getMembership(
+        granteeUserId,
+        connection.organizationId,
+        tx
+      );
+      if (!grantee)
+        throw new HttpError(
+          400,
+          "That user is not a member of this organization",
+          "validation_error"
+        );
+      if (grantee.role === "OWNER")
+        throw new HttpError(403, "Owners always have every mailbox");
+      if (actor.role !== "OWNER" && grantee?.role !== "MEMBER") {
+        throw new HttpError(
+          403,
+          "Only an owner can change an admin's mailbox access"
+        );
+      }
+      await assertGrantActorAccess(tx, id, userId, actor.role);
+      // Keep a denial row even after a demotion, so promotion cannot restore access.
+      await tx.smtpConnectionGrant.upsert({
+        where: {
+          smtpConnectionId_userId: {
+            smtpConnectionId: id,
+            userId: granteeUserId,
+          },
+        },
+        create: {
+          organizationId: connection.organizationId,
+          smtpConnectionId: id,
+          userId: granteeUserId,
+          revoked: true,
+        },
+        update: { revoked: true },
       });
       if (inboxAccountId)
-        await tx.inboxAccountGrant.deleteMany({
-          where: { inboxAccountId, userId: granteeUserId },
+        await tx.inboxAccountGrant.upsert({
+          where: {
+            inboxAccountId_userId: { inboxAccountId, userId: granteeUserId },
+          },
+          create: {
+            organizationId: connection.organizationId,
+            inboxAccountId,
+            userId: granteeUserId,
+            revoked: true,
+          },
+          update: { revoked: true },
         });
+      await tx.apiKey.updateMany({
+        where: {
+          organizationId: connection.organizationId,
+          userId: granteeUserId,
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      });
     });
   },
 };

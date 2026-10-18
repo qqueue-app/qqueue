@@ -15,6 +15,8 @@ import { HttpError } from "../../lib/http-error.js";
 import {
   emailJobScope,
   inboundMessageScope,
+  assertMailboxNotRevoked,
+  assertInboxAccountAccess,
   resolveMailboxAccess,
 } from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
@@ -591,7 +593,9 @@ export const inboxService = {
     }
   },
 
-  async createAccount(input: InboxAccountInput) {
+  async createAccount(input: InboxAccountInput, userId?: string) {
+    if (userId)
+      await assertMailboxNotRevoked(userId, input.organizationId, input.email);
     await this.verifyConnection(input);
 
     const data = {
@@ -658,6 +662,10 @@ export const inboxService = {
     input: InboxAccountUpdateInput,
     organizationId: string
   ) {
+    assertInboxAccountAccess(
+      await resolveMailboxAccess(userId, organizationId),
+      id
+    );
     const { count } = await prisma.inboxAccount.updateMany({
       where: {
         id,
@@ -693,6 +701,10 @@ export const inboxService = {
   },
 
   async deleteAccount(id: string, userId: string, organizationId: string) {
+    assertInboxAccountAccess(
+      await resolveMailboxAccess(userId, organizationId),
+      id
+    );
     // Disconnecting must never cascade into deleting the team's received mail.
     const { count } = await prisma.inboxAccount.updateMany({
       where: {

@@ -102,9 +102,14 @@ export const mailSearchService = {
       : access.inboxAccountIds.length
         ? Prisma.sql`m."inboxAccountId" IN (${Prisma.join(access.inboxAccountIds)})`
         : Prisma.sql`FALSE`;
-    const sentScope = access.unrestricted
+    const sentAccess = access.unrestricted
       ? Prisma.sql`TRUE`
       : Prisma.sql`(j."createdByUserId"=${userId} OR ${access.smtpConnectionIds.length ? Prisma.sql`j."smtpConnectionId" IN (${Prisma.join(access.smtpConnectionIds)})` : Prisma.sql`FALSE`})`;
+    const sentScope = Prisma.sql`(${sentAccess}) AND ${
+      access.revokedSmtpConnectionIds?.length
+        ? Prisma.sql`(j."smtpConnectionId" IS NULL OR j."smtpConnectionId" NOT IN (${Prisma.join(access.revokedSmtpConnectionIds)}))`
+        : Prisma.sql`TRUE`
+    }`;
     const currentFolder = (role: string) =>
       Prisma.sql`EXISTS (SELECT 1 FROM "InboundMessageLocation" l JOIN "InboxFolder" f ON f.id=l."inboxFolderId" WHERE l."inboundMessageId"=m.id AND l.present AND f.present AND f.role=${role})`;
     const incomingView =

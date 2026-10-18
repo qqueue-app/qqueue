@@ -73,6 +73,7 @@ const assignedToUs = [
 const assignedToOther: never[] = [] as never;
 
 beforeEach(() => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({ role: "OWNER" } as never);
   for (const fn of Object.values(h.client)) {
     fn.mockReset().mockResolvedValue(undefined);
   }

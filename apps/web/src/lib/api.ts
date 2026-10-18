@@ -76,6 +76,7 @@ export interface OrganizationMember {
 export type InviteStatus = "PENDING" | "ACCEPTED" | "REVOKED";
 
 export interface OrganizationInvite {
+  smtpConnectionIds: string[];
   id: string;
   organizationId: string;
   email: string;
@@ -827,6 +828,7 @@ export interface SMTPConnection {
 }
 
 export interface SmtpConnectionGrant {
+  revoked: boolean;
   id: string;
   organizationId: string;
   smtpConnectionId: string;
@@ -2486,7 +2488,12 @@ export const api = {
     );
   },
 
-  createInvite(input: { organizationId: string; email: string; role: string }) {
+  createInvite(input: {
+    organizationId: string;
+    email: string;
+    role: string;
+    smtpConnectionIds?: string[];
+  }) {
     return request<{
       invite: OrganizationInvite;
       acceptUrl: string;

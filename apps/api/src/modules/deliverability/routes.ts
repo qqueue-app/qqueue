@@ -1,3 +1,4 @@
+import { requireUnrestrictedMailboxes } from "../../middleware/require-unrestricted-mailboxes.js";
 import { Router } from "express";
 import { requireOrgMembership } from "../../middleware/require-org.js";
 import { requireOrgRole } from "../../middleware/require-org-role.js";
@@ -8,7 +9,8 @@ export const deliverabilityRouter = Router();
 // Deliverability is an operations view, restricted to OWNER/ADMIN.
 deliverabilityRouter.use(
   requireOrgMembership,
-  requireOrgRole("OWNER", "ADMIN")
+  requireOrgRole("OWNER", "ADMIN"),
+  requireUnrestrictedMailboxes
 );
 
 deliverabilityRouter.get("/overview", deliverabilityController.overview);

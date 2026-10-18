@@ -3,8 +3,8 @@ import { getMembership } from "./org-access.js";
 import { prisma } from "./prisma.js";
 
 /**
- * Send-as enforcement (Phase 4): OWNER/ADMIN may send from any org
- * connection; a MEMBER only from connections they hold a SmtpConnectionGrant
+ * Send-as enforcement (Phase 4): Owners may send from any org connection; admins may unless explicitly
+ * revoked, and members only from connections they hold a SmtpConnectionGrant
  * for.
  *
  * Enforced once, at creation time on every send surface (transactional +
@@ -27,7 +27,7 @@ export async function assertMayUseConnection(input: {
   if (!membership) {
     throw new HttpError(403, "You do not have access to this organization");
   }
-  if (membership.role === "OWNER" || membership.role === "ADMIN") {
+  if (membership.role === "OWNER") {
     return;
   }
 
@@ -49,9 +49,9 @@ export async function assertMayUseConnection(input: {
     where: {
       smtpConnectionId_userId: { smtpConnectionId, userId: input.userId },
     },
-    select: { id: true },
+    select: { id: true, revoked: true },
   });
-  if (!grant) {
+  if (grant?.revoked || (membership.role !== "ADMIN" && !grant)) {
     throw new HttpError(
       403,
       "You are not allowed to send as this account",

@@ -24,6 +24,7 @@ const inviteSelect = {
   organizationId: true,
   email: true,
   role: true,
+  smtpConnectionIds: true,
   status: true,
   expiresAt: true,
   acceptedAt: true,
@@ -100,8 +101,13 @@ export const invitationService = {
       ["OWNER", "ADMIN"]
     );
 
-    if (input.role === "OWNER" && membership.role !== "OWNER") {
-      throw new HttpError(403, "Only an owner can invite another owner");
+    if (input.role !== "MEMBER" && membership.role !== "OWNER") {
+      throw new HttpError(
+        403,
+        input.role === "OWNER"
+          ? "Only an owner can invite another owner"
+          : "Only an owner can invite an admin"
+      );
     }
 
     const email = input.email.toLowerCase();
@@ -132,9 +138,22 @@ export const invitationService = {
           ["OWNER", "ADMIN"],
           tx
         );
-        if (input.role === "OWNER" && currentActor.role !== "OWNER") {
-          throw new HttpError(403, "Only an owner can invite another owner");
+        if (input.role !== "MEMBER" && currentActor.role !== "OWNER") {
+          throw new HttpError(
+            403,
+            input.role === "OWNER"
+              ? "Only an owner can invite another owner"
+              : "Only an owner can invite an admin"
+          );
         }
+        const smtpConnectionIds = [...new Set(input.smtpConnectionIds ?? [])];
+        await selectableMailboxes(
+          tx,
+          input.organizationId,
+          invitedByUserId,
+          currentActor.role,
+          smtpConnectionIds
+        );
         // Supersede any still-pending invite for this email/org.
         await tx.organizationInvite.updateMany({
           where: {
@@ -150,6 +169,7 @@ export const invitationService = {
             organizationId: input.organizationId,
             email,
             role: input.role,
+            smtpConnectionIds,
             tokenHash,
             invitedByUserId,
             expiresAt,
@@ -305,6 +325,7 @@ export const invitationService = {
             tx
           );
           if (!member) {
+            const mailboxes = await acceptanceMailboxes(tx, invite);
             await tx.organizationMember.create({
               data: {
                 organizationId: invite.organizationId,
@@ -312,6 +333,12 @@ export const invitationService = {
                 role: invite.role,
               },
             });
+            await grantInviteMailboxes(
+              tx,
+              invite.organizationId,
+              existingUser.id,
+              mailboxes
+            );
           }
           return Boolean(member);
         }
@@ -340,6 +367,7 @@ export const invitationService = {
       async (tx: Prisma.TransactionClient) => {
         await lockOrganizationTeam(tx, invite.organizationId);
         await consumeInvite(tx, invite.id);
+        const mailboxes = await acceptanceMailboxes(tx, invite);
         const createdUser = await tx.user.create({
           data: {
             email: invite.email,
@@ -356,6 +384,12 @@ export const invitationService = {
           },
         });
 
+        await grantInviteMailboxes(
+          tx,
+          invite.organizationId,
+          createdUser.id,
+          mailboxes
+        );
         const org = await tx.organization.findUnique({
           where: { id: invite.organizationId },
           select: { id: true, name: true },
@@ -391,4 +425,99 @@ async function consumeInvite(tx: Prisma.TransactionClient, id: string) {
   });
   if (changed.count !== 1)
     throw new HttpError(400, "This invitation is invalid or has expired");
+}
+
+type InviteMailbox = { id: string; fromEmail: string };
+
+async function selectableMailboxes(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  userId: string,
+  role: string,
+  ids: string[]
+): Promise<InviteMailbox[]> {
+  if (!ids.length) return [];
+  const mailboxes = await tx.sMTPConnection.findMany({
+    where: {
+      organizationId,
+      id: { in: ids },
+      ...(role === "OWNER"
+        ? {}
+        : { grants: { none: { userId, revoked: true } } }),
+    },
+    select: { id: true, fromEmail: true },
+  });
+  if (mailboxes.length !== ids.length)
+    throw new HttpError(
+      403,
+      "One or more assigned mailboxes are unavailable or you no longer have access. Ask an owner to renew the invitation.",
+      "mailbox_access_denied"
+    );
+  return mailboxes;
+}
+
+async function acceptanceMailboxes(
+  tx: Prisma.TransactionClient,
+  invite: {
+    organizationId: string;
+    invitedByUserId: string;
+    role: string;
+    smtpConnectionIds: string[];
+  }
+) {
+  const ids = [...new Set(invite.smtpConnectionIds ?? [])];
+  if (!ids.length) return [];
+  const actor = await getMembership(
+    invite.invitedByUserId,
+    invite.organizationId,
+    tx
+  );
+  if (
+    !actor ||
+    (actor.role !== "OWNER" && actor.role !== "ADMIN") ||
+    (invite.role !== "MEMBER" && actor.role !== "OWNER")
+  ) {
+    throw new HttpError(
+      403,
+      "The inviter can no longer assign these mailboxes. Ask an owner to renew the invitation.",
+      "mailbox_access_denied"
+    );
+  }
+  return selectableMailboxes(
+    tx,
+    invite.organizationId,
+    invite.invitedByUserId,
+    actor.role,
+    ids
+  );
+}
+
+async function grantInviteMailboxes(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  userId: string,
+  mailboxes: InviteMailbox[]
+) {
+  for (const mailbox of mailboxes) {
+    await tx.smtpConnectionGrant.upsert({
+      where: {
+        smtpConnectionId_userId: { smtpConnectionId: mailbox.id, userId },
+      },
+      create: { organizationId, smtpConnectionId: mailbox.id, userId },
+      update: { revoked: false },
+    });
+    const inbox = await tx.inboxAccount.findFirst({
+      where: {
+        organizationId,
+        email: { equals: mailbox.fromEmail, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (inbox)
+      await tx.inboxAccountGrant.upsert({
+        where: { inboxAccountId_userId: { inboxAccountId: inbox.id, userId } },
+        create: { organizationId, inboxAccountId: inbox.id, userId },
+        update: { revoked: false },
+      });
+  }
 }

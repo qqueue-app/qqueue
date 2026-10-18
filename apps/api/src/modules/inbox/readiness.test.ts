@@ -140,13 +140,8 @@ describe("safe mailbox operations", () => {
         { name: "Changed" },
         "org_1"
       )
-    ).rejects.toThrow("Inbox account not found");
-    expect(
-      prismaMock.inboxAccount.updateMany.mock.calls[0][0]?.where
-    ).toMatchObject({
-      organizationId: "org_1",
-      organization: { members: { some: { role: { in: ["OWNER", "ADMIN"] } } } },
-    });
+    ).rejects.toThrow("You do not have access to this mailbox");
+    expect(prismaMock.inboxAccount.updateMany).not.toHaveBeenCalled();
   });
 
   it("bulk read intersects supplied IDs with mailbox grants", async () => {

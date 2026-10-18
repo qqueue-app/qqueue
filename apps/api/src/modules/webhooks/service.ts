@@ -2,11 +2,12 @@ import { randomBytes } from "node:crypto";
 import type {
   EmailEventType,
   WebhookEndpointInput,
-  WebhookEndpointUpdateInput
+  WebhookEndpointUpdateInput,
 } from "@qqueue/shared";
 import { assertOrgAccess, assertOrgRole } from "../../lib/org-access.js";
 import { encryptSecret } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
+import { assertNoMailboxRestrictions } from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 import { webhookDeliveryQueue } from "../../queues/webhook-delivery.queue.js";
 
@@ -19,7 +20,7 @@ const endpointSelect = {
   enabled: true,
   createdAt: true,
   updatedAt: true,
-  deletedAt: true
+  deletedAt: true,
 };
 
 const deliverySelect = {
@@ -34,7 +35,7 @@ const deliverySelect = {
   error: true,
   nextAttemptAt: true,
   deliveredAt: true,
-  createdAt: true
+  createdAt: true,
 };
 
 export function toOutboundWebhookEventName(type: EmailEventType) {
@@ -50,14 +51,15 @@ async function findOwnedEndpoint(id: string, userId: string) {
     where: {
       id,
       deletedAt: null,
-      organization: { members: { some: { userId } } }
-    }
+      organization: { members: { some: { userId } } },
+    },
   });
 
   if (!endpoint) {
     throw new HttpError(404, "Webhook endpoint not found");
   }
 
+  await assertNoMailboxRestrictions(userId, endpoint.organizationId);
   return endpoint;
 }
 
@@ -67,13 +69,14 @@ export const webhookEndpointService = {
     return prisma.webhookEndpoint.findMany({
       where: { organizationId, deletedAt: null },
       select: endpointSelect,
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
   },
 
   async create(input: WebhookEndpointInput, userId: string) {
     await assertOrgRole(userId, input.organizationId, ["OWNER", "ADMIN"]);
 
+    await assertNoMailboxRestrictions(userId, input.organizationId);
     const secret = generateSigningSecret();
     const endpoint = await prisma.webhookEndpoint.create({
       data: {
@@ -82,9 +85,9 @@ export const webhookEndpointService = {
         url: input.url,
         events: input.events,
         enabled: input.enabled ?? true,
-        secretEncrypted: encryptSecret(secret)
+        secretEncrypted: encryptSecret(secret),
       },
-      select: endpointSelect
+      select: endpointSelect,
     });
 
     return { endpoint, secret };
@@ -100,9 +103,9 @@ export const webhookEndpointService = {
         name: input.name,
         url: input.url,
         events: input.events,
-        enabled: input.enabled
+        enabled: input.enabled,
       },
-      select: endpointSelect
+      select: endpointSelect,
     });
   },
 
@@ -113,7 +116,7 @@ export const webhookEndpointService = {
     await prisma.webhookEndpoint.update({
       where: { id },
       data: { enabled: false, deletedAt: new Date() },
-      select: { id: true }
+      select: { id: true },
     });
   },
 
@@ -123,7 +126,7 @@ export const webhookEndpointService = {
       where: { endpointId },
       select: deliverySelect,
       orderBy: { createdAt: "desc" },
-      take: 25
+      take: 25,
     });
   },
 
@@ -133,8 +136,8 @@ export const webhookEndpointService = {
       select: {
         id: true,
         endpointId: true,
-        status: true
-      }
+        status: true,
+      },
     });
 
     if (!delivery) {
@@ -157,9 +160,9 @@ export const webhookEndpointService = {
         status: "PENDING",
         responseStatus: null,
         error: null,
-        nextAttemptAt: new Date()
+        nextAttemptAt: new Date(),
       },
-      select: deliverySelect
+      select: deliverySelect,
     });
 
     await webhookDeliveryQueue.add(
@@ -168,7 +171,7 @@ export const webhookEndpointService = {
       {
         jobId: `webhook-retry-${delivery.id}-${Date.now()}`,
         attempts: 5,
-        backoff: { type: "exponential", delay: 30_000 }
+        backoff: { type: "exponential", delay: 30_000 },
       }
     );
 
@@ -187,10 +190,10 @@ export const webhookEndpointService = {
             status: true,
             messageId: true,
             campaignId: true,
-            templateId: true
-          }
-        }
-      }
+            templateId: true,
+          },
+        },
+      },
     });
 
     if (!event) {
@@ -203,9 +206,9 @@ export const webhookEndpointService = {
         organizationId: event.organizationId,
         enabled: true,
         deletedAt: null,
-        events: { has: eventName }
+        events: { has: eventName },
       },
-      select: { id: true }
+      select: { id: true },
     });
 
     for (const endpoint of endpoints) {
@@ -227,13 +230,13 @@ export const webhookEndpointService = {
                 status: event.emailJob.status,
                 messageId: event.emailJob.messageId,
                 campaignId: event.emailJob.campaignId,
-                templateId: event.emailJob.templateId
+                templateId: event.emailJob.templateId,
               },
-              metadata: event.metadata
-            }
-          }
+              metadata: event.metadata,
+            },
+          },
         },
-        select: { id: true }
+        select: { id: true },
       });
 
       await webhookDeliveryQueue.add(
@@ -242,7 +245,7 @@ export const webhookEndpointService = {
         {
           jobId: `webhook-${delivery.id}`,
           attempts: 5,
-          backoff: { type: "exponential", delay: 30_000 }
+          backoff: { type: "exponential", delay: 30_000 },
         }
       );
     }
@@ -257,14 +260,14 @@ export const webhookEndpointService = {
       where: {
         organizationId: input.organizationId,
         emailJobId: input.emailJobId,
-        type: input.type
+        type: input.type,
       },
       select: { id: true },
-      orderBy: { occurredAt: "desc" }
+      orderBy: { occurredAt: "desc" },
     });
 
     if (event) {
       await this.enqueueForEmailEvent(event.id);
     }
-  }
+  },
 };

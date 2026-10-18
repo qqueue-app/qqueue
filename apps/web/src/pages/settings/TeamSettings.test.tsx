@@ -31,6 +31,7 @@ vi.mock("../../lib/api.js", () => ({
   api: {
     listOrganizationMembers: vi.fn(),
     listInvites: vi.fn(),
+    listSendableSMTPConnections: vi.fn(),
     createInvite: vi.fn(),
     revokeInvite: vi.fn(),
     updateMemberRole: vi.fn(),
@@ -86,6 +87,7 @@ beforeEach(() => {
   };
   mockedApi.listOrganizationMembers.mockResolvedValue(members);
   mockedApi.listInvites.mockResolvedValue(invites);
+  mockedApi.listSendableSMTPConnections.mockResolvedValue([]);
 });
 
 describe("TeamSettings", () => {
@@ -343,4 +345,142 @@ it("removes the displayed invitation link when that invitation is revoked", asyn
       screen.queryByText(/accept-invite\?token=discarded/)
     ).not.toBeInTheDocument()
   );
+});
+
+it("limits admins to member invitations and prevents editing another admin", async () => {
+  sessionRef.current.currentOrganization!.role = "ADMIN";
+  mockedApi.listOrganizationMembers.mockResolvedValue([
+    ...members,
+    {
+      ...members[1],
+      id: "m3",
+      userId: "admin_2",
+      role: "ADMIN",
+      user: { id: "admin_2", email: "admin@x.com", name: null },
+    },
+  ]);
+  mockedApi.listInvites.mockResolvedValue([{ ...invites[0], role: "ADMIN" }]);
+  const user = userEvent.setup();
+  renderWithProviders(<TeamSettings />);
+  await screen.findByText("admin@x.com");
+  expect(
+    screen.queryByRole("combobox", { name: "Role for admin@x.com" })
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Remove admin@x.com" })
+  ).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "Resend invitation to pending@x.com" })
+  ).toBeDisabled();
+  await user.click(screen.getByRole("combobox", { name: "Role" }));
+  expect(screen.getByRole("option", { name: "Member" })).toBeInTheDocument();
+  expect(
+    screen.queryByRole("option", { name: "Admin" })
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("option", { name: "Owner" })
+  ).not.toBeInTheDocument();
+});
+
+describe("assign mailboxes with an invitation", () => {
+  const mailboxes = [
+    { id: "smtp1", fromEmail: "support@example.com" },
+    { id: "smtp2", fromEmail: "sales@example.com" },
+  ];
+  beforeEach(() => {
+    mockedApi.listSendableSMTPConnections.mockResolvedValue(mailboxes);
+    mockedApi.createInvite.mockResolvedValue({
+      invite: { ...invites[0], smtpConnectionIds: ["smtp1"] },
+      acceptUrl: "https://example.com/accept-invite?token=ready",
+      emailQueued: true,
+    });
+  });
+  it("sends selected mailbox IDs with the invitation and clears them after success", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TeamSettings />);
+    const support = await screen.findByRole("checkbox", {
+      name: "support@example.com",
+    });
+    await user.click(support);
+    await user.click(
+      screen.getByRole("checkbox", { name: "sales@example.com" })
+    );
+    await user.type(
+      screen.getByLabelText("Invite by email"),
+      "new@example.com"
+    );
+    await user.click(screen.getByRole("button", { name: "Invite" }));
+    await waitFor(() =>
+      expect(mockedApi.createInvite).toHaveBeenCalledWith({
+        organizationId: "org_1",
+        email: "new@example.com",
+        role: "MEMBER",
+        smtpConnectionIds: ["smtp1", "smtp2"],
+      })
+    );
+    await waitFor(() =>
+      expect(support).toHaveAttribute("aria-checked", "false")
+    );
+  });
+  it("shows saved assignments and preserves them on resend", async () => {
+    mockedApi.listInvites.mockResolvedValue([
+      { ...invites[0], smtpConnectionIds: ["smtp2"] },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<TeamSettings />);
+    expect(
+      await screen.findByText(/Mailboxes: sales@example.com/)
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Resend invitation to pending@x.com" })
+    );
+    await waitFor(() =>
+      expect(mockedApi.createInvite).toHaveBeenCalledWith({
+        organizationId: "org_1",
+        email: "pending@x.com",
+        role: "MEMBER",
+        smtpConnectionIds: ["smtp2"],
+      })
+    );
+  });
+  it("keeps mailbox choices when creating an invitation fails", async () => {
+    mockedApi.createInvite.mockRejectedValueOnce(new Error("Try again"));
+    const user = userEvent.setup();
+    renderWithProviders(<TeamSettings />);
+    const support = await screen.findByRole("checkbox", {
+      name: "support@example.com",
+    });
+    await user.click(support);
+    await user.type(
+      screen.getByLabelText("Invite by email"),
+      "new@example.com"
+    );
+    await user.click(screen.getByRole("button", { name: "Invite" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Try again"));
+    expect(support).toHaveAttribute("aria-checked", "true");
+  });
+  it("explains automatic owner/admin access instead of offering member assignments", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TeamSettings />);
+    await screen.findByRole("checkbox", { name: "support@example.com" });
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    await user.click(screen.getByRole("option", { name: "Admin" }));
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Owners and admins start with access to all mailboxes/)
+    ).toBeInTheDocument();
+  });
+  it("offers a retry when mailboxes fail to load", async () => {
+    mockedApi.listSendableSMTPConnections.mockRejectedValueOnce(
+      new Error("Offline")
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<TeamSettings />);
+    await user.click(
+      await screen.findByRole("button", { name: "Retry mailboxes" })
+    );
+    expect(
+      await screen.findByRole("checkbox", { name: "support@example.com" })
+    ).toBeInTheDocument();
+  });
 });

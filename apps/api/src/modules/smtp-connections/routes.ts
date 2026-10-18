@@ -6,7 +6,7 @@ import { smtpConnectionController } from "./controller.js";
 export const smtpConnectionRouter = Router();
 
 // Sending accounts are the org's outbound identity and hold its SMTP
-// credentials: any member may see and send from them, but only OWNER/ADMIN may
+// credentials: mailbox access scopes the list and send-as picker. OWNER/ADMIN may
 // add, alter, or remove them. The /:id writes carry no org id in the request,
 // so their role check lives in the service (same 403), next to the ownership
 // lookup.

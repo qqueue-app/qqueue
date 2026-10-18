@@ -9,14 +9,13 @@ vi.mock("@qqueue/email-engine", () => ({
   SMTPProvider: vi.fn().mockImplementation((config: unknown) => ({
     config,
     verify,
-    send
-  }))
+    send,
+  })),
 }));
 
 const { smtpConnectionService } = await import("./service.js");
-const { SECRET_DECRYPTION_MESSAGE, decryptSecret, encryptSecret } = await import(
-  "../../lib/crypto.js"
-);
+const { SECRET_DECRYPTION_MESSAGE, decryptSecret, encryptSecret } =
+  await import("../../lib/crypto.js");
 
 const createInput = {
   organizationId: "org_1",
@@ -27,7 +26,7 @@ const createInput = {
   username: "user",
   password: "pass",
   fromEmail: "a@b.com",
-  fromName: "A"
+  fromName: "A",
 };
 
 beforeEach(() => {
@@ -43,8 +42,12 @@ describe("smtpConnectionService.list / get", () => {
   });
 
   it("gets an owned connection", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue({ id: "s1" } as never);
-    prismaMock.sMTPConnection.findUnique.mockResolvedValue({ id: "s1" } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "s1",
+    } as never);
+    prismaMock.sMTPConnection.findUnique.mockResolvedValue({
+      id: "s1",
+    } as never);
     const result = await smtpConnectionService.get("s1", "user_1");
     expect(result).toEqual({ id: "s1" });
   });
@@ -72,23 +75,27 @@ describe("smtpConnectionService.create", () => {
   });
 
   it("clears other defaults when explicitly default", async () => {
-    prismaMock.sMTPConnection.updateMany.mockResolvedValue({ count: 1 } as never);
+    prismaMock.sMTPConnection.updateMany.mockResolvedValue({
+      count: 1,
+    } as never);
     prismaMock.sMTPConnection.create.mockResolvedValue({ id: "s1" } as never);
 
     await smtpConnectionService.create({ ...createInput, isDefault: true });
     expect(prismaMock.sMTPConnection.updateMany).toHaveBeenCalledWith({
       where: { organizationId: "org_1" },
-      data: { isDefault: false }
+      data: { isDefault: false },
     });
   });
 
   it("is not default when another default already exists", async () => {
-    prismaMock.sMTPConnection.findFirst.mockResolvedValue({ id: "other" } as never);
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "other",
+    } as never);
     prismaMock.sMTPConnection.create.mockResolvedValue({ id: "s1" } as never);
     await smtpConnectionService.create(createInput);
-    expect(prismaMock.sMTPConnection.create.mock.calls[0][0].data.isDefault).toBe(
-      false
-    );
+    expect(
+      prismaMock.sMTPConnection.create.mock.calls[0][0].data.isDefault
+    ).toBe(false);
   });
 
   it("throws 400 with the provider message when verification fails", async () => {
@@ -117,7 +124,7 @@ describe("smtpConnectionService.create", () => {
       smtpConnectionService.create(createInput)
     ).rejects.toMatchObject({
       statusCode: 400,
-      message: expect.stringContaining("rejected the username or password")
+      message: expect.stringContaining("rejected the username or password"),
     });
   });
 });
@@ -131,20 +138,20 @@ describe("smtpConnectionService.update", () => {
     secure: false,
     usernameEncrypted: encryptSecret("old-user"),
     passwordEncrypted: encryptSecret("old-pass"),
-    isDefault: false
+    isDefault: false,
   };
 
   // Writes require OWNER/ADMIN (Phase 3); the happy paths run as ADMIN.
   beforeEach(() => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
   });
 
   it("throws 403 when a MEMBER updates a connection", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(existing as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     await expect(
       smtpConnectionService.update("s1", "user_1", { name: "x" })
@@ -172,7 +179,7 @@ describe("smtpConnectionService.update", () => {
 
     await smtpConnectionService.update("s1", "user_1", {
       name: "Renamed",
-      replyTo: "support@b.com"
+      replyTo: "support@b.com",
     });
 
     expect(verify).not.toHaveBeenCalled();
@@ -208,13 +215,15 @@ describe("smtpConnectionService.update", () => {
 
   it("re-encrypts new secrets and recomputes default when toggled on", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(existing as never);
-    prismaMock.sMTPConnection.updateMany.mockResolvedValue({ count: 0 } as never);
+    prismaMock.sMTPConnection.updateMany.mockResolvedValue({
+      count: 0,
+    } as never);
     prismaMock.sMTPConnection.update.mockResolvedValue({ id: "s1" } as never);
 
     await smtpConnectionService.update("s1", "user_1", {
       username: "newuser",
       password: "newpass",
-      isDefault: true
+      isDefault: true,
     });
     const data = prismaMock.sMTPConnection.update.mock.calls[0][0].data;
     expect(decryptSecret(data.usernameEncrypted as string)).toBe("newuser");
@@ -232,14 +241,14 @@ describe("smtpConnectionService.update", () => {
   it("returns a clear error when existing secrets cannot be decrypted", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       ...existing,
-      usernameEncrypted: "not-a-valid-secret"
+      usernameEncrypted: "not-a-valid-secret",
     } as never);
 
     await expect(
       smtpConnectionService.update("s1", "user_1", { name: "Renamed" })
     ).rejects.toMatchObject({
       statusCode: 400,
-      message: SECRET_DECRYPTION_MESSAGE
+      message: SECRET_DECRYPTION_MESSAGE,
     });
   });
 });
@@ -248,25 +257,25 @@ describe("smtpConnectionService.delete", () => {
   it("deletes an owned connection as OWNER/ADMIN", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       id: "s1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.sMTPConnection.delete.mockResolvedValue({ id: "s1" } as never);
     await smtpConnectionService.delete("s1", "user_1");
     expect(prismaMock.sMTPConnection.delete).toHaveBeenCalledWith({
-      where: { id: "s1" }
+      where: { id: "s1" },
     });
   });
 
   it("throws 403 when a MEMBER deletes a connection", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue({
       id: "s1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     await expect(
       smtpConnectionService.delete("s1", "user_1")
@@ -290,7 +299,7 @@ describe("smtpConnectionService.verify (on-demand test)", () => {
     port: 587,
     secure: false,
     usernameEncrypted: encryptSecret("user"),
-    passwordEncrypted: encryptSecret("pass")
+    passwordEncrypted: encryptSecret("pass"),
   };
 
   it("returns verified: true when the handshake succeeds", async () => {
@@ -324,20 +333,7 @@ describe("smtpConnectionService.verify (on-demand test)", () => {
 describe("smtpConnectionService.listSendable", () => {
   it("returns every org connection for OWNER/ADMIN", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
-    } as never);
-    prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
-
-    await smtpConnectionService.listSendable("org_1", "user_1");
-
-    expect(prismaMock.sMTPConnection.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { organizationId: "org_1" } })
-    );
-  });
-
-  it("returns only granted connections for a MEMBER", async () => {
-    prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "ADMIN",
     } as never);
     prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
 
@@ -347,8 +343,26 @@ describe("smtpConnectionService.listSendable", () => {
       expect.objectContaining({
         where: {
           organizationId: "org_1",
-          grants: { some: { userId: "user_1" } }
-        }
+          grants: { none: { userId: "user_1", revoked: true } },
+        },
+      })
+    );
+  });
+
+  it("returns only granted connections for a MEMBER", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "MEMBER",
+    } as never);
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([] as never);
+
+    await smtpConnectionService.listSendable("org_1", "user_1");
+
+    expect(prismaMock.sMTPConnection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId: "org_1",
+          grants: { some: { userId: "user_1", revoked: false } },
+        },
       })
     );
   });
@@ -367,11 +381,11 @@ describe("smtpConnectionService grants", () => {
   it("adds an idempotent grant for an org member", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(connection as never);
     // Actor role, then grantee membership — same lookup, called twice.
-    prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
-    } as never);
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "ADMIN" } as never)
+      .mockResolvedValueOnce({ role: "MEMBER" } as never);
     prismaMock.smtpConnectionGrant.upsert.mockResolvedValue({
-      id: "g1"
+      id: "g1",
     } as never);
 
     await smtpConnectionService.addGrant("s1", "admin_1", "member_1");
@@ -381,14 +395,14 @@ describe("smtpConnectionService grants", () => {
         where: {
           smtpConnectionId_userId: {
             smtpConnectionId: "s1",
-            userId: "member_1"
-          }
+            userId: "member_1",
+          },
         },
         create: {
           organizationId: "org_1",
           smtpConnectionId: "s1",
-          userId: "member_1"
-        }
+          userId: "member_1",
+        },
       })
     );
   });
@@ -408,7 +422,7 @@ describe("smtpConnectionService grants", () => {
   it("blocks a MEMBER from managing grants", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(connection as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
 
     await expect(
@@ -424,18 +438,125 @@ describe("smtpConnectionService grants", () => {
 
   it("removes a grant", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(connection as never);
-    prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
-    } as never);
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER" } as never)
+      .mockResolvedValueOnce({ role: "MEMBER" } as never);
     prismaMock.smtpConnectionGrant.deleteMany.mockResolvedValue({
-      count: 1
+      count: 1,
     } as never);
 
     await smtpConnectionService.removeGrant("s1", "owner_1", "member_1");
 
-    expect(prismaMock.smtpConnectionGrant.deleteMany).toHaveBeenCalledWith({
-      where: { smtpConnectionId: "s1", userId: "member_1" }
-    });
+    expect(prismaMock.smtpConnectionGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          smtpConnectionId_userId: {
+            smtpConnectionId: "s1",
+            userId: "member_1",
+          },
+        },
+        update: { revoked: true },
+      })
+    );
   });
 });
 
+describe("owner-controlled admin access", () => {
+  beforeEach(() => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue({
+      id: "s1",
+      organizationId: "org_1",
+      fromEmail: "private@acme.test",
+    } as never);
+    prismaMock.inboxAccount.findFirst.mockResolvedValue({
+      id: "inbox_1",
+    } as never);
+  });
+  it("revokes both read and send access from an admin and invalidates their API keys", async () => {
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER" } as never)
+      .mockResolvedValueOnce({ role: "ADMIN" } as never);
+    await smtpConnectionService.removeGrant("s1", "owner", "admin");
+    expect(prismaMock.smtpConnectionGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: {
+          organizationId: "org_1",
+          smtpConnectionId: "s1",
+          userId: "admin",
+          revoked: true,
+        },
+        update: { revoked: true },
+      })
+    );
+    expect(prismaMock.inboxAccountGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: {
+          organizationId: "org_1",
+          inboxAccountId: "inbox_1",
+          userId: "admin",
+          revoked: true,
+        },
+        update: { revoked: true },
+      })
+    );
+    expect(prismaMock.apiKey.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org_1", userId: "admin", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+  it("restores both halves when an owner reassigns the admin", async () => {
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER" } as never)
+      .mockResolvedValueOnce({ role: "ADMIN" } as never);
+    await smtpConnectionService.addGrant("s1", "owner", "admin");
+    expect(prismaMock.smtpConnectionGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { revoked: false } })
+    );
+    expect(prismaMock.inboxAccountGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { revoked: false } })
+    );
+  });
+  it.each(["addGrant", "removeGrant"] as const)(
+    "prevents an admin from using %s on another admin or themselves",
+    async (method) => {
+      prismaMock.organizationMember.findUnique.mockResolvedValue({
+        role: "ADMIN",
+      } as never);
+      await expect(
+        smtpConnectionService[method]("s1", "admin", "admin")
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(prismaMock.smtpConnectionGrant.upsert).not.toHaveBeenCalled();
+    }
+  );
+  it.each(["addGrant", "removeGrant"] as const)(
+    "rechecks actor access inside the locked %s transaction",
+    async (method) => {
+      prismaMock.organizationMember.findUnique
+        .mockResolvedValueOnce({ role: "ADMIN" } as never)
+        .mockResolvedValueOnce({ role: "MEMBER" } as never);
+      prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
+        revoked: true,
+      } as never);
+      await expect(
+        smtpConnectionService[method]("s1", "admin", "member")
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(prismaMock.inboxAccountGrant.upsert).not.toHaveBeenCalled();
+    }
+  );
+  it("never removes an owner's mailbox access", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "OWNER",
+    } as never);
+    await expect(
+      smtpConnectionService.removeGrant("s1", "owner", "owner2")
+    ).rejects.toThrow("Owners always have every mailbox");
+  });
+  it("refuses a missing grantee without creating a denial", async () => {
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "OWNER" } as never)
+      .mockResolvedValueOnce(null);
+    await expect(
+      smtpConnectionService.removeGrant("s1", "owner", "outsider")
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+});

@@ -12,6 +12,7 @@ import {
   FormSections,
 } from "../../components/settings/FormLayout.js";
 import { Badge } from "../../components/ui/badge.js";
+import { Checkbox } from "../../components/ui/checkbox.js";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { Label } from "../../components/ui/label.js";
@@ -88,6 +89,14 @@ export function TeamSettings() {
     (id) => api.listInvites(id),
     { enabled: canManage }
   );
+  const mailboxesQuery = useOrgQuery(
+    currentOrganizationId,
+    qk.sendableSmtpConnections(currentOrganizationId ?? ""),
+    (id) => api.listSendableSMTPConnections(id),
+    { enabled: canManage }
+  );
+  const mailboxes = mailboxesQuery.data ?? [];
+  const [inviteMailboxIds, setInviteMailboxIds] = useState<string[]>([]);
   const members = membersQuery.data ?? [];
   const invites = invitesQuery.data ?? [];
   const loading = membersQuery.isPending || invitesQuery.isPending;
@@ -113,6 +122,7 @@ export function TeamSettings() {
     setCreatedInvite(null);
     setInviteEmail("");
     setInviteRole("MEMBER");
+    setInviteMailboxIds([]);
     setRemoveTarget(null);
   }, [currentOrganizationId]);
 
@@ -125,12 +135,21 @@ export function TeamSettings() {
 
   const ownerCount = members.filter((m) => m.role === "OWNER").length;
 
-  async function issueInvite(email: string, role: InviteRole) {
+  async function issueInvite(
+    email: string,
+    role: InviteRole,
+    smtpConnectionIds: string[] = []
+  ) {
     const organizationId = currentOrganizationId;
     if (!organizationId) return;
     setInviting(true);
     try {
-      const result = await api.createInvite({ organizationId, email, role });
+      const result = await api.createInvite({
+        organizationId,
+        email,
+        role,
+        ...(smtpConnectionIds.length ? { smtpConnectionIds } : {}),
+      });
       await refreshTeam(organizationId);
       if (orgRef.current !== organizationId) return;
       setCreatedInvite({
@@ -141,6 +160,7 @@ export function TeamSettings() {
       });
       setInviteEmail("");
       setInviteRole("MEMBER");
+      setInviteMailboxIds([]);
       toast.success(
         result.emailQueued
           ? `Invitation email queued for ${result.invite.email}.`
@@ -157,7 +177,11 @@ export function TeamSettings() {
 
   function createInvite(event: FormEvent) {
     event.preventDefault();
-    void issueInvite(inviteEmail.trim(), inviteRole);
+    void issueInvite(
+      inviteEmail.trim(),
+      inviteRole,
+      inviteRole === "MEMBER" ? inviteMailboxIds : []
+    );
   }
 
   async function revokeInvite(invite: OrganizationInvite) {
@@ -209,14 +233,14 @@ export function TeamSettings() {
   }
 
   // Role options the current actor is allowed to assign (only an OWNER can
-  // grant OWNER). The server re-checks regardless.
+  // grant OWNER or ADMIN). The server re-checks regardless.
   const assignableRoles: InviteRole[] = isOwner
     ? ["OWNER", "ADMIN", "MEMBER"]
-    : ["ADMIN", "MEMBER"];
+    : ["MEMBER"];
 
   function canEditMember(member: OrganizationMember) {
-    // Admins cannot touch owners.
-    return !(actorRole === "ADMIN" && member.role === "OWNER");
+    // Admins manage members; only owners may change another admin.
+    return !(actorRole === "ADMIN" && member.role !== "MEMBER");
   }
 
   function isLastOwner(member: OrganizationMember) {
@@ -270,45 +294,107 @@ export function TeamSettings() {
               />
             ) : null}
 
-            <form
-              onSubmit={createInvite}
-              className="flex flex-col gap-3 xs:flex-row xs:items-end"
-            >
-              <Field>
-                <Label htmlFor="invite-email">Invite by email</Label>
-                <Input
-                  id="invite-email"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="off"
-                  width="name"
-                  placeholder="teammate@example.com"
-                  value={inviteEmail}
-                  onChange={(event) => setInviteEmail(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <Label htmlFor="invite-role">Role</Label>
-                <Select
-                  value={inviteRole}
-                  onValueChange={(value) => setInviteRole(value as InviteRole)}
-                >
-                  <SelectTrigger
-                    id="invite-role"
-                    className="w-full xs:w-32"
-                    width="full"
+            <form onSubmit={createInvite} className="space-y-4">
+              <div className="flex flex-col gap-3 xs:flex-row xs:items-end">
+                <Field>
+                  <Label htmlFor="invite-email">Invite by email</Label>
+                  <Input
+                    id="invite-email"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="off"
+                    width="name"
+                    placeholder="teammate@example.com"
+                    value={inviteEmail}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <Label htmlFor="invite-role">Role</Label>
+                  <Select
+                    value={inviteRole}
+                    onValueChange={(value) =>
+                      setInviteRole(value as InviteRole)
+                    }
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignableRoles.map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {titleCaseRole(role)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+                    <SelectTrigger
+                      id="invite-role"
+                      className="w-full xs:w-32"
+                      width="full"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assignableRoles.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {titleCaseRole(role)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+              {inviteRole === "MEMBER" ? (
+                <fieldset className="space-y-2" disabled={inviting}>
+                  <legend className="text-body font-medium">
+                    Assign mailboxes (optional)
+                  </legend>
+                  <p className="text-ui text-text-secondary">
+                    They can read and send from these mailboxes as soon as they
+                    accept.
+                  </p>
+                  {mailboxesQuery.isPending ? (
+                    <p className="text-ui text-text-secondary">
+                      Loading mailboxes…
+                    </p>
+                  ) : mailboxesQuery.isError ? (
+                    <div role="alert" className="text-ui text-warn">
+                      Couldn't load mailboxes. You can retry or invite without
+                      assigning one.
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void mailboxesQuery.refetch()}
+                      >
+                        Retry mailboxes
+                      </Button>
+                    </div>
+                  ) : mailboxes.length ? (
+                    <div className="space-y-3 rounded-control border p-3">
+                      {mailboxes.map((mailbox) => (
+                        <label
+                          key={mailbox.id}
+                          htmlFor={`invite-mailbox-${mailbox.id}`}
+                          className="flex min-h-touch cursor-pointer items-center gap-3 text-body"
+                        >
+                          <Checkbox
+                            id={`invite-mailbox-${mailbox.id}`}
+                            checked={inviteMailboxIds.includes(mailbox.id)}
+                            onCheckedChange={(checked) =>
+                              setInviteMailboxIds((ids) =>
+                                checked
+                                  ? [...ids, mailbox.id]
+                                  : ids.filter((id) => id !== mailbox.id)
+                              )
+                            }
+                          />
+                          <span>{mailbox.fromEmail}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-ui text-text-secondary">
+                      No mailboxes available. Connect a mailbox first, or invite
+                      now and assign one later.
+                    </p>
+                  )}
+                </fieldset>
+              ) : (
+                <p className="text-ui text-text-secondary">
+                  Owners and admins start with access to all mailboxes. Owners
+                  can remove an admin’s mailbox access after they join.
+                </p>
+              )}
               <Button
                 type="submit"
                 disabled={
@@ -326,12 +412,13 @@ export function TeamSettings() {
             description="Owners and admins manage this organization. Members read and send with assigned accounts. Instance administration is a separate permission."
           >
             <p className="mb-4 text-ui text-text-secondary">
-              After your teammate accepts,{" "}
+              You can also change mailbox access after your teammate joins. To
+              do so,{" "}
               <Link className="underline" to="/settings/mailboxes">
                 assign a mailbox
               </Link>{" "}
-              so they can read and send. Sign-in reset links recover a QQueue
-              account; mailbox passwords are managed separately by your mail
+              in mailbox settings. Sign-in reset links recover a QQueue account;
+              mailbox passwords are managed separately by your mail
               administrator.
             </p>
             {membersQuery.isError || invitesQuery.isError ? (
@@ -379,7 +466,7 @@ export function TeamSettings() {
                         ) : null}
                       </div>
 
-                      {editable && !lockedOwner ? (
+                      {isOwner && !lockedOwner ? (
                         <Select
                           value={member.role}
                           disabled={savingRoleFor === member.userId}
@@ -457,6 +544,9 @@ export function TeamSettings() {
                     <div className="min-w-0 flex-1 text-body text-text">
                       <p className="truncate">{invite.email}</p>
                       <p className="text-meta text-text-secondary">
+                        {invite.smtpConnectionIds?.length
+                          ? `Mailboxes: ${invite.smtpConnectionIds.map((id) => mailboxes.find((mailbox) => mailbox.id === id)?.fromEmail ?? "Unavailable mailbox").join(", ")}. `
+                          : ""}
                         {new Date(invite.expiresAt).getTime() <= Date.now()
                           ? "Expired — resend to renew"
                           : `Expires ${new Date(invite.expiresAt).toLocaleDateString()}`}
@@ -474,11 +564,12 @@ export function TeamSettings() {
                           icon: RotateCw,
                           primary: true,
                           disabled:
-                            inviting || (invite.role === "OWNER" && !isOwner),
+                            inviting || (invite.role !== "MEMBER" && !isOwner),
                           onSelect: () =>
                             void issueInvite(
                               invite.email,
-                              invite.role as InviteRole
+                              invite.role as InviteRole,
+                              invite.smtpConnectionIds ?? []
                             ),
                         },
                         {

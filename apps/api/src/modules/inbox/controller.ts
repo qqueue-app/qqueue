@@ -29,16 +29,14 @@ const markReadSchema = z.object({
 
 export const inboxController = {
   async prepareDraftCopy(req: Request, res: Response) {
-    res
-      .status(201)
-      .json({
-        data: await inboxDraftCopyService.prepare(
-          String(req.params.id),
-          req.organizationId!,
-          req.userId!,
-          mailboxDraftCopySchema.parse(req.body)
-        ),
-      });
+    res.status(201).json({
+      data: await inboxDraftCopyService.prepare(
+        String(req.params.id),
+        req.organizationId!,
+        req.userId!,
+        mailboxDraftCopySchema.parse(req.body)
+      ),
+    });
   },
   async prepareForward(req: Request, res: Response) {
     res.status(201).json({
@@ -151,7 +149,7 @@ export const inboxController = {
 
   async createAccount(req: Request, res: Response) {
     const input = inboxAccountSchema.parse(req.body);
-    const account = await inboxService.createAccount(input);
+    const account = await inboxService.createAccount(input, req.userId!);
     res.status(201).json({ data: account });
   },
 

@@ -695,6 +695,72 @@ async function main() {
         },
       })
     );
+    // An owner may keep this mailbox private from an otherwise privileged admin.
+    const admin = await prisma.user.create({ data: { email: `admin-${Date.now()}@example.com`, passwordHash: "unused" } });
+    await prisma.organizationMember.create({ data: { organizationId, userId: admin.id, role: "ADMIN" } });
+    const { createAuthTokens } = await import("../apps/api/src/lib/tokens.js");
+    const adminAuth = `Bearer ${createAuthTokens(admin).accessToken}`;
+    const accountsUrl = `/api/v1/inbox/accounts?organizationId=${organizationId}`;
+    const grantsUrl = `/api/v1/smtp-connections/${connection.id}/grants`;
+    const beforeRevoke = await request(app).get(accountsUrl).set("Authorization", adminAuth).expect(200);
+    if (!beforeRevoke.body.data.some((row: { id: string }) => row.id === mailbox.id)) throw new Error("Upgrade/default admin access was lost");
+    const adminKey = await request(app).post("/api/v1/api-keys").set("Authorization", adminAuth).send({ organizationId, name: "Admin integration" }).expect(201);
+    await prisma.emailJob.update({ where: { id: sentJob.id }, data: { createdByUserId: admin.id } });
+    await request(app).delete(`${grantsUrl}/${admin.id}`).set("Authorization", auth).expect(204);
+    const afterRevoke = await request(app).get(accountsUrl).set("Authorization", adminAuth).expect(200);
+    if (afterRevoke.body.data.some((row: { id: string }) => row.id === mailbox.id)) throw new Error("Revoked admin still sees mailbox");
+    const identities = await request(app).get(`/api/v1/smtp-connections?organizationId=${organizationId}`).set("Authorization", adminAuth).expect(200);
+    if (identities.body.data.some((row: { id: string }) => row.id === connection.id)) throw new Error("Revoked admin still sees sending account");
+    const adminSearch = await request(app).get(`/api/v1/mail-search?organizationId=${organizationId}&q=Question`).set("Authorization", adminAuth).expect(200);
+    if (adminSearch.body.data.rows.length) throw new Error("Search leaked revoked mailbox");
+    const ownSentSearch = await request(app).get(`/api/v1/mail-search?organizationId=${organizationId}&q=${encodeURIComponent(sentJob.subject)}`).set("Authorization", adminAuth).expect(200);
+    if (ownSentSearch.body.data.rows.length) throw new Error("Search leaked revoked admin-authored mail");
+    await request(app).get(`/api/v1/inbox/messages/${inbound[0].id}/conversation?organizationId=${organizationId}`).set("Authorization", adminAuth).expect(404);
+    await request(app).get(`/api/v1/sent/${sentJob.id}?organizationId=${organizationId}`).set("Authorization", adminAuth).expect(404);
+    await request(app).post("/api/v1/transactional-email/send").set("Authorization", adminAuth).send({ organizationId, to: "target@example.com", subject: "Denied", text: "Denied" }).expect(403);
+    await request(app).post(grantsUrl).set("Authorization", adminAuth).send({ userId: admin.id }).expect(404);
+    await request(app).put(`/api/v1/smtp-connections/${connection.id}`).set("Authorization", adminAuth).send({ name: "Stolen" }).expect(404);
+    await request(app).patch(`/api/v1/inbox/accounts/${mailbox.id}?organizationId=${organizationId}`).set("Authorization", adminAuth).send({ name: "Stolen" }).expect(403);
+    await request(app).post("/api/v1/api-keys").set("Authorization", adminAuth).send({ organizationId, name: "Bypass" }).expect(403);
+    if (!(await prisma.apiKey.findUniqueOrThrow({ where: { id: adminKey.body.data.apiKey.id } })).revokedAt) throw new Error("Admin key survived revocation");
+    await request(app).get(`/api/v1/queue-operations?organizationId=${organizationId}`).set("Authorization", adminAuth).expect(403);
+    await request(app).post("/api/v1/webhook-endpoints").set("Authorization", adminAuth).send({ organizationId, name: "Bypass", url: "https://example.com/webhook", events: ["email.sent"] }).expect(403);
+    await request(app).patch(`/api/v1/organizations/${organizationId}/members/${admin.id}`).set("Authorization", adminAuth).send({ role: "MEMBER" }).expect(403);
+    const stillOwner = await request(app).get(accountsUrl).set("Authorization", auth).expect(200);
+    if (!stillOwner.body.data.some((row: { id: string }) => row.id === mailbox.id)) throw new Error("Revocation removed owner access");
+    await request(app).post(grantsUrl).set("Authorization", auth).send({ userId: admin.id }).expect(201);
+    const restored = await request(app).get(accountsUrl).set("Authorization", adminAuth).expect(200);
+    if (!restored.body.data.some((row: { id: string }) => row.id === mailbox.id)) throw new Error("Owner could not restore admin mailbox access");
+
+    // Mailboxes selected at invitation time are usable at the first sign-in.
+    const inviteEmail = `assigned-${Date.now()}@example.com`;
+    const assignedInvite = await request(app).post("/api/v1/invitations").set("Authorization", auth).send({ organizationId, email: inviteEmail, role: "MEMBER", smtpConnectionIds: [connection.id] }).expect(201);
+    if (assignedInvite.body.data.invite.smtpConnectionIds[0] !== connection.id) throw new Error("Invitation did not retain mailbox selection");
+    const inviteToken = new URL(assignedInvite.body.data.acceptUrl).searchParams.get("token");
+    const joined = await request(app).post("/api/v1/invitations/accept").send({ token: inviteToken, password: "password123", name: "Assigned teammate" }).expect(200);
+    const joinedAuth = `Bearer ${joined.body.data.tokens.accessToken}`;
+    const joinedInboxes = await request(app).get(accountsUrl).set("Authorization", joinedAuth).expect(200);
+    if (!joinedInboxes.body.data.some((row: { id: string }) => row.id === mailbox.id)) throw new Error("Invited member did not receive read access on first sign-in");
+    const joinedSenders = await request(app).get(`/api/v1/smtp-connections/sendable?organizationId=${organizationId}`).set("Authorization", joinedAuth).expect(200);
+    if (!joinedSenders.body.data.some((row: { id: string }) => row.id === connection.id)) throw new Error("Invited member did not receive send access on first sign-in");
+    await request(app).get(`/api/v1/inbox/messages/${inbound[0].id}/conversation?organizationId=${organizationId}`).set("Authorization", joinedAuth).expect(200);
+    await request(app).post("/api/v1/invitations/accept").send({ token: inviteToken, password: "password123" }).expect(400);
+
+    const existingInviteUser = await prisma.user.create({ data: { email: `existing-invite-${Date.now()}@example.com`, passwordHash: "unused" } });
+    const existingInvite = await request(app).post("/api/v1/invitations").set("Authorization", auth).send({ organizationId, email: existingInviteUser.email, role: "MEMBER", smtpConnectionIds: [connection.id] }).expect(201);
+    const existingAccepted = await request(app).post("/api/v1/invitations/accept").send({ token: new URL(existingInvite.body.data.acceptUrl).searchParams.get("token") }).expect(200);
+    if (!existingAccepted.body.data.requiresSignIn || existingAccepted.body.data.tokens) throw new Error("Existing invitee was signed in without a password");
+    if (!(await prisma.inboxAccountGrant.findUnique({ where: { inboxAccountId_userId: { inboxAccountId: mailbox.id, userId: existingInviteUser.id } } }))) throw new Error("Existing invitee missed mailbox assignment");
+
+    // Owner revocation after issuance must also stop a stale pending assignment.
+    const staleInviteEmail = `stale-invite-${Date.now()}@example.com`;
+    const staleInvite = await request(app).post("/api/v1/invitations").set("Authorization", adminAuth).send({ organizationId, email: staleInviteEmail, role: "MEMBER", smtpConnectionIds: [connection.id] }).expect(201);
+    await request(app).delete(`${grantsUrl}/${admin.id}`).set("Authorization", auth).expect(204);
+    await request(app).post("/api/v1/invitations/accept").send({ token: new URL(staleInvite.body.data.acceptUrl).searchParams.get("token"), password: "password123" }).expect(403);
+    const unconsumed = await prisma.organizationInvite.findUniqueOrThrow({ where: { id: staleInvite.body.data.invite.id } });
+    if (unconsumed.status !== "PENDING" || await prisma.user.findUnique({ where: { email: staleInviteEmail } })) throw new Error("Failed assignment partially consumed an invite or created a user");
+    await request(app).post(grantsUrl).set("Authorization", auth).send({ userId: admin.id }).expect(201);
+
     await request(app)
       .delete(
         `/api/v1/inbox/accounts/${mailbox.id}?organizationId=${organizationId}`

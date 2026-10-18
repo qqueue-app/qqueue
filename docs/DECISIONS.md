@@ -1366,3 +1366,57 @@ reconciliation, not a cross-client send lock or an exactly-once SMTP guarantee.
 
 Private inline previews authenticate attachment downloads and resolve Content-ID
 links only for display; saved HTML retains the MIME links, never local blob URLs.
+
+
+## Owners may revoke admin mailbox access (2026-10-18)
+
+The earlier mailbox-access decision left OWNER and ADMIN unrestricted. An
+organization owner now needs to keep selected mailboxes private from admins.
+Owners retain unconditional access. Admins keep their existing default access,
+but an owner can untick an admin's mailbox in Mailboxes → Who has access.
+
+Both grant tables have a `revoked` flag. Ordinary grants default to false;
+explicit denial rows are stored on removal and survive role demotion/promotion.
+Members need a non-revoked grant; admins may access everything except explicitly
+revoked accounts. Restoring access resets both paired rows to false. The additive
+migration defaults existing rows to false, preserving every existing permission.
+No cross-product backfill of every admin × mailbox pair is necessary.
+
+Only owners can change admin mailbox access, invite admins, change an admin's
+role, promote someone to admin, or remove an admin. Admins may continue managing
+members on mailboxes they can access. Grant edits re-check actor authority and
+revocation under the existing organization team lock. The restriction also guards
+connection edits, reconnects, Mailcow credential recovery, push delivery and reply
+presence. An explicit admin denial also hides outgoing mail from that account even when
+the admin authored it. Members retain their existing personal outgoing-history
+rule. Already downloaded copies cannot be recalled. Accepted sends
+continue under the existing creation-time authorization rule.
+
+API keys authorize org-wide sending without an acting user. Revocation therefore
+invalidates the affected user's existing keys and blocks restricted users from
+issuing new ones. Org-wide webhook and operations tools also reject users with
+mailbox restrictions. Existing integrations and mail-server credentials already
+shared outside QQueue remain external credentials that an owner must rotate or
+review separately; this change controls access through QQueue.
+
+
+## Assign mailboxes before invitation acceptance (2026-10-18)
+
+Inviting a member and giving them a mailbox are now one administrator journey.
+`OrganizationInvite.smtpConnectionIds` stores the selected sending accounts until
+acceptance; the existing paired mailbox grants are still the access authority.
+The invitation form lists only the actor's sendable accounts, and the API checks
+organization scope and admin revocations inside the organization team lock.
+
+Acceptance rechecks the inviter's current role and access, then consumes the
+invite, creates the user/membership and grants both halves in one transaction.
+A deleted mailbox or revoked inviter permission rejects acceptance and rolls back
+the whole operation, leaving the invite available for an owner to renew. Existing
+accounts receive grants but must sign in normally; a user who already joined is
+not regranted access by an old invite. SMTP-only accounts grant sending alone.
+
+Selections are bounded and deduplicated. Pending invites display assignments and
+resends carry their saved selections. IDs are stored rather than addresses so
+renaming a mailbox follows its existing connection identity. Missing IDs are
+validated at acceptance rather than silently dropping an advertised assignment.
+The additive array column defaults to empty, leaving older invitations unchanged.

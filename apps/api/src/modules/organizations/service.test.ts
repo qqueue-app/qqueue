@@ -282,3 +282,32 @@ it("removes mailbox/provisioning grants and reply indicators with membership, pr
   expect(prismaMock.emailDraft.deleteMany).not.toHaveBeenCalled();
   expect(prismaMock.$queryRaw).toHaveBeenCalled();
 });
+
+describe("admin role changes cannot bypass mailbox restrictions", () => {
+  it("does not let an admin demote another admin or themselves", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN",
+    } as never);
+    await expect(
+      organizationService.updateMemberRole("org", "admin", "admin", "MEMBER")
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(prismaMock.organizationMember.update).not.toHaveBeenCalled();
+  });
+  it("does not let an admin promote a member to an unrestricted admin", async () => {
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce({ role: "ADMIN" } as never)
+      .mockResolvedValueOnce({ role: "MEMBER" } as never);
+    await expect(
+      organizationService.updateMemberRole("org", "member", "admin", "ADMIN")
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+  it("does not let an admin remove another admin and clear their denial rows", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN",
+    } as never);
+    await expect(
+      organizationService.removeMember("org", "admin2", "admin")
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(prismaMock.smtpConnectionGrant.deleteMany).not.toHaveBeenCalled();
+  });
+});

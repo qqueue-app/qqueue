@@ -14,6 +14,7 @@ import { env } from "../../config/env.js";
 import { encryptSecret } from "../../lib/crypto.js";
 import { HttpError } from "../../lib/http-error.js";
 import { getMembership, lockOrganizationTeam } from "../../lib/org-access.js";
+import { assertMailboxNotRevoked } from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 import {
   normalizeDefault,
@@ -270,6 +271,7 @@ async function resolveManageableMailbox(
     throw new HttpError(400, "That is not a valid address", "validation_error");
   }
   await assertDomainAccess(actor, domain, verb);
+  await assertMailboxNotRevoked(actor.userId, actor.organizationId, email);
 
   const mailbox = (await client.listMailboxes(domain)).find(
     (candidate) => candidate.email === email
@@ -593,6 +595,33 @@ export const mailcowService = {
       });
     }
 
+    if (actor.role !== "OWNER") {
+      const [smtp, inbox] = await Promise.all([
+        prisma.smtpConnectionGrant.findMany({
+          where: {
+            organizationId: actor.organizationId,
+            userId: actor.userId,
+            revoked: true,
+          },
+          select: { smtpConnection: { select: { fromEmail: true } } },
+        }),
+        prisma.inboxAccountGrant.findMany({
+          where: {
+            organizationId: actor.organizationId,
+            userId: actor.userId,
+            revoked: true,
+          },
+          select: { inboxAccount: { select: { email: true } } },
+        }),
+      ]);
+      const denied = new Set([
+        ...(smtp ?? []).map((g) => g.smtpConnection.fromEmail.toLowerCase()),
+        ...(inbox ?? []).map((g) => g.inboxAccount.email.toLowerCase()),
+      ]);
+      return rows
+        .filter((row) => !denied.has(row.email.toLowerCase()))
+        .sort((a, b) => a.email.localeCompare(b.email));
+    }
     return rows.sort((a, b) => a.email.localeCompare(b.email));
   },
 
@@ -651,6 +680,7 @@ export const mailcowService = {
       }
     }
 
+    await assertMailboxNotRevoked(actor.userId, input.organizationId, email);
     await assertNotAlreadyConnected(input.organizationId, email);
 
     const mailboxPassword = generatePassword();
@@ -729,6 +759,7 @@ export const mailcowService = {
       }
     }
 
+    await assertMailboxNotRevoked(actor.userId, input.organizationId, email);
     await assertNotAlreadyConnected(input.organizationId, email);
 
     const connected = await connectMailbox(client, {

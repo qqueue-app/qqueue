@@ -10,6 +10,30 @@ mailbox provisioning, tracking, transactional API keys, outbound webhooks, an
 MIT-licensed SDK package, tests, deployment files, and open-core licensing
 guardrails.
 
+## Mailbox assignment during invitations (2026-10-18)
+
+Settings → Team now lets an owner or admin select mailboxes while inviting a
+member. Pending invitations show their assignments, and resending preserves
+those selections. Accepting an invitation creates membership and paired read/send
+grants in one transaction, for new and existing QQueue accounts. Admins can only
+assign mailboxes they can access; acceptance rechecks the inviter's current
+permissions so a later owner revocation cannot be bypassed through an old invite.
+Deleted or inaccessible selections leave the invitation pending for renewal.
+Existing invitations default to no assignments and preserve their old behavior.
+
+## Owner-controlled admin mailbox access (2026-10-18)
+
+Owners can remove and restore an admin's read/send access from Mailboxes → Who
+has access. Owners remain unrestricted; admins retain access by default until
+explicitly revoked. Revocation writes paired read/send denial rows, hides the
+mailbox and its notifications, and prevents the admin from granting access back,
+changing its connection or recovering its mail-server credentials. Admin role
+changes and admin invitations now require an owner so role cycling or another
+admin account cannot bypass the restriction. Revocation invalidates that user's
+organization-wide API keys; restricted users cannot issue new keys or operate
+organization-wide webhook/operations tools. Existing grants and admin access
+are preserved on upgrade by additive false-default columns.
+
 ## Organization email client improvements (2026-10-14)
 
 The first implementation set from the primary-email-client audit adds inbox

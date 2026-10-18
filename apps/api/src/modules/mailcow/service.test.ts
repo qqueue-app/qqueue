@@ -166,9 +166,9 @@ describe("mailcowService.provision", () => {
       { userId: "owner_1", role: "OWNER" }
     );
 
-    expect(
-      prismaMock.sMTPConnection.create.mock.calls[0][0].data.replyTo
-    ).toBe("support@acme.test");
+    expect(prismaMock.sMTPConnection.create.mock.calls[0][0].data.replyTo).toBe(
+      "support@acme.test"
+    );
   });
 
   it("leaves Reply-To null when creation does not name one", async () => {
@@ -636,6 +636,22 @@ describe("per-mailbox actions", () => {
     expect(h.client.setMailboxPassword).not.toHaveBeenCalled();
     // Refused before the mailbox was even looked up.
     expect(h.client.listMailboxes).not.toHaveBeenCalled();
+  });
+
+  it("refuses credential recovery for a revoked admin even with a domain grant", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN",
+    } as never);
+    prismaMock.mailDomainGrant.findUnique.mockResolvedValue({
+      id: "domain-grant",
+    } as never);
+    prismaMock.smtpConnectionGrant.findFirst.mockResolvedValue({
+      id: "denial",
+    } as never);
+    await expect(
+      mailcowService.resetPassword(target, admin)
+    ).rejects.toMatchObject({ statusCode: 403, code: "mailbox_access_denied" });
+    expect(h.client.setMailboxPassword).not.toHaveBeenCalled();
   });
 
   it("pauses and resumes delivery", async () => {

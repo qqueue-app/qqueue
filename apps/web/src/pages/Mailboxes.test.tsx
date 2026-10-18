@@ -815,3 +815,68 @@ describe("Mailboxes", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("owner-controlled admin mailbox access", () => {
+  const admin = {
+    ...members[1],
+    userId: "user_admin",
+    role: "ADMIN",
+    user: { id: "user_admin", email: "admin@acme.test", name: "Admin" },
+  };
+  async function selectAdmin(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByText("support@acme.test");
+    await user.click(screen.getByRole("tab", { name: /Who has access/ }));
+    await user.click(
+      within(await screen.findByRole("list", { name: "People" })).getByRole(
+        "button",
+        { name: /admin@acme.test/ }
+      )
+    );
+    return screen.findByRole("checkbox", {
+      name: "Admin can read and send as support@acme.test",
+    });
+  }
+  it("lets an owner revoke an admin's implicit access", async () => {
+    session.current.currentOrganization.role = "OWNER";
+    mockedApi.listOrganizationMembers.mockResolvedValue([...members, admin]);
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+    const cell = await selectAdmin(user);
+    expect(cell).toHaveAttribute("aria-checked", "true");
+    expect(cell).toBeEnabled();
+    await user.click(cell);
+    await waitFor(() =>
+      expect(mockedApi.removeConnectionGrant).toHaveBeenCalledWith(
+        "s1",
+        "user_admin"
+      )
+    );
+  });
+  it("shows revoked admin access as unticked and lets an owner restore it", async () => {
+    session.current.currentOrganization.role = "OWNER";
+    mockedApi.listOrganizationMembers.mockResolvedValue([...members, admin]);
+    mockedApi.listConnectionGrants.mockResolvedValue([
+      { id: "denial", userId: "user_admin", revoked: true },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+    const cell = await selectAdmin(user);
+    expect(cell).toHaveAttribute("aria-checked", "false");
+    await user.click(cell);
+    await waitFor(() =>
+      expect(mockedApi.addConnectionGrant).toHaveBeenCalledWith(
+        "s1",
+        "user_admin"
+      )
+    );
+  });
+  it("keeps admin access controls read-only for another admin", async () => {
+    mockedApi.listOrganizationMembers.mockResolvedValue([...members, admin]);
+    const user = userEvent.setup();
+    renderWithProviders(<Mailboxes />);
+    const cell = await selectAdmin(user);
+    expect(cell).toBeDisabled();
+    await user.click(cell);
+    expect(mockedApi.removeConnectionGrant).not.toHaveBeenCalled();
+  });
+});

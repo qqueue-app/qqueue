@@ -118,7 +118,13 @@ export async function sendPushToUsers(
 
   const subscriptions = await prisma.pushSubscription.findMany({
     where: { userId: { in: [...payloadByUser.keys()] } },
-    select: { id: true, endpoint: true, p256dh: true, auth: true, userId: true },
+    select: {
+      id: true,
+      endpoint: true,
+      p256dh: true,
+      auth: true,
+      userId: true,
+    },
   });
 
   if (subscriptions.length === 0) return 0;
@@ -169,7 +175,7 @@ export interface InboundMessageNotification {
  * Three filters, applied in this order, and the order is the safety property:
  *
  * 1. **Access.** A member is told about mail in a mailbox they hold; an
- *    OWNER/ADMIN about any of them. Without this, a banner carrying sender and
+ *    OWNER about any of them; an ADMIN unless access was revoked. Without this, a banner carrying sender and
  *    subject would be the one way to read a mailbox you were never given — and
  *    it would reach the device of someone the inbox itself refuses.
  * 2. **Which mailbox** (`InboxNotifyRule`). Per-mailbox and per-domain mutes
@@ -192,11 +198,25 @@ export async function notifyNewInboundMessage(
       organizationId: notification.organizationId,
       notifyLevel: { not: "NONE" },
       OR: [
-        { role: { in: ["OWNER", "ADMIN"] } },
+        { role: "OWNER" },
+        {
+          role: "ADMIN",
+          user: {
+            inboxGrants: {
+              none: {
+                inboxAccountId: notification.inboxAccountId,
+                revoked: true,
+              },
+            },
+          },
+        },
         {
           user: {
             inboxGrants: {
-              some: { inboxAccountId: notification.inboxAccountId },
+              some: {
+                inboxAccountId: notification.inboxAccountId,
+                revoked: false,
+              },
             },
           },
         },
@@ -245,10 +265,13 @@ export async function notifyNewInboundMessage(
   const interested = members.filter((member) => {
     // Absent rules resolve to on: someone who never opened the settings page,
     // or was granted this mailbox after they last did, still hears about it.
-    const { enabled } = resolveInboxNotify(rulesByUser.get(member.userId) ?? [], {
-      inboxAccountId: notification.inboxAccountId,
-      domain,
-    });
+    const { enabled } = resolveInboxNotify(
+      rulesByUser.get(member.userId) ?? [],
+      {
+        inboxAccountId: notification.inboxAccountId,
+        domain,
+      }
+    );
     if (!enabled) return false;
 
     return (

@@ -41,6 +41,7 @@ import {
   isValidCron,
   isValidTimezone,
   loginSchema,
+  inviteCreateSchema,
   manualEmailSendSchema,
   nextCronRun,
   organizationSchema,
@@ -1625,4 +1626,15 @@ describe("mail reply recipient defaults",()=>{
   expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:[],cc:["cc@example.com"]},["own@example.com"],false)).toEqual({to:["cc@example.com"],cc:[]});
   expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:["own@example.com"],cc:[]},["own@example.com"],false)).toEqual({to:["own@example.com"],cc:[]});
  });
+});
+
+
+describe("invitation mailbox assignments", () => {
+  it("accepts optional bounded mailbox selections while preserving old invite defaults", () => {
+    const base = { organizationId: "org", email: "person@example.com" };
+    expect(inviteCreateSchema.parse(base)).toEqual({ ...base, role: "MEMBER" });
+    expect(inviteCreateSchema.parse({ ...base, smtpConnectionIds: ["smtp1", "smtp2"] }).smtpConnectionIds).toEqual(["smtp1", "smtp2"]);
+    expect(inviteCreateSchema.safeParse({ ...base, smtpConnectionIds: [""] }).success).toBe(false);
+    expect(inviteCreateSchema.safeParse({ ...base, smtpConnectionIds: Array(101).fill("smtp1") }).success).toBe(false);
+  });
 });

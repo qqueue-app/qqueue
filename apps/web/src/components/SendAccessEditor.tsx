@@ -29,11 +29,13 @@ export interface AccessPerson {
   /** Role as the UI says it, e.g. "Owner" — shown as a badge. */
   roleLabel: string;
   /**
-   * People who hold the permission unconditionally: an owner or admin may send
+   * People who hold the permission unconditionally: an owner may send
    * as any of the organization's accounts. Their mailboxes are listed but not
    * togglable, because unticking one would do nothing.
    */
   alwaysAllowed?: boolean;
+  /** Access can be inspected but only an owner may change it. */
+  readOnly?: boolean;
   alwaysAllowedReason?: string;
 }
 
@@ -107,7 +109,9 @@ export function SendAccessEditor({
     return [...byDomain.entries()]
       .map(([domain, items]) => ({
         domain,
-        mailboxes: [...items].sort((a, b) => a.address.localeCompare(b.address)),
+        mailboxes: [...items].sort((a, b) =>
+          a.address.localeCompare(b.address)
+        ),
       }))
       .sort((a, b) => a.domain.localeCompare(b.domain));
   }, [mailboxes]);
@@ -475,7 +479,7 @@ function PersonAccess({
                         </>
                       );
 
-                      // Owners and admins hold every account by role, so there
+                      // Owners hold every account by role, so there
                       // is nothing to toggle — the row states the fact instead
                       // of offering a control that would refuse to move.
                       if (person.alwaysAllowed) {
@@ -499,7 +503,7 @@ function PersonAccess({
                             role="checkbox"
                             aria-checked={granted}
                             aria-label={`${person.name} can read and send as ${mailbox.address}`}
-                            disabled={disabled || busy}
+                            disabled={disabled || person.readOnly || busy}
                             onClick={() =>
                               onToggle(person.id, mailbox.id, !granted)
                             }

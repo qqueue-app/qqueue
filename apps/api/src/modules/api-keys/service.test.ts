@@ -5,7 +5,7 @@ import { apiKeyService, hashApiKey } from "./service.js";
 describe("apiKeyService", () => {
   it("lists keys for an accessible organization", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "MEMBER"
+      role: "MEMBER",
     } as never);
     prismaMock.apiKey.findMany.mockResolvedValue([] as never);
 
@@ -19,13 +19,13 @@ describe("apiKeyService", () => {
 
   it("creates a key and only stores its hash", async () => {
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "OWNER"
+      role: "OWNER",
     } as never);
     prismaMock.apiKey.create.mockResolvedValue({
       id: "key_1",
       organizationId: "org_1",
       userId: "user_1",
-      name: "Production"
+      name: "Production",
     } as never);
 
     const result = await apiKeyService.create(
@@ -43,10 +43,10 @@ describe("apiKeyService", () => {
   it("revokes a key when the user can administer its organization", async () => {
     prismaMock.apiKey.findFirst.mockResolvedValue({
       id: "key_1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.organizationMember.findUnique.mockResolvedValue({
-      role: "ADMIN"
+      role: "ADMIN",
     } as never);
     prismaMock.apiKey.update.mockResolvedValue({ id: "key_1" } as never);
 
@@ -55,7 +55,7 @@ describe("apiKeyService", () => {
     expect(prismaMock.apiKey.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "key_1" },
-        data: { revokedAt: expect.any(Date) }
+        data: { revokedAt: expect.any(Date) },
       })
     );
   });
@@ -64,7 +64,7 @@ describe("apiKeyService", () => {
     const key = "qq_live_valid";
     prismaMock.apiKey.findFirst.mockResolvedValue({
       id: "key_1",
-      organizationId: "org_1"
+      organizationId: "org_1",
     } as never);
     prismaMock.apiKey.update.mockResolvedValue({ id: "key_1" } as never);
 
@@ -73,12 +73,12 @@ describe("apiKeyService", () => {
     expect(result).toEqual({ id: "key_1", organizationId: "org_1" });
     expect(prismaMock.apiKey.findFirst).toHaveBeenCalledWith({
       where: { keyHash: hashApiKey(key), revokedAt: null },
-      select: { id: true, organizationId: true }
+      select: { id: true, organizationId: true, userId: true },
     });
     expect(prismaMock.apiKey.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "key_1" },
-        data: { lastUsedAt: expect.any(Date) }
+        data: { lastUsedAt: expect.any(Date) },
       })
     );
   });
@@ -89,4 +89,25 @@ describe("apiKeyService", () => {
     expect(result).toBeNull();
     expect(prismaMock.apiKey.findFirst).not.toHaveBeenCalled();
   });
+});
+
+it("rejects a copied API key when its creator now has a mailbox restriction", async () => {
+  prismaMock.apiKey.findFirst.mockResolvedValue({
+    id: "key",
+    organizationId: "org",
+    userId: "admin",
+  } as never);
+  prismaMock.smtpConnectionGrant.count.mockResolvedValue(1);
+  expect(await apiKeyService.authenticate("qq_live_test")).toBeNull();
+  expect(prismaMock.apiKey.update).not.toHaveBeenCalled();
+});
+it("refuses new org-wide keys for a restricted admin", async () => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "ADMIN",
+  } as never);
+  prismaMock.inboxAccountGrant.count.mockResolvedValue(1);
+  await expect(
+    apiKeyService.create({ organizationId: "org", name: "Bypass" }, "admin")
+  ).rejects.toMatchObject({ statusCode: 403 });
+  expect(prismaMock.apiKey.create).not.toHaveBeenCalled();
 });

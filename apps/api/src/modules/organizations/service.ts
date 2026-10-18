@@ -193,12 +193,20 @@ export const organizationService = {
         throw new HttpError(404, "Member not found in this organization");
       }
 
-      if (actor.role === "ADMIN" && target.role === "OWNER") {
-        throw new HttpError(403, "Admins cannot change an owner's role");
+      if (actor.role === "ADMIN" && target.role !== "MEMBER") {
+        throw new HttpError(
+          403,
+          target.role === "OWNER"
+            ? "Admins cannot change an owner's role"
+            : "Only owners can change an admin's role"
+        );
       }
 
-      if (role === "OWNER" && actor.role !== "OWNER") {
-        throw new HttpError(403, "Only an owner can grant the owner role");
+      if ((role === "OWNER" || role === "ADMIN") && actor.role !== "OWNER") {
+        throw new HttpError(
+          403,
+          `Only an owner can grant the ${role.toLowerCase()} role`
+        );
       }
 
       if (target.role === "OWNER" && role !== "OWNER") {
@@ -236,8 +244,13 @@ export const organizationService = {
         throw new HttpError(404, "Member not found in this organization");
       }
 
-      if (actor.role === "ADMIN" && target.role === "OWNER") {
-        throw new HttpError(403, "Admins cannot remove an owner");
+      if (actor.role === "ADMIN" && target.role !== "MEMBER") {
+        throw new HttpError(
+          403,
+          target.role === "OWNER"
+            ? "Admins cannot remove an owner"
+            : "Only owners can remove an admin"
+        );
       }
 
       if (target.role === "OWNER") {

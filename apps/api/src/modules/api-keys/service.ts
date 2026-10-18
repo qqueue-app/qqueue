@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { ApiKeyCreateInput } from "@qqueue/shared";
 import { assertOrgAccess, assertOrgRole } from "../../lib/org-access.js";
 import { HttpError } from "../../lib/http-error.js";
+import { assertNoMailboxRestrictions } from "../../lib/mailbox-access.js";
 import { prisma } from "../../lib/prisma.js";
 
 const API_KEY_PREFIX = "qq_live_";
@@ -13,7 +14,7 @@ const apiKeySelect = {
   name: true,
   lastUsedAt: true,
   createdAt: true,
-  revokedAt: true
+  revokedAt: true,
 };
 
 export function hashApiKey(key: string) {
@@ -30,13 +31,14 @@ export const apiKeyService = {
       prisma.apiKey.findMany({
         where: { organizationId },
         select: apiKeySelect,
-        orderBy: { createdAt: "desc" }
+        orderBy: { createdAt: "desc" },
       })
     );
   },
 
   async create(input: ApiKeyCreateInput, userId: string) {
     await assertOrgRole(userId, input.organizationId, ["OWNER", "ADMIN"]);
+    await assertNoMailboxRestrictions(userId, input.organizationId);
 
     const key = generateApiKey();
     const apiKey = await prisma.apiKey.create({
@@ -44,9 +46,9 @@ export const apiKeyService = {
         organizationId: input.organizationId,
         userId,
         name: input.name,
-        keyHash: hashApiKey(key)
+        keyHash: hashApiKey(key),
       },
-      select: apiKeySelect
+      select: apiKeySelect,
     });
 
     return { apiKey, key };
@@ -55,7 +57,7 @@ export const apiKeyService = {
   async revoke(id: string, userId: string) {
     const existing = await prisma.apiKey.findFirst({
       where: { id },
-      select: { id: true, organizationId: true }
+      select: { id: true, organizationId: true },
     });
 
     if (!existing) {
@@ -67,7 +69,7 @@ export const apiKeyService = {
     return prisma.apiKey.update({
       where: { id },
       data: { revokedAt: new Date() },
-      select: apiKeySelect
+      select: apiKeySelect,
     });
   },
 
@@ -79,21 +81,36 @@ export const apiKeyService = {
     const existing = await prisma.apiKey.findFirst({
       where: {
         keyHash: hashApiKey(key),
-        revokedAt: null
+        revokedAt: null,
       },
-      select: { id: true, organizationId: true }
+      select: { id: true, organizationId: true, userId: true },
     });
 
     if (!existing) {
       return null;
     }
 
+    if (existing.userId) {
+      try {
+        await assertNoMailboxRestrictions(
+          existing.userId,
+          existing.organizationId
+        );
+      } catch (error) {
+        if (
+          error instanceof HttpError &&
+          error.code === "mailbox_access_denied"
+        )
+          return null;
+        throw error;
+      }
+    }
     await prisma.apiKey.update({
       where: { id: existing.id },
       data: { lastUsedAt: new Date() },
-      select: { id: true }
+      select: { id: true },
     });
 
     return existing;
-  }
+  },
 };

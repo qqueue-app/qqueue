@@ -157,8 +157,18 @@ describe("worker push", () => {
     // mailbox you were never given.
     const [call] = prisma.organizationMember.findMany.mock.calls[0];
     expect(call.where.OR).toEqual([
-      { role: { in: ["OWNER", "ADMIN"] } },
-      { user: { inboxGrants: { some: { inboxAccountId: "inbox_1" } } } },
+      { role: "OWNER" },
+      {
+        role: "ADMIN",
+        user: {
+          inboxGrants: { none: { inboxAccountId: "inbox_1", revoked: true } },
+        },
+      },
+      {
+        user: {
+          inboxGrants: { some: { inboxAccountId: "inbox_1", revoked: false } },
+        },
+      },
     ]);
   });
 

@@ -339,6 +339,8 @@ model OrganizationInvite {
   tokenHash       String       @unique
   status          InviteStatus @default(PENDING)
   invitedByUserId String
+  /// Mailbox assignments applied atomically when the invitation is accepted.
+  smtpConnectionIds String[]   @default([])
   expiresAt       DateTime
   acceptedAt      DateTime?
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -465,7 +467,8 @@ model InstanceAdminMute {
 }
 
 /// Send-as permission (Phase 4): MEMBERs may only send from connections they
-/// hold a grant for; OWNER/ADMIN may use any org connection and need no row.
+/// hold a non-revoked grant for; owners are unrestricted and admins are allowed
+/// unless an explicit revoked grant exists.
 /// Enforced at the service layer when a send/draft/schedule is created —
 /// EmailJobs are created post-check, so the worker does not re-verify.
 model SmtpConnectionGrant {
@@ -473,6 +476,8 @@ model SmtpConnectionGrant {
   organizationId   String
   smtpConnectionId String
   userId           String
+  /// Explicit denial overrides ADMIN access; false is an ordinary grant.
+  revoked          Boolean        @default(false)
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   smtpConnection   SMTPConnection @relation(fields: [smtpConnectionId], references: [id], onDelete: Cascade)
   user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1118,6 +1123,8 @@ model InboxAccountGrant {
   organizationId String
   inboxAccountId String
   userId         String
+  /// Explicit denial overrides ADMIN access; false is an ordinary grant.
+  revoked        Boolean      @default(false)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   inboxAccount   InboxAccount @relation(fields: [inboxAccountId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)

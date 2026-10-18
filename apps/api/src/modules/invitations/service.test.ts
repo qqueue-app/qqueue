@@ -383,3 +383,205 @@ it("rejects a token revoked after lookup before adding any member", async () => 
   ).rejects.toMatchObject({ statusCode: 400 });
   expect(prismaMock.organizationMember.create).not.toHaveBeenCalled();
 });
+
+it("does not let an admin invite a new unrestricted admin", async () => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "ADMIN",
+  } as never);
+  await expect(
+    invitationService.create(
+      { organizationId: "org", email: "new@example.com", role: "ADMIN" },
+      "admin"
+    )
+  ).rejects.toMatchObject({ statusCode: 403 });
+  expect(prismaMock.organizationInvite.create).not.toHaveBeenCalled();
+});
+
+describe("mailbox assignments on invitations", () => {
+  const selected = [{ id: "smtp1", fromEmail: "Support@Example.com" }];
+  const invitation = {
+    id: "invite",
+    organizationId: "org_1",
+    invitedByUserId: "owner",
+    email: "new@example.com",
+    role: "MEMBER",
+    status: "PENDING",
+    expiresAt: future,
+    smtpConnectionIds: ["smtp1"],
+  };
+  beforeEach(() => {
+    prismaMock.organizationInvite.findUnique.mockResolvedValue(
+      invitation as never
+    );
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "OWNER",
+    } as never);
+    prismaMock.sMTPConnection.findMany.mockResolvedValue(selected as never);
+    prismaMock.inboxAccount.findFirst.mockResolvedValue({
+      id: "inbox1",
+    } as never);
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.user.create.mockResolvedValue({
+      id: "new-user",
+      email: invitation.email,
+      createdAt: new Date(),
+    } as never);
+    prismaMock.organization.findUnique.mockResolvedValue({
+      id: "org_1",
+      name: "Acme",
+    } as never);
+  });
+  it("stores deduplicated assignments without granting anyone access before acceptance", async () => {
+    await invitationService.create(
+      {
+        organizationId: "org_1",
+        email: invitation.email,
+        role: "MEMBER",
+        smtpConnectionIds: ["smtp1", "smtp1"],
+      },
+      "owner"
+    );
+    expect(prismaMock.organizationInvite.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ smtpConnectionIds: ["smtp1"] }),
+      })
+    );
+    expect(prismaMock.smtpConnectionGrant.upsert).not.toHaveBeenCalled();
+  });
+  it("scopes admin assignment choices to their organization and non-revoked accounts", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN",
+    } as never);
+    await invitationService.create(
+      {
+        organizationId: "org_1",
+        email: invitation.email,
+        role: "MEMBER",
+        smtpConnectionIds: ["smtp1"],
+      },
+      "admin"
+    );
+    expect(prismaMock.sMTPConnection.findMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org_1",
+        id: { in: ["smtp1"] },
+        grants: { none: { userId: "admin", revoked: true } },
+      },
+      select: { id: true, fromEmail: true },
+    });
+  });
+  it("rejects missing, foreign or forbidden accounts before replacing an existing invite", async () => {
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([]);
+    await expect(
+      invitationService.create(
+        {
+          organizationId: "org_1",
+          email: invitation.email,
+          role: "MEMBER",
+          smtpConnectionIds: ["other-org-account"],
+        },
+        "owner"
+      )
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(prismaMock.organizationInvite.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.organizationInvite.create).not.toHaveBeenCalled();
+  });
+  it("creates both read and send grants before signing in a new invitee", async () => {
+    const result = await invitationService.accept({
+      token: "valid-invite-token",
+      password: "password123",
+    });
+    expect(result.requiresSignIn).toBe(false);
+    expect(prismaMock.smtpConnectionGrant.upsert).toHaveBeenCalledWith({
+      where: {
+        smtpConnectionId_userId: {
+          smtpConnectionId: "smtp1",
+          userId: "new-user",
+        },
+      },
+      create: {
+        organizationId: "org_1",
+        smtpConnectionId: "smtp1",
+        userId: "new-user",
+      },
+      update: { revoked: false },
+    });
+    expect(prismaMock.inboxAccount.findFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org_1",
+        email: { equals: "Support@Example.com", mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    expect(prismaMock.inboxAccountGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: {
+          organizationId: "org_1",
+          inboxAccountId: "inbox1",
+          userId: "new-user",
+        },
+      })
+    );
+  });
+  it("grants assignments to an existing account without issuing sign-in tokens", async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ id: "existing" } as never);
+    prismaMock.organizationMember.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ role: "OWNER" } as never);
+    const result = await invitationService.accept({
+      token: "valid-invite-token",
+    });
+    expect(result.requiresSignIn).toBe(true);
+    expect(result.tokens).toBeUndefined();
+    expect(prismaMock.smtpConnectionGrant.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ userId: "existing" }),
+      })
+    );
+  });
+  it("does not restore revoked mailbox access when an old invitee is already a member", async () => {
+    prismaMock.user.findUnique.mockResolvedValue({ id: "existing" } as never);
+    const result = await invitationService.accept({
+      token: "valid-invite-token",
+    });
+    expect(result.alreadyMember).toBe(true);
+    expect(prismaMock.smtpConnectionGrant.upsert).not.toHaveBeenCalled();
+  });
+  it("supports send-only accounts without inventing a receiving mailbox", async () => {
+    prismaMock.inboxAccount.findFirst.mockResolvedValue(null);
+    await invitationService.accept({
+      token: "valid-invite-token",
+      password: "password123",
+    });
+    expect(prismaMock.smtpConnectionGrant.upsert).toHaveBeenCalledOnce();
+    expect(prismaMock.inboxAccountGrant.upsert).not.toHaveBeenCalled();
+  });
+  it.each([null, "MEMBER"])(
+    "rejects assignments when the inviter is no longer an administrator (%s)",
+    async (role) => {
+      prismaMock.organizationMember.findUnique.mockResolvedValue(
+        role ? ({ role } as never) : null
+      );
+      await expect(
+        invitationService.accept({
+          token: "valid-invite-token",
+          password: "password123",
+        })
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(prismaMock.user.create).not.toHaveBeenCalled();
+    }
+  );
+  it("rechecks an admin's mailbox access at acceptance", async () => {
+    prismaMock.organizationMember.findUnique.mockResolvedValue({
+      role: "ADMIN",
+    } as never);
+    prismaMock.sMTPConnection.findMany.mockResolvedValue([]);
+    await expect(
+      invitationService.accept({
+        token: "valid-invite-token",
+        password: "password123",
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(prismaMock.user.create).not.toHaveBeenCalled();
+  });
+});

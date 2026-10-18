@@ -209,6 +209,7 @@ export const manualEmailService = {
       userId,
       access.unrestricted,
       [...access.smtpConnectionIds].sort(),
+      [...(access.revokedSmtpConnectionIds ?? [])].sort(),
     ]);
     const cached = suggestionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {

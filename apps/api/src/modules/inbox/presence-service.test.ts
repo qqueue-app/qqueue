@@ -90,7 +90,11 @@ it("returns current authorized teammates' names only, without email or writing",
       OR: expect.arrayContaining([
         {
           inboxGrants: {
-            some: { organizationId: "org1", inboxAccountId: "inbox1" },
+            some: {
+              organizationId: "org1",
+              inboxAccountId: "inbox1",
+              revoked: false,
+            },
           },
         },
       ]),

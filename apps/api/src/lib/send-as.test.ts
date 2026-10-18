@@ -12,8 +12,8 @@ describe("assertMayUseConnection", () => {
     expect(prismaMock.organizationMember.findUnique).not.toHaveBeenCalled();
   });
 
-  it("allows OWNER and ADMIN without a grant lookup", async () => {
-    for (const role of ["OWNER", "ADMIN"]) {
+  it("allows OWNER without a grant lookup", async () => {
+    for (const role of ["OWNER"]) {
       prismaMock.organizationMember.findUnique.mockResolvedValue({
         role,
       } as never);
@@ -39,7 +39,7 @@ describe("assertMayUseConnection", () => {
       where: {
         smtpConnectionId_userId: { smtpConnectionId: "s1", userId: "user_1" },
       },
-      select: { id: true },
+      select: { id: true, revoked: true },
     });
   });
 
@@ -96,4 +96,33 @@ describe("assertMayUseConnection", () => {
       assertMayUseConnection({ ...base, userId: "user_1" })
     ).rejects.toMatchObject({ statusCode: 403 });
   });
+});
+
+it("allows an admin without an explicit grant but refuses a revoked admin", async () => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "ADMIN",
+  } as never);
+  prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue(null);
+  await expect(
+    assertMayUseConnection({ ...base, userId: "admin" })
+  ).resolves.toBeUndefined();
+  prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
+    id: "g",
+    revoked: true,
+  } as never);
+  await expect(
+    assertMayUseConnection({ ...base, userId: "admin" })
+  ).rejects.toMatchObject({ statusCode: 403, code: "send_as_denied" });
+});
+it("rejects a denial row even when the user is now a member", async () => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({
+    role: "MEMBER",
+  } as never);
+  prismaMock.smtpConnectionGrant.findUnique.mockResolvedValue({
+    id: "g",
+    revoked: true,
+  } as never);
+  await expect(
+    assertMayUseConnection({ ...base, userId: "member" })
+  ).rejects.toMatchObject({ statusCode: 403 });
 });

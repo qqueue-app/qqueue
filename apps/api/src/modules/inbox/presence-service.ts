@@ -63,10 +63,20 @@ export const replyPresenceService = {
           OR: [
             {
               members: {
-                some: { organizationId, role: { in: ["OWNER", "ADMIN"] } },
+                some: { organizationId, role: "OWNER" },
               },
             },
-            { inboxGrants: { some: { organizationId, inboxAccountId } } },
+            {
+              members: { some: { organizationId, role: "ADMIN" } },
+              inboxGrants: {
+                none: { organizationId, inboxAccountId, revoked: true },
+              },
+            },
+            {
+              inboxGrants: {
+                some: { organizationId, inboxAccountId, revoked: false },
+              },
+            },
           ],
         },
       },

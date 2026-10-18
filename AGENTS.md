@@ -110,8 +110,9 @@ worker) plus these non-obvious ones:
 - **Suppression enforcement is part of the pipeline, not optional.** Campaign
   fan-out excludes suppressed recipients and the send worker re-checks before
   delivery. New send paths must respect suppressions — don't route around them.
-- **Send-as grants** (`lib/send-as.ts`): OWNER/ADMIN may use any org connection,
-  a MEMBER only granted ones. Enforced once at creation time on every send
+- **Send-as grants** (`lib/send-as.ts`): OWNER may use any org connection; ADMIN may use any
+  connection unless an owner explicitly revoked access; MEMBER needs a non-revoked
+  grant. Only owners can change admin mailbox access. Enforced once at creation time on every send
   surface — jobs are created after the check, so the worker deliberately does
   not re-verify. API-key and SYSTEM sends pass `userId: null` and are not gated.
 - **Transactional sends dedupe on `Idempotency-Key`** — preserve that for any

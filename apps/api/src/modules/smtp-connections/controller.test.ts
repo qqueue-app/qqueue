@@ -11,8 +11,8 @@ vi.mock("./service.js", () => ({
     get: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
-    delete: vi.fn()
-  }
+    delete: vi.fn(),
+  },
 }));
 
 const { smtpConnectionController } = await import("./controller.js");
@@ -37,7 +37,7 @@ const validCreateBody = {
   password: "s3cret",
   fromEmail: "hello@example.com",
   fromName: "Hello",
-  isDefault: true
+  isDefault: true,
 };
 
 beforeEach(() => {
@@ -50,9 +50,12 @@ describe("smtpConnectionController.list", () => {
     vi.mocked(smtpConnectionService.list).mockResolvedValue(rows as never);
     const res = mockRes();
 
-    await smtpConnectionController.list({ organizationId: "org_1" } as Request, res);
+    await smtpConnectionController.list(
+      { organizationId: "org_1", userId: "usr_1" } as Request,
+      res
+    );
 
-    expect(smtpConnectionService.list).toHaveBeenCalledWith("org_1");
+    expect(smtpConnectionService.list).toHaveBeenCalledWith("org_1", "usr_1");
     expect(res.json).toHaveBeenCalledWith({ data: rows });
   });
 });
@@ -84,7 +87,7 @@ describe("smtpConnectionController.get", () => {
 
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.json).toHaveBeenCalledWith({
-      error: { message: "SMTP connection not found" }
+      error: { message: "SMTP connection not found" },
     });
   });
 });
@@ -95,10 +98,17 @@ describe("smtpConnectionController.create", () => {
     vi.mocked(smtpConnectionService.create).mockResolvedValue(created as never);
     const res = mockRes();
 
-    await smtpConnectionController.create({ body: validCreateBody } as Request, res);
+    await smtpConnectionController.create(
+      { body: validCreateBody, userId: "usr_1" } as Request,
+      res
+    );
 
     expect(smtpConnectionService.create).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org_1", host: "smtp.example.com" })
+      expect.objectContaining({
+        organizationId: "org_1",
+        host: "smtp.example.com",
+      }),
+      "usr_1"
     );
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith({ data: created });
@@ -120,7 +130,10 @@ describe("smtpConnectionController.create", () => {
     );
 
     await expect(
-      smtpConnectionController.create({ body: validCreateBody } as Request, mockRes())
+      smtpConnectionController.create(
+        { body: validCreateBody, userId: "usr_1" } as Request,
+        mockRes()
+      )
     ).rejects.toThrow("Could not connect to the SMTP server");
   });
 });
@@ -135,15 +148,19 @@ describe("smtpConnectionController.update", () => {
       {
         params: { id: "smtp_1" },
         userId: "usr_1",
-        body: { name: "Renamed", isDefault: true }
+        body: { name: "Renamed", isDefault: true },
       } as unknown as Request,
       res
     );
 
-    expect(smtpConnectionService.update).toHaveBeenCalledWith("smtp_1", "usr_1", {
-      name: "Renamed",
-      isDefault: true
-    });
+    expect(smtpConnectionService.update).toHaveBeenCalledWith(
+      "smtp_1",
+      "usr_1",
+      {
+        name: "Renamed",
+        isDefault: true,
+      }
+    );
     expect(res.json).toHaveBeenCalledWith({ data: updated });
   });
 
@@ -155,7 +172,7 @@ describe("smtpConnectionController.update", () => {
         {
           params: { id: "smtp_1" },
           userId: "usr_1",
-          body: { port: "not-a-number" }
+          body: { port: "not-a-number" },
         } as unknown as Request,
         mockRes()
       )
@@ -166,7 +183,9 @@ describe("smtpConnectionController.update", () => {
 
 describe("smtpConnectionController.delete", () => {
   it("deletes by id and responds 204 with no body", async () => {
-    vi.mocked(smtpConnectionService.delete).mockResolvedValue(undefined as never);
+    vi.mocked(smtpConnectionService.delete).mockResolvedValue(
+      undefined as never
+    );
     const res = mockRes();
 
     await smtpConnectionController.delete(
@@ -174,7 +193,10 @@ describe("smtpConnectionController.delete", () => {
       res
     );
 
-    expect(smtpConnectionService.delete).toHaveBeenCalledWith("smtp_1", "usr_1");
+    expect(smtpConnectionService.delete).toHaveBeenCalledWith(
+      "smtp_1",
+      "usr_1"
+    );
     expect(res.status).toHaveBeenCalledWith(204);
     expect(res.send).toHaveBeenCalled();
   });

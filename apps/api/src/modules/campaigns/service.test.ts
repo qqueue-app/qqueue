@@ -421,7 +421,7 @@ describe("campaignService send-as gate", () => {
           userId: "user_1"
         }
       },
-      select: { id: true }
+      select: { id: true, revoked: true }
     });
   });
 

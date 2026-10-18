@@ -2,13 +2,16 @@ import type { Request, Response } from "express";
 import {
   smtpConnectionGrantCreateSchema,
   smtpConnectionSchema,
-  smtpConnectionUpdateSchema
+  smtpConnectionUpdateSchema,
 } from "@qqueue/shared";
 import { smtpConnectionService } from "./service.js";
 
 export const smtpConnectionController = {
   async list(req: Request, res: Response) {
-    const connections = await smtpConnectionService.list(req.organizationId!);
+    const connections = await smtpConnectionService.list(
+      req.organizationId!,
+      req.userId!
+    );
     res.json({ data: connections });
   },
 
@@ -63,7 +66,7 @@ export const smtpConnectionController = {
 
   async create(req: Request, res: Response) {
     const input = smtpConnectionSchema.parse(req.body);
-    const connection = await smtpConnectionService.create(input);
+    const connection = await smtpConnectionService.create(input, req.userId!);
     res.status(201).json({ data: connection });
   },
 
@@ -88,5 +91,5 @@ export const smtpConnectionController = {
       req.userId!
     );
     res.json({ data: result });
-  }
+  },
 };

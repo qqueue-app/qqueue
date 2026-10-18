@@ -217,7 +217,9 @@ export function Mailboxes() {
   const grantedUserIds = useMemo(() => {
     const set = new Set<string>();
     grantsByConnection.forEach((grants, connectionId) => {
-      grants.forEach((grant) => set.add(`${grant.userId}:${connectionId}`));
+      grants
+        .filter((grant) => !grant.revoked)
+        .forEach((grant) => set.add(`${grant.userId}:${connectionId}`));
     });
     return set;
   }, [grantsByConnection]);
@@ -483,7 +485,9 @@ export function Mailboxes() {
         // from at all sort below that, at -1.
         accessorFn: (row) =>
           row.smtpConnectionId
-            ? (grantsByConnection.get(row.smtpConnectionId)?.length ?? 0)
+            ? (grantsByConnection
+                .get(row.smtpConnectionId)
+                ?.filter((grant) => !grant.revoked).length ?? 0)
             : -1,
         cell: ({ row }) => {
           const connectionId = row.original.smtpConnectionId;
@@ -496,7 +500,9 @@ export function Mailboxes() {
               </Hint>
             );
           }
-          const grants = grantsByConnection.get(connectionId) ?? [];
+          const grants = (grantsByConnection.get(connectionId) ?? []).filter(
+            (grant) => !grant.revoked
+          );
           const names = grants
             .map((grant) => grant.user?.name ?? grant.user?.email ?? "someone")
             .join(", ");
@@ -504,13 +510,15 @@ export function Mailboxes() {
             <Hint
               label={
                 grants.length === 0
-                  ? "Only owners and admins, who can always use any mailbox"
-                  : `Owners and admins, plus ${names}`
+                  ? "Owners and admins whose access has not been removed"
+                  : `Owners, permitted admins, plus ${names}`
               }
             >
               <span className="inline-flex cursor-help items-center gap-field text-body text-muted-foreground">
                 <Users className="h-3.5 w-3.5" />
-                {grants.length === 0 ? "Admins only" : `+${grants.length}`}
+                {grants.length === 0
+                  ? "No assigned teammates"
+                  : `+${grants.length}`}
               </span>
             </Hint>
           );
@@ -743,7 +751,9 @@ export function Mailboxes() {
               }
               renderMobileRow={(mailbox) => {
                 const grants = mailbox.smtpConnectionId
-                  ? (grantsByConnection.get(mailbox.smtpConnectionId) ?? [])
+                  ? (
+                      grantsByConnection.get(mailbox.smtpConnectionId) ?? []
+                    ).filter((grant) => !grant.revoked)
                   : null;
                 return (
                   <div className="flex items-start gap-3">
@@ -768,7 +778,7 @@ export function Mailboxes() {
                         {grants === null
                           ? "QQueue can't use this yet"
                           : grants.length === 0
-                            ? "Admins only"
+                            ? "No assigned teammates"
                             : `${grants.length} member(s) have access`}
                       </p>
                     </div>
@@ -783,8 +793,9 @@ export function Mailboxes() {
               <p className="text-body text-muted-foreground">
                 Pick a teammate to see every mailbox, grouped by domain, and
                 tick the ones they should have. A ticked mailbox lets them read
-                the mail that arrives at it and send as it. Owners and admins
-                always have every mailbox.
+                the mail that arrives at it and send as it. Owners always have
+                every mailbox. Only owners can remove or restore an admin’s
+                mailbox access.
               </p>
               <SendAccessEditor
                 people={members.map((member) => ({
@@ -793,15 +804,25 @@ export function Mailboxes() {
                   email: member.user.email,
                   roleLabel:
                     member.role.charAt(0) + member.role.slice(1).toLowerCase(),
-                  alwaysAllowed: member.role !== "MEMBER",
+                  alwaysAllowed: member.role === "OWNER",
+                  readOnly:
+                    member.role === "ADMIN" &&
+                    currentOrganization?.role !== "OWNER",
                   alwaysAllowedReason: `${memberName(member)} is an ${member.role.toLowerCase()} and has every mailbox.`,
                 }))}
                 mailboxes={accessMailboxes}
                 noPeopleMessage="Invite teammates from Settings, then come back to give them access."
                 noMailboxesMessage="Create a mailbox first — then you can decide who sends as it."
-                isGranted={(userId, connectionId) =>
-                  grantedUserIds.has(`${userId}:${connectionId}`)
-                }
+                isGranted={(userId, connectionId) => {
+                  const member = members.find(
+                    (person) => person.userId === userId
+                  );
+                  if (member?.role === "ADMIN")
+                    return !(grantsByConnection.get(connectionId) ?? []).some(
+                      (grant) => grant.userId === userId && grant.revoked
+                    );
+                  return grantedUserIds.has(`${userId}:${connectionId}`);
+                }}
                 onToggle={toggleGrant}
                 pending={pendingCells}
               />
