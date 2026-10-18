@@ -6,10 +6,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useSearchParams,
+  type SetURLSearchParams,
+} from "react-router-dom";
 import {
   ArrowUpRight,
   Eye,
+  MoreVertical,
+  Type,
   FileText,
   Paperclip,
   Save,
@@ -150,15 +157,30 @@ function newLocalDraftId(): string {
     : `draft-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function EmailStudio() {
+interface EmailStudioProps {
+  docked?: boolean;
+  queryState?: [URLSearchParams, SetURLSearchParams];
+}
+export function EmailStudio(props: EmailStudioProps = {}) {
   const { currentOrganizationId, user } = useSession();
-  return <EmailStudioWorkspace key={`${user?.id}:${currentOrganizationId}`} />;
+  return (
+    <EmailStudioWorkspace
+      key={`${user?.id}:${currentOrganizationId}`}
+      {...props}
+    />
+  );
 }
 
-function EmailStudioWorkspace() {
+function EmailStudioWorkspace({
+  docked = false,
+  queryState,
+}: EmailStudioProps) {
   const { currentOrganizationId: organizationId, user } = useSession();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [mailOptions, setMailOptions] = useState(false);
+  const [formatting, setFormatting] = useState(false);
+  const routeQuery = useSearchParams();
+  const [searchParams, setSearchParams] = queryState ?? routeQuery;
   const [loadedDraftLink, setLoadedDraftLink] = useState<string | null>(null);
   const requestedDraftId =
     searchParams.get("draft") === loadedDraftLink
@@ -1561,94 +1583,107 @@ function EmailStudioWorkspace() {
     replyTo.length > 0;
   const attachmentsVisible = attachmentsRevealed || attachments.length > 0;
 
+  const draftActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => setDraftsOpen(true)}
+        disabled={!organizationId || sending || openingDraft}
+      >
+        <FileText className="h-4 w-4" />
+        Drafts{drafts.length ? ` (${drafts.length})` : ""}
+      </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => void saveDraft(false)}
+        disabled={
+          !organizationId ||
+          savingDraft ||
+          sending ||
+          openingDraft ||
+          Boolean(acceptedSendId) ||
+          !hasContent
+        }
+      >
+        {savingDraft ? <Spinner /> : <Save className="h-4 w-4" />}
+        Save draft
+      </Button>
+    </div>
+  );
+
   return (
     <>
-      <PageHeader
-        title="Compose"
-        description="Write and send an email."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setDraftsOpen(true)}
-              disabled={!organizationId || sending || openingDraft}
-            >
-              <FileText className="h-4 w-4" />
-              Drafts{drafts.length ? ` (${drafts.length})` : ""}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void saveDraft(false)}
-              disabled={
-                !organizationId ||
-                savingDraft ||
-                sending ||
-                openingDraft ||
-                Boolean(acceptedSendId) ||
-                !hasContent
-              }
-            >
-              {savingDraft ? <Spinner /> : <Save className="h-4 w-4" />}
-              Save draft
-            </Button>
-          </div>
-        }
-      />
-
-      <PageContainer>
-        {openingDraft ? (
-          <div role="status" className="mb-4 text-ui">
-            {(
-              requestedRestoreId
-                ? requestedCopy.isError
-                : requestedDraft.isError
-            ) ? (
-              <>
-                Couldn't open this draft. Your current writing is kept.{" "}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    void (requestedRestoreId
-                      ? requestedCopy.refetch()
-                      : requestedDraft.refetch())
-                  }
-                >
-                  Try opening again
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    setSearchParams(
-                      (current) => {
-                        const next = new URLSearchParams(current);
-                        next.delete("draft");
-                        next.delete("restore");
-                        return next;
-                      },
-                      { replace: true }
-                    )
-                  }
-                >
-                  Keep current writing
-                </Button>
-              </>
-            ) : (
-              "Opening saved draft…"
-            )}
-          </div>
-        ) : null}
-        {loading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-touch w-full sm:h-control sm:w-field-name" />
-            <Skeleton className="h-touch w-full sm:h-control sm:w-field-long" />
-            <Skeleton className="h-64 w-full" />
-          </div>
-        ) : (
-          /*
+      <div
+        className={cn(
+          "mail-writer",
+          docked && "is-docked",
+          mailOptions && "show-options",
+          formatting && "show-formatting"
+        )}
+      >
+        <div className="mail-writer-heading">
+          {!docked ? (
+            <PageHeader
+              title="Compose"
+              description="Write and send an email."
+              actions={draftActions}
+            />
+          ) : null}
+        </div>
+        <PageContainer>
+          {openingDraft ? (
+            <div role="status" className="mb-4 text-ui">
+              {(
+                requestedRestoreId
+                  ? requestedCopy.isError
+                  : requestedDraft.isError
+              ) ? (
+                <>
+                  Couldn't open this draft. Your current writing is kept.{" "}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      void (requestedRestoreId
+                        ? requestedCopy.refetch()
+                        : requestedDraft.refetch())
+                    }
+                  >
+                    Try opening again
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() =>
+                      setSearchParams(
+                        (current) => {
+                          const next = new URLSearchParams(current);
+                          next.delete("draft");
+                          next.delete("restore");
+                          return next;
+                        },
+                        { replace: true }
+                      )
+                    }
+                  >
+                    Keep current writing
+                  </Button>
+                </>
+              ) : (
+                "Opening saved draft…"
+              )}
+            </div>
+          ) : null}
+          {loading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-touch w-full sm:h-control sm:w-field-name" />
+              <Skeleton className="h-touch w-full sm:h-control sm:w-field-long" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+          ) : (
+            /*
             Two columns: the message, and a rail beside it holding this send's
             options. Below `xl` the rail drops underneath, and on a phone every
             field inside collapses to the padded column's full width — the
@@ -1661,497 +1696,525 @@ function EmailStudioWorkspace() {
             fixed is what used to pin the cluster left and dump every pixel the
             window gained on the right, 656px of it at 1920px.
           */
-          <form
-            onSubmit={send}
-            className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_var(--content-rail)]"
-          >
-            <fieldset
-              disabled={sending || openingDraft || Boolean(acceptedSendId)}
-              className="min-w-0 space-y-6"
+            <form
+              onSubmit={send}
+              className={
+                docked
+                  ? "mail-writer-form"
+                  : "grid gap-8 xl:grid-cols-[minmax(0,1fr)_var(--content-rail)]"
+              }
             >
-              {draftId &&
-              user &&
-              organizationId &&
-              draftVariables.qqueueMailboxDraftCopy === true ? (
-                <MailboxDraftReview
-                  key={draftId}
-                  organizationId={organizationId}
-                  userId={user.id}
-                  draftId={draftId}
-                  onOpen={loadDraft}
-                  onKeep={async (version) => {
-                    const id = draftId;
-                    const saved = await saveDraft(true);
-                    if (saved !== id || draftIdentity.current.id !== id)
-                      throw new Error(
-                        "Save this private copy before reviewing the original."
-                      );
-                    const revision = draftIdentity.current.revision;
-                    const reviewed = await api.reviewMailboxDraftSource(
-                      id,
-                      revision,
-                      version
-                    );
-                    if (
-                      draftIdentity.current.id === id &&
-                      draftIdentity.current.revision === revision
-                    ) {
-                      draftIdentity.current = {
-                        id,
-                        revision: reviewed.revision,
-                      };
-                    }
-                  }}
-                />
-              ) : null}
-              {noSmtp ? (
-                <div className="rounded-card border border-border bg-warn-bg px-4 py-3 text-ui leading-5 text-warn">
-                  <p className="font-medium">No sending account yet</p>
-                  <p className="mt-1">
-                    Email can't go out until one is configured.{" "}
-                    <Link
-                      to="/settings/sending"
-                      className="rounded-control font-medium underline underline-offset-2"
-                    >
-                      Add a sending account
-                    </Link>
-                    .
-                  </p>
-                </div>
-              ) : null}
-
-              {reviewWaitingFiles && draftId && organizationId && user ? (
-                <aside
-                  role="alert"
-                  className="space-y-3 rounded-card bg-warn-bg p-3 text-ui"
-                >
-                  <p className="font-medium">
-                    {deviceFiles.isPending
-                      ? "Checking for files waiting on this device…"
-                      : deviceFiles.isError
-                        ? "Couldn’t check this device for waiting files."
-                        : "Files are waiting on this device for this draft."}
-                  </p>
-                  <p>
-                    Resume their device copy to keep the writing and files
-                    together, or deliberately continue with only the saved
-                    files. The device copies are kept.
-                  </p>
-                  {waitingDeviceCopies
-                    .flatMap((copy) => copy.pendingUploads ?? [])
-                    .map((file) => (
-                      <p key={file.uploadId}>
-                        {file.file.name} · {formatBytes(file.file.size)} ·
-                        waiting to upload
-                      </p>
-                    ))}
-                  <DeviceDraftCopies
+              <fieldset
+                disabled={sending || openingDraft || Boolean(acceptedSendId)}
+                className="mail-writer-fields min-w-0 space-y-6"
+              >
+                {draftId &&
+                user &&
+                organizationId &&
+                draftVariables.qqueueMailboxDraftCopy === true ? (
+                  <MailboxDraftReview
+                    key={draftId}
                     organizationId={organizationId}
                     userId={user.id}
                     draftId={draftId}
-                    waitingFilesOnly
-                    onUse={async (copy) => {
-                      preserveWriting.current();
+                    onOpen={loadDraft}
+                    onKeep={async (version) => {
+                      const id = draftId;
+                      const saved = await saveDraft(true);
+                      if (saved !== id || draftIdentity.current.id !== id)
+                        throw new Error(
+                          "Save this private copy before reviewing the original."
+                        );
                       const revision = draftIdentity.current.revision;
-                      applyDeviceCopy(copy);
-                      setDraftConflict((copy.revision ?? 1) !== revision);
+                      const reviewed = await api.reviewMailboxDraftSource(
+                        id,
+                        revision,
+                        version
+                      );
+                      if (
+                        draftIdentity.current.id === id &&
+                        draftIdentity.current.revision === revision
+                      ) {
+                        draftIdentity.current = {
+                          id,
+                          revision: reviewed.revision,
+                        };
+                      }
                     }}
                   />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={deviceFiles.isPending}
-                    onClick={() => setIgnoredWaitingFiles(draftId)}
+                ) : null}
+                {noSmtp ? (
+                  <div className="rounded-card border border-border bg-warn-bg px-4 py-3 text-ui leading-5 text-warn">
+                    <p className="font-medium">No sending account yet</p>
+                    <p className="mt-1">
+                      Email can't go out until one is configured.{" "}
+                      <Link
+                        to="/settings/sending"
+                        className="rounded-control font-medium underline underline-offset-2"
+                      >
+                        Add a sending account
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                ) : null}
+
+                {reviewWaitingFiles && draftId && organizationId && user ? (
+                  <aside
+                    role="alert"
+                    className="space-y-3 rounded-card bg-warn-bg p-3 text-ui"
                   >
-                    Use saved files only
-                  </Button>
-                  {deviceFiles.isError ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void deviceFiles.refetch()}
-                    >
-                      Check device files again
-                    </Button>
-                  ) : null}
-                </aside>
-              ) : null}
-              <FormSections>
-                <FormSection
-                  title="Recipients"
-                  description="Who this goes to, and the account it sends as."
-                >
-                  <Field className={fieldWidths.name}>
-                    <Label htmlFor="from">From</Label>
-                    <Select
-                      value={smtpConnectionId}
-                      onValueChange={setSMTPConnectionId}
-                    >
-                      <SelectTrigger id="from" width="name">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {/* Name the account the send will actually use, rather
-                            than the word "default" on its own. */}
-                        <SelectItem
-                          value={DEFAULT_SMTP}
-                          disabled={!loading && !defaultConnection}
-                        >
-                          {defaultConnection
-                            ? `Default · ${describeConnection(defaultConnection)}`
-                            : "No default sending account — pick one below"}
-                        </SelectItem>
-                        {smtpConnections.map((connection) => (
-                          <SelectItem key={connection.id} value={connection.id}>
-                            <span className="flex items-center gap-2">
-                              {describeConnection(connection)}
-                              {connection.isDefault ? (
-                                <Badge
-                                  variant="secondary"
-                                  className="font-normal"
-                                >
-                                  Default
-                                </Badge>
-                              ) : null}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-
-                  <RecipientField
-                    disabled={
-                      sending || openingDraft || Boolean(acceptedSendId)
-                    }
-                    id="to"
-                    label="To"
-                    pendingValue={recipientInputs["to"] ?? ""}
-                    onPendingChange={(value) =>
-                      setRecipientInputs((current) => ({
-                        ...current,
-                        to: value,
-                      }))
-                    }
-                    emails={toEmails}
-                    onChange={setToEmails}
-                    suggestions={recipientSuggestions}
-                  />
-
-                  {selectedLists.length > 0 ? (
-                    <div className="flex flex-wrap gap-field">
-                      {selectedLists.map((list) => (
-                        <Badge
-                          key={list.id}
-                          variant="outline"
-                          className="gap-1 pr-1"
-                        >
-                          {list.name} ({list._count?.contacts ?? 0})
-                          <button
-                            type="button"
-                            aria-label={`Remove ${list.name}`}
-                            onClick={() =>
-                              setSelectedListIds((current) =>
-                                current.filter((id) => id !== list.id)
-                              )
-                            }
-                            className={cn(
-                              "relative flex h-4 w-4 items-center justify-center rounded-pill",
-                              "text-text-tertiary transition-colors duration-fast ease-out hover:text-err",
-                              "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
-                              "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden"
-                            )}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </Badge>
+                    <p className="font-medium">
+                      {deviceFiles.isPending
+                        ? "Checking for files waiting on this device…"
+                        : deviceFiles.isError
+                          ? "Couldn’t check this device for waiting files."
+                          : "Files are waiting on this device for this draft."}
+                    </p>
+                    <p>
+                      Resume their device copy to keep the writing and files
+                      together, or deliberately continue with only the saved
+                      files. The device copies are kept.
+                    </p>
+                    {waitingDeviceCopies
+                      .flatMap((copy) => copy.pendingUploads ?? [])
+                      .map((file) => (
+                        <p key={file.uploadId}>
+                          {file.file.name} · {formatBytes(file.file.size)} ·
+                          waiting to upload
+                        </p>
                       ))}
-                    </div>
-                  ) : null}
+                    <DeviceDraftCopies
+                      organizationId={organizationId}
+                      userId={user.id}
+                      draftId={draftId}
+                      waitingFilesOnly
+                      onUse={async (copy) => {
+                        preserveWriting.current();
+                        const revision = draftIdentity.current.revision;
+                        applyDeviceCopy(copy);
+                        setDraftConflict((copy.revision ?? 1) !== revision);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={deviceFiles.isPending}
+                      onClick={() => setIgnoredWaitingFiles(draftId)}
+                    >
+                      Use saved files only
+                    </Button>
+                    {deviceFiles.isError ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void deviceFiles.refetch()}
+                      >
+                        Check device files again
+                      </Button>
+                    ) : null}
+                  </aside>
+                ) : null}
+                <FormSections>
+                  <FormSection
+                    className="mail-recipient-section"
+                    title="Recipients"
+                    description="Who this goes to, and the account it sends as."
+                  >
+                    <Field className={cn(fieldWidths.name, "mail-from-field")}>
+                      <Label htmlFor="from">From</Label>
+                      <Select
+                        value={smtpConnectionId}
+                        onValueChange={setSMTPConnectionId}
+                      >
+                        <SelectTrigger id="from" width="name">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {/* Name the account the send will actually use, rather
+                            than the word "default" on its own. */}
+                          <SelectItem
+                            value={DEFAULT_SMTP}
+                            disabled={!loading && !defaultConnection}
+                          >
+                            {defaultConnection
+                              ? `Default · ${describeConnection(defaultConnection)}`
+                              : "No default sending account — pick one below"}
+                          </SelectItem>
+                          {smtpConnections.map((connection) => (
+                            <SelectItem
+                              key={connection.id}
+                              value={connection.id}
+                            >
+                              <span className="flex items-center gap-2">
+                                {describeConnection(connection)}
+                                {connection.isDefault ? (
+                                  <Badge
+                                    variant="secondary"
+                                    className="font-normal"
+                                  >
+                                    Default
+                                  </Badge>
+                                ) : null}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setContactPickerOpen(true)}
-                    >
-                      <Users className="h-4 w-4" />
-                      Add contacts
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setListPickerOpen(true)}
-                    >
-                      <Users className="h-4 w-4" />
-                      Add list
-                    </Button>
-                    {/*
+                    <RecipientField
+                      disabled={
+                        sending || openingDraft || Boolean(acceptedSendId)
+                      }
+                      id="to"
+                      label="To"
+                      pendingValue={recipientInputs["to"] ?? ""}
+                      onPendingChange={(value) =>
+                        setRecipientInputs((current) => ({
+                          ...current,
+                          to: value,
+                        }))
+                      }
+                      emails={toEmails}
+                      onChange={setToEmails}
+                      suggestions={recipientSuggestions}
+                    />
+
+                    {selectedLists.length > 0 ? (
+                      <div className="flex flex-wrap gap-field">
+                        {selectedLists.map((list) => (
+                          <Badge
+                            key={list.id}
+                            variant="outline"
+                            className="gap-1 pr-1"
+                          >
+                            {list.name} ({list._count?.contacts ?? 0})
+                            <button
+                              type="button"
+                              aria-label={`Remove ${list.name}`}
+                              onClick={() =>
+                                setSelectedListIds((current) =>
+                                  current.filter((id) => id !== list.id)
+                                )
+                              }
+                              className={cn(
+                                "relative flex h-4 w-4 items-center justify-center rounded-pill",
+                                "text-text-tertiary transition-colors duration-fast ease-out hover:text-err",
+                                "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
+                                "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden"
+                              )}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="mail-recipient-tools flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        hidden={docked && !mailOptions}
+                        onClick={() => setContactPickerOpen(true)}
+                      >
+                        <Users className="h-4 w-4" />
+                        Add contacts
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        hidden={docked && !mailOptions}
+                        onClick={() => setListPickerOpen(true)}
+                      >
+                        <Users className="h-4 w-4" />
+                        Add list
+                      </Button>
+                      {/*
                       The reveal disappears once the fields are on screen, the
                       way every mail client does it: a "hide" that refuses to
                       hide because you typed an address into it is worse than
                       no button at all.
                     */}
-                    {copyVisible ? null : (
+                      {copyVisible ? null : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-expanded={false}
+                          aria-controls="cc"
+                          onClick={() => setCopyRevealed(true)}
+                        >
+                          Cc / Bcc / Reply-To
+                        </Button>
+                      )}
+                    </div>
+
+                    {copyVisible ? (
+                      <>
+                        <RecipientField
+                          disabled={
+                            sending || openingDraft || Boolean(acceptedSendId)
+                          }
+                          id="cc"
+                          label="Cc"
+                          pendingValue={recipientInputs["cc"] ?? ""}
+                          onPendingChange={(value) =>
+                            setRecipientInputs((current) => ({
+                              ...current,
+                              cc: value,
+                            }))
+                          }
+                          emails={ccEmails}
+                          onChange={setCcEmails}
+                          suggestions={recipientSuggestions}
+                        />
+                        <RecipientField
+                          disabled={
+                            sending || openingDraft || Boolean(acceptedSendId)
+                          }
+                          id="bcc"
+                          label="Bcc"
+                          pendingValue={recipientInputs["bcc"] ?? ""}
+                          onPendingChange={(value) =>
+                            setRecipientInputs((current) => ({
+                              ...current,
+                              bcc: value,
+                            }))
+                          }
+                          emails={bccEmails}
+                          onChange={setBccEmails}
+                          suggestions={recipientSuggestions}
+                        />
+                        <Field className={fieldWidths.long}>
+                          <Label htmlFor="reply-to">Reply-To</Label>
+                          <Input
+                            id="reply-to"
+                            type="email"
+                            width="long"
+                            value={replyTo}
+                            onChange={(event) => setReplyTo(event.target.value)}
+                            placeholder={inheritedReplyTo}
+                          />
+                          <p className="text-meta text-text-tertiary">
+                            {sendingConnection?.replyTo
+                              ? `Overrides this account's default of ${sendingConnection.replyTo}.`
+                              : "Where replies go. Leave empty to use the sending account's setting."}
+                          </p>
+                        </Field>
+                      </>
+                    ) : null}
+
+                    <Field
+                      className={cn(fieldWidths.long, "mail-subject-field")}
+                    >
+                      <Label htmlFor="subject">Subject</Label>
+                      <Input
+                        id="subject"
+                        width="long"
+                        value={subject}
+                        onChange={(event) => setSubject(event.target.value)}
+                        placeholder="Subject line"
+                      />
+                    </Field>
+                  </FormSection>
+
+                  <FormSection
+                    className="mail-message-section"
+                    title="Message"
+                    action={
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
-                        aria-expanded={false}
-                        aria-controls="cc"
-                        onClick={() => setCopyRevealed(true)}
+                        onClick={() => void openPreview()}
+                        disabled={previewing}
                       >
-                        Cc / Bcc / Reply-To
+                        {previewing ? <Spinner /> : <Eye className="h-4 w-4" />}
+                        Preview
                       </Button>
-                    )}
-                  </div>
+                    }
+                  >
+                    <Field className="space-y-4">
+                      <div
+                        className="mail-compose-advanced space-y-2"
+                        hidden={docked && !mailOptions}
+                      >
+                        {templatePickerOpen || templateId !== NO_TEMPLATE ? (
+                          <Select
+                            value={templateId}
+                            onValueChange={selectTemplate}
+                          >
+                            <SelectTrigger
+                              id="template"
+                              width="name"
+                              aria-label="Template"
+                            >
+                              <SelectValue placeholder="Start from a template" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NO_TEMPLATE}>
+                                No template
+                              </SelectItem>
+                              {templates.map((template) => (
+                                <SelectItem
+                                  key={template.id}
+                                  value={template.id}
+                                >
+                                  {template.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="-ml-3"
+                            aria-expanded={false}
+                            aria-controls="template"
+                            onClick={() => setTemplatePickerOpen(true)}
+                          >
+                            Use a template
+                          </Button>
+                        )}
 
-                  {copyVisible ? (
-                    <>
-                      <RecipientField
-                        disabled={
-                          sending || openingDraft || Boolean(acceptedSendId)
-                        }
-                        id="cc"
-                        label="Cc"
-                        pendingValue={recipientInputs["cc"] ?? ""}
-                        onPendingChange={(value) =>
-                          setRecipientInputs((current) => ({
-                            ...current,
-                            cc: value,
-                          }))
-                        }
-                        emails={ccEmails}
-                        onChange={setCcEmails}
-                        suggestions={recipientSuggestions}
-                      />
-                      <RecipientField
-                        disabled={
-                          sending || openingDraft || Boolean(acceptedSendId)
-                        }
-                        id="bcc"
-                        label="Bcc"
-                        pendingValue={recipientInputs["bcc"] ?? ""}
-                        onPendingChange={(value) =>
-                          setRecipientInputs((current) => ({
-                            ...current,
-                            bcc: value,
-                          }))
-                        }
-                        emails={bccEmails}
-                        onChange={setBccEmails}
-                        suggestions={recipientSuggestions}
-                      />
-                      <Field className={fieldWidths.long}>
-                        <Label htmlFor="reply-to">Reply-To</Label>
-                        <Input
-                          id="reply-to"
-                          type="email"
-                          width="long"
-                          value={replyTo}
-                          onChange={(event) => setReplyTo(event.target.value)}
-                          placeholder={inheritedReplyTo}
+                        {/* The editor is the one control that legitimately fills
+                        the form column — prose has no natural width. */}
+                        <SignatureControl
+                          organizationId={organizationId!}
+                          connectionId={sendingConnection?.id}
+                          value={html}
+                          onChange={setHtml}
+                          stamp={signature}
+                          onStamp={setSignature}
+                          autoReady={!loading && !openingDraft && !draftId}
+                          generation={localDraftId.current}
+                          disabled={
+                            sending || openingDraft || Boolean(acceptedSendId)
+                          }
                         />
-                        <p className="text-meta text-text-tertiary">
-                          {sendingConnection?.replyTo
-                            ? `Overrides this account's default of ${sendingConnection.replyTo}.`
-                            : "Where replies go. Leave empty to use the sending account's setting."}
+                      </div>
+                      {draftVariables.qqueueMailboxDraftCopy === true &&
+                      attachments.some((file) => file.cid) ? (
+                        <p className="text-meta text-text-secondary">
+                          Inline images remain private files. Use Preview to see
+                          them in the message.
                         </p>
-                      </Field>
-                    </>
-                  ) : null}
+                      ) : null}
+                      <BodyEditor
+                        allowSource={!docked || mailOptions}
+                        disabled={
+                          sending || openingDraft || Boolean(acceptedSendId)
+                        }
+                        compactToolbar
+                        value={html}
+                        onChange={setHtml}
+                        placeholder="Write your email…"
+                        showVariables={false}
+                        onUploadImage={uploadInlineImage}
+                      />
+                    </Field>
 
-                  <Field className={fieldWidths.long}>
-                    <Label htmlFor="subject">Subject</Label>
-                    <Input
-                      id="subject"
-                      width="long"
-                      value={subject}
-                      onChange={(event) => setSubject(event.target.value)}
-                      placeholder="Subject line"
+                    {/*
+                    The file input stays mounted whether or not the tray is
+                    revealed: it is the hidden control the button drives, and
+                    unmounting it would break the picker mid-upload.
+                  */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      aria-label="Add attachments"
+                      className="hidden"
+                      onChange={handleFileSelect}
                     />
-                  </Field>
-                </FormSection>
 
-                <FormSection
-                  title="Message"
-                  action={
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => void openPreview()}
-                      disabled={previewing}
-                    >
-                      {previewing ? <Spinner /> : <Eye className="h-4 w-4" />}
-                      Preview
-                    </Button>
-                  }
-                >
-                  <Field className="space-y-4">
-                    {templatePickerOpen || templateId !== NO_TEMPLATE ? (
-                      <Select value={templateId} onValueChange={selectTemplate}>
-                        <SelectTrigger
-                          id="template"
-                          width="name"
-                          aria-label="Template"
-                        >
-                          <SelectValue placeholder="Start from a template" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={NO_TEMPLATE}>
-                            No template
-                          </SelectItem>
-                          {templates.map((template) => (
-                            <SelectItem key={template.id} value={template.id}>
-                              {template.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    {attachmentsVisible ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label>Attachments</Label>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploading || !organizationId}
+                          >
+                            {uploading ? (
+                              <Spinner />
+                            ) : (
+                              <Paperclip className="h-4 w-4" />
+                            )}
+                            Add files
+                          </Button>
+                        </div>
+                        {attachments.length > 0 ? (
+                          <ul className="space-y-field">
+                            {attachments.map((attachment) => (
+                              <li
+                                key={attachment.id}
+                                className="flex min-h-touch items-center gap-2 rounded-control border border-border px-3 py-2 text-ui sm:min-h-0"
+                              >
+                                <Paperclip className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+                                <span className="min-w-0 flex-1 truncate text-text">
+                                  {attachment.filename}
+                                </span>
+                                <span
+                                  data-numeric
+                                  className="shrink-0 text-meta text-text-tertiary"
+                                >
+                                  {formatBytes(attachment.size)}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${attachment.filename}`}
+                                  onClick={() =>
+                                    void removeAttachment(attachment.id)
+                                  }
+                                  className={cn(
+                                    "relative flex h-5 w-5 shrink-0 items-center justify-center rounded-control",
+                                    "text-text-tertiary transition-colors duration-fast ease-out hover:text-err",
+                                    "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
+                                    "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden"
+                                  )}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-meta text-text-tertiary">
+                            Nothing attached yet.
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="-ml-3"
                         aria-expanded={false}
-                        aria-controls="template"
-                        onClick={() => setTemplatePickerOpen(true)}
+                        className="-ml-3"
+                        onClick={() => {
+                          setAttachmentsRevealed(true);
+                          if (docked) fileInputRef.current?.click();
+                        }}
                       >
-                        Use a template
+                        <Paperclip className="h-4 w-4" />
+                        Attachments
                       </Button>
                     )}
+                  </FormSection>
+                </FormSections>
+              </fieldset>
 
-                    {/* The editor is the one control that legitimately fills
-                        the form column — prose has no natural width. */}
-                    <SignatureControl
-                      organizationId={organizationId!}
-                      connectionId={sendingConnection?.id}
-                      value={html}
-                      onChange={setHtml}
-                      stamp={signature}
-                      onStamp={setSignature}
-                      autoReady={!loading && !openingDraft && !draftId}
-                      generation={localDraftId.current}
-                      disabled={
-                        sending || openingDraft || Boolean(acceptedSendId)
-                      }
-                    />
-                    {draftVariables.qqueueMailboxDraftCopy === true &&
-                    attachments.some((file) => file.cid) ? (
-                      <p className="text-meta text-text-secondary">
-                        Inline images remain private files. Use Preview to see
-                        them in the message.
-                      </p>
-                    ) : null}
-                    <BodyEditor
-                      disabled={
-                        sending || openingDraft || Boolean(acceptedSendId)
-                      }
-                      compactToolbar
-                      value={html}
-                      onChange={setHtml}
-                      placeholder="Write your email…"
-                      showVariables={false}
-                      onUploadImage={uploadInlineImage}
-                    />
-                  </Field>
-
-                  {/*
-                    The file input stays mounted whether or not the tray is
-                    revealed: it is the hidden control the button drives, and
-                    unmounting it would break the picker mid-upload.
-                  */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    aria-label="Add attachments"
-                    className="hidden"
-                    onChange={handleFileSelect}
-                  />
-
-                  {attachmentsVisible ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <Label>Attachments</Label>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={uploading || !organizationId}
-                        >
-                          {uploading ? (
-                            <Spinner />
-                          ) : (
-                            <Paperclip className="h-4 w-4" />
-                          )}
-                          Add files
-                        </Button>
-                      </div>
-                      {attachments.length > 0 ? (
-                        <ul className="space-y-field">
-                          {attachments.map((attachment) => (
-                            <li
-                              key={attachment.id}
-                              className="flex min-h-touch items-center gap-2 rounded-control border border-border px-3 py-2 text-ui sm:min-h-0"
-                            >
-                              <Paperclip className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
-                              <span className="min-w-0 flex-1 truncate text-text">
-                                {attachment.filename}
-                              </span>
-                              <span
-                                data-numeric
-                                className="shrink-0 text-meta text-text-tertiary"
-                              >
-                                {formatBytes(attachment.size)}
-                              </span>
-                              <button
-                                type="button"
-                                aria-label={`Remove ${attachment.filename}`}
-                                onClick={() =>
-                                  void removeAttachment(attachment.id)
-                                }
-                                className={cn(
-                                  "relative flex h-5 w-5 shrink-0 items-center justify-center rounded-control",
-                                  "text-text-tertiary transition-colors duration-fast ease-out hover:text-err",
-                                  "after:absolute after:left-1/2 after:top-1/2 after:h-touch after:w-touch",
-                                  "after:-translate-x-1/2 after:-translate-y-1/2 after:content-[''] sm:after:hidden"
-                                )}
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-meta text-text-tertiary">
-                          Nothing attached yet.
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-expanded={false}
-                      className="-ml-3"
-                      onClick={() => setAttachmentsRevealed(true)}
-                    >
-                      <Paperclip className="h-4 w-4" />
-                      Attachments
-                    </Button>
-                  )}
-                </FormSection>
-              </FormSections>
-            </fieldset>
-
-            {/*
+              {/*
               The rail holds the options for *this* message and nothing else.
 
               It used to also list every recurring send in the organization, in
@@ -2161,236 +2224,256 @@ function EmailStudioWorkspace() {
               column sets an overflow or a height, so it cannot scroll on its
               own at any width.
             */}
-            <div className="min-w-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
-              <Card className="space-y-4 p-card">
-                {sendOptionsOpen || scheduleForLater || recurring ? (
-                  <div id="send-options" className="space-y-4">
-                    <h2 className="text-section font-semibold text-text">
-                      Send options
-                    </h2>
-                    <ScheduleControls
-                      scheduleEnabled={scheduleForLater}
-                      onScheduleEnabledChange={setScheduleForLater}
-                      scheduledAt={scheduledAt}
-                      onScheduledAtChange={setScheduledAt}
-                      recurring={recurring}
-                      onRecurringChange={setRecurring}
-                      recurrence={recurrence}
-                      onRecurrenceChange={setRecurrence}
-                    />
-                    {recurring && attachments.length > 0 ? (
-                      <p className="text-meta leading-5 text-err">
-                        Recurring sends can&apos;t include attachments — each
-                        occurrence would need its own copy.
-                      </p>
-                    ) : null}
-                    <Link
-                      to="/campaigns/recurring"
-                      className={cn(
-                        "-mx-1 flex min-h-touch items-center justify-between gap-2 rounded-control px-1",
-                        "text-ui font-medium text-text-secondary sm:min-h-0 sm:py-1",
-                        "transition-colors duration-fast ease-out hover:text-text"
-                      )}
+              <div className="mail-writer-footer min-w-0 space-y-6">
+                <Card className="mail-send-controls space-y-4 p-card">
+                  {docked ? (
+                    <>
+                      <IconButton
+                        label="Formatting options"
+                        aria-pressed={formatting}
+                        onClick={() => setFormatting(!formatting)}
+                      >
+                        <Type />
+                      </IconButton>
+                      <IconButton
+                        label="More compose options"
+                        aria-expanded={mailOptions}
+                        onClick={() => setMailOptions(!mailOptions)}
+                      >
+                        <MoreVertical />
+                      </IconButton>
+                      {mailOptions ? draftActions : null}
+                    </>
+                  ) : null}
+                  {sendOptionsOpen || scheduleForLater || recurring ? (
+                    <div id="send-options" className="space-y-4">
+                      <h2 className="text-section font-semibold text-text">
+                        Send options
+                      </h2>
+                      <ScheduleControls
+                        scheduleEnabled={scheduleForLater}
+                        onScheduleEnabledChange={setScheduleForLater}
+                        scheduledAt={scheduledAt}
+                        onScheduledAtChange={setScheduledAt}
+                        recurring={recurring}
+                        onRecurringChange={setRecurring}
+                        recurrence={recurrence}
+                        onRecurrenceChange={setRecurrence}
+                      />
+                      {recurring && attachments.length > 0 ? (
+                        <p className="text-meta leading-5 text-err">
+                          Recurring sends can&apos;t include attachments — each
+                          occurrence would need its own copy.
+                        </p>
+                      ) : null}
+                      <Link
+                        to="/campaigns/recurring"
+                        className={cn(
+                          "-mx-1 flex min-h-touch items-center justify-between gap-2 rounded-control px-1",
+                          "text-ui font-medium text-text-secondary sm:min-h-0 sm:py-1",
+                          "transition-colors duration-fast ease-out hover:text-text"
+                        )}
+                      >
+                        Manage recurring sends
+                        <ArrowUpRight className="h-4 w-4 shrink-0" />
+                      </Link>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="-ml-3"
+                      aria-expanded={false}
+                      aria-controls="send-options"
+                      onClick={() => setSendOptionsOpen(true)}
                     >
-                      Manage recurring sends
-                      <ArrowUpRight className="h-4 w-4 shrink-0" />
-                    </Link>
-                  </div>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="-ml-3"
-                    aria-expanded={false}
-                    aria-controls="send-options"
-                    onClick={() => setSendOptionsOpen(true)}
-                  >
-                    Schedule or repeat
-                  </Button>
-                )}
+                      Schedule or repeat
+                    </Button>
+                  )}
 
-                {/*
+                  {/*
                   The running tally lives with the button that acts on it —
                   a list contributes an estimate, so it is marked approximate.
                 */}
-                <p className="text-ui leading-5 text-text-secondary">
-                  {totalRecipients === 0
-                    ? "No recipients yet — add people in the To field."
-                    : `Sending to ${listMemberEstimate > 0 ? "~" : ""}${totalRecipients} ${
-                        totalRecipients === 1 ? "recipient" : "recipients"
-                      }. Duplicates are removed.`}
-                </p>
+                  <p className="text-ui leading-5 text-text-secondary">
+                    {totalRecipients === 0
+                      ? "No recipients yet — add people in the To field."
+                      : `Sending to ${listMemberEstimate > 0 ? "~" : ""}${totalRecipients} ${
+                          totalRecipients === 1 ? "recipient" : "recipients"
+                        }. Duplicates are removed.`}
+                  </p>
 
-                {/* The one primary button in the view (§3). */}
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={
-                    sending ||
-                    openingDraft ||
-                    uploading ||
-                    pendingUploads.length > 0 ||
-                    reviewWaitingFiles ||
-                    Boolean(acceptedSendId) ||
-                    noSmtp ||
-                    !organizationId
-                  }
-                >
-                  {sending ? <Spinner /> : <Send className="h-4 w-4" />}
-                  {recurring
-                    ? "Create recurring send"
-                    : scheduleForLater
-                      ? "Schedule email"
-                      : "Send email"}
-                </Button>
-                {/*
+                  {/* The one primary button in the view (§3). */}
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={
+                      sending ||
+                      openingDraft ||
+                      uploading ||
+                      pendingUploads.length > 0 ||
+                      reviewWaitingFiles ||
+                      Boolean(acceptedSendId) ||
+                      noSmtp ||
+                      !organizationId
+                    }
+                  >
+                    {sending ? <Spinner /> : <Send className="h-4 w-4" />}
+                    {recurring
+                      ? "Create recurring send"
+                      : scheduleForLater
+                        ? "Schedule email"
+                        : "Send email"}
+                  </Button>
+                  {/*
                   "Saved" and "saved on this device" are not the same promise,
                   and on a phone the difference is the one that matters — so the
                   pending state says which, rather than letting an unsynced
                   draft wear the same reassuring line as a synced one.
                 */}
-                {pendingUploads.length ? (
-                  <div role="alert" className="space-y-3 text-ui text-err">
-                    <p>
-                      Some files need attention before this email can be sent.
-                    </p>
-                    {pendingUploads.map((entry) => (
-                      <div key={entry.uploadId} className="space-y-2">
-                        <p className="break-all">
-                          {entry.file.name}: {entry.error}
-                        </p>
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={uploading || sending}
-                            onClick={() => void processUploads([entry])}
-                          >
-                            Retry {entry.file.name}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            disabled={uploading || sending}
-                            onClick={() => {
-                              updateUploads(
-                                uploadBackup.current.filter(
-                                  (item) => item.uploadId !== entry.uploadId
-                                )
-                              );
-                              void saveDraft(true);
-                            }}
-                          >
-                            Remove file
-                          </Button>
+                  {pendingUploads.length ? (
+                    <div role="alert" className="space-y-3 text-ui text-err">
+                      <p>
+                        Some files need attention before this email can be sent.
+                      </p>
+                      {pendingUploads.map((entry) => (
+                        <div key={entry.uploadId} className="space-y-2">
+                          <p className="break-all">
+                            {entry.file.name}: {entry.error}
+                          </p>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={uploading || sending}
+                              onClick={() => void processUploads([entry])}
+                            >
+                              Retry {entry.file.name}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              disabled={uploading || sending}
+                              onClick={() => {
+                                updateUploads(
+                                  uploadBackup.current.filter(
+                                    (item) => item.uploadId !== entry.uploadId
+                                  )
+                                );
+                                void saveDraft(true);
+                              }}
+                            >
+                              Remove file
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {acceptedSendId ? (
-                  <div role="status" className="space-y-2 text-ui">
-                    <p>
-                      This email was already accepted for delivery. Your writing
-                      is kept here.
-                    </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() =>
-                        void pollDeliveryStatus(
-                          acceptedSendId,
-                          organizationId as string,
-                          {
-                            follow: false,
-                            recipientSummary:
-                              describeRecipientCount(totalRecipients),
-                          }
-                        )
-                      }
-                    >
-                      Check delivery status
-                    </Button>
-                  </div>
-                ) : draftConflict ? (
-                  <DraftConflictReview
-                    organizationId={organizationId!}
-                    draftId={draftIdentity.current.id}
-                    clientId={draftClientId.current}
-                    onUse={(draft) => {
-                      preserveWriting.current();
-                      applyDraft(draft);
-                      setIgnoredWaitingFiles(draft.id);
-                    }}
-                    onKeep={(draft) => {
-                      preserveWriting.current();
-                      localDraftId.current = newLocalDraftId();
-                      saveChain.current = Promise.resolve();
-                      uploadAbort.current?.abort();
-                      draftIdentity.current = {
-                        id: draft.id,
-                        revision: draft.revision ?? 1,
-                      };
-                      draftClientId.current =
-                        draft.clientId ?? draftClientId.current;
-                      setDraftId(draft.id);
-                      setAttachments((local) => [
-                        ...new Map(
-                          [...local, ...(draft.attachments ?? [])].map(
-                            (file) => [file.id, file]
+                      ))}
+                    </div>
+                  ) : null}
+                  {acceptedSendId ? (
+                    <div role="status" className="space-y-2 text-ui">
+                      <p>
+                        This email was already accepted for delivery. Your
+                        writing is kept here.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() =>
+                          void pollDeliveryStatus(
+                            acceptedSendId,
+                            organizationId as string,
+                            {
+                              follow: false,
+                              recipientSummary:
+                                describeRecipientCount(totalRecipients),
+                            }
                           )
-                        ).values(),
-                      ]);
-                      setSavedFingerprint(undefined);
-                      setDraftConflict(false);
-                      setPendingLocally(true);
-                    }}
-                    onAccepted={(id) => {
-                      acceptedSend.current = id;
-                      setAcceptedSendId(id);
-                    }}
+                        }
+                      >
+                        Check delivery status
+                      </Button>
+                    </div>
+                  ) : draftConflict ? (
+                    <DraftConflictReview
+                      organizationId={organizationId!}
+                      draftId={draftIdentity.current.id}
+                      clientId={draftClientId.current}
+                      onUse={(draft) => {
+                        preserveWriting.current();
+                        applyDraft(draft);
+                        setIgnoredWaitingFiles(draft.id);
+                      }}
+                      onKeep={(draft) => {
+                        preserveWriting.current();
+                        localDraftId.current = newLocalDraftId();
+                        saveChain.current = Promise.resolve();
+                        uploadAbort.current?.abort();
+                        draftIdentity.current = {
+                          id: draft.id,
+                          revision: draft.revision ?? 1,
+                        };
+                        draftClientId.current =
+                          draft.clientId ?? draftClientId.current;
+                        setDraftId(draft.id);
+                        setAttachments((local) => [
+                          ...new Map(
+                            [...local, ...(draft.attachments ?? [])].map(
+                              (file) => [file.id, file]
+                            )
+                          ).values(),
+                        ]);
+                        setSavedFingerprint(undefined);
+                        setDraftConflict(false);
+                        setPendingLocally(true);
+                      }}
+                      onAccepted={(id) => {
+                        acceptedSend.current = id;
+                        setAcceptedSendId(id);
+                      }}
+                    />
+                  ) : null}
+                  {backupFailed ? (
+                    <p role="alert" className="text-ui text-err">
+                      This writing or its files are kept only in this window.
+                      Keep the window open until saving succeeds.
+                    </p>
+                  ) : pendingUploads.length > 0 ? (
+                    <p className="text-center text-meta text-warn">
+                      {lastSavedAt && savedFingerprint === writingFingerprint
+                        ? "Writing saved; waiting file bytes are kept on this device."
+                        : "Writing and waiting files are kept on this device."}
+                    </p>
+                  ) : pendingLocally &&
+                    backupFingerprint === writingFingerprint ? (
+                    <p className="text-center text-meta text-warn">
+                      {draftConflict
+                        ? "Device copy kept — compare the saved version before syncing."
+                        : "Saved on this device — syncs when you’re back online"}
+                    </p>
+                  ) : lastSavedAt && savedFingerprint === writingFingerprint ? (
+                    <p className="text-center text-meta text-text-tertiary">
+                      Draft saved
+                    </p>
+                  ) : hasContent ? (
+                    <p className="text-center text-meta text-text-secondary">
+                      Changes waiting to save
+                    </p>
+                  ) : null}
+                </Card>
+
+                {deliveryStatus ? (
+                  <DeliveryStatusCard
+                    status={deliveryStatus}
+                    onDismiss={() => setDeliveryStatus(null)}
                   />
                 ) : null}
-                {backupFailed ? (
-                  <p role="alert" className="text-ui text-err">
-                    This writing or its files are kept only in this window. Keep
-                    the window open until saving succeeds.
-                  </p>
-                ) : pendingUploads.length > 0 ? (
-                  <p className="text-center text-meta text-warn">
-                    {lastSavedAt && savedFingerprint === writingFingerprint
-                      ? "Writing saved; waiting file bytes are kept on this device."
-                      : "Writing and waiting files are kept on this device."}
-                  </p>
-                ) : pendingLocally &&
-                  backupFingerprint === writingFingerprint ? (
-                  <p className="text-center text-meta text-warn">
-                    {draftConflict
-                      ? "Device copy kept — compare the saved version before syncing."
-                      : "Saved on this device — syncs when you’re back online"}
-                  </p>
-                ) : lastSavedAt && savedFingerprint === writingFingerprint ? (
-                  <p className="text-center text-meta text-text-tertiary">
-                    Draft saved
-                  </p>
-                ) : hasContent ? (
-                  <p className="text-center text-meta text-text-secondary">
-                    Changes waiting to save
-                  </p>
-                ) : null}
-              </Card>
-
-              {deliveryStatus ? (
-                <DeliveryStatusCard
-                  status={deliveryStatus}
-                  onDismiss={() => setDeliveryStatus(null)}
-                />
-              ) : null}
-            </div>
-          </form>
-        )}
-      </PageContainer>
+              </div>
+            </form>
+          )}
+        </PageContainer>
+      </div>
 
       <ContactPickerDialog
         open={contactPickerOpen}

@@ -1483,3 +1483,41 @@ it("keeps a window-only file warning after the server acknowledges its writing",
     session.current = { currentOrganizationId: "org_1" };
   }
 });
+
+it("keeps HTML and draft management behind options in the docked writer without changing send behavior", async () => {
+  vi.clearAllMocks();
+  session.current = { currentOrganizationId: "org_1" };
+  setup();
+  const user = userEvent.setup();
+  renderWithProviders(<EmailStudio docked />);
+  await screen.findByRole("button", { name: "Send email" });
+  expect(
+    screen.queryByRole("button", { name: "HTML" })
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Save draft" })
+  ).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "More compose options" })
+  );
+  expect(screen.getByRole("button", { name: "HTML" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Formatting options" }));
+  expect(
+    screen.getByRole("button", { name: "Formatting options" })
+  ).toHaveAttribute("aria-pressed", "true");
+  await user.type(screen.getByLabelText("To"), "customer@example.test{Enter}");
+  await user.type(screen.getByLabelText("Subject"), "Docked message");
+  await user.type(
+    screen.getByLabelText("body-editor"),
+    "<p>Same safe pipeline</p>"
+  );
+  await user.click(screen.getByRole("button", { name: "Send email" }));
+  await waitFor(() => expect(mockedApi.sendManualEmail).toHaveBeenCalled());
+  expect(mockedApi.sendManualEmail.mock.calls[0][0]).toMatchObject({
+    organizationId: "org_1",
+    to: ["customer@example.test"],
+    subject: "Docked message",
+    html: "<p>Same safe pipeline</p>",
+  });
+});

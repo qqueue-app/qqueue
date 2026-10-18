@@ -68,6 +68,8 @@ declare module "@tanstack/react-table" {
 export type DataGridColumn<TData> = ColumnDef<TData, unknown>;
 
 export interface DataGridProps<TData> {
+  variant?: "default" | "mail";
+  getRowClassName?: (row: TData) => string | undefined;
   data: TData[];
   columns: DataGridColumn<TData>[];
   /** Stable row identity — required for selection to survive refetches. */
@@ -137,6 +139,8 @@ function responsiveClass(meta: DataGridColumnMeta | undefined) {
  * behaves the same wherever it appears.
  */
 export function DataGrid<TData>({
+  variant = "default",
+  getRowClassName,
   data,
   columns,
   getRowId,
@@ -171,7 +175,7 @@ export function DataGrid<TData>({
     if (!enableSelection) return null;
     return {
       id: "__select",
-      meta: { pinned: true },
+      meta: { pinned: true, cellClassName: "w-10" },
       size: 40,
       header: ({ table }: { table: TanstackTable<TData> }) => (
         <Checkbox
@@ -245,7 +249,61 @@ export function DataGrid<TData>({
   }
 
   return (
-    <div className={cn("flex flex-col gap-3", className)}>
+    <div
+      className={cn(
+        "flex flex-col gap-3",
+        variant === "mail" && "mail-data-grid",
+        className
+      )}
+      onKeyDown={(event) => {
+        if (
+          variant !== "mail" ||
+          !["j", "k"].includes(event.key) ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.altKey ||
+          (event.target as HTMLElement).closest(
+            "input,textarea,select,[contenteditable='true'],[role='menu']"
+          )
+        )
+          return;
+        const buttons = Array.from(
+          event.currentTarget.querySelectorAll<HTMLButtonElement>(
+            "button.mail-row-open"
+          )
+        );
+        const current = buttons.indexOf(
+          document.activeElement as HTMLButtonElement
+        );
+        if (!buttons.length) return;
+        event.preventDefault();
+        buttons[
+          Math.max(
+            0,
+            Math.min(buttons.length - 1, current + (event.key === "j" ? 1 : -1))
+          )
+        ]?.focus();
+      }}
+    >
+      {variant === "mail" && enableSelection ? (
+        <div className="mail-selection-toolbar">
+          <Checkbox
+            aria-label="Select all rows on this page"
+            checked={
+              table.getIsAllPageRowsSelected() ||
+              (table.getIsSomePageRowsSelected() && "indeterminate")
+            }
+            onCheckedChange={(value) =>
+              table.toggleAllPageRowsSelected(Boolean(value))
+            }
+          />
+          <span className="text-meta text-text-secondary">
+            {selectedRows.length
+              ? `${selectedRows.length} selected on this page`
+              : "Select mail"}
+          </span>
+        </div>
+      ) : null}
       {searchable || toolbar || hideableColumns.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           {searchable ? (
@@ -314,7 +372,7 @@ export function DataGrid<TData>({
         </div>
       ) : null}
 
-      {enableSelection && isMobile && rows.length > 0 ? (
+      {variant !== "mail" && enableSelection && isMobile && rows.length > 0 ? (
         <label className="flex min-h-touch items-center gap-2 text-ui">
           <Checkbox
             aria-label="Select all rows on this page"
@@ -439,7 +497,12 @@ export function DataGrid<TData>({
                   scrolls, so it has to clear whatever the shell has parked at
                   the top of the viewport at this width. */}
                 <thead
-                  className={cn(stickyHeader && "sticky top-sticky-top z-10")}
+                  hidden={variant === "mail"}
+                  className={cn(
+                    variant === "mail"
+                      ? "hidden"
+                      : stickyHeader && "sticky top-sticky-top z-10"
+                  )}
                 >
                   {table.getHeaderGroups().map((headerGroup) => (
                     <tr key={headerGroup.id}>
@@ -538,7 +601,8 @@ export function DataGrid<TData>({
                         "[&>td]:transition-colors [&>td]:duration-fast [&>td]:ease-out",
                         "[&:hover>td]:bg-surface-sunken",
                         "[&[data-state=selected]>td]:bg-accent",
-                        onRowClick && "cursor-pointer"
+                        onRowClick && "cursor-pointer",
+                        getRowClassName?.(row.original)
                       )}
                     >
                       {row.getVisibleCells().map((cell) => {

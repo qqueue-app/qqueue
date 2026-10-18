@@ -24,6 +24,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { MailRow } from "../components/mail/MailRow.js";
+import { mailPreview } from "../lib/mail-preview.js";
 import { api } from "../lib/api.js";
 import { qk } from "../lib/query-client.js";
 import { useSession } from "../lib/session-context.js";
@@ -41,7 +43,6 @@ import { Button } from "../components/ui/button.js";
 import { IconButton } from "../components/ui/icon-button.js";
 import { Input } from "../components/ui/input.js";
 import { Spinner } from "../components/ui/spinner.js";
-import { Badge } from "../components/ui/badge.js";
 import {
   Select,
   SelectContent,
@@ -66,17 +67,10 @@ const labels = {
   OUTBOX: "Outbox",
   DRAFTS: "Drafts",
 };
-function preview(html: string) {
-  return html
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/\s+/g, " ")
-    .trim();
+function preview(value: string) {
+  return mailPreview(value, value);
 }
+
 function status(row: MailSearchRow) {
   if (row.kind !== "SENT") return row.label;
   if (row.scheduledAt && (row.status === "PENDING" || row.status === "QUEUED"))
@@ -195,6 +189,17 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
     () => api.getEmailDraft(draftId!),
     { enabled: Boolean(draftId), refetchInterval: 10000 }
   );
+  const markMany = useApiMutation(
+    ({ ids, read }: { ids: string[]; read: boolean }) =>
+      api.markInboundMessagesRead(org!, ids, read),
+    {
+      onSuccess: () => {
+        void mail.refetch();
+      },
+      errorMessage:
+        "Couldn't update the selected received mail. Your selection is kept.",
+    }
+  );
   const cancel = useApiMutation(
     (id: string) => api.cancelOutboxEmail(id, org!),
     {
@@ -298,51 +303,29 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
     });
   }
   function renderRow(row: MailSearchRow) {
+    const attention =
+      row.kind === "SENT" &&
+      ["FAILED", "UNCERTAIN", "SUPPRESSED", "CANCELLED"].includes(
+        row.status ?? ""
+      );
     return (
-      <div
-        className={cn(
-          "min-w-0 space-y-1 py-2",
-          (row.id === messageId || row.id === jobId || row.id === draftId) &&
-            "rounded-control bg-accent px-2"
-        )}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <span
-            className={cn(
-              "min-w-0 truncate text-ui",
-              !row.read && "font-semibold"
-            )}
-          >
-            {row.kind === "RECEIVED"
-              ? row.fromName || row.fromEmail
-              : `To: ${row.to.join(", ") || "No recipients yet"}`}
-          </span>
-          <time className="shrink-0 text-meta text-text-tertiary">
-            {formatMailDate(row.at)}
-          </time>
-        </div>
-        <p className="truncate text-ui font-medium">
-          {row.subject || "(no subject)"}
-        </p>
-        <p className="truncate text-meta text-text-secondary">
-          {preview(row.preview) || "No preview available"}
-        </p>
-        <div className="flex min-w-0 items-center gap-2">
-          <Badge
-            className="max-w-full whitespace-normal"
-            variant={
-              row.status === "UNCERTAIN" || row.status === "FAILED"
-                ? "warn"
-                : "neutral"
-            }
-          >
-            {status(row)}
-          </Badge>
-          <span className="truncate text-meta text-text-tertiary">
-            {row.mailboxEmail || "Account removed"}
-          </span>
-        </div>
-      </div>
+      <MailRow
+        sender={
+          row.kind === "RECEIVED"
+            ? row.fromName || row.fromEmail
+            : `To: ${row.to.join(", ") || "No recipients yet"}`
+        }
+        subject={row.subject}
+        preview={preview(row.preview)}
+        unread={!row.read}
+        status={
+          attention || view === "OUTBOX"
+            ? status(row)
+            : row.kind === "DRAFT"
+              ? "Draft"
+              : undefined
+        }
+      />
     );
   }
   const columns = useMemo<ColumnDef<MailSearchRow, unknown>[]>(
@@ -355,7 +338,7 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
         cell: ({ row }) => (
           <button
             type="button"
-            className="w-full min-w-0 rounded-control text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="mail-row-open"
             aria-label={`Open ${row.original.subject || "untitled message"}`}
             onClick={(event) => {
               event.stopPropagation();
@@ -366,12 +349,28 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
           </button>
         ),
       },
+      {
+        id: "date",
+        header: "Date",
+        enableSorting: false,
+        enableHiding: false,
+        meta: { cellClassName: "w-24" },
+        cell: ({ row }) => (
+          <time
+            className="mail-row-date"
+            dateTime={row.original.at}
+            title={formatFullDate(row.original.at)}
+          >
+            {formatMailDate(row.original.at)}
+          </time>
+        ),
+      },
     ],
-    [messageId, jobId, draftId]
+    [messageId, jobId, draftId, view]
   );
   const list = (
     <>
-      <header className="sticky top-sticky-top z-10 space-y-3 border-b border-border bg-surface p-4">
+      <header className="mail-list-header sticky top-sticky-top z-10">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-section font-semibold">{title}</h1>
           <IconButton
@@ -383,6 +382,7 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
           </IconButton>
         </div>
         <Input
+          className="mail-local-search"
           aria-label={
             view === "ALL" ? "Search received and sent mail" : `Search ${title}`
           }
@@ -471,6 +471,44 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
         />
       ) : (
         <DataGrid
+          key={`${view}:${q}:${mailbox}`}
+          variant="mail"
+          enableSelection
+          bulkActions={(selectedRows, clear) => {
+            const ids = selectedRows
+              .filter((row) => row.kind === "RECEIVED")
+              .map((row) => row.id);
+            return (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!ids.length || markMany.isPending}
+                  onClick={() =>
+                    markMany.mutate({ ids, read: true }, { onSuccess: clear })
+                  }
+                >
+                  Mark selected as read
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!ids.length || markMany.isPending}
+                  onClick={() =>
+                    markMany.mutate({ ids, read: false }, { onSuccess: clear })
+                  }
+                >
+                  Mark selected as unread
+                </Button>
+                {ids.length !== selectedRows.length ? (
+                  <span className="text-meta">
+                    Read actions apply to received mail.
+                  </span>
+                ) : null}
+              </>
+            );
+          }}
+          getRowClassName={(row) => (!row.read ? "mail-unread" : undefined)}
           label={`${title} messages`}
           className="[&_table]:table-fixed"
           data={rows}
@@ -482,7 +520,14 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
           stickyHeader={false}
           onRowClick={open}
           getRowLabel={(row) => `Open ${row.subject || "untitled message"}`}
-          renderMobileRow={renderRow}
+          renderMobileRow={(row) => (
+            <div className="relative">
+              {renderRow(row)}
+              <time className="absolute right-0 top-1 text-meta text-text-secondary">
+                {formatMailDate(row.at)}
+              </time>
+            </div>
+          )}
           empty={
             <EmptyState
               icon={
@@ -498,7 +543,11 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
               description={
                 q
                   ? "Try another phrase or choose another mailbox."
-                  : "Messages appear here when they are available to your account."
+                  : view === "DRAFTS"
+                    ? "Start a message with Compose. Your drafts are saved automatically."
+                    : view === "OUTBOX"
+                      ? "Messages waiting to send will appear here."
+                      : "Messages appear here when they are available to your account."
               }
             />
           }
@@ -624,7 +673,7 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
         className={
           pane
             ? "grid h-[calc(100dvh-var(--mail-notice-height,0px))] grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]"
-            : "min-w-0"
+            : "mail-view min-w-0"
         }
       >
         {!selected || pane ? (
@@ -649,7 +698,7 @@ function MailFolderWorkspace({ view }: { view: MailSearchInput["view"] }) {
         {selected || pane ? (
           <section
             className={cn(
-              "min-w-0",
+              "mail-reader min-w-0",
               // scroll-exception: approved desktop conversation scroll stays beside the mail list.
               pane && "min-h-0 overflow-y-auto"
             )}

@@ -10,6 +10,23 @@ mailbox provisioning, tracking, transactional API keys, outbound webhooks, an
 MIT-licensed SDK package, tests, deployment files, and open-core licensing
 guardrails.
 
+## Gmail mail workspace overhaul
+
+The 18 October 2026 interface overhaul introduces a Gmail-shaped mail shell with
+QQueue’s existing logo and colours, full-width lists by default, persistent
+search, familiar folders, compact message rows, docked compose that survives
+mail navigation, inline replies, and a phone drawer with floating Compose.
+Advanced writing and delivery details remain available through secondary
+controls. Inbox bulk Archive/Trash reuse durable conversation move requests with
+retry identities and visible progress. Existing grants, drafts, private files,
+and the shared delivery pipeline remain the foundation.
+
+The implementation and acceptance scope is recorded in
+[Gmail mail workspace overhaul](GMAIL_UI_OVERHAUL.md). Gmail-only features such as
+labels, snooze and automatic category classification are separate functional
+work. Physical-device and production-scale acceptance remain outstanding as
+recorded in the email client readiness document.
+
 ## Mailbox assignment during invitations (2026-10-18)
 
 Settings → Team now lets an owner or admin select mailboxes while inviting a

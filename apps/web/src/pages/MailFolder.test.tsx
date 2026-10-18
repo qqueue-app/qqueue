@@ -20,6 +20,7 @@ vi.mock("../lib/use-media-query.js", () => ({
 vi.mock("../lib/api.js", () => ({
   api: {
     searchMail: vi.fn(),
+    markInboundMessagesRead: vi.fn().mockResolvedValue({ updated: 1 }),
     searchableMailboxes: vi.fn(),
     getEmailDraft: vi.fn(),
     cancelOutboxEmail: vi.fn(),
@@ -375,5 +376,25 @@ it("recovers a draft load failure and directs a completed draft to its accepted 
   );
   expect(screen.getByLabelText("Current URL")).toHaveTextContent(
     "/sent?job=accepted1"
+  );
+});
+
+it("applies bulk read actions only to received results in a mixed search", async () => {
+  viewport.desktop = true;
+  const user = userEvent.setup();
+  renderWithProviders(<MailFolder />, { route: "/search" });
+  await screen.findByRole("button", { name: "Open Customer question" });
+  await user.click(
+    screen.getByRole("checkbox", { name: "Select all rows on this page" })
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Mark selected as read" })
+  );
+  await waitFor(() =>
+    expect(api.markInboundMessagesRead).toHaveBeenCalledWith(
+      "org1",
+      ["in1"],
+      true
+    )
   );
 });

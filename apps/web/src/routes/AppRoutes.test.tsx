@@ -2,6 +2,13 @@ import { renderWithProviders, screen } from "../test/render.js";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("../lib/session-context.js", () => ({
+  useSession: () => ({
+    user: { id: "route-user" },
+    currentOrganizationId: "route-org",
+  }),
+}));
+
 // Stub the lazy-loaded pages and layout so we can assert routing without
 // pulling in their full dependency trees.
 vi.mock("../layouts/DashboardLayout.js", async () => {
@@ -26,8 +33,12 @@ vi.mock("../pages/Login.js", () => ({
 vi.mock("../pages/Legal.js", () => ({
   LegalPage: ({ kind }: { kind: string }) => <div>Legal {kind}</div>,
 }));
-vi.mock("../pages/MailFolder.js",()=>({MailFolder:({view}:{view:string})=><div>Mail folder {view}</div>}));
-vi.mock("../pages/Sent.js",()=>({Sent:()=> <div>Delivery archive</div>}));
+vi.mock("../pages/MailFolder.js", () => ({
+  MailFolder: ({ view }: { view: string }) => <div>Mail folder {view}</div>,
+}));
+vi.mock("../pages/Sent.js", () => ({
+  Sent: () => <div>Delivery archive</div>,
+}));
 vi.mock("../pages/EmailStudio.js", () => ({ EmailStudio: () => <div /> }));
 vi.mock("../pages/Inbox.js", () => ({ Inbox: () => <div>Inbox page</div> }));
 vi.mock("../pages/SMTPConnections.js", () => ({
@@ -76,45 +87,55 @@ import { AppRoutes } from "./AppRoutes.js";
 
 describe("AppRoutes", () => {
   // Signing in lands on the inbox now; the stats page moved to /insights.
-  it("renders the inbox within the layout at the index route", async () => { renderWithProviders(
+  it("renders the inbox within the layout at the index route", async () => {
+    renderWithProviders(
       <MemoryRouter initialEntries={["/"]}>
         <AppRoutes />
-      </MemoryRouter>
-    , { withRouter: false });
+      </MemoryRouter>,
+      { withRouter: false }
+    );
     expect(await screen.findByTestId("layout")).toBeInTheDocument();
     expect(await screen.findByText("Inbox page")).toBeInTheDocument();
   });
 
-  it("renders the login route outside the layout", async () => { renderWithProviders(
+  it("renders the login route outside the layout", async () => {
+    renderWithProviders(
       <MemoryRouter initialEntries={["/login"]}>
         <AppRoutes />
-      </MemoryRouter>
-    , { withRouter: false });
+      </MemoryRouter>,
+      { withRouter: false }
+    );
     expect(await screen.findByText("Login login")).toBeInTheDocument();
   });
 
-  it("renders the register route", async () => { renderWithProviders(
+  it("renders the register route", async () => {
+    renderWithProviders(
       <MemoryRouter initialEntries={["/register"]}>
         <AppRoutes />
-      </MemoryRouter>
-    , { withRouter: false });
+      </MemoryRouter>,
+      { withRouter: false }
+    );
     expect(await screen.findByText("Login register")).toBeInTheDocument();
   });
 
-  it("renders password reset routes outside the layout", async () => { renderWithProviders(
+  it("renders password reset routes outside the layout", async () => {
+    renderWithProviders(
       <MemoryRouter initialEntries={["/forgot-password"]}>
         <AppRoutes />
-      </MemoryRouter>
-    , { withRouter: false });
+      </MemoryRouter>,
+      { withRouter: false }
+    );
     expect(await screen.findByText("Login forgot")).toBeInTheDocument();
     expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
   });
 
-  it("renders public legal routes outside the dashboard layout", async () => { renderWithProviders(
+  it("renders public legal routes outside the dashboard layout", async () => {
+    renderWithProviders(
       <MemoryRouter initialEntries={["/terms"]}>
         <AppRoutes />
-      </MemoryRouter>
-    , { withRouter: false });
+      </MemoryRouter>,
+      { withRouter: false }
+    );
     expect(await screen.findByText("Legal terms")).toBeInTheDocument();
     expect(screen.queryByTestId("layout")).not.toBeInTheDocument();
   });
@@ -178,10 +199,26 @@ describe("AppRoutes", () => {
   });
 });
 
-
-it.each([["/sent","SENT"],["/drafts","DRAFTS"],["/outbox","OUTBOX"],["/search","ALL"]])("opens the reading workspace at %s",async(path,view)=>{
- renderWithProviders(<MemoryRouter initialEntries={[path]}><AppRoutes/></MemoryRouter>,{withRouter:false});expect(await screen.findByText(`Mail folder ${view}`)).toBeInTheDocument();
+it.each([
+  ["/sent", "SENT"],
+  ["/drafts", "DRAFTS"],
+  ["/outbox", "OUTBOX"],
+  ["/search", "ALL"],
+])("opens the reading workspace at %s", async (path, view) => {
+  renderWithProviders(
+    <MemoryRouter initialEntries={[path]}>
+      <AppRoutes />
+    </MemoryRouter>,
+    { withRouter: false }
+  );
+  expect(await screen.findByText(`Mail folder ${view}`)).toBeInTheDocument();
 });
-it("preserves an existing sent report bookmark",async()=>{
- renderWithProviders(<MemoryRouter initialEntries={["/sent?origin=CAMPAIGN&outcome=failed"]}><AppRoutes/></MemoryRouter>,{withRouter:false});expect(await screen.findByText("Delivery archive")).toBeInTheDocument();
+it("preserves an existing sent report bookmark", async () => {
+  renderWithProviders(
+    <MemoryRouter initialEntries={["/sent?origin=CAMPAIGN&outcome=failed"]}>
+      <AppRoutes />
+    </MemoryRouter>,
+    { withRouter: false }
+  );
+  expect(await screen.findByText("Delivery archive")).toBeInTheDocument();
 });

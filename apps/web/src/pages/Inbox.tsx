@@ -14,9 +14,12 @@ import {
   Reply,
   Forward,
   Trash2,
-  Flag,
+  Star,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useBulkMailMoves } from "../components/mail/use-bulk-mail-moves.js";
+import { MailRow } from "../components/mail/MailRow.js";
+import { mailPreview } from "../lib/mail-preview.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { InboundHtmlFrame } from "../components/InboundHtmlFrame.js";
 import { ConnectInboxDialog } from "../components/inbox/ConnectInboxDialog.js";
@@ -102,23 +105,7 @@ function senderLabel(message: InboundMessage) {
 }
 
 function snippet(message: InboundMessage) {
-  const text = message.text?.replace(/\s+/g, " ").trim();
-  if (text) return text.slice(0, 180);
-  if (!message.html) return "No preview available";
-  // HTML-only message: derive a preview instead of showing a placeholder. This
-  // is a list snippet rendered as a plain text node, never as markup, so
-  // stripping tags crudely is enough — script/style contents are dropped first
-  // so their source doesn't surface as "preview text".
-  const stripped = message.html
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-  return stripped ? stripped.slice(0, 180) : "No preview available";
+  return mailPreview(message.text, message.html);
 }
 
 function threadKeyForMessage(message: InboundMessage) {
@@ -366,6 +353,7 @@ function InboxWorkspace({
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const readMessages = useRef(new Set<string>());
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const bulkMoves = useBulkMailMoves(organizationId, view, folderId);
   const [preview, setPreview] = useState<{
     attachment: InboundAttachment;
     blob: Blob;
@@ -709,7 +697,11 @@ function InboxWorkspace({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest?.("input, textarea, [contenteditable='true']"))
+      if (
+        target?.closest?.(
+          "input, textarea, [contenteditable='true'], [aria-label='Compose workspace']"
+        )
+      )
         return;
       closeConversation();
     }
@@ -767,49 +759,38 @@ function InboxWorkspace({
   function renderThread(thread: ConversationThread, showDate = true) {
     const unread = thread.unreadCount > 0;
     return (
-      <button
-        type="button"
-        onClick={() => openThread(thread)}
-        className={cn(
-          "flex min-h-touch w-full items-start gap-3 rounded-control p-2 text-left focus-visible:bg-accent focus-visible:underline focus-visible:underline-offset-4 focus-visible:outline-none",
-          selectedThread?.threadKey === thread.threadKey
-            ? "bg-brand/10"
-            : unread
-              ? "bg-surface"
-              : "bg-transparent"
-        )}
-      >
-        {unread ? <span className="sr-only">Unread</span> : null}
-        <Avatar name={thread.senderName} size="md" />
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn("block truncate text-ui", unread && "font-semibold")}
-          >
-            {thread.senderName}
-          </span>
-          <span
-            className={cn("block truncate text-ui", unread && "font-semibold")}
-          >
-            {thread.subject}
-          </span>
-          <span className="block truncate text-meta text-text-tertiary">
-            {snippet(thread.latestMessage)}
-          </span>
+      <div className="relative min-w-0">
+        <button
+          type="button"
+          onClick={() => openThread(thread)}
+          className="mail-row-open"
+        >
+          {unread ? <span className="sr-only">Unread </span> : null}
+          <MailRow
+            sender={thread.senderName}
+            subject={thread.subject}
+            preview={snippet(thread.latestMessage)}
+            unread={unread}
+            count={thread.messages.length}
+            attachment={thread.messages.some((message) =>
+              message.attachments?.some((file) => !file.isInline)
+            )}
+          />
           {thread.messages.some(
             (message) => message.dsnAttribution === "UNATTRIBUTED"
           ) ? (
             <Badge variant="warn">Unattributed</Badge>
           ) : null}
-        </span>
+        </button>
         {showDate ? (
           <time
             dateTime={thread.latestMessage.receivedAt}
-            className="shrink-0 text-meta text-text-secondary"
+            className="absolute right-0 top-1 text-meta text-text-secondary"
           >
             {formatMailDate(thread.latestMessage.receivedAt)}
           </time>
         ) : null}
-      </button>
+      </div>
     );
   }
 
@@ -847,7 +828,7 @@ function InboxWorkspace({
                 disabled={flag.isPending}
                 onClick={() => flag.mutate(selectedThread.latestMessage)}
               >
-                <Flag
+                <Star
                   className={
                     selectedThread.latestMessage.flagged
                       ? "fill-current text-primary"
@@ -1000,7 +981,7 @@ function InboxWorkspace({
             return (
               <article
                 key={message.id}
-                className="rounded-card border border-border bg-surface p-4 shadow-card"
+                className="mail-conversation-message rounded-card border border-border bg-surface p-4 shadow-card"
               >
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-ui font-medium">
@@ -1060,7 +1041,7 @@ function InboxWorkspace({
           return (
             <article
               key={message.id}
-              className="rounded-card border border-border bg-surface p-4 shadow-card"
+              className="mail-conversation-message rounded-card border border-border bg-surface p-4 shadow-card"
             >
               <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -1308,6 +1289,55 @@ function InboxWorkspace({
         >
           <Reply /> Write a reply
         </Button>
+        {replyTarget && organizationId ? (
+          <ReplyComposer
+            inline
+            key={`${replyTarget.id}:${searchParams.get("replyDraft") ?? ""}:${searchParams.get("replyBackup") ?? ""}`}
+            message={replyTarget}
+            organizationId={organizationId}
+            mailboxEmail={
+              accounts.find(
+                (account) => account.id === replyTarget.inboxAccountId
+              )?.email ?? "Receiving mailbox"
+            }
+            replyPresence={conversationQuery.data?.replyPresence}
+            initialBackupId={searchParams.get("replyBackup") ?? undefined}
+            initialDraftId={searchParams.get("replyDraft") ?? undefined}
+            onClose={() => {
+              setReplyTarget(null);
+              setSearchParams(
+                (current) => {
+                  const next = new URLSearchParams(current);
+                  next.delete("replyDraft");
+                  next.delete("replyBackup");
+                  next.delete("move");
+                  return next;
+                },
+                { replace: true }
+              );
+            }}
+            onQueued={() => {
+              setReplyTarget(null);
+              setSearchParams(
+                (current) => {
+                  const next = new URLSearchParams(current);
+                  next.delete("replyDraft");
+                  next.delete("replyBackup");
+                  next.delete("beforeMessage");
+                  next.delete("afterMessage");
+                  next.delete("move");
+                  next.delete("message");
+                  return next;
+                },
+                { replace: true }
+              );
+              void conversationQuery.refetch();
+              void queryClient.invalidateQueries({
+                queryKey: ["outbox", organizationId],
+              });
+            }}
+          />
+        ) : null}
       </div>
     </>
   ) : (
@@ -1338,8 +1368,8 @@ function InboxWorkspace({
   );
   const mailList = (
     <>
-      <header className="sticky top-sticky-top z-10 border-b border-border bg-surface">
-        <div className="mx-auto w-full max-w-page px-4 pb-3 pt-4 sm:px-6">
+      <header className="mail-list-header sticky top-sticky-top z-10">
+        <div className="mx-auto flex w-full max-w-page flex-wrap items-center gap-4">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <h1 className="text-section font-semibold text-text">
@@ -1384,7 +1414,7 @@ function InboxWorkspace({
                 their own lines on a phone, where the search box goes full
                 width and the rest follows underneath.
               */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mail-local-filters">
             <Select
               value={folderId ? `folder:${folderId}` : `view:${view}`}
               onValueChange={(value) => {
@@ -1401,7 +1431,13 @@ function InboxWorkspace({
                 );
               }}
             >
-              <SelectTrigger aria-label="Choose mail folder" className="w-full">
+              <SelectTrigger
+                aria-label="Choose mail folder"
+                className={cn(
+                  "mail-folder-choice w-full",
+                  view !== "OTHER" && !folderId && "mail-folder-secondary"
+                )}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1460,7 +1496,7 @@ function InboxWorkspace({
               </p>
             ) : null}
             <form
-              className="w-full sm:w-auto"
+              className="mail-local-search w-full sm:w-auto"
               onSubmit={(event) => {
                 event.preventDefault();
                 setSubmittedSearch(search.trim());
@@ -1517,45 +1553,55 @@ function InboxWorkspace({
             ) : null}
 
             {selectedAccount ? (
-              <div className="flex min-w-0 items-center gap-2 text-meta text-text-tertiary sm:ml-auto">
-                <Badge variant="outline" className="text-meta">
-                  {selectedAccount.status === "DISABLED"
-                    ? "Disconnected"
-                    : selectedAccount.lastSyncError
-                      ? "Needs attention"
-                      : "Connected"}
-                </Badge>
-                {selectedAccount.lastSyncError ? (
-                  <span role="alert" className="text-err">
-                    {selectedAccount.lastSyncError}
+              <details
+                className="mail-sync-details min-w-0 text-meta text-text-tertiary sm:ml-auto"
+                open={
+                  selectedAccount.status === "DISABLED" ||
+                  Boolean(selectedAccount.lastSyncError)
+                }
+              >
+                <summary className="cursor-pointer">Mailbox status</summary>
+                <div className="flex flex-wrap items-center gap-2 p-2">
+                  <Badge variant="outline" className="text-meta">
+                    {selectedAccount.status === "DISABLED"
+                      ? "Disconnected"
+                      : selectedAccount.lastSyncError
+                        ? "Needs attention"
+                        : "Connected"}
+                  </Badge>
+                  {selectedAccount.lastSyncError ? (
+                    <span role="alert" className="text-err">
+                      {selectedAccount.lastSyncError}
+                    </span>
+                  ) : null}
+                  <span className="truncate">
+                    Last checked {formatFullDate(selectedAccount.lastSyncedAt)}
                   </span>
-                ) : null}
-                <span className="truncate">
-                  Last checked {formatFullDate(selectedAccount.lastSyncedAt)}
-                </span>
-                {selectedAccount.status === "ACTIVE" &&
-                (selectedAccount.historyBeforeUid === null ||
-                  (selectedAccount.historyBeforeUid ?? 0) > 0) ? (
-                  <span className="text-meta">
-                    Older mail is importing in the background.
-                  </span>
-                ) : null}
-                {canManageMailboxes ? (
-                  <IconButton
-                    label={`Disconnect ${selectedAccount.email}`}
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => setDisconnectTarget(selectedAccount.id)}
-                  >
-                    <Trash2 />
-                  </IconButton>
-                ) : null}
-              </div>
+                  {selectedAccount.status === "ACTIVE" &&
+                  (selectedAccount.historyBeforeUid === null ||
+                    (selectedAccount.historyBeforeUid ?? 0) > 0) ? (
+                    <span className="text-meta">
+                      Older mail is importing in the background.
+                    </span>
+                  ) : null}
+                  {canManageMailboxes ? (
+                    <IconButton
+                      label={`Disconnect ${selectedAccount.email}`}
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => setDisconnectTarget(selectedAccount.id)}
+                    >
+                      <Trash2 />
+                    </IconButton>
+                  ) : null}
+                </div>
+              </details>
             ) : null}
           </div>
         </div>
       </header>
 
+      {bulkMoves.progress}
       <div className="mx-auto w-full max-w-page">
         {accountsQuery.isError || messagesQuery.isError ? (
           <EmptyState
@@ -1619,12 +1665,48 @@ function InboxWorkspace({
           />
         ) : (
           <DataGrid
+            key={`${accountFilter}:${view}:${folderId ?? ""}:${readFilter}:${submittedSearch}`}
+            variant="mail"
+            getRowClassName={(thread) =>
+              thread.unreadCount ? "mail-unread" : undefined
+            }
             label="Inbox conversations"
             className="[&_table]:table-fixed [&_th:first-child]:w-12 [&_th:last-child]:w-24"
             stickyHeader={false}
             data={threads}
             getRowId={(thread) => thread.threadKey}
             columns={[
+              {
+                id: "star",
+                header: "Star",
+                enableSorting: false,
+                enableHiding: false,
+                meta: { pinned: true, cellClassName: "w-9" },
+                cell: ({ row }) => (
+                  <IconButton
+                    label={
+                      row.original.latestMessage.flagged
+                        ? "Unstar message"
+                        : "Star message"
+                    }
+                    size="sm"
+                    aria-pressed={Boolean(row.original.latestMessage.flagged)}
+                    disabled={flag.isPending}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      flag.mutate(row.original.latestMessage);
+                    }}
+                  >
+                    <Star
+                      className={
+                        row.original.latestMessage.flagged
+                          ? "fill-current text-primary"
+                          : "text-text-tertiary"
+                      }
+                    />
+                  </IconButton>
+                ),
+              },
               {
                 id: "conversation",
                 header: "Conversation",
@@ -1636,19 +1718,20 @@ function InboxWorkspace({
                 id: "actions",
                 header: "",
                 enableSorting: false,
-                meta: { pinned: true },
+                meta: { pinned: true, cellClassName: "w-28" },
                 cell: ({ row }) => (
-                  <div className="flex flex-col items-end gap-1">
+                  <div className="flex items-center justify-end">
                     <time
                       dateTime={row.original.latestMessage.receivedAt}
                       title={formatFullDate(
                         row.original.latestMessage.receivedAt
                       )}
-                      className="pr-1 text-meta text-text-secondary"
+                      className="mail-row-date"
                     >
                       {formatMailDate(row.original.latestMessage.receivedAt)}
                     </time>
                     <RowActions
+                      className="mail-hover-actions"
                       rowLabel={row.original.subject}
                       actions={[
                         {
@@ -1669,7 +1752,7 @@ function InboxWorkspace({
                           label: row.original.latestMessage.flagged
                             ? "Remove flag"
                             : "Flag message",
-                          icon: Flag,
+                          icon: Star,
                           onSelect: () =>
                             flag.mutate(row.original.latestMessage),
                         },
@@ -1685,6 +1768,7 @@ function InboxWorkspace({
             renderMobileRow={(thread) => renderThread(thread)}
             bulkActions={(rows, clear) => (
               <>
+                {bulkMoves.controls(rows, clear)}
                 <Button
                   variant="secondary"
                   disabled={markMany.isPending}
@@ -1739,9 +1823,9 @@ function InboxWorkspace({
     </>
   );
   return (
-    <div className="min-h-0">
+    <div className="mail-view min-h-0">
       {embedded ? (
-        reader
+        <div className="mail-reader">{reader}</div>
       ) : readingPane ? (
         <div className="grid h-[calc(100dvh-var(--mail-notice-height,0px))] grid-cols-[22.5rem_minmax(0,1fr)] 2xl:grid-cols-[25rem_minmax(0,1fr)]">
           {/* scroll-exception: the approved desktop mail list scrolls independently of the adjacent reader. */}
@@ -1754,66 +1838,18 @@ function InboxWorkspace({
           </div>
           {/* scroll-exception: the approved desktop reading pane keeps a long conversation beside the mail list. */}
           <section
-            className="min-h-0 min-w-0 overflow-y-auto"
+            className="mail-reader min-h-0 min-w-0 overflow-y-auto"
             aria-label="Reading pane"
           >
             {reader}
           </section>
         </div>
       ) : selectedThread || searchParams.get("message") ? (
-        reader
+        <div className="mail-reader">{reader}</div>
       ) : (
         mailList
       )}
 
-      {replyTarget && organizationId ? (
-        <ReplyComposer
-          key={`${replyTarget.id}:${searchParams.get("replyDraft") ?? ""}:${searchParams.get("replyBackup") ?? ""}`}
-          message={replyTarget}
-          organizationId={organizationId}
-          mailboxEmail={
-            accounts.find(
-              (account) => account.id === replyTarget.inboxAccountId
-            )?.email ?? "Receiving mailbox"
-          }
-          replyPresence={conversationQuery.data?.replyPresence}
-          initialBackupId={searchParams.get("replyBackup") ?? undefined}
-          initialDraftId={searchParams.get("replyDraft") ?? undefined}
-          onClose={() => {
-            setReplyTarget(null);
-            setSearchParams(
-              (current) => {
-                const next = new URLSearchParams(current);
-                next.delete("replyDraft");
-                next.delete("replyBackup");
-                next.delete("move");
-                return next;
-              },
-              { replace: true }
-            );
-          }}
-          onQueued={() => {
-            setReplyTarget(null);
-            setSearchParams(
-              (current) => {
-                const next = new URLSearchParams(current);
-                next.delete("replyDraft");
-                next.delete("replyBackup");
-                next.delete("beforeMessage");
-                next.delete("afterMessage");
-                next.delete("move");
-                next.delete("message");
-                return next;
-              },
-              { replace: true }
-            );
-            void conversationQuery.refetch();
-            void queryClient.invalidateQueries({
-              queryKey: ["outbox", organizationId],
-            });
-          }}
-        />
-      ) : null}
       <ConfirmDialog
         open={Boolean(disconnectTarget)}
         onOpenChange={(open) => {

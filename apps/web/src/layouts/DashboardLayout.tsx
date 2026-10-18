@@ -1,11 +1,12 @@
 import {
+  Suspense,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
 } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
   Inbox,
@@ -19,31 +20,32 @@ import {
   FileText,
   Megaphone,
   Settings as SettingsIcon,
-  Menu,
   X,
+  Star,
+  Archive,
+  Trash2,
+  ShieldAlert,
+  Mails,
+  Folder,
 } from "lucide-react";
 import { useUnreadCount } from "../lib/use-unread-count.js";
 import { BrandWordmark } from "../components/BrandWordmark.js";
 import { WindowDraftNotice } from "../components/WindowDraftNotice.js";
 import { OfflineBanner } from "../components/OfflineBanner.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { IconButton } from "../components/ui/icon-button.js";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet.js";
-import { MobileTabBar } from "../components/shell/MobileTabBar.js";
-import { MoreSheet } from "../components/shell/MoreSheet.js";
+import { MailHeader } from "../components/shell/MailHeader.js";
+import {
+  ComposeHost,
+  useMailComposeOpen,
+} from "../components/mail/ComposeWorkspace.js";
+import { useMediaQuery } from "../lib/use-media-query.js";
 import { SidebarNav } from "../components/shell/SidebarNav.js";
-import type { MobileTab, NavSection } from "../components/shell/nav-types.js";
+import type { NavSection } from "../components/shell/nav-types.js";
 
-/*
-  Every destination in the app, in one table.
-
-  §4 of the design system restructured this and the shape matters as much as
-  the contents: it is flat. The Settings sub-tree that used to hang off the
-  bottom is a single item now, backed by a hub page, and "Smart lists" folded
-  into Lists as a tab because smart is a *kind* of list, not a place to go.
-  Both changes exist to keep this list short enough that the sidebar never
-  needs a scrollbar of its own — so think twice before adding a tenth item, and
-  three times before adding a sub-tree.
-*/
+// One destination table for the desktop navigation and the phone drawer.
+// Daily mail stays visible; campaigns and reporting remain under More tools.
 const navSections: NavSection[] = [
   {
     items: [
@@ -57,10 +59,16 @@ const navSections: NavSection[] = [
         activePaths: ["/"],
       },
       { to: "/email-studio", label: "Compose", icon: PenSquare },
+      { to: "/inbox?view=FLAGGED", label: "Starred", icon: Star },
       { to: "/search", label: "Search mail", icon: Search },
       { to: "/sent", label: "Sent", icon: MailCheck },
       { to: "/drafts", label: "Drafts", icon: FileEdit },
       { to: "/outbox", label: "Outbox", icon: Send },
+      { to: "/inbox?view=ALL", label: "All mail", icon: Mails },
+      { to: "/inbox?view=ARCHIVE", label: "Archive", icon: Archive },
+      { to: "/inbox?view=JUNK", label: "Spam", icon: ShieldAlert },
+      { to: "/inbox?view=TRASH", label: "Trash", icon: Trash2 },
+      { to: "/inbox?view=OTHER", label: "Other folders", icon: Folder },
       // Statistics are useful, but this is a report rather than the mail home.
       {
         to: "/insights",
@@ -119,45 +127,15 @@ const navSections: NavSection[] = [
   },
 ];
 
-/*
-  The phone's tab bar: the four destinations worth a permanent thumb-reachable
-  slot, plus a More tab the bar renders itself. Everything else lives in the
-  More sheet, which reads the table above — so a destination added there shows
-  up on a phone without a second edit here.
-*/
-const mobileTabs: MobileTab[] = [
-  {
-    to: "/inbox",
-    label: "Inbox",
-    icon: Inbox,
-    badge: "unread",
-    activePaths: ["/"],
-  },
-  { to: "/email-studio", label: "Compose", icon: PenSquare, emphasis: true },
-  { to: "/sent", label: "Sent", icon: MailCheck },
-  { to: "/contacts", label: "Contacts", icon: Users },
-];
-
-const tabBarPaths = mobileTabs.map((tab) => tab.to);
-
-/**
- * The app shell.
- *
- * Three layouts off two breakpoints, built mobile-first (§2):
- *
- *   <640px    no sidebar; a bottom tab bar plus a full-screen More sheet
- *   640–1023  a top bar whose menu button opens the sidebar as a drawer
- *   ≥1024px   the sidebar, fixed at 200px, always there
- *
- * The shell never scrolls independently. Ordinary pages use document scrolling;
- * the desktop Inbox owns its adjacent list and reader scroll regions. Extra
- * tools open in a menu so they never lengthen the fixed folder navigation.
- */
+/** Shared mail shell. The phone uses the folder drawer and a Compose action. */
 export function DashboardLayout() {
   const unread = useUnreadCount();
+  const composing = useMailComposeOpen();
   const location = useLocation();
+  const desktop = useMediaQuery("(min-width: 1024px)");
+  const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [navigationMounted, setNavigationMounted] = useState(false);
   const notices = useRef<HTMLDivElement>(null);
   const [noticeHeight, setNoticeHeight] = useState(0);
   useLayoutEffect(() => {
@@ -175,76 +153,45 @@ export function DashboardLayout() {
       window.removeEventListener("resize", measured);
     };
   }, []);
-
-  // Close both nav overlays whenever the route changes.
   useEffect(() => {
     setDrawerOpen(false);
-    setMoreOpen(false);
-  }, [location.pathname]);
-
+  }, [location.pathname, location.search, composing, desktop]);
   return (
-    <div className="min-h-screen bg-bg">
-      {/*
-        Skip link.
-
-        The sidebar is eleven destinations, three legal links and the account
-        button — fifteen tab stops that a keyboard user crossed before reaching
-        the page on *every* navigation, because the nav precedes main in the
-        document (which is the right order for it to be in). This is the
-        standard way out of that, and it is the only element in the shell that
-        is deliberately invisible until focused: off-screen by default, and it
-        lands in the top-left corner the moment it is tabbed to.
-      */}
+    <div
+      className="mail-shell min-h-screen bg-bg"
+      data-collapsed={collapsed || undefined}
+    >
       <a
         href="#main"
-        className="sr-only z-50 rounded-control bg-surface px-4 py-2 text-body font-medium text-text shadow-overlay focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
+        className="sr-only z-50 rounded-control bg-surface px-4 py-2 text-body focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
       >
         Skip to content
       </a>
-
-      {/*
-        Paints the strip behind the status bar in standalone, so content
-        scrolling up past a sticky header isn't visible in the notch. Collapses
-        to zero height anywhere `--safe-top` is 0, which is everywhere else.
-      */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-x-0 top-0 z-40 h-safe-t bg-bg"
+      <MailHeader
+        onMenu={() => {
+          if (desktop) setCollapsed(!collapsed);
+          else {
+            setNavigationMounted(true);
+            setDrawerOpen(true);
+          }
+        }}
       />
-
-      {/* ---------------------------------------------------- desktop sidebar */}
-      {/*
-        `fixed` with no `overflow`: it can't scroll, by construction. Main is
-        inset by the same token that sets this width so the two can't drift.
-      */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-sidebar flex-col border-r border-border bg-surface pb-safe-b pl-safe-l pt-safe-t lg:flex">
-        <SidebarNav sections={navSections} unread={unread} />
+      <aside className="mail-sidebar fixed left-0 z-30 hidden w-sidebar flex-col pb-safe-b pl-safe-l lg:flex">
+        <SidebarNav sections={navSections} unread={unread} showBrand={false} />
       </aside>
-
-      {/* -------------------------------------------------------- tablet bar */}
-      <header className="sticky top-0 z-30 hidden h-topbar-safe items-center gap-2 border-b border-border bg-surface px-3 pt-safe-t sm:flex lg:hidden">
-        <IconButton
-          label="Open navigation"
-          onClick={() => setDrawerOpen(true)}
-          size="lg"
-        >
-          <Menu />
-        </IconButton>
-        <BrandWordmark />
-      </header>
-
-      {/* ----------------------------------------------------- tablet drawer */}
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SheetContent
           side="left"
           hideClose
+          onCloseAutoFocus={(event) => {
+            if (composing) event.preventDefault();
+            setNavigationMounted(false);
+          }}
           aria-describedby={undefined}
-          className="w-sidebar max-w-none gap-0 p-0 pb-safe-b pl-safe-l pt-safe-t lg:hidden"
+          className="mail-navigation-drawer w-sidebar max-w-none gap-0 p-0 pb-safe-b pl-safe-l pt-safe-t"
         >
-          {/* The wordmark below is a logo, not a heading — Radix still needs a
-              real title for screen readers to announce the drawer. */}
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <div className="flex h-14 shrink-0 items-center justify-between px-4">
+          <div className="flex h-16 shrink-0 items-center justify-between px-4">
             <BrandWordmark />
             <IconButton
               label="Close navigation"
@@ -260,45 +207,34 @@ export function DashboardLayout() {
           />
         </SheetContent>
       </Sheet>
-
-      {/* ----------------------------------------------------------- content */}
-      {/*
-        Top inset is main's job only where nothing else is holding that space:
-        in the tablet band the sticky bar above already occupies it.
-        Bottom inset clears the tab bar and the home indicator under it.
-      */}
-      {/* `tabIndex={-1}` so the skip link above can actually move focus here:
-          without it the browser scrolls to main but focus stays on the link,
-          and the next Tab goes back into the nav. */}
       <main
         id="main"
         style={{ "--mail-notice-height": `${noticeHeight}px` } as CSSProperties}
         tabIndex={-1}
-        className="min-w-0 pb-tabbar-safe pl-safe-l pr-safe-r pt-safe-t focus:outline-none sm:pb-0 sm:pt-0 lg:pl-sidebar lg:pt-safe-t"
+        className="mail-main min-w-0 pb-safe-b pl-safe-l pr-safe-r pt-safe-t focus:outline-none sm:pb-0 lg:pl-sidebar"
       >
-        {/* Above the routed page, so it can never cover a page header — and
-            inside main, so it clears the sidebar on desktop. */}
-        <div ref={notices}>
-          <OfflineBanner />
-          <WindowDraftNotice />
+        <div className="mail-main-surface">
+          <div ref={notices}>
+            <OfflineBanner />
+            <WindowDraftNotice />
+          </div>
+          <Suspense
+            fallback={
+              <div className="space-y-3 p-4">
+                <Skeleton className="h-10" />
+                <Skeleton className="h-64" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
-        <Outlet />
       </main>
-
-      {/* ------------------------------------------------------- mobile nav */}
-      <MobileTabBar
-        tabs={mobileTabs}
-        unread={unread}
-        moreOpen={moreOpen}
-        onOpenMore={() => setMoreOpen(true)}
-      />
-      <MoreSheet
-        open={moreOpen}
-        onOpenChange={setMoreOpen}
-        sections={navSections}
-        excludePaths={tabBarPaths}
-        unread={unread}
-      />
+      <Link to="/email-studio" className="mail-mobile-compose sm:hidden">
+        <PenSquare className="h-6 w-6" />
+        Compose
+      </Link>
+      <ComposeHost navigationBlocking={navigationMounted} />
     </div>
   );
 }

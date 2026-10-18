@@ -375,36 +375,9 @@ export function SentMessage({
           : `${ORIGIN_LABEL[email.origin]} · ${formatFullDate(sentAt)}`
       )}
 
-      <Content className="space-y-6">
-        {email.recipients?.length ? (
-          <section
-            className="rounded-card border border-border bg-surface p-4"
-            aria-label="Recipient delivery outcomes"
-          >
-            <h2 className="font-semibold text-ui">Delivery outcomes</h2>
-            <ul className="mt-2 space-y-2">
-              {email.recipients.map((recipient) => (
-                <li
-                  key={recipient.email}
-                  className="flex flex-wrap justify-between gap-2 text-ui"
-                >
-                  <span className="break-all">
-                    {recipient.field.toUpperCase()}: {recipient.email}
-                  </span>
-                  <span>
-                    {recipient.status === "uncertain"
-                      ? "Delivery unconfirmed"
-                      : recipient.status === "delivered"
-                        ? "Sent to mail server"
-                        : recipient.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
+      <Content className="mail-message-document space-y-6">
         {/* ------------------------------------------------------- envelope */}
-        <section className="rounded-card border border-border bg-surface p-4 shadow-card sm:p-5">
+        <section className="mail-message-envelope p-4 sm:p-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={outcome.variant}>{outcome.label}</Badge>
             {engagement ? (
@@ -477,7 +450,7 @@ export function SentMessage({
 
         {/* ----------------------------------------------------------- body */}
         <section className="space-y-2">
-          <SectionTitle>Message</SectionTitle>
+          <span className="sr-only">Message</span>
           {body ? (
             <EmailPreviewFrame
               html={body}
@@ -541,80 +514,118 @@ export function SentMessage({
           </section>
         ) : null}
 
-        {/* -------------------------------------------------------- history */}
-        <section className="space-y-2">
-          <SectionTitle>History</SectionTitle>
-          {opensNeedExplaining ? (
-            <p className="text-meta leading-5 text-text-tertiary">
-              An open is recorded every time this message&rsquo;s images are
-              fetched, so one reader can register several. Fetches that looked
-              like a scanner or a privacy proxy rather than a person are marked,
-              and left out of the open count.
-            </p>
-          ) : null}
-          {email.events.length > 0 ? (
-            /* Named: the envelope above already renders the recipients as a
-               list, so "the list of events" has to be findable as itself. */
-            <ol
-              aria-label="Message history"
-              className="rounded-card border border-border bg-surface"
+        <details
+          className="mail-delivery-details"
+          open={
+            !embedded ||
+            ["FAILED", "UNCERTAIN", "SUPPRESSED"].includes(email.status)
+          }
+        >
+          <summary className="cursor-pointer py-3 text-ui text-text-secondary">
+            Delivery details and message history
+          </summary>
+          {email.recipients?.length ? (
+            <section
+              className="rounded-card border border-border bg-surface p-4"
+              aria-label="Recipient delivery outcomes"
             >
-              {email.events.map((event) => {
-                const Icon = EVENT_ICON[event.type];
-                const repeat = repeatSummary(event);
-                return (
+              <h2 className="font-semibold text-ui">Delivery outcomes</h2>
+              <ul className="mt-2 space-y-2">
+                {email.recipients.map((recipient) => (
                   <li
-                    key={event.id}
-                    className="flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                    key={recipient.email}
+                    className="flex flex-wrap justify-between gap-2 text-ui"
                   >
-                    <Icon
-                      className={cn(
-                        "mt-0.5 h-4 w-4 shrink-0",
-                        eventTone(event.type)
-                      )}
-                      aria-hidden
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-ui font-medium text-text">
-                        {EVENT_LABEL[event.type]}
-                      </div>
-                      {event.detail ? (
-                        <p className="mt-0.5 break-all text-meta text-text-secondary">
-                          {event.detail}
-                        </p>
-                      ) : null}
-                      {repeat ? (
-                        <p className="mt-0.5 text-meta text-text-tertiary">
-                          {repeat}
-                        </p>
-                      ) : null}
-                    </div>
-                    <time
-                      dateTime={event.occurredAt}
-                      className="shrink-0 whitespace-nowrap text-meta text-text-tertiary"
-                      data-numeric
-                    >
-                      {formatFullDate(event.occurredAt)}
-                    </time>
+                    <span className="break-all">
+                      {recipient.field.toUpperCase()}: {recipient.email}
+                    </span>
+                    <span>
+                      {recipient.status === "uncertain"
+                        ? "Delivery unconfirmed"
+                        : recipient.status === "delivered"
+                          ? "Sent to mail server"
+                          : recipient.status}
+                    </span>
                   </li>
-                );
-              })}
-            </ol>
-          ) : (
-            <p className="rounded-card border border-border bg-surface p-4 text-ui text-text-tertiary">
-              Nothing recorded beyond the send itself.
-            </p>
-          )}
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {/* -------------------------------------------------------- history */}
+          <section className="space-y-2">
+            <SectionTitle>History</SectionTitle>
+            {opensNeedExplaining ? (
+              <p className="text-meta leading-5 text-text-tertiary">
+                An open is recorded every time this message&rsquo;s images are
+                fetched, so one reader can register several. Fetches that looked
+                like a scanner or a privacy proxy rather than a person are
+                marked, and left out of the open count.
+              </p>
+            ) : null}
+            {email.events.length > 0 ? (
+              /* Named: the envelope above already renders the recipients as a
+               list, so "the list of events" has to be findable as itself. */
+              <ol
+                aria-label="Message history"
+                className="rounded-card border border-border bg-surface"
+              >
+                {email.events.map((event) => {
+                  const Icon = EVENT_ICON[event.type];
+                  const repeat = repeatSummary(event);
+                  return (
+                    <li
+                      key={event.id}
+                      className="flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                    >
+                      <Icon
+                        className={cn(
+                          "mt-0.5 h-4 w-4 shrink-0",
+                          eventTone(event.type)
+                        )}
+                        aria-hidden
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-ui font-medium text-text">
+                          {EVENT_LABEL[event.type]}
+                        </div>
+                        {event.detail ? (
+                          <p className="mt-0.5 break-all text-meta text-text-secondary">
+                            {event.detail}
+                          </p>
+                        ) : null}
+                        {repeat ? (
+                          <p className="mt-0.5 text-meta text-text-tertiary">
+                            {repeat}
+                          </p>
+                        ) : null}
+                      </div>
+                      <time
+                        dateTime={event.occurredAt}
+                        className="shrink-0 whitespace-nowrap text-meta text-text-tertiary"
+                        data-numeric
+                      >
+                        {formatFullDate(event.occurredAt)}
+                      </time>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <p className="rounded-card border border-border bg-surface p-4 text-ui text-text-tertiary">
+                Nothing recorded beyond the send itself.
+              </p>
+            )}
 
-          {/* The Message-ID is what you quote to whoever is reading the mail
+            {/* The Message-ID is what you quote to whoever is reading the mail
               server's logs, so it belongs on this page — but nowhere near the
               top of it. */}
-          {email.messageId ? (
-            <p className="pt-1 text-meta text-text-tertiary">
-              Message-ID <span className="break-all">{email.messageId}</span>
-            </p>
-          ) : null}
-        </section>
+            {email.messageId ? (
+              <p className="pt-1 text-meta text-text-tertiary">
+                Message-ID <span className="break-all">{email.messageId}</span>
+              </p>
+            ) : null}
+          </section>
+        </details>
       </Content>
 
       <AttachmentPreviewDialog

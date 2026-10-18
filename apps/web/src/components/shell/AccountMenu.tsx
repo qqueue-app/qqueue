@@ -17,7 +17,13 @@ import {
  * Shared by the sidebar footer and the More sheet so "sign out" is one code
  * path regardless of which surface you reached it from.
  */
-export function AccountMenu({ className }: { className?: string }) {
+export function AccountMenu({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   const navigate = useNavigate();
   const { user, signOut: clearSessionState } = useSession();
 
@@ -32,6 +38,7 @@ export function AccountMenu({ className }: { className?: string }) {
         to="/login"
         className={cn(
           "flex min-h-touch items-center justify-center rounded-control bg-primary px-3 text-ui font-medium text-primary-foreground transition-colors duration-fast ease-out hover:bg-primary-hover",
+          compact && "mail-account-button",
           className
         )}
       >
@@ -47,13 +54,14 @@ export function AccountMenu({ className }: { className?: string }) {
       <MenuTrigger
         className={cn(
           "flex min-h-touch w-full min-w-0 items-center gap-3 rounded-control px-2 py-2 text-left transition-colors duration-fast ease-out hover:bg-surface-sunken",
+          compact && "mail-account-button",
           className
         )}
       >
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill bg-identity-1-bg text-meta font-medium text-identity-1">
           {initial}
         </div>
-        <div className="min-w-0 flex-1">
+        <div className={cn("min-w-0 flex-1", compact && "sr-only")}>
           <div className="truncate text-ui font-medium text-text">
             {user.name ?? "Account"}
           </div>
@@ -61,7 +69,9 @@ export function AccountMenu({ className }: { className?: string }) {
             {user.email}
           </div>
         </div>
-        <ChevronsUpDown className="h-4 w-4 shrink-0 text-text-tertiary" />
+        {!compact ? (
+          <ChevronsUpDown className="h-4 w-4 shrink-0 text-text-tertiary" />
+        ) : null}
       </MenuTrigger>
       <MenuContent align="start" className="w-56">
         <MenuLabel className="truncate font-normal text-text-secondary">
