@@ -219,60 +219,45 @@ describe("DashboardLayout", () => {
     });
   });
 
-  // ------------------------------------------------------------- §5 mobile
-  describe("mobile shell (§5)", () => {
-    it("renders the five bottom tabs", () => {
+  describe("phone mail shell", () => {
+    it("offers Compose within thumb reach and keeps a folder drawer", () => {
       const { container } = renderLayout("/");
-      const tabBar = within(
-        container.querySelector("nav[aria-label='Primary']") as HTMLElement
+      expect(container.querySelector("a.mail-mobile-compose")).toHaveAttribute(
+        "href",
+        "/email-studio"
       );
-      expect(tabBar.getByRole("link", { name: /Sent/ })).toBeInTheDocument();
-      expect(tabBar.getByRole("link", { name: /Compose/ })).toBeInTheDocument();
-      expect(tabBar.getByRole("link", { name: /Inbox/ })).toBeInTheDocument();
       expect(
-        tabBar.getByRole("link", { name: /Contacts/ })
+        screen.getByRole("button", { name: "Open navigation" })
       ).toBeInTheDocument();
-      expect(tabBar.getByRole("button", { name: "More" })).toBeInTheDocument();
     });
-
-    it("opens a More sheet listing what the tab bar leaves out", async () => {
+    it("opens the same mail folders on phones and tablets", async () => {
       const user = userEvent.setup();
-      const { container } = renderLayout("/");
-      const tabBar = within(
-        container.querySelector("nav[aria-label='Primary']") as HTMLElement
+      renderLayout("/");
+      await user.click(screen.getByRole("button", { name: "Open navigation" }));
+      const drawer = within(
+        await screen.findByRole("dialog", { name: "Navigation" })
       );
-      await user.click(tabBar.getByRole("button", { name: "More" }));
-
-      const sheet = within(await screen.findByRole("dialog"));
-      for (const label of [
+      for (const name of [
+        "Inbox",
+        "Starred",
+        "Sent",
         "Drafts",
         "Outbox",
-        "Insights",
-        "Lists",
-        "Templates",
-        "Campaigns",
         "Settings",
-      ]) {
-        expect(sheet.getByRole("link", { name: label })).toBeInTheDocument();
-      }
-      // Tab-bar destinations aren't repeated in the sheet.
-      expect(
-        sheet.queryByRole("link", { name: "Sent" })
-      ).not.toBeInTheDocument();
-      expect(
-        sheet.queryByRole("link", { name: "Contacts" })
-      ).not.toBeInTheDocument();
-    });
-
-    it("closes the More sheet when a destination is chosen", async () => {
-      const user = userEvent.setup();
-      const { container } = renderLayout("/");
-      const tabBar = within(
-        container.querySelector("nav[aria-label='Primary']") as HTMLElement
+      ])
+        expect(drawer.getByRole("link", { name })).toBeInTheDocument();
+      await user.click(drawer.getByRole("button", { name: "More folders" }));
+      expect(drawer.getByRole("link", { name: "Trash" })).toHaveAttribute(
+        "href",
+        "/inbox?view=TRASH"
       );
-      await user.click(tabBar.getByRole("button", { name: "More" }));
-      const sheet = await screen.findByRole("dialog");
-      await user.click(within(sheet).getByRole("link", { name: "Settings" }));
+    });
+    it("closes the folder drawer after a destination is chosen", async () => {
+      const user = userEvent.setup();
+      renderLayout("/");
+      await user.click(screen.getByRole("button", { name: "Open navigation" }));
+      const drawer = await screen.findByRole("dialog", { name: "Navigation" });
+      await user.click(within(drawer).getByRole("link", { name: "Settings" }));
       await waitFor(() =>
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
       );
@@ -319,8 +304,8 @@ describe("DashboardLayout", () => {
       const { container } = renderLayout("/");
       const main = container.querySelector("main") as HTMLElement;
       const sidebar = container.querySelector("aside") as HTMLElement;
-      const tabBar = container.querySelector(
-        "nav[aria-label='Primary']"
+      const compose = container.querySelector(
+        "a.mail-mobile-compose"
       ) as HTMLElement;
 
       // ≥1024px: sidebar visible, main inset by exactly its width.
@@ -329,15 +314,15 @@ describe("DashboardLayout", () => {
       expect(sidebar.className).toContain("w-sidebar");
       expect(main.className).toContain("lg:pl-sidebar");
 
-      // <640px: tab bar visible, main padded to clear it and the home indicator.
-      expect(tabBar.className).toContain("sm:hidden");
-      expect(main.className).toContain("pb-tabbar-safe");
+      // The floating action clears the safe area; the list keeps its own space.
+      expect(compose.className).toContain("sm:hidden");
+      expect(main.className).toContain("pb-safe-b");
 
       // Safe-area insets on every edge the shell owns.
       expect(main.className).toContain("pl-safe-l");
       expect(main.className).toContain("pr-safe-r");
       expect(main.className).toContain("pt-safe-t");
-      expect(tabBar.className).toContain("pb-safe-b");
+      expect(compose.className).toContain("mail-mobile-compose");
     });
   });
 });

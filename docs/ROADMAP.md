@@ -7,6 +7,22 @@ gaps, beta checklist, and recommended next sprint. As of the Beta Polish +
 Launch Prep Sprint, QQueue is a **feature-complete self-hosted beta candidate
 undergoing launch preparation** — see the Beta Readiness Assessment in STATUS.md.
 
+## Gmail interface overhaul
+
+The 18 October 2026 direction is to closely reproduce Gmail’s everyday mail
+interface using QQueue’s logo and palette. The shell, lists, reading, composing,
+search, selection and phone navigation changes are described in
+[Gmail mail workspace overhaul](GMAIL_UI_OVERHAUL.md), following the
+[UI and UX audit](GMAIL_UX_AUDIT.md). Preserve the existing mail and delivery
+capabilities while changing their presentation. The older implementation tasks
+below must be read alongside the newer dated STATUS and readiness entries;
+unchecked historical items are not proof that a feature is missing.
+
+The next acceptance work is physical-device and assistive-technology testing,
+production-scale mail validation, and observing nontechnical users complete
+daily mail tasks. Gmail labels, snooze, category classification, operator search
+and a send-cancellation window require separate capability slices.
+
 ## Everyday email app (next phase)
 
 **Goal:** An administrator provisions or connects a mailbox, grants it to a

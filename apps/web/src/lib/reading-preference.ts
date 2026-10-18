@@ -7,9 +7,9 @@ function key(userId: string) {
 }
 export function readingPreference(userId: string): ReadingPreference {
   try {
-    return localStorage.getItem(key(userId)) === "focused" ? "focused" : "pane";
+    return localStorage.getItem(key(userId)) === "pane" ? "pane" : "focused";
   } catch {
-    return "pane";
+    return "focused";
   }
 }
 export function setReadingPreference(userId: string, value: ReadingPreference) {
@@ -31,6 +31,6 @@ export function useReadingPreference(userId: string) {
       };
     },
     () => readingPreference(userId),
-    () => "pane" as const
+    () => "focused" as const
   );
 }

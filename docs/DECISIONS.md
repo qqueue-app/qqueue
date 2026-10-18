@@ -1,5 +1,19 @@
 # Decisions
 
+## Reproduce the Gmail mail interface with QQueue branding
+
+On 18 October 2026 the product direction changed to closely reproduce Gmail’s
+mail layout and supported interactions while retaining QQueue’s logo and colours.
+Daily reading, writing, searching and organizing mail define the main shell.
+Campaigns, transactional tools and administration remain available as secondary
+workspaces. This supersedes the earlier restriction against a primary mailbox
+interface, not the shared delivery pipeline or mailbox permission model.
+
+Use the existing implementation rather than rebuilding delivery, synchronization
+or draft recovery. Gmail capabilities without a QQueue equivalent remain explicit
+feature work; do not create inert controls or rename folders as personal labels.
+See [the audit](GMAIL_UX_AUDIT.md) and [implementation scope](GMAIL_UI_OVERHAUL.md).
+
 ## Use a Monorepo
 
 QQueue uses a monorepo so apps, shared types, email provider logic, and the SDK can evolve together with a single dependency graph.

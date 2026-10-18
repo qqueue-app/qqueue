@@ -1,7 +1,9 @@
+import { Hint } from "../ui/tooltip.js";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../../lib/utils.js";
+import { PenSquare, ChevronDown, ChevronUp } from "lucide-react";
+import { useState } from "react";
 import { BrandWordmark } from "../BrandWordmark.js";
-import { AccountMenu } from "./AccountMenu.js";
 import { OrgSwitcher } from "./OrgSwitcher.js";
 import { isNavItemActive, type NavSection } from "./nav-types.js";
 import {
@@ -18,44 +20,48 @@ interface SidebarNavProps {
   showBrand?: boolean;
 }
 
-/**
- * The sidebar's contents: brand, org, destinations, account.
- *
- * **Nothing here may scroll.** The whole point of §4's restructure — Settings
- * collapsed to one item, Smart lists folded into Lists — was to make the nav
- * short enough that it never needs to. If a future destination pushes this past
- * the viewport, the fix is to fold it into a hub page, not to add
- * `overflow-y-auto` and call it done.
- */
+/** Folder navigation, organization context, Compose, and secondary tools. */
 export function SidebarNav({
   sections,
   unread,
   showBrand = true,
 }: SidebarNavProps) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  const [showFolders, setShowFolders] = useState(false);
   const tools = sections.flatMap((section) =>
     section.items.filter((item) => item.advanced)
   );
   const dailySections = sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => !item.advanced),
+      items: section.items.filter(
+        (item) =>
+          !item.advanced && item.to !== "/email-studio" && item.to !== "/search"
+      ),
     }))
     .filter((section) => section.items.length);
-  const toolActive = tools.some((item) => isNavItemActive(item, pathname));
+  const toolActive = tools.some((item) =>
+    isNavItemActive(item, pathname, search)
+  );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="mail-sidebar-content flex min-h-0 flex-1 flex-col">
+      <Link
+        to="/email-studio"
+        aria-label="Compose"
+        className="mail-compose-button"
+      >
+        <PenSquare className="h-6 w-6" />
+        <span>Compose</span>
+      </Link>
       {showBrand ? (
-        <div className="flex h-14 shrink-0 items-center px-4">
+        <span className="sr-only">
           <BrandWordmark />
-        </div>
+        </span>
       ) : null}
-
-      <div className="px-3 pb-3">
+      <div className="mail-org-switcher">
         <OrgSwitcher />
       </div>
-
       <nav aria-label="Main" className="flex flex-col gap-3 px-3">
         {dailySections.map((section, index) => (
           <div
@@ -73,46 +79,76 @@ export function SidebarNav({
               </div>
             ) : null}
 
-            {section.items.map((item) => {
-              const Icon = item.icon;
-              const active = isNavItemActive(item, pathname);
+            {section.items
+              .filter(
+                (item) =>
+                  showFolders ||
+                  ![
+                    "Archive",
+                    "Trash",
+                    "Spam",
+                    "All mail",
+                    "Other folders",
+                  ].includes(item.label)
+              )
+              .map((item) => {
+                const Icon = item.icon;
+                const active = isNavItemActive(item, pathname, search);
 
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "flex h-9 items-center gap-2 rounded-control px-2 text-ui font-medium transition-colors duration-fast ease-out",
-                    active
-                      ? "bg-accent text-accent-foreground"
-                      : "text-text-secondary hover:bg-surface-sunken hover:text-text"
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="flex-1 truncate">{item.label}</span>
-                  {item.badge === "unread" && unread > 0 ? (
-                    <span
-                      data-numeric
-                      className="min-w-badge rounded-pill bg-primary px-field py-1 text-center text-eyebrow font-semibold leading-none text-primary-foreground"
+                return (
+                  <Hint key={item.to} label={item.label} side="right">
+                    <Link
+                      aria-label={
+                        item.badge === "unread" && unread > 0
+                          ? `${item.label} ${unread} unread`
+                          : item.label
+                      }
+                      to={item.to}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "mail-nav-item",
+                        active
+                          ? "mail-nav-active"
+                          : "text-text-secondary hover:bg-surface-sunken hover:text-text"
+                      )}
                     >
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-                  ) : null}
-                </Link>
-              );
-            })}
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="flex-1 truncate">{item.label}</span>
+                      {item.badge === "unread" && unread > 0 ? (
+                        <span
+                          data-numeric
+                          className="min-w-badge rounded-pill bg-primary px-field py-1 text-center text-eyebrow font-semibold leading-none text-primary-foreground"
+                        >
+                          {unread > 99 ? "99+" : unread}
+                        </span>
+                      ) : null}
+                    </Link>
+                  </Hint>
+                );
+              })}
           </div>
         ))}
+        <button
+          type="button"
+          aria-label={showFolders ? "Less" : "More folders"}
+          className="mail-nav-item text-text-secondary"
+          aria-expanded={showFolders}
+          onClick={() => setShowFolders(!showFolders)}
+        >
+          {showFolders ? (
+            <ChevronUp className="h-4 w-4" />
+          ) : (
+            <ChevronDown className="h-4 w-4" />
+          )}
+          <span>{showFolders ? "Less" : "More folders"}</span>
+        </button>
       </nav>
       {tools.length ? (
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
               "mx-3 mt-2 min-h-touch rounded-control px-2 text-left text-ui hover:bg-surface-sunken",
-              toolActive
-                ? "bg-accent text-accent-foreground"
-                : "text-text-secondary"
+              toolActive ? "mail-nav-active" : "text-text-secondary"
             )}
           >
             More tools
@@ -125,7 +161,9 @@ export function SidebarNav({
                   <Link
                     to={item.to}
                     aria-current={
-                      isNavItemActive(item, pathname) ? "page" : undefined
+                      isNavItemActive(item, pathname, search)
+                        ? "page"
+                        : undefined
                     }
                   >
                     <Icon />
@@ -138,7 +176,7 @@ export function SidebarNav({
         </DropdownMenu>
       ) : null}
 
-      {/* Pushes the account block to the bottom without making anything scroll. */}
+      {/* Legal links stay below the folder navigation. */}
       <div className="flex-1" aria-hidden />
 
       <div className="shrink-0 border-t border-border px-3 py-2">
@@ -162,7 +200,6 @@ export function SidebarNav({
             Licensing
           </Link>
         </div>
-        <AccountMenu />
       </div>
     </div>
   );

@@ -49,6 +49,7 @@ import { replyBackupKey } from "../../lib/reply-backup.js";
 import { getSession } from "../../lib/session.js";
 
 interface Props {
+  inline?: boolean;
   message: InboundMessage;
   organizationId: string;
   mailboxEmail: string;
@@ -76,6 +77,7 @@ interface ReplyBackup {
 }
 
 export function ReplyComposer({
+  inline = false,
   message,
   organizationId,
   mailboxEmail,
@@ -85,6 +87,18 @@ export function ReplyComposer({
   onClose,
   onQueued,
 }: Props) {
+  const inlineRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!inline) return;
+    const frame = requestAnimationFrame(() => {
+      inlineRef.current?.scrollIntoView({ block: "nearest" });
+      inlineRef.current
+        ?.querySelector<HTMLElement>("[contenteditable='true'],textarea")
+        ?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [inline]);
+
   const { user } = useSession();
   const queryClient = useQueryClient();
   const online = useOnline();
@@ -729,7 +743,479 @@ export function ReplyComposer({
       send.mutate();
   }
 
-  return (
+  const Header = inline ? "header" : SheetHeader;
+  const Title = inline ? "h2" : SheetTitle;
+  const Description = inline ? "p" : SheetDescription;
+  const Body = inline ? "div" : SheetBody;
+  const Footer = inline ? "footer" : SheetFooter;
+  const content = (
+    <>
+      <Header>
+        <Title>Reply to {message.fromName || message.fromEmail}</Title>
+        <Description>{subject}</Description>
+      </Header>
+      <Body>
+        <ReplyPresenceNotice
+          participants={replyPresence?.participants ?? []}
+          userId={user?.id}
+          clientId={presenceClientId}
+          unavailable={
+            presence.isError ||
+            presence.isPaused ||
+            replyPresence?.available === false
+          }
+        />
+        <form id="message-reply-form" onSubmit={submit} className="space-y-4">
+          {backupMissing ? (
+            <p role="alert">
+              That window copy is no longer available. Check Drafts for a saved
+              copy.
+            </p>
+          ) : null}
+          <p className="break-words text-ui">
+            <strong>From:</strong> {mailboxEmail}
+          </p>
+          {message.bodyStatus === "UNAVAILABLE" ? (
+            <p role="alert" className="text-ui text-warn">
+              Reload the original message before sending this reply. Your draft
+              can still be saved.
+            </p>
+          ) : null}
+          <RecipientField
+            id="reply-to-addresses"
+            pendingValue={recipientInputs["reply-to-addresses"] ?? ""}
+            onPendingChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setRecipientInputs((current) => ({
+                ...current,
+                "reply-to-addresses": value,
+              }));
+            }}
+            label="To"
+            emails={to}
+            onChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setTo(value);
+            }}
+            disabled={
+              !filesRestored ||
+              backupMissing ||
+              send.isPending ||
+              Boolean(acceptedId)
+            }
+          />
+          <RecipientField
+            id="reply-cc-addresses"
+            pendingValue={recipientInputs["reply-cc-addresses"] ?? ""}
+            onPendingChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setRecipientInputs((current) => ({
+                ...current,
+                "reply-cc-addresses": value,
+              }));
+            }}
+            label="Cc"
+            emails={cc}
+            onChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setCc(value);
+            }}
+            disabled={
+              !filesRestored ||
+              backupMissing ||
+              send.isPending ||
+              Boolean(acceptedId)
+            }
+          />
+          <RecipientField
+            id="reply-bcc-addresses"
+            pendingValue={recipientInputs["reply-bcc-addresses"] ?? ""}
+            onPendingChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setRecipientInputs((current) => ({
+                ...current,
+                "reply-bcc-addresses": value,
+              }));
+            }}
+            label="Bcc"
+            emails={bcc}
+            onChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setBcc(value);
+            }}
+            disabled={
+              !filesRestored ||
+              backupMissing ||
+              send.isPending ||
+              Boolean(acceptedId)
+            }
+          />
+          {message.to.length + message.cc.length > 1 ? (
+            <label className="flex items-center gap-2 text-ui">
+              <input
+                type="checkbox"
+                checked={replyAll}
+                disabled={
+                  !filesRestored ||
+                  backupMissing ||
+                  send.isPending ||
+                  Boolean(acceptedId)
+                }
+                onChange={(event) => {
+                  touched.current = true;
+                  setSaved(false);
+                  setReplyAll(event.target.checked);
+                  const next = resolvedRecipients(event.target.checked);
+                  setTo(next.to);
+                  setCc(next.cc);
+                }}
+              />{" "}
+              Reply to everyone
+            </label>
+          ) : null}
+          <SignatureControl
+            organizationId={organizationId}
+            mailboxEmail={mailboxEmail}
+            value={html}
+            onChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setHtml(value);
+            }}
+            stamp={signature}
+            onStamp={setSignature}
+            autoReady={
+              filesRestored &&
+              !draftQuery.isPending &&
+              !draftQuery.data &&
+              !backup
+            }
+            generation={backupId}
+            disabled={
+              !filesRestored ||
+              backupMissing ||
+              send.isPending ||
+              Boolean(acceptedId)
+            }
+          />
+          <BodyEditor
+            compactToolbar
+            disabled={
+              !filesRestored ||
+              backupMissing ||
+              send.isPending ||
+              Boolean(acceptedId)
+            }
+            value={html}
+            onChange={(value) => {
+              touched.current = true;
+              setSaved(false);
+              setHtml(value);
+            }}
+            placeholder="Write your reply…"
+            ariaLabel={`Reply to ${message.fromName || message.fromEmail}`}
+            allowSource={false}
+            showVariables={false}
+            onUploadImage={async (file) =>
+              (await api.uploadImage(file, { organizationId })).url
+            }
+          />
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="hidden"
+            aria-label="Attach files to reply"
+            onChange={(event) => void upload(event.target.files)}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={
+              uploading ||
+              send.isPending ||
+              draftQuery.isPending ||
+              draftQuery.isError ||
+              conflict ||
+              Boolean(acceptedId)
+            }
+            onClick={() => fileInput.current?.click()}
+          >
+            {uploading ? <Spinner /> : <Paperclip />} Attach files
+          </Button>
+          {pendingFiles.map((entry) => (
+            <div
+              key={entry.uploadId}
+              role="alert"
+              className="space-y-2 text-ui"
+            >
+              <p>
+                {entry.file.name}: {entry.error}
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={uploading || send.isPending}
+                onClick={() => void processFiles([entry])}
+              >
+                Retry {entry.file.name}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={uploading || send.isPending}
+                onClick={() => {
+                  updateFiles(
+                    pendingRef.current.filter(
+                      (file) => file.uploadId !== entry.uploadId
+                    )
+                  );
+                  if (pendingRef.current.length === 0)
+                    void deletePendingDraft(backupId);
+                }}
+              >
+                Remove pending {entry.file.name}
+              </Button>
+            </div>
+          ))}
+          {user?.id && storageKey ? (
+            <ReplyDeviceCopies
+              userId={user.id}
+              organizationId={organizationId}
+              messageId={message.id}
+              draftId={draftId.current}
+              currentKey={storageKey}
+              onUse={async (copy) => {
+                // Preserve this tab's writing before the explicit replacement.
+                const current = localStorage.getItem(storageKey);
+                const archivedKey = `${storageKey}.before.${crypto.randomUUID()}`;
+                const deviceDrafts = await listPendingDrafts(organizationId);
+                const currentFiles = deviceDrafts.find(
+                  (entry) => entry.localId === backupId
+                );
+                if (
+                  currentFiles?.pendingUploads?.length &&
+                  !(await savePendingDraft({
+                    ...currentFiles,
+                    localId: archivedKey,
+                  }))
+                ) {
+                  throw new Error("Couldn't keep the current file bytes");
+                }
+                if (current) localStorage.setItem(archivedKey, current);
+                const restored = copy.value as unknown as ReplyBackup;
+                const files = deviceDrafts.find(
+                  (entry) => entry.localId === copy.key
+                );
+                if (
+                  restored.pendingFiles?.length &&
+                  !files?.pendingUploads?.length
+                ) {
+                  throw new Error(
+                    "This copy's pending file bytes are unavailable. Copy its writing and reattach the listed files before sending."
+                  );
+                }
+                draftId.current = restored.draftId;
+                revision.current = restored.revision ?? 1;
+                clientId.current = restored.clientId ?? clientId.current;
+                touched.current = true;
+                setSaved(false);
+                setHtml(restored.html);
+                setTo(restored.to ?? defaultTo);
+                setCc(restored.cc ?? []);
+                setBcc(restored.bcc ?? []);
+                setRecipientInputs(restored.recipientInputs ?? {});
+                setSignature(signatureStamp(restored.signature));
+                setReplyAll(restored.replyAll ?? false);
+                setAttachments(restored.attachments ?? []);
+                updateFiles(files?.pendingUploads ?? []);
+                // Choosing a device copy does not adopt a newer server revision.
+                setConflict(
+                  Boolean(
+                    draftQuery.data &&
+                    restored.revision !== draftQuery.data.revision
+                  )
+                );
+              }}
+            />
+          ) : null}
+          {conflict ? (
+            <DraftConflictReview
+              organizationId={organizationId}
+              draftId={draftId.current}
+              clientId={clientId.current}
+              onAccepted={(id) => {
+                sent.current = true;
+                setAcceptedId(id);
+              }}
+              onKeep={(current) => {
+                saveGeneration.current++;
+                saveChain.current = Promise.resolve();
+                uploadAbort.current?.abort();
+                draftId.current = current.id;
+                revision.current = current.revision ?? 1;
+                clientId.current = current.clientId ?? clientId.current;
+                setAttachments((local) => [
+                  ...new Map(
+                    [...local, ...(current.attachments ?? [])].map((file) => [
+                      file.id,
+                      file,
+                    ])
+                  ).values(),
+                ]);
+                touched.current = true;
+                setSaved(false);
+                setConflict(false);
+              }}
+              onUse={(current) => {
+                saveGeneration.current++;
+                saveChain.current = Promise.resolve();
+                uploadAbort.current?.abort();
+                const archivedKey = `${backupId}.before.${crypto.randomUUID()}`;
+                void savePendingDraft({
+                  ...pendingRecord(),
+                  localId: archivedKey,
+                });
+                try {
+                  if (storageKey)
+                    localStorage.setItem(
+                      archivedKey,
+                      JSON.stringify({
+                        ...writing.current,
+                        draftId: draftId.current,
+                        revision: revision.current,
+                        clientId: clientId.current,
+                        updatedAt: new Date().toISOString(),
+                        pendingFiles: pendingRef.current.map((file) => ({
+                          name: file.file.name,
+                          size: file.file.size,
+                        })),
+                      })
+                    );
+                } catch {
+                  setStorageError(true);
+                }
+                updateFiles([]);
+                draftId.current = current.id;
+                revision.current = current.revision ?? 1;
+                setSignature(
+                  signatureStamp(current.variables?.qqueueSignature)
+                );
+                setHtml(current.html ?? "");
+                setTo(current.to ?? defaultTo);
+                setCc(current.cc ?? []);
+                setBcc(current.bcc ?? []);
+                setRecipientInputs(
+                  (current.variables?.qqueueRecipientInputs as Record<
+                    string,
+                    string
+                  >) ?? {}
+                );
+                setAttachments(current.attachments ?? []);
+                setReplyAll(Boolean(current.variables?.qqueueReplyAll));
+                setConflict(false);
+                setSaved(true);
+              }}
+            />
+          ) : null}
+          {acceptedId ? (
+            <p role="status">
+              This reply was already accepted. Check its progress in Outbox.
+            </p>
+          ) : null}
+          {storageError && (!durableText || !durableFiles) ? (
+            <p role="alert">
+              This writing or its files are kept only in this window. Keep the
+              window open until saving succeeds.
+            </p>
+          ) : null}
+          <ul className="space-y-2">
+            {attachments.map((file) => (
+              <li key={file.id} className="flex items-center gap-2 text-ui">
+                <span className="min-w-0 flex-1 truncate">
+                  {file.filename} · {formatBytes(file.size)}
+                </span>
+                <IconButton
+                  label={`Remove ${file.filename}`}
+                  disabled={
+                    send.isPending || remove.isPending || Boolean(acceptedId)
+                  }
+                  onClick={() => remove.mutate(file.id)}
+                >
+                  <Trash2 />
+                </IconButton>
+              </li>
+            ))}
+          </ul>
+          {draftQuery.isError ? (
+            <p role="alert" className="text-ui text-err">
+              Couldn't load your saved reply.{" "}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void draftQuery.refetch()}
+              >
+                Try again
+              </Button>
+            </p>
+          ) : null}
+          <p className="text-meta text-text-secondary" role="status">
+            {save.isPaused || (!online && touched.current)
+              ? "Waiting for a connection. Your reply is kept on this device when browser storage is available."
+              : save.isError
+                ? "Couldn't save to the server. Your reply is kept on this device when browser storage is available."
+                : saved
+                  ? "Draft saved"
+                  : "Changes will be saved automatically"}
+          </p>
+        </form>
+      </Body>
+      <Footer className="flex-row items-center justify-between">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={send.isPending}
+          onClick={close}
+        >
+          Close and keep draft
+        </Button>
+        <Button
+          type="submit"
+          form="message-reply-form"
+          disabled={
+            empty ||
+            !filesRestored ||
+            pendingFiles.length > 0 ||
+            conflict ||
+            Boolean(acceptedId) ||
+            to.length + cc.length + bcc.length === 0 ||
+            message.bodyStatus === "UNAVAILABLE" ||
+            send.isPending ||
+            uploading ||
+            draftQuery.isPending ||
+            draftQuery.isError
+          }
+        >
+          {send.isPending ? <Spinner /> : <Send />} Send reply
+        </Button>
+      </Footer>
+    </>
+  );
+  return inline ? (
+    <section
+      ref={inlineRef}
+      className="mail-inline-reply"
+      aria-label={`Reply to ${message.fromName || message.fromEmail}`}
+    >
+      {content}
+    </section>
+  ) : (
     <Sheet
       open
       onOpenChange={(open) => {
@@ -737,463 +1223,7 @@ export function ReplyComposer({
       }}
     >
       <SheetContent side="right" className="w-full max-w-none sm:max-w-2xl">
-        <SheetHeader>
-          <SheetTitle>
-            Reply to {message.fromName || message.fromEmail}
-          </SheetTitle>
-          <SheetDescription>{subject}</SheetDescription>
-        </SheetHeader>
-        <SheetBody>
-          <ReplyPresenceNotice
-            participants={replyPresence?.participants ?? []}
-            userId={user?.id}
-            clientId={presenceClientId}
-            unavailable={
-              presence.isError ||
-              presence.isPaused ||
-              replyPresence?.available === false
-            }
-          />
-          <form id="message-reply-form" onSubmit={submit} className="space-y-4">
-            {backupMissing ? (
-              <p role="alert">
-                That window copy is no longer available. Check Drafts for a
-                saved copy.
-              </p>
-            ) : null}
-            <p className="break-words text-ui">
-              <strong>From:</strong> {mailboxEmail}
-            </p>
-            {message.bodyStatus === "UNAVAILABLE" ? (
-              <p role="alert" className="text-ui text-warn">
-                Reload the original message before sending this reply. Your
-                draft can still be saved.
-              </p>
-            ) : null}
-            <RecipientField
-              id="reply-to-addresses"
-              pendingValue={recipientInputs["reply-to-addresses"] ?? ""}
-              onPendingChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setRecipientInputs((current) => ({
-                  ...current,
-                  "reply-to-addresses": value,
-                }));
-              }}
-              label="To"
-              emails={to}
-              onChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setTo(value);
-              }}
-              disabled={
-                !filesRestored ||
-                backupMissing ||
-                send.isPending ||
-                Boolean(acceptedId)
-              }
-            />
-            <RecipientField
-              id="reply-cc-addresses"
-              pendingValue={recipientInputs["reply-cc-addresses"] ?? ""}
-              onPendingChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setRecipientInputs((current) => ({
-                  ...current,
-                  "reply-cc-addresses": value,
-                }));
-              }}
-              label="Cc"
-              emails={cc}
-              onChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setCc(value);
-              }}
-              disabled={
-                !filesRestored ||
-                backupMissing ||
-                send.isPending ||
-                Boolean(acceptedId)
-              }
-            />
-            <RecipientField
-              id="reply-bcc-addresses"
-              pendingValue={recipientInputs["reply-bcc-addresses"] ?? ""}
-              onPendingChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setRecipientInputs((current) => ({
-                  ...current,
-                  "reply-bcc-addresses": value,
-                }));
-              }}
-              label="Bcc"
-              emails={bcc}
-              onChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setBcc(value);
-              }}
-              disabled={
-                !filesRestored ||
-                backupMissing ||
-                send.isPending ||
-                Boolean(acceptedId)
-              }
-            />
-            {message.to.length + message.cc.length > 1 ? (
-              <label className="flex items-center gap-2 text-ui">
-                <input
-                  type="checkbox"
-                  checked={replyAll}
-                  disabled={
-                    !filesRestored ||
-                    backupMissing ||
-                    send.isPending ||
-                    Boolean(acceptedId)
-                  }
-                  onChange={(event) => {
-                    touched.current = true;
-                    setSaved(false);
-                    setReplyAll(event.target.checked);
-                    const next = resolvedRecipients(event.target.checked);
-                    setTo(next.to);
-                    setCc(next.cc);
-                  }}
-                />{" "}
-                Reply to everyone
-              </label>
-            ) : null}
-            <SignatureControl
-              organizationId={organizationId}
-              mailboxEmail={mailboxEmail}
-              value={html}
-              onChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setHtml(value);
-              }}
-              stamp={signature}
-              onStamp={setSignature}
-              autoReady={
-                filesRestored &&
-                !draftQuery.isPending &&
-                !draftQuery.data &&
-                !backup
-              }
-              generation={backupId}
-              disabled={
-                !filesRestored ||
-                backupMissing ||
-                send.isPending ||
-                Boolean(acceptedId)
-              }
-            />
-            <BodyEditor
-              compactToolbar
-              disabled={
-                !filesRestored ||
-                backupMissing ||
-                send.isPending ||
-                Boolean(acceptedId)
-              }
-              value={html}
-              onChange={(value) => {
-                touched.current = true;
-                setSaved(false);
-                setHtml(value);
-              }}
-              placeholder="Write your reply…"
-              ariaLabel={`Reply to ${message.fromName || message.fromEmail}`}
-              allowSource={false}
-              showVariables={false}
-              onUploadImage={async (file) =>
-                (await api.uploadImage(file, { organizationId })).url
-              }
-            />
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              className="hidden"
-              aria-label="Attach files to reply"
-              onChange={(event) => void upload(event.target.files)}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={
-                uploading ||
-                send.isPending ||
-                draftQuery.isPending ||
-                draftQuery.isError ||
-                conflict ||
-                Boolean(acceptedId)
-              }
-              onClick={() => fileInput.current?.click()}
-            >
-              {uploading ? <Spinner /> : <Paperclip />} Attach files
-            </Button>
-            {pendingFiles.map((entry) => (
-              <div
-                key={entry.uploadId}
-                role="alert"
-                className="space-y-2 text-ui"
-              >
-                <p>
-                  {entry.file.name}: {entry.error}
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={uploading || send.isPending}
-                  onClick={() => void processFiles([entry])}
-                >
-                  Retry {entry.file.name}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={uploading || send.isPending}
-                  onClick={() => {
-                    updateFiles(
-                      pendingRef.current.filter(
-                        (file) => file.uploadId !== entry.uploadId
-                      )
-                    );
-                    if (pendingRef.current.length === 0)
-                      void deletePendingDraft(backupId);
-                  }}
-                >
-                  Remove pending {entry.file.name}
-                </Button>
-              </div>
-            ))}
-            {user?.id && storageKey ? (
-              <ReplyDeviceCopies
-                userId={user.id}
-                organizationId={organizationId}
-                messageId={message.id}
-                draftId={draftId.current}
-                currentKey={storageKey}
-                onUse={async (copy) => {
-                  // Preserve this tab's writing before the explicit replacement.
-                  const current = localStorage.getItem(storageKey);
-                  const archivedKey = `${storageKey}.before.${crypto.randomUUID()}`;
-                  const deviceDrafts = await listPendingDrafts(organizationId);
-                  const currentFiles = deviceDrafts.find(
-                    (entry) => entry.localId === backupId
-                  );
-                  if (
-                    currentFiles?.pendingUploads?.length &&
-                    !(await savePendingDraft({
-                      ...currentFiles,
-                      localId: archivedKey,
-                    }))
-                  ) {
-                    throw new Error("Couldn't keep the current file bytes");
-                  }
-                  if (current) localStorage.setItem(archivedKey, current);
-                  const restored = copy.value as unknown as ReplyBackup;
-                  const files = deviceDrafts.find(
-                    (entry) => entry.localId === copy.key
-                  );
-                  if (
-                    restored.pendingFiles?.length &&
-                    !files?.pendingUploads?.length
-                  ) {
-                    throw new Error(
-                      "This copy's pending file bytes are unavailable. Copy its writing and reattach the listed files before sending."
-                    );
-                  }
-                  draftId.current = restored.draftId;
-                  revision.current = restored.revision ?? 1;
-                  clientId.current = restored.clientId ?? clientId.current;
-                  touched.current = true;
-                  setSaved(false);
-                  setHtml(restored.html);
-                  setTo(restored.to ?? defaultTo);
-                  setCc(restored.cc ?? []);
-                  setBcc(restored.bcc ?? []);
-                  setRecipientInputs(restored.recipientInputs ?? {});
-                  setSignature(signatureStamp(restored.signature));
-                  setReplyAll(restored.replyAll ?? false);
-                  setAttachments(restored.attachments ?? []);
-                  updateFiles(files?.pendingUploads ?? []);
-                  // Choosing a device copy does not adopt a newer server revision.
-                  setConflict(
-                    Boolean(
-                      draftQuery.data &&
-                      restored.revision !== draftQuery.data.revision
-                    )
-                  );
-                }}
-              />
-            ) : null}
-            {conflict ? (
-              <DraftConflictReview
-                organizationId={organizationId}
-                draftId={draftId.current}
-                clientId={clientId.current}
-                onAccepted={(id) => {
-                  sent.current = true;
-                  setAcceptedId(id);
-                }}
-                onKeep={(current) => {
-                  saveGeneration.current++;
-                  saveChain.current = Promise.resolve();
-                  uploadAbort.current?.abort();
-                  draftId.current = current.id;
-                  revision.current = current.revision ?? 1;
-                  clientId.current = current.clientId ?? clientId.current;
-                  setAttachments((local) => [
-                    ...new Map(
-                      [...local, ...(current.attachments ?? [])].map((file) => [
-                        file.id,
-                        file,
-                      ])
-                    ).values(),
-                  ]);
-                  touched.current = true;
-                  setSaved(false);
-                  setConflict(false);
-                }}
-                onUse={(current) => {
-                  saveGeneration.current++;
-                  saveChain.current = Promise.resolve();
-                  uploadAbort.current?.abort();
-                  const archivedKey = `${backupId}.before.${crypto.randomUUID()}`;
-                  void savePendingDraft({
-                    ...pendingRecord(),
-                    localId: archivedKey,
-                  });
-                  try {
-                    if (storageKey)
-                      localStorage.setItem(
-                        archivedKey,
-                        JSON.stringify({
-                          ...writing.current,
-                          draftId: draftId.current,
-                          revision: revision.current,
-                          clientId: clientId.current,
-                          updatedAt: new Date().toISOString(),
-                          pendingFiles: pendingRef.current.map((file) => ({
-                            name: file.file.name,
-                            size: file.file.size,
-                          })),
-                        })
-                      );
-                  } catch {
-                    setStorageError(true);
-                  }
-                  updateFiles([]);
-                  draftId.current = current.id;
-                  revision.current = current.revision ?? 1;
-                  setSignature(
-                    signatureStamp(current.variables?.qqueueSignature)
-                  );
-                  setHtml(current.html ?? "");
-                  setTo(current.to ?? defaultTo);
-                  setCc(current.cc ?? []);
-                  setBcc(current.bcc ?? []);
-                  setRecipientInputs(
-                    (current.variables?.qqueueRecipientInputs as Record<
-                      string,
-                      string
-                    >) ?? {}
-                  );
-                  setAttachments(current.attachments ?? []);
-                  setReplyAll(Boolean(current.variables?.qqueueReplyAll));
-                  setConflict(false);
-                  setSaved(true);
-                }}
-              />
-            ) : null}
-            {acceptedId ? (
-              <p role="status">
-                This reply was already accepted. Check its progress in Outbox.
-              </p>
-            ) : null}
-            {storageError && (!durableText || !durableFiles) ? (
-              <p role="alert">
-                This writing or its files are kept only in this window. Keep the
-                window open until saving succeeds.
-              </p>
-            ) : null}
-            <ul className="space-y-2">
-              {attachments.map((file) => (
-                <li key={file.id} className="flex items-center gap-2 text-ui">
-                  <span className="min-w-0 flex-1 truncate">
-                    {file.filename} · {formatBytes(file.size)}
-                  </span>
-                  <IconButton
-                    label={`Remove ${file.filename}`}
-                    disabled={
-                      send.isPending || remove.isPending || Boolean(acceptedId)
-                    }
-                    onClick={() => remove.mutate(file.id)}
-                  >
-                    <Trash2 />
-                  </IconButton>
-                </li>
-              ))}
-            </ul>
-            {draftQuery.isError ? (
-              <p role="alert" className="text-ui text-err">
-                Couldn't load your saved reply.{" "}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => void draftQuery.refetch()}
-                >
-                  Try again
-                </Button>
-              </p>
-            ) : null}
-            <p className="text-meta text-text-secondary" role="status">
-              {save.isPaused || (!online && touched.current)
-                ? "Waiting for a connection. Your reply is kept on this device when browser storage is available."
-                : save.isError
-                  ? "Couldn't save to the server. Your reply is kept on this device when browser storage is available."
-                  : saved
-                    ? "Draft saved"
-                    : "Changes will be saved automatically"}
-            </p>
-          </form>
-        </SheetBody>
-        <SheetFooter className="flex-row items-center justify-between">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={send.isPending}
-            onClick={close}
-          >
-            Close and keep draft
-          </Button>
-          <Button
-            type="submit"
-            form="message-reply-form"
-            disabled={
-              empty ||
-              !filesRestored ||
-              pendingFiles.length > 0 ||
-              conflict ||
-              Boolean(acceptedId) ||
-              to.length + cc.length + bcc.length === 0 ||
-              message.bodyStatus === "UNAVAILABLE" ||
-              send.isPending ||
-              uploading ||
-              draftQuery.isPending ||
-              draftQuery.isError
-            }
-          >
-            {send.isPending ? <Spinner /> : <Send />} Send reply
-          </Button>
-        </SheetFooter>
+        {content}
       </SheetContent>
     </Sheet>
   );

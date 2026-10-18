@@ -1,5 +1,9 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
+import {
+  MailComposeProvider,
+  useMailRouteLocation,
+} from "../components/mail/ComposeWorkspace.js";
 import { DashboardLayout } from "../layouts/DashboardLayout.js";
 import { SetupGate } from "../components/SetupGate.js";
 import { Skeleton } from "../components/ui/skeleton.js";
@@ -100,7 +104,11 @@ const InstanceMailboxes = lazy(() =>
     default: module.InstanceMailboxes,
   }))
 );
-const SignatureSettings = lazy(() => import("../pages/settings/SignatureSettings.js").then(module => ({default:module.SignatureSettings})));
+const SignatureSettings = lazy(() =>
+  import("../pages/settings/SignatureSettings.js").then((module) => ({
+    default: module.SignatureSettings,
+  }))
+);
 const AccountSettings = lazy(() =>
   import("../pages/settings/AccountSettings.js").then((module) => ({
     default: module.AccountSettings,
@@ -116,17 +124,17 @@ const QueueOperations = lazy(() =>
     default: module.QueueOperations,
   }))
 );
-const EmailStudio = lazy(() =>
-  import("../pages/EmailStudio.js").then((module) => ({
-    default: module.EmailStudio,
-  }))
-);
+
 const Inbox = lazy(() =>
   import("../pages/Inbox.js").then((module) => ({
     default: module.Inbox,
   }))
 );
-const MailFolder=lazy(()=>import("../pages/MailFolder.js").then(module=>({default:module.MailFolder})));
+const MailFolder = lazy(() =>
+  import("../pages/MailFolder.js").then((module) => ({
+    default: module.MailFolder,
+  }))
+);
 const Drafts = lazy(() =>
   import("../pages/Drafts.js").then((module) => ({
     default: module.Drafts,
@@ -209,137 +217,174 @@ function RouteFallback() {
   );
 }
 
+function SearchEntry() {
+  const [params] = useSearchParams();
+  const scope = params.get("scope");
+  return (
+    <MailFolder
+      view={
+        scope === "SENT" || scope === "DRAFTS" || scope === "RECEIVED"
+          ? scope
+          : "ALL"
+      }
+    />
+  );
+}
+
 function SentEntry() {
-  const [params]=useSearchParams();
-  return ["origin","outcome","account","days","page"].some(key=>params.has(key)) ? <Sent/> : <MailFolder view="SENT"/>;
+  const [params] = useSearchParams();
+  return ["origin", "outcome", "account", "days", "page"].some((key) =>
+    params.has(key)
+  ) ? (
+    <Sent />
+  ) : (
+    <MailFolder view="SENT" />
+  );
 }
 
 export function AppRoutes() {
   return (
+    <MailComposeProvider>
+      <AppRouteContent />
+    </MailComposeProvider>
+  );
+}
+function AppRouteContent() {
+  const routeLocation = useMailRouteLocation();
+  return (
     <Suspense fallback={<RouteFallback />}>
       <SetupGate>
-      <Routes>
-        <Route path="/setup" element={<Setup />} />
-        <Route path="/login" element={<Login mode="login" />} />
-        <Route path="/register" element={<Login mode="register" />} />
-        <Route path="/forgot-password" element={<Login mode="forgot" />} />
-        <Route path="/reset-password" element={<Login mode="reset" />} />
-        <Route path="/accept-invite" element={<AcceptInvite />} />
-        {import.meta.env.DEV ? (
-          <Route path="/design-system" element={<DesignSystem />} />
-        ) : null}
-        <Route path="/terms" element={<LegalPage kind="terms" />} />
-        <Route path="/privacy" element={<LegalPage kind="privacy" />} />
-        <Route path="/licensing" element={<LegalPage kind="licensing" />} />
-        <Route path="/trademark" element={<LegalPage kind="trademark" />} />
-        <Route element={<DashboardLayout />}>
-          {/* Signing in lands on mail, the way every email client does. The
+        <Routes location={routeLocation}>
+          <Route path="/setup" element={<Setup />} />
+          <Route path="/login" element={<Login mode="login" />} />
+          <Route path="/register" element={<Login mode="register" />} />
+          <Route path="/forgot-password" element={<Login mode="forgot" />} />
+          <Route path="/reset-password" element={<Login mode="reset" />} />
+          <Route path="/accept-invite" element={<AcceptInvite />} />
+          {import.meta.env.DEV ? (
+            <Route path="/design-system" element={<DesignSystem />} />
+          ) : null}
+          <Route path="/terms" element={<LegalPage kind="terms" />} />
+          <Route path="/privacy" element={<LegalPage kind="privacy" />} />
+          <Route path="/licensing" element={<LegalPage kind="licensing" />} />
+          <Route path="/trademark" element={<LegalPage kind="trademark" />} />
+          <Route element={<DashboardLayout />}>
+            {/* Signing in lands on mail, the way every email client does. The
               stats page still exists, but you go to it deliberately. */}
-          <Route index element={<Inbox />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/insights" element={<Dashboard />} />
-          {/* Bookmarks and old links to the stats-first home. */}
-          <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
-          <Route path="/email-studio" element={<EmailStudio />} />
-          <Route path="/drafts" element={<MailFolder view="DRAFTS" />} />
-          <Route path="/drafts/manage" element={<Drafts />} />
-          <Route path="/outbox" element={<MailFolder view="OUTBOX" />} />
-          <Route path="/outbox/manage" element={<Outbox />} />
-          {/* The archive the outbox drains into. */}
-          <Route path="/sent" element={<SentEntry />} />
-          <Route path="/sent/activity" element={<Sent />} />
-          <Route path="/search" element={<MailFolder view="ALL" />} />
-          <Route path="/sent/:id" element={<SentMessage />} />
-          {/* The standalone Send Email page was merged into Email Studio. */}
-          <Route
-            path="/send-email"
-            element={<Navigate to="/email-studio" replace />}
-          />
-          <Route path="/contacts" element={<Contacts />} />
-          <Route path="/templates" element={<Templates />} />
-          <Route path="/templates/new" element={<TemplateEditor />} />
-          <Route path="/templates/:id/edit" element={<TemplateEditor />} />
-          <Route path="/campaigns" element={<Campaigns />} />
-          {/* Smart lists are a tab of Lists now, not a sibling destination —
+            <Route index element={<Inbox />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/insights" element={<Dashboard />} />
+            {/* Bookmarks and old links to the stats-first home. */}
+            <Route
+              path="/dashboard"
+              element={<Navigate to="/insights" replace />}
+            />
+            <Route path="/email-studio" element={<Inbox />} />
+            <Route path="/drafts" element={<MailFolder view="DRAFTS" />} />
+            <Route path="/drafts/manage" element={<Drafts />} />
+            <Route path="/outbox" element={<MailFolder view="OUTBOX" />} />
+            <Route path="/outbox/manage" element={<Outbox />} />
+            {/* The archive the outbox drains into. */}
+            <Route path="/sent" element={<SentEntry />} />
+            <Route path="/sent/activity" element={<Sent />} />
+            <Route path="/search" element={<SearchEntry />} />
+            <Route path="/sent/:id" element={<SentMessage />} />
+            {/* The standalone Send Email page was merged into Email Studio. */}
+            <Route
+              path="/send-email"
+              element={<Navigate to="/email-studio" replace />}
+            />
+            <Route path="/contacts" element={<Contacts />} />
+            <Route path="/templates" element={<Templates />} />
+            <Route path="/templates/new" element={<TemplateEditor />} />
+            <Route path="/templates/:id/edit" element={<TemplateEditor />} />
+            <Route path="/campaigns" element={<Campaigns />} />
+            {/* Smart lists are a tab of Lists now, not a sibling destination —
               see §4. The old path still works so existing links don't rot. */}
-          <Route path="/campaigns/lists" element={<ContactLists />} />
-          <Route path="/campaigns/lists/smart" element={<Segments />} />
-          <Route
-            path="/campaigns/segments"
-            element={<Navigate to="/campaigns/lists/smart" replace />}
-          />
-          {/* A recurring send is a scheduled campaign, so it lives under
+            <Route path="/campaigns/lists" element={<ContactLists />} />
+            <Route path="/campaigns/lists/smart" element={<Segments />} />
+            <Route
+              path="/campaigns/segments"
+              element={<Navigate to="/campaigns/lists/smart" replace />}
+            />
+            {/* A recurring send is a scheduled campaign, so it lives under
               Campaigns rather than in the composer's rail — see §4. */}
-          <Route path="/campaigns/recurring" element={<RecurringSends />} />
-          <Route
-            path="/campaigns/:id/analytics"
-            element={<CampaignAnalytics />}
-          />
-          <Route path="/queue-operations" element={<QueueOperations />} />
+            <Route path="/campaigns/recurring" element={<RecurringSends />} />
+            <Route
+              path="/campaigns/:id/analytics"
+              element={<CampaignAnalytics />}
+            />
+            <Route path="/queue-operations" element={<QueueOperations />} />
 
-          {/* ------------------------------------------------------ settings */}
-          {/*
+            {/* ------------------------------------------------------ settings */}
+            {/*
             A hub and its destinations, not a mega-page. Every one of these was
             a card in a two-column grid on /settings, or a top-level route the
             sidebar had to name separately; both shapes are gone (§4).
           */}
-          <Route path="/settings" element={<SettingsHub />} />
-          <Route
-            path="/settings/organization"
-            element={<OrganizationSettings />}
-          />
-          <Route path="/settings/branding" element={<BrandingSettings />} />
-          <Route path="/settings/team" element={<TeamSettings />} />
-          <Route path="/settings/sending" element={<SMTPConnections />} />
-          <Route path="/settings/sending/health" element={<Deliverability />} />
-          <Route path="/settings/mailboxes" element={<Mailboxes />} />
-          <Route path="/settings/suppressions" element={<Suppressions />} />
-          <Route path="/settings/api" element={<ApiSettings />} />
-          <Route path="/settings/instance" element={<InstanceSettings />} />
-          {/* Install-scope administration. Each page defends itself rather than
+            <Route path="/settings" element={<SettingsHub />} />
+            <Route
+              path="/settings/organization"
+              element={<OrganizationSettings />}
+            />
+            <Route path="/settings/branding" element={<BrandingSettings />} />
+            <Route path="/settings/team" element={<TeamSettings />} />
+            <Route path="/settings/sending" element={<SMTPConnections />} />
+            <Route
+              path="/settings/sending/health"
+              element={<Deliverability />}
+            />
+            <Route path="/settings/mailboxes" element={<Mailboxes />} />
+            <Route path="/settings/suppressions" element={<Suppressions />} />
+            <Route path="/settings/api" element={<ApiSettings />} />
+            <Route path="/settings/instance" element={<InstanceSettings />} />
+            {/* Install-scope administration. Each page defends itself rather than
               relying on a route guard, because a URL can be typed. */}
-          <Route
-            path="/settings/instance/organizations"
-            element={<InstanceOrganizations />}
-          />
-          <Route
-            path="/settings/instance/domains"
-            element={<InstanceDomains />}
-          />
-          <Route
-            path="/settings/instance/mailboxes"
-            element={<InstanceMailboxes />}
-          />
-          <Route path="/settings/signatures" element={<SignatureSettings />} />
-          <Route path="/settings/account" element={<AccountSettings />} />
-          <Route
-            path="/settings/notifications"
-            element={<NotificationSettings />}
-          />
+            <Route
+              path="/settings/instance/organizations"
+              element={<InstanceOrganizations />}
+            />
+            <Route
+              path="/settings/instance/domains"
+              element={<InstanceDomains />}
+            />
+            <Route
+              path="/settings/instance/mailboxes"
+              element={<InstanceMailboxes />}
+            />
+            <Route
+              path="/settings/signatures"
+              element={<SignatureSettings />}
+            />
+            <Route path="/settings/account" element={<AccountSettings />} />
+            <Route
+              path="/settings/notifications"
+              element={<NotificationSettings />}
+            />
 
-          {/*
+            {/*
             The paths these pages used to answer on. Bookmarks, the docs, and
             every "see Settings → Sending accounts" line written before the move
             still resolve — a redirect is cheap and a dead link is not.
           */}
-          <Route
-            path="/smtp-connections"
-            element={<Navigate to="/settings/sending" replace />}
-          />
-          <Route
-            path="/mailboxes"
-            element={<Navigate to="/settings/mailboxes" replace />}
-          />
-          <Route
-            path="/suppressions"
-            element={<Navigate to="/settings/suppressions" replace />}
-          />
-          <Route
-            path="/deliverability"
-            element={<Navigate to="/settings/sending/health" replace />}
-          />
-        </Route>
-      </Routes>
+            <Route
+              path="/smtp-connections"
+              element={<Navigate to="/settings/sending" replace />}
+            />
+            <Route
+              path="/mailboxes"
+              element={<Navigate to="/settings/mailboxes" replace />}
+            />
+            <Route
+              path="/suppressions"
+              element={<Navigate to="/settings/suppressions" replace />}
+            />
+            <Route
+              path="/deliverability"
+              element={<Navigate to="/settings/sending/health" replace />}
+            />
+          </Route>
+        </Routes>
       </SetupGate>
     </Suspense>
   );

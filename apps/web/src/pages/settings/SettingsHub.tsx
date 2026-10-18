@@ -201,23 +201,28 @@ export function SettingsHub() {
       />
 
       <PageContainer>
-        {summaryQuery.data ? (
+        {summaryQuery.data && isOrgAdmin ? (
           <div className="mb-6">
             <SetupChecklist
-              steps={setupSteps(summaryQuery.data.setup)}
+              steps={setupSteps(summaryQuery.data.setup).slice(0, 2)}
               showWhenComplete
             />
           </div>
         ) : null}
 
         <nav aria-label="Settings sections" className="space-y-6">
-          {visibleGroups.map((group) => (
-            <SettingsLinkGroup key={group.heading} heading={group.heading}>
-              {group.links.map((link) => (
-                <SettingsLinkRow key={link.to} {...link} />
-              ))}
-            </SettingsLinkGroup>
-          ))}
+          {[...visibleGroups]
+            .sort(
+              (a, b) =>
+                Number(b.heading === "You") - Number(a.heading === "You")
+            )
+            .map((group) => (
+              <SettingsLinkGroup key={group.heading} heading={group.heading}>
+                {group.links.map((link) => (
+                  <SettingsLinkRow key={link.to} {...link} />
+                ))}
+              </SettingsLinkGroup>
+            ))}
         </nav>
       </PageContainer>
     </>

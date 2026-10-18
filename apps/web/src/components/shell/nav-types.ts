@@ -71,8 +71,24 @@ function matches(path: string, pathname: string, end?: boolean): boolean {
  */
 export function isNavItemActive(
   item: Pick<NavItem, "to" | "end" | "activePaths">,
-  pathname: string
+  pathname: string,
+  search = ""
 ): boolean {
+  const [targetPath, targetSearch] = item.to.split("?");
+  if (targetSearch) {
+    const expected = new URLSearchParams(targetSearch);
+    const actual = new URLSearchParams(search);
+    return (
+      matches(targetPath, pathname, item.end) &&
+      [...expected].every(([key, value]) => actual.get(key) === value)
+    );
+  }
+  if (
+    targetPath === "/inbox" &&
+    (new URLSearchParams(search).has("view") ||
+      new URLSearchParams(search).has("folder"))
+  )
+    return false;
   return (
     matches(item.to, pathname, item.end) ||
     (item.activePaths ?? []).some((path) => matches(path, pathname))
