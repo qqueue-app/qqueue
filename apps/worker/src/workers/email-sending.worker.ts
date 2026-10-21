@@ -210,17 +210,18 @@ export function startEmailSendingWorker() {
             : undefined;
 
           // Bulk mail (campaign fan-out, recurring sends, or a bulk API send)
-          // offers a one-click unsubscribe. One URL serves both the RFC 8058
-          // headers and the visible footer, so they cannot drift apart.
-          const unsubscribeUrl = emailJob.isBulk
-            ? (customUnsubscribeUrl ??
-              buildUnsubscribeUrl(
-                env.APP_URL,
-                emailJob.organizationId,
-                emailJob.toEmail,
-                env.TRACKING_SECRET
-              ))
-            : undefined;
+          // offers a one-click unsubscribe unless disabled on the campaign.
+          // One URL serves both the RFC 8058 headers and the visible footer.
+          const unsubscribeUrl =
+            emailJob.isBulk && emailJob.unsubscribeEnabled !== false
+              ? (customUnsubscribeUrl ??
+                buildUnsubscribeUrl(
+                  env.APP_URL,
+                  emailJob.organizationId,
+                  emailJob.toEmail,
+                  env.TRACKING_SECRET
+                ))
+              : undefined;
 
           // For bulk jobs, QQueue's pair is authoritative unless the caller
           // supplied a complete one-click pair. Its footer then uses that same
@@ -240,7 +241,7 @@ export function startEmailSendingWorker() {
                 ...otherHeaders,
                 ...listUnsubscribeHeadersForUrl(unsubscribeUrl),
               }
-            : callerHeaders;
+            : otherHeaders;
 
           // The footer goes on *after* tracking injection, so the opt-out link is
           // the only one in the message that isn't rewritten through the click

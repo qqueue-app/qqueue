@@ -166,12 +166,12 @@ describe("Campaigns", () => {
     await waitFor(() => expect(mockedApi.createCampaign).toHaveBeenCalled());
     // The default travels as an explicit null, not as an omitted field.
     expect(mockedApi.createCampaign).toHaveBeenCalledWith(
-      expect.objectContaining({ smtpConnectionId: null })
+      expect.objectContaining({ smtpConnectionId: null, unsubscribeEnabled: true })
     );
     expect(toast.success).toHaveBeenCalledWith("Campaign draft created.");
   });
 
-  it("sends a campaign as an account other than the default", async () => {
+  it("creates a campaign with unsubscribe disabled", async () => {
     const user = userEvent.setup();
     setup([]);
     mockedApi.createCampaign.mockResolvedValue({ id: "cmpx" });
@@ -180,6 +180,7 @@ describe("Campaigns", () => {
     await user.click(screen.getByRole("button", { name: /New campaign/i }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Name"), "Launch");
+    await user.click(within(dialog).getByRole("switch", { name: "Include unsubscribe link" }));
 
     const [accountSelect, templateSelect, listSelect] =
       within(dialog).getAllByRole("combobox");
@@ -197,7 +198,7 @@ describe("Campaigns", () => {
 
     await waitFor(() =>
       expect(mockedApi.createCampaign).toHaveBeenCalledWith(
-        expect.objectContaining({ smtpConnectionId: "smtp2" })
+        expect.objectContaining({ smtpConnectionId: "smtp2", unsubscribeEnabled: false })
       )
     );
   });
@@ -379,9 +380,9 @@ describe("Campaigns", () => {
     expect(screen.getByText(/Monday/i)).toBeInTheDocument();
   });
 
-  it("edits a draft campaign", async () => {
+  it.each([true, false])("edits a draft with unsubscribe initially %s", async (enabled) => {
     const user = userEvent.setup();
-    setup([campaign()]);
+    setup([campaign({ unsubscribeEnabled: enabled })]);
     mockedApi.updateCampaign.mockResolvedValue({});
     renderCampaigns();
     await screen.findByText("Spring");
@@ -391,6 +392,9 @@ describe("Campaigns", () => {
       await screen.findByRole("menuitem", { name: "Edit this campaign" })
     );
     const dialog = await screen.findByRole("dialog");
+    const toggle = within(dialog).getByRole("switch", { name: "Include unsubscribe link" });
+    expect(toggle).toHaveAttribute("aria-checked", String(enabled));
+    await user.click(toggle);
     const name = within(dialog).getByLabelText("Name");
     await user.clear(name);
     await user.type(name, "Spring 2");
@@ -400,7 +404,7 @@ describe("Campaigns", () => {
     await waitFor(() =>
       expect(mockedApi.updateCampaign).toHaveBeenCalledWith(
         "cmp1",
-        expect.objectContaining({ name: "Spring 2" })
+        expect.objectContaining({ name: "Spring 2", unsubscribeEnabled: !enabled })
       )
     );
   });

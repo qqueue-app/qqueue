@@ -347,8 +347,9 @@ export function startCampaignProcessingWorker() {
           campaignId: campaign.id,
           campaignRunId: run.id,
           origin: "CAMPAIGN" as const,
-          // Campaign fan-out is bulk mail: every job carries List-Unsubscribe.
+          // Keep bulk classification separate from the campaign opt-out choice.
           isBulk: true,
+          unsubscribeEnabled: campaign.unsubscribeEnabled ?? true,
           toEmail,
           subject: renderVariables(subjectSource, variables) ?? subjectSource,
           html: renderVariables(templateHtml, renderVars),

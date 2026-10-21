@@ -708,6 +708,8 @@ model Campaign {
   // send time). Exactly one is set; enforced by the API, not the schema.
   segmentId        String?
   name             String
+  // Default on preserves opt-out behavior for existing campaigns.
+  unsubscribeEnabled Boolean         @default(true)
   status           CampaignStatus    @default(DRAFT)
   scheduledAt      DateTime?
   cronExpression   String?
@@ -804,11 +806,12 @@ model EmailJob {
   createdByUserId  String?
   // For A/B campaign sends: which CampaignVariant's subject this job used.
   variantId        String?
-  // Bulk mail (campaign fan-out, recurring sends) carries RFC 8058
-  // List-Unsubscribe headers; transactional, one-off manual, and SYSTEM mail
-  // does not. A flag rather than an origin check so the decision is made where
+  // Bulk mail normally carries RFC 8058 List-Unsubscribe headers;
+  // transactional, one-off manual, and SYSTEM mail does not. A flag rather than an origin check so the decision is made where
   // the job is created, not inferred later in the worker.
   isBulk           Boolean           @default(false)
+  // Snapshot the campaign choice so queued sends and retries retain it.
+  unsubscribeEnabled Boolean         @default(true)
   // Groups the per-recipient jobs of one multi-recipient manual/recurring send
   // so the composer's delivery panel can aggregate them. NULL for single-job
   // sends (campaign jobs group via campaignRunId instead).

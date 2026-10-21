@@ -1184,6 +1184,7 @@ export interface InboxNotifySettings {
 }
 
 export interface Campaign {
+  unsubscribeEnabled?: boolean;
   id: string;
   organizationId: string;
   name: string;

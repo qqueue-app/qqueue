@@ -126,11 +126,11 @@ describe("BrandingSettings", () => {
     ).toBeInTheDocument();
   });
 
-  it("says the unsubscribe link cannot be turned off", async () => {
+  it("explains campaign unsubscribe defaults", async () => {
     renderWithProviders(<BrandingSettings />);
     await waitFor(() =>
       expect(
-        screen.getByText("An unsubscribe link is always added.")
+        screen.getByText("Campaign unsubscribe links are on by default.")
       ).toBeInTheDocument()
     );
   });

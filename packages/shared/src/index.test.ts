@@ -1638,3 +1638,34 @@ describe("invitation mailbox assignments", () => {
     expect(inviteCreateSchema.safeParse({ ...base, smtpConnectionIds: Array(101).fill("smtp1") }).success).toBe(false);
   });
 });
+
+describe("campaign unsubscribe contracts", () => {
+  it.each([true, false])(
+    "preserves unsubscribeEnabled=%s on create and update",
+    (enabled) => {
+      expect(
+        campaignSchema.parse({
+          organizationId: "org_1",
+          name: "Campaign",
+          unsubscribeEnabled: enabled
+        }).unsubscribeEnabled
+      ).toBe(enabled);
+      expect(
+        campaignUpdateSchema.parse({ unsubscribeEnabled: enabled })
+          .unsubscribeEnabled
+      ).toBe(enabled);
+    }
+  );
+  it("rejects string booleans", () => {
+    expect(
+      campaignSchema.safeParse({
+        organizationId: "org_1",
+        name: "Campaign",
+        unsubscribeEnabled: "false"
+      }).success
+    ).toBe(false);
+    expect(
+      campaignUpdateSchema.safeParse({ unsubscribeEnabled: "false" }).success
+    ).toBe(false);
+  });
+});

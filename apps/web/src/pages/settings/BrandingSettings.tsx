@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { ImagePlus, Lock, Trash2 } from "lucide-react";
+import { ImagePlus, Info, Trash2 } from "lucide-react";
 import { PageContainer } from "../../components/PageContainer.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import {
@@ -184,7 +184,7 @@ export function BrandingSettings() {
                     <SettingsRow
                       label="Brand outgoing emails"
                       htmlFor="brandingEnabled"
-                      description="Off sends each template's HTML exactly as you wrote it, with no header, colours, or layout added. Your address and the unsubscribe link are still included — those are required on bulk mail."
+                      description="Off sends each template's HTML exactly as you wrote it, with no header, colours, or layout added. Unsubscribe footers are controlled separately for each campaign."
                     >
                       <Switch
                         id="brandingEnabled"
@@ -319,16 +319,16 @@ export function BrandingSettings() {
                     </Field>
 
                     <div className="flex items-start gap-2 rounded-control border border-border bg-accent px-3 py-2.5">
-                      <Lock
+                      <Info
                         aria-hidden="true"
                         className="mt-0.5 h-4 w-4 shrink-0 text-primary"
                       />
                       <p className="text-ui text-text-secondary">
                         <span className="font-semibold text-text">
-                          An unsubscribe link is always added.
+                          Campaign unsubscribe links are on by default.
                         </span>{" "}
-                        It can't be turned off for bulk mail. To place it
-                        yourself instead, put{" "}
+                        You can turn the automatic link off in each campaign. To
+                        place it yourself instead, put{" "}
                         <code className="rounded-control bg-surface-sunken px-1 py-0.5">
                           {"{{unsubscribe_url}}"}
                         </code>{" "}
@@ -353,7 +353,7 @@ export function BrandingSettings() {
               <div className="rounded-card border border-border bg-email-paper p-5 shadow-card">
                 {/* Header, accent, and copyright are the frame — the switch
                     governs all three. The address and unsubscribe link below
-                    are obligations, so they stay either way. */}
+                    preview the default campaign footer. */}
                 {form.brandingEnabled ? (
                   form.logoUrl ? (
                     <img
@@ -404,7 +404,7 @@ export function BrandingSettings() {
               <p className="mt-2 text-meta text-text-tertiary">
                 {form.brandingEnabled
                   ? "Applied to campaigns, recurring sends, and anything you compose."
-                  : "Templates send exactly as authored. Only the address and unsubscribe link are added."}
+                  : "Templates send as authored, with the campaign unsubscribe footer when enabled."}
               </p>
             </aside>
           </div>

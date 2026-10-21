@@ -170,6 +170,7 @@ async function main() {
     { createApp },
     { prisma },
     { startEmailSendingWorker },
+    { startCampaignProcessingWorker },
     { emailSendingQueue },
     { campaignProcessingQueue },
     { webhookDeliveryQueue },
@@ -178,6 +179,7 @@ async function main() {
     import("../apps/api/src/app.js"),
     import("../apps/api/src/lib/prisma.js"),
     import("../apps/worker/src/workers/email-sending.worker.js"),
+    import("../apps/worker/src/workers/campaign-processing.worker.js"),
     import("../apps/api/src/queues/email-sending.queue.js"),
     import("../apps/api/src/queues/campaign-processing.queue.js"),
     import("../apps/api/src/queues/webhook-delivery.queue.js"),
@@ -193,6 +195,7 @@ async function main() {
     controls: smtpControls,
   } = await startFakeSmtp();
   const worker = startEmailSendingWorker();
+  const campaignWorker = startCampaignProcessingWorker();
   const app = createApp();
 
   try {
@@ -305,6 +308,64 @@ async function main() {
       throw new Error(
         "Smoke SMTP message is missing the one-click headers or footer"
       );
+    }
+
+    // Campaign choices travel through API -> fan-out -> queue -> actual SMTP.
+    const campaignContact = await prisma.contact.create({
+      data: { organizationId, email: "campaign-recipient@example.com" }
+    });
+    const campaignList = await prisma.contactList.create({
+      data: {
+        organizationId,
+        name: "Campaign smoke",
+        members: { create: { contactId: campaignContact.id } }
+      }
+    });
+    const campaignTemplate = await prisma.template.create({
+      data: {
+        organizationId,
+        name: "Campaign smoke",
+        subject: "Campaign smoke",
+        html: "<p>Campaign body</p>",
+        text: "Campaign body"
+      }
+    });
+    for (const enabled of [true, false]) {
+      const created = await request(app)
+        .post("/api/v1/campaigns")
+        .set("Authorization", auth)
+        .send({
+          organizationId,
+          name: `Unsubscribe ${enabled}`,
+          templateId: campaignTemplate.id,
+          contactListId: campaignList.id,
+          unsubscribeEnabled: enabled
+        })
+        .expect(201);
+      if (created.body.data.unsubscribeEnabled !== enabled)
+        throw new Error("Campaign API lost unsubscribe setting");
+      const messageStart = smtpMessages.length;
+      await request(app)
+        .post(`/api/v1/campaigns/${created.body.data.id}/send`)
+        .set("Authorization", auth)
+        .expect(200);
+      const delivered = await eventually(() =>
+        prisma.emailJob.findFirst({
+          where: { campaignId: created.body.data.id, status: "SENT" }
+        })
+      );
+      if (delivered.unsubscribeEnabled !== enabled || !delivered.isBulk)
+        throw new Error(
+          "Campaign job lost unsubscribe setting or bulk classification"
+        );
+      const raw = smtpMessages[messageStart] ?? "";
+      if (
+        /^List-Unsubscribe:/im.test(raw) !== enabled ||
+        /^List-Unsubscribe-Post:/im.test(raw) !== enabled ||
+        raw.includes("Unsubscribe:") !== enabled
+      ) {
+        throw new Error(`Campaign SMTP unsubscribe toggle failed for ${enabled}`);
+      }
     }
 
     // Group messages retain their full headers and identity on the SMTP wire.
@@ -790,6 +851,7 @@ async function main() {
     process.exit(0);
   } finally {
     await worker.close(true);
+    await campaignWorker.close(true);
     await Promise.allSettled([
       emailSendingQueue.disconnect(),
       campaignProcessingQueue.disconnect(),

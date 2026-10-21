@@ -210,6 +210,7 @@ export const campaignService = {
       data: {
         organizationId: input.organizationId,
         name: input.name,
+        unsubscribeEnabled: input.unsubscribeEnabled ?? true,
         templateId: input.templateId,
         smtpConnectionId,
         contactListId: input.contactListId,
@@ -266,6 +267,7 @@ export const campaignService = {
       where: { id },
       data: {
         name: input.name,
+        unsubscribeEnabled: input.unsubscribeEnabled,
         templateId: input.templateId,
         // Explicit null is a real value here — "go back to the org default" —
         // so it must survive as null rather than being coalesced away.
@@ -343,6 +345,7 @@ export const campaignService = {
       data: {
         organizationId: existing.organizationId,
         name: `Copy of ${existing.name}`,
+        unsubscribeEnabled: existing.unsubscribeEnabled,
         templateId: existing.templateId,
         // The copy sends as whatever the original did; findOwned has already
         // established this actor may see (and so may send as) that account.

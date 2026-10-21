@@ -1434,3 +1434,19 @@ resends carry their saved selections. IDs are stored rather than addresses so
 renaming a mailbox follows its existing connection identity. Missing IDs are
 validated at acceptance rather than silently dropping an advertised assignment.
 The additive array column defaults to empty, leaving older invitations unchanged.
+
+## Campaign unsubscribe is configurable per campaign (2026-10-21)
+
+Campaign drafts expose `unsubscribeEnabled`, defaulting to true. Authors can
+turn off the automatically added HTML/plaintext unsubscribe footer and RFC 8058
+headers for an individual campaign. This supersedes the unconditional campaign
+unsubscribe behavior described above. Duplication preserves the setting and
+fan-out snapshots it onto `EmailJob`, including A/B test and held-remainder jobs,
+so scheduled, recurring and retried sends use the same choice. `isBulk` remains
+true for campaign jobs; disabling unsubscribe does not reclassify bulk mail.
+
+The additive migration defaults existing campaigns and jobs to true, preserving
+upgrade behavior. The toggle does not rewrite template-authored links, including
+`{{unsubscribe_url}}`. Suppressions remain organization-wide and enforced during
+fan-out and delivery regardless of this setting. Other bulk sending paths retain
+their existing automatic unsubscribe behavior.

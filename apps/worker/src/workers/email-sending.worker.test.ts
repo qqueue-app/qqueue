@@ -1118,3 +1118,61 @@ describe("SMTP acceptance safety", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("campaign unsubscribe toggle delivery", () => {
+  it.each([0, 1])(
+    "omits unsubscribe on send attempt %s while retaining other headers",
+    async (attemptsMade) => {
+      prismaMock.emailJob.findUnique.mockResolvedValue({
+        ...baseEmailJob,
+        origin: "CAMPAIGN",
+        isBulk: true,
+        unsubscribeEnabled: false,
+        headers: {
+          "List-Unsubscribe": "<https://example.com/u>",
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          "X-Campaign": "test"
+        }
+      } as never);
+      send.mockResolvedValue({
+        provider: "smtp",
+        messageId: "mid1",
+        accepted: ["to@example.com"],
+        rejected: []
+      });
+      await run(makeJob({ attemptsMade }));
+      expect(h.buildUnsubscribeUrl).not.toHaveBeenCalled();
+      expect(h.appendUnsubscribeFooter).not.toHaveBeenCalled();
+      expect(h.appendUnsubscribeFooterText).not.toHaveBeenCalled();
+      expect(send.mock.calls[0][0]).toMatchObject({
+        html: "tracked:<p>Body</p>",
+        text: "Body",
+        headers: { "X-Campaign": "test" }
+      });
+      expect(send.mock.calls[0][0].headers).not.toHaveProperty(
+        "List-Unsubscribe"
+      );
+      expect(send.mock.calls[0][0].headers).not.toHaveProperty(
+        "List-Unsubscribe-Post"
+      );
+    }
+  );
+
+  it("still suppresses a recipient when unsubscribe is disabled", async () => {
+    prismaMock.emailJob.findUnique.mockResolvedValue({
+      ...baseEmailJob,
+      origin: "CAMPAIGN",
+      isBulk: true,
+      unsubscribeEnabled: false
+    } as never);
+    prismaMock.suppression.findUnique.mockResolvedValue({
+      id: "suppression"
+    } as never);
+    await run(makeJob());
+    expect(send).not.toHaveBeenCalled();
+    expect(prismaMock.emailJob.update).toHaveBeenCalledWith({
+      where: { id: baseEmailJob.id },
+      data: { status: "SUPPRESSED" }
+    });
+  });
+});

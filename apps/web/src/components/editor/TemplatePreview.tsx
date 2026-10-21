@@ -55,8 +55,8 @@ function brandingChrome(branding: OrganizationBranding | null | undefined) {
       : null
   ].filter(Boolean);
 
-  // The unsubscribe link is shown because every campaign gets one — it is not
-  // governed by the branding switch.
+  // Preview the default campaign footer; individual campaigns may disable it.
+  // Branding and campaign unsubscribe settings are independent.
   const footer =
     `<div style="padding-top:16px;text-align:center;font-size:12px;line-height:1.5;color:#9aa5b1;">` +
     (lines.length ? `<div>${lines.join("<br />")}</div>` : "") +

@@ -309,10 +309,11 @@ describe("campaign-processing worker", () => {
     expect(emailSendingQueue.addBulk).not.toHaveBeenCalled();
   });
 
-  it("creates email jobs with rendered variables and enqueues them", async () => {
+  it.each([undefined, true, false])("creates recipient jobs with unsubscribe %s", async (enabled) => {
     prismaMock.campaign.findUnique.mockResolvedValue({
       id: "c1",
       status: "SENDING",
+      unsubscribeEnabled: enabled,
       cronExpression: null,
       scheduledAt: null,
       organizationId: "org1",
@@ -343,7 +344,9 @@ describe("campaign-processing worker", () => {
       html: "<p>Hello Ann Bee </p>",
       text: "Hello Ann",
       status: "QUEUED",
-      origin: "CAMPAIGN"
+      origin: "CAMPAIGN",
+      isBulk: true,
+      unsubscribeEnabled: enabled ?? true
     });
     // null first/last names render as empty strings.
     expect(createData[1]).toMatchObject({
@@ -503,6 +506,7 @@ describe("campaign-processing worker", () => {
         ]
       },
       abTestEnabled: true,
+      unsubscribeEnabled: false,
       abTestPercent: 50,
       abWinnerMetric: "OPEN",
       abTestWindowMin: 60,
@@ -522,6 +526,7 @@ describe("campaign-processing worker", () => {
     await run({ id: "j1", data: { campaignId: "c1" } });
 
     const createData = prismaMock.emailJob.createMany.mock.calls[0][0].data;
+    expect(createData.every((job) => job.unsubscribeEnabled === false && job.isBulk)).toBe(true);
     // 50% of 4 = 2 test jobs (one per variant), 2 held PENDING jobs.
     const queued = createData.filter((d: { status: string }) => d.status === "QUEUED");
     const held = createData.filter((d: { status: string }) => d.status === "PENDING");

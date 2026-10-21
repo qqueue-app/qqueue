@@ -863,3 +863,50 @@ describe("campaignService.analytics", () => {
     expect(result.links).toEqual([]);
   });
 });
+
+describe("campaign unsubscribe settings", () => {
+  it.each([undefined, true, false])(
+    "creates with unsubscribe %s",
+    async (enabled) => {
+      await campaignService.create(
+        {
+          organizationId: "org_1",
+          name: "Campaign",
+          unsubscribeEnabled: enabled
+        },
+        "user_1"
+      );
+      expect(
+        prismaMock.campaign.create.mock.calls[0][0].data.unsubscribeEnabled
+      ).toBe(enabled ?? true);
+    }
+  );
+
+  it.each([undefined, true, false])(
+    "updates unsubscribe to %s without defaulting omitted values",
+    async (enabled) => {
+      prismaMock.campaign.findFirst.mockResolvedValue({
+        ...draft,
+        unsubscribeEnabled: false
+      } as never);
+      await campaignService.update("c1", "user_1", {
+        name: "Updated",
+        unsubscribeEnabled: enabled
+      });
+      expect(
+        prismaMock.campaign.update.mock.calls[0][0].data.unsubscribeEnabled
+      ).toBe(enabled);
+    }
+  );
+
+  it("keeps unsubscribe disabled when duplicating", async () => {
+    prismaMock.campaign.findFirst.mockResolvedValue({
+      ...draft,
+      unsubscribeEnabled: false
+    } as never);
+    await campaignService.duplicate("c1", "user_1");
+    expect(
+      prismaMock.campaign.create.mock.calls[0][0].data.unsubscribeEnabled
+    ).toBe(false);
+  });
+});

@@ -56,6 +56,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "../components/ui/select.js";
+import { Switch } from "../components/ui/switch.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { DataGrid } from "../components/ui/data-grid.js";
 import { RowActions, type RowAction } from "../components/ui/row-actions.js";
@@ -74,7 +75,8 @@ const emptyCampaignForm = {
   name: "",
   templateId: "",
   smtpConnectionId: DEFAULT_ACCOUNT,
-  contactListId: ""
+  contactListId: "",
+  unsubscribeEnabled: true
 };
 
 /** "Acme Support <hi@acme.com>", or just the address when it has no name. */
@@ -395,7 +397,8 @@ export function Campaigns() {
       name: campaign.name,
       templateId: campaign.templateId ?? "",
       smtpConnectionId: campaign.smtpConnectionId ?? DEFAULT_ACCOUNT,
-      contactListId: campaign.contactListId ?? ""
+      contactListId: campaign.contactListId ?? "",
+      unsubscribeEnabled: campaign.unsubscribeEnabled ?? true
     });
     setCampaignDialogOpen(true);
   }
@@ -785,6 +788,31 @@ export function Campaigns() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-control border p-3">
+              <div className="space-y-1">
+                <Label htmlFor="campaignUnsubscribe">
+                  Include unsubscribe link
+                </Label>
+                <p
+                  id="campaignUnsubscribeHelp"
+                  className="text-meta text-muted-foreground"
+                >
+                  Add an unsubscribe footer and mail-client unsubscribe headers.
+                  Links already in your template are kept.
+                </p>
+              </div>
+              <Switch
+                id="campaignUnsubscribe"
+                aria-describedby="campaignUnsubscribeHelp"
+                checked={campaignForm.unsubscribeEnabled}
+                onCheckedChange={(checked) =>
+                  setCampaignForm({
+                    ...campaignForm,
+                    unsubscribeEnabled: checked
+                  })
+                }
+              />
             </div>
             <DialogFooter>
               <Button

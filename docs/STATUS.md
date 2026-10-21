@@ -10,6 +10,15 @@ mailbox provisioning, tracking, transactional API keys, outbound webhooks, an
 MIT-licensed SDK package, tests, deployment files, and open-core licensing
 guardrails.
 
+## Per-campaign unsubscribe control
+
+Campaign drafts have an **Include unsubscribe link** toggle, enabled by default.
+It controls the automatic HTML/plaintext footer and List-Unsubscribe headers.
+The choice is preserved when duplicating campaigns and snapshotted onto recipient
+jobs for scheduled, recurring, A/B and retried sends. Existing campaigns and jobs
+remain enabled on upgrade. Template-authored links (including
+`{{unsubscribe_url}}`) remain intact, and suppression enforcement is unchanged.
+
 ## Gmail mail workspace overhaul
 
 The 18 October 2026 interface overhaul introduces a Gmail-shaped mail shell with
