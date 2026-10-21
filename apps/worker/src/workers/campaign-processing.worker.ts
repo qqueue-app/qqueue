@@ -205,16 +205,17 @@ export function startCampaignProcessingWorker() {
       // otherwise pay for 10k MJML compilations to produce 10k near-identical
       // documents.
       //
-      // `footerNote` is deliberately absent. A campaign is bulk, so the send
-      // worker prints the address beside the unsubscribe link; supplying it
-      // here as well would print it twice.
+      // Legacy layouts leave the address to the send worker; custom layouts
+      // mark their address so the send-time footer does not repeat it.
       const organization = await prisma.organization.findUnique({
         where: { id: campaign.organizationId },
         select: {
           brandName: true,
           logoUrl: true,
           accentColor: true,
-          brandingEnabled: true
+          brandingEnabled: true,
+          layoutHtml: true,
+          footerNote: true
         }
       });
 
@@ -222,6 +223,10 @@ export function startCampaignProcessingWorker() {
       if (organization?.brandingEnabled && templateHtml) {
         const rendered = await renderHtmlAsEmailSafe(templateHtml, {
           branding: {
+            layoutHtml: organization.layoutHtml ?? undefined,
+            footerNote: organization.layoutHtml
+              ? organization.footerNote ?? undefined
+              : undefined,
             brandName: organization.brandName ?? undefined,
             logoUrl: organization.logoUrl ?? undefined,
             accentColor: organization.accentColor ?? undefined

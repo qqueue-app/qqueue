@@ -192,3 +192,29 @@ describe("renderHtmlAsEmailSafe with a complete document", () => {
     expect(result.html).toContain("<table");
   });
 });
+
+describe("custom branding layouts", () => {
+  const layoutHtml = '<html><body><header>{{brand_name}}</header><main>{{content}}</main><footer>{{footer_note}}</footer></body></html>';
+  it("uses the saved HTML without rewriting layout or body", async () => {
+    const result = await renderHtmlAsEmailSafe('<p>{{firstName}} $&</p>', {
+      branding: { layoutHtml, brandName: "Acme <Co>", footerNote: "Address" }
+    });
+    expect(result.usedFallback).toBe(false);
+    expect(result.html).toContain('<header>Acme &lt;Co&gt;</header>');
+    expect(result.html).toContain('<main><p>{{firstName}} $&</p></main>');
+    expect(result.html).toContain('qq-branding-footer-note');
+    expect(result.html).not.toContain("qq-body");
+  });
+  it("keeps the body when a stored layout has no content slot", async () => {
+    expect(await renderHtmlAsEmailSafe("<p>Body</p>", { branding: { layoutHtml: "<p>Broken</p>" } }))
+      .toMatchObject({ html: "<p>Body</p>", usedFallback: true });
+  });
+  it("honours the branding switch even when a custom layout exists", async () => {
+    const result = await renderHtmlAsEmailSafe("<p>Body</p>", { branding: { layoutHtml, brandingEnabled: false } });
+    expect(result.html).toBe("<p>Body</p>");
+  });
+  it("preserves complete email documents that supply their own layout", async () => {
+    const html = '<html><body>Existing full document</body></html>';
+    expect((await renderHtmlAsEmailSafe(html, { branding: { layoutHtml } })).html).toBe(html);
+  });
+});

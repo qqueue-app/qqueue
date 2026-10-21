@@ -1,3 +1,4 @@
+import { BRANDING_FOOTER_MARKER } from "@qqueue/shared";
 import { DelayedError, Worker } from "bullmq";
 import {
   SMTPProvider,
@@ -254,7 +255,11 @@ export function startEmailSendingWorker() {
             ? appendUnsubscribeFooter(
                 trackedHtml,
                 unsubscribeUrl,
-                footerOptions
+                {
+                  note: trackedHtml?.includes(BRANDING_FOOTER_MARKER)
+                    ? null
+                    : footerOptions.note
+                }
               )
             : trackedHtml;
           const text = unsubscribeUrl

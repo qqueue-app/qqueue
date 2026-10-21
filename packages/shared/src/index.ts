@@ -1,3 +1,5 @@
+export * from "./branding-layout.js";
+import { brandingLayoutError } from "./branding-layout.js";
 import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
 
@@ -1081,6 +1083,11 @@ export const organizationBrandingSchema = z.object({
    * obligations on bulk mail, not styling.
    */
   brandingEnabled: z.boolean(),
+  layoutHtml: z.preprocess(emptyToNull, z.string().nullable().optional())
+    .superRefine((html, ctx) => {
+      const error = html == null ? null : brandingLayoutError(html);
+      if (error) ctx.addIssue({ code: z.ZodIssueCode.custom, message: error });
+    }),
 });
 
 export type OrganizationBrandingInput = z.infer<

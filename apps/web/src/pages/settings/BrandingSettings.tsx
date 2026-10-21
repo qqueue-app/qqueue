@@ -1,3 +1,21 @@
+import { BodyEditor } from "../../components/editor/BodyEditor.js";
+import {
+  BRANDING_STARTERS,
+  brandingLayoutError,
+  createBrandingLayout,
+  renderBrandingLayout,
+  type BrandingStarter
+} from "@qqueue/shared";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "../../components/ui/alert-dialog.js";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ImagePlus, Info, Trash2 } from "lucide-react";
 import { PageContainer } from "../../components/PageContainer.js";
@@ -5,7 +23,7 @@ import { PageHeader } from "../../components/PageHeader.js";
 import {
   Field,
   FormSection,
-  FormSections,
+  FormSections
 } from "../../components/settings/FormLayout.js";
 import { Button } from "../../components/ui/button.js";
 import { IconButton } from "../../components/ui/icon-button.js";
@@ -17,7 +35,11 @@ import { Textarea } from "../../components/ui/textarea.js";
 import { api, type OrganizationBranding } from "../../lib/api.js";
 import { qk } from "../../lib/query-client.js";
 import { useSession } from "../../lib/session-context.js";
-import { errorMessage, useApiMutation, useOrgQuery } from "../../lib/use-api.js";
+import {
+  errorMessage,
+  useApiMutation,
+  useOrgQuery
+} from "../../lib/use-api.js";
 
 /**
  * How this organization's mail looks to the people who receive it.
@@ -36,7 +58,7 @@ const EMPTY: OrganizationBranding = {
   logoUrl: null,
   accentColor: null,
   footerNote: null,
-  brandingEnabled: true,
+  brandingEnabled: true
 };
 
 /** Form state keeps strings; the API takes nulls. Empty means "add nothing". */
@@ -46,6 +68,7 @@ interface BrandingForm {
   accentColor: string;
   footerNote: string;
   brandingEnabled: boolean;
+  layoutHtml: string | null;
 }
 
 function toForm(branding: OrganizationBranding): BrandingForm {
@@ -55,6 +78,7 @@ function toForm(branding: OrganizationBranding): BrandingForm {
     accentColor: branding.accentColor ?? "",
     footerNote: branding.footerNote ?? "",
     brandingEnabled: branding.brandingEnabled,
+    layoutHtml: branding.layoutHtml ?? null
   };
 }
 
@@ -66,10 +90,13 @@ function toPayload(form: BrandingForm): OrganizationBranding {
     accentColor: trim(form.accentColor),
     footerNote: trim(form.footerNote),
     brandingEnabled: form.brandingEnabled,
+    layoutHtml: form.layoutHtml
   };
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
+const PREVIEW_CONTENT =
+  '<h1 style="font-size:24px;line-height:1.3;">Spring release is live</h1><p>Hi Dana, we shipped three things you asked for.</p><p><a href="https://example.com">See what’s new</a></p>';
 
 export function BrandingSettings() {
   const { currentOrganizationId, currentOrganization } = useSession();
@@ -80,6 +107,12 @@ export function BrandingSettings() {
   const [form, setForm] = useState<BrandingForm>(toForm(EMPTY));
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const seededOrganization = useRef<string | null>(null);
+  const activeOrganization = useRef(currentOrganizationId);
+  activeOrganization.current = currentOrganizationId;
+  const [pendingStarter, setPendingStarter] = useState<
+    BrandingStarter | "original" | null
+  >(null);
 
   const branding = useOrgQuery(
     currentOrganizationId,
@@ -87,35 +120,49 @@ export function BrandingSettings() {
     (organizationId) => api.getOrganizationBranding(organizationId)
   );
 
-  // Seed the form once the server value lands. Keyed on the fetched object so
-  // switching organizations reseeds instead of stranding the previous org's
-  // values in the inputs.
+  // Refetches must not overwrite a design the user is editing.
   useEffect(() => {
-    if (branding.data) {
+    if (
+      branding.data &&
+      currentOrganizationId &&
+      seededOrganization.current !== currentOrganizationId
+    ) {
       setForm(toForm(branding.data));
+      seededOrganization.current = currentOrganizationId;
+      setPendingStarter(null);
     }
-  }, [branding.data]);
+  }, [branding.data, currentOrganizationId]);
 
   const save = useApiMutation(
-    (payload: OrganizationBranding) =>
-      api.updateOrganizationBranding(currentOrganizationId!, payload),
+    ({
+      organizationId,
+      payload
+    }: {
+      organizationId: string;
+      payload: OrganizationBranding;
+    }) => api.updateOrganizationBranding(organizationId, payload),
     {
       successMessage: "Branding saved.",
       errorMessage: "Unable to save branding",
-      invalidates: [qk.organizationBranding(currentOrganizationId ?? "")],
+      invalidates: ({ organizationId }) => [
+        qk.organizationBranding(organizationId)
+      ]
     }
   );
 
   async function uploadLogo(file: File) {
     if (!currentOrganizationId) return;
+    const organizationId = currentOrganizationId;
     setUploading(true);
     try {
       // Through the image pipeline, not attachments: the returned URL is public
       // and absolute because a recipient's mail client has no session.
       const image = await api.uploadImage(file, {
-        organizationId: currentOrganizationId,
+        organizationId
       });
-      setForm((previous) => ({ ...previous, logoUrl: image.url }));
+      if (activeOrganization.current === organizationId) {
+        setForm((previous) => ({ ...previous, logoUrl: image.url }));
+      }
     } catch (error) {
       const { toast } = await import("sonner");
       toast.error(errorMessage(error, "Unable to upload the logo"));
@@ -128,7 +175,11 @@ export function BrandingSettings() {
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!currentOrganizationId) return;
-    save.mutate(toPayload(form));
+    if (layoutError || accentInvalid || branding.isError || !canEdit) return;
+    save.mutate({
+      organizationId: currentOrganizationId,
+      payload: toPayload(form)
+    });
   }
 
   const accent = HEX.test(form.accentColor.trim())
@@ -137,11 +188,41 @@ export function BrandingSettings() {
   const accentInvalid =
     form.accentColor.trim() !== "" && !HEX.test(form.accentColor.trim());
 
+  const layoutSource = form.layoutHtml ?? createBrandingLayout(form);
+  const visualLayout = renderBrandingLayout(layoutSource, "{{content}}", form);
+  const layoutError =
+    form.layoutHtml === null ? null : brandingLayoutError(form.layoutHtml);
+  const previewBody = form.brandingEnabled
+    ? renderBrandingLayout(layoutSource, PREVIEW_CONTENT, form)
+    : renderBrandingLayout(
+        '<html><body style="padding:24px;font-family:Arial,sans-serif;">{{content}}<p>{{footer_note}}</p></body></html>',
+        PREVIEW_CONTENT,
+        form
+      );
+  const previewFooter =
+    '<p style="text-align:center;font:12px Arial;color:#9aa5b1;">Unsubscribe</p>';
+  const previewHtml = /<\/body\s*>/i.test(previewBody)
+    ? previewBody.replace(/<\/body\s*>/i, (close) => `${previewFooter}${close}`)
+    : `${previewBody}${previewFooter}`;
+
+  function applyStarter(starter: BrandingStarter | "original") {
+    setForm((previous) => ({
+      ...previous,
+      layoutHtml:
+        starter === "original" ? null : createBrandingLayout(previous, starter)
+    }));
+  }
+
+  function chooseStarter(starter: BrandingStarter | "original") {
+    if (form.layoutHtml !== null) setPendingStarter(starter);
+    else applyStarter(starter);
+  }
+
   return (
     <>
       <PageHeader
         title="Branding"
-        description="Your logo, colours, and the footer on every campaign."
+        description="Edit your email branding visually, with your logo, colours, and reusable designs."
         breadcrumb={{ label: "Settings", to: "/settings" }}
         actions={
           canEdit ? (
@@ -150,14 +231,23 @@ export function BrandingSettings() {
                 type="button"
                 variant="secondary"
                 onClick={() => setForm(toForm(branding.data ?? EMPTY))}
-                disabled={save.isPending || branding.isLoading}
+                disabled={
+                  save.isPending || branding.isLoading || branding.isError
+                }
               >
                 Discard
               </Button>
               <Button
                 type="submit"
                 form="branding-form"
-                disabled={save.isPending || branding.isLoading}
+                disabled={
+                  save.isPending ||
+                  branding.isLoading ||
+                  branding.isError ||
+                  uploading ||
+                  Boolean(layoutError) ||
+                  accentInvalid
+                }
               >
                 {save.isPending ? <Spinner className="mr-2" /> : null}
                 Save changes
@@ -172,8 +262,19 @@ export function BrandingSettings() {
           <div className="flex justify-center py-12">
             <Spinner />
           </div>
+        ) : branding.isError ? (
+          <div role="alert" className="space-y-3">
+            <p>Your saved branding could not be loaded.</p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void branding.refetch()}
+            >
+              Try again
+            </Button>
+          </div>
         ) : (
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+          <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_28rem] xl:items-start">
             <form id="branding-form" onSubmit={submit}>
               <fieldset disabled={!canEdit} className="min-w-0 border-0 p-0">
                 <FormSections>
@@ -198,8 +299,131 @@ export function BrandingSettings() {
                   </FormSection>
 
                   <FormSection
-                    title="Identity"
-                    description="Shown at the top of your emails. Leave both empty and no header is added — nothing is ever stamped on your mail that you didn't choose."
+                    title="Email layout"
+                    description="Edit text, add images and links, and change formatting directly. Start with your saved branding or choose a design. Changes apply when you save."
+                  >
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {BRANDING_STARTERS.map((starter) => {
+                        const thumbnail = renderBrandingLayout(
+                          createBrandingLayout(form, starter.id),
+                          PREVIEW_CONTENT,
+                          form
+                        );
+                        return (
+                          <div
+                            key={starter.id}
+                            className="space-y-2 rounded-control border p-3"
+                          >
+                            <div className="pointer-events-none h-40 overflow-hidden rounded-control border bg-email-paper">
+                              <iframe
+                                key={thumbnail}
+                                title={`${starter.name} design preview`}
+                                sandbox=""
+                                srcDoc={thumbnail}
+                                tabIndex={-1}
+                                aria-hidden="true"
+                                className="h-[480px] w-[300%] origin-top-left scale-[0.333333] border-0"
+                              />
+                            </div>
+                            <p className="text-ui font-medium">
+                              {starter.name}
+                            </p>
+                            <p className="text-meta text-muted-foreground">
+                              {starter.description}
+                            </p>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => chooseStarter(starter.id)}
+                            >
+                              Use {starter.name.toLowerCase()}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email branding</Label>
+                      <BodyEditor
+                        value={visualLayout}
+                        ariaLabel="Email branding"
+                        allowSource={false}
+                        disabled={!canEdit}
+                        showVariables={false}
+                        onChange={(html) =>
+                          setForm((previous) => ({
+                            ...previous,
+                            layoutHtml: html
+                          }))
+                        }
+                        onUploadImage={async (file) => {
+                          const organizationId = currentOrganizationId;
+                          if (!organizationId)
+                            throw new Error("Select an organization first.");
+                          const image = await api.uploadImage(file, {
+                            organizationId
+                          });
+                          if (activeOrganization.current !== organizationId)
+                            throw new Error(
+                              "The organization changed. Reopen the editor to add this image."
+                            );
+                          return image.url;
+                        }}
+                      />
+                      <FieldHint>
+                        Your email’s message goes where {"{{content}}"} appears.
+                        Keep that marker in place while editing the branding
+                        around it.
+                      </FieldHint>
+                      {layoutError ? (
+                        <p role="alert" className="text-meta text-destructive">
+                          {layoutError}
+                        </p>
+                      ) : null}
+                    </div>
+                    <details className="rounded-control border p-3">
+                      <summary className="cursor-pointer text-ui font-medium">
+                        Advanced: HTML source
+                      </summary>
+                      <Field className="mt-3">
+                        <Label htmlFor="brandingHtml">Branding HTML</Label>
+                        <Textarea
+                          id="brandingHtml"
+                          rows={12}
+                          spellCheck={false}
+                          className="font-mono text-xs"
+                          aria-invalid={Boolean(layoutError)}
+                          value={layoutSource}
+                          onChange={(event) =>
+                            setForm((previous) => ({
+                              ...previous,
+                              layoutHtml: event.target.value
+                            }))
+                          }
+                        />
+                        <FieldHint>
+                          Optional placeholders:{" "}
+                          {
+                            "{{brand_name}}, {{logo_url}}, {{accent_color}}, {{footer_note}}"
+                          }
+                          . These use the saved identity fields. Keep{" "}
+                          {"{{content}}"} exactly once.
+                        </FieldHint>
+                      </Field>
+                    </details>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => chooseStarter("original")}
+                      disabled={form.layoutHtml === null}
+                    >
+                      Use original layout
+                    </Button>
+                  </FormSection>
+                  <FormSection
+                    title="Saved identity"
+                    description="Used to fill starter designs and HTML placeholders. In a customized design, edit its text and images directly in the editor above."
                   >
                     <Field>
                       <Label htmlFor="brandName">Brand name</Label>
@@ -284,7 +508,7 @@ export function BrandingSettings() {
                           onChange={(event) =>
                             setForm({
                               ...form,
-                              accentColor: event.target.value,
+                              accentColor: event.target.value
                             })
                           }
                         />
@@ -308,7 +532,9 @@ export function BrandingSettings() {
                         rows={3}
                         maxLength={500}
                         value={form.footerNote}
-                        placeholder={"Acme Inc\n400 Market St, Springfield IL 62704"}
+                        placeholder={
+                          "Acme Inc\n400 Market St, Springfield IL 62704"
+                        }
                         onChange={(event) =>
                           setForm({ ...form, footerNote: event.target.value })
                         }
@@ -332,7 +558,8 @@ export function BrandingSettings() {
                         <code className="rounded-control bg-surface-sunken px-1 py-0.5">
                           {"{{unsubscribe_url}}"}
                         </code>{" "}
-                        in a campaign template and the automatic one steps aside.
+                        in a campaign template and the automatic one steps
+                        aside.
                       </p>
                     </div>
                   </FormSection>
@@ -340,76 +567,53 @@ export function BrandingSettings() {
               </fieldset>
             </form>
 
-            <aside className="lg:sticky lg:top-4">
+            <aside className="xl:sticky xl:top-4">
               <p className="mb-2 text-eyebrow font-semibold uppercase tracking-wide text-text-tertiary">
-                Preview
+                Live preview
               </p>
-              {/*
-                --email-paper, not --surface: this stands for what a mail client
-                paints behind the message, so it must not follow the app if the
-                app ever gets a dark palette. A preview that goes dark is lying
-                about the email.
-              */}
-              <div className="rounded-card border border-border bg-email-paper p-5 shadow-card">
-                {/* Header, accent, and copyright are the frame — the switch
-                    governs all three. The address and unsubscribe link below
-                    preview the default campaign footer. */}
-                {form.brandingEnabled ? (
-                  form.logoUrl ? (
-                    <img
-                      src={form.logoUrl}
-                      alt=""
-                      className="mx-auto max-h-10 object-contain"
-                    />
-                  ) : form.brandName.trim() ? (
-                    <p
-                      className="text-center text-title font-semibold tracking-tight"
-                      style={{ color: accent }}
-                    >
-                      {form.brandName}
-                    </p>
-                  ) : null
-                ) : null}
-
-                <div className="mt-4 text-body text-[#1f2933]">
-                  <p className="mb-2 text-section font-semibold text-[#102a43]">
-                    Spring release is live
-                  </p>
-                  <p className="mb-2">
-                    Hi Dana, we shipped three things you asked for.
-                  </p>
-                  <p>
-                    <span
-                      style={
-                        form.brandingEnabled ? { color: accent } : undefined
-                      }
-                    >
-                      See what&rsquo;s new
-                    </span>
-                  </p>
-                </div>
-
-                <div className="mt-5 border-t border-[#eef2f6] pt-3 text-center text-meta text-[#9aa5b1]">
-                  {form.brandingEnabled && form.brandName.trim() ? (
-                    <span className="block">&copy; {form.brandName}</span>
-                  ) : null}
-                  {form.footerNote.trim() ? (
-                    <span className="block whitespace-pre-line">
-                      {form.footerNote}
-                    </span>
-                  ) : null}
-                  <span className="mt-2 block underline">Unsubscribe</span>
-                </div>
-              </div>
+              <iframe
+                key={previewHtml}
+                title="Branding preview"
+                sandbox=""
+                srcDoc={previewHtml}
+                className="h-[36rem] w-full rounded-card border bg-email-paper"
+              />
               <p className="mt-2 text-meta text-text-tertiary">
-                {form.brandingEnabled
-                  ? "Applied to campaigns, recurring sends, and anything you compose."
-                  : "Templates send as authored, with the campaign unsubscribe footer when enabled."}
+                Sample campaign content. The unsubscribe link follows each
+                campaign’s setting. Full email documents keep their own design.
               </p>
             </aside>
           </div>
         )}
       </PageContainer>
+      <AlertDialog
+        open={pendingStarter !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingStarter(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace this branding design?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your logo, colours, brand name, and address will be kept. This
+              replaces the design you are editing. Nothing changes for sent
+              emails until you save.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingStarter) applyStarter(pendingStarter);
+                setPendingStarter(null);
+              }}
+            >
+              Replace layout
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

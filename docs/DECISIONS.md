@@ -1450,3 +1450,37 @@ upgrade behavior. The toggle does not rewrite template-authored links, including
 `{{unsubscribe_url}}`. Suppressions remain organization-wide and enforced during
 fan-out and delivery regardless of this setting. Other bulk sending paths retain
 their existing automatic unsubscribe behavior.
+
+## Visual organization branding editor (2026-10-21)
+
+`Organization.layoutHtml` is nullable: adding the editor must not replace an
+organization's saved logo, colours, name or address, or change mail already
+composed. Null retains the original renderer. The editor generates a starting
+layout from the saved identity. Rich text is the primary editing surface, with
+the existing BodyEditor formatting and image-upload tools; HTML is an optional
+advanced view. The generated starters remain editable schema nodes rather than
+opaque HTML blocks. Choosing a starter or editing the design only changes
+outgoing mail after Save. Returning to the original layout clears this column,
+leaving all identity fields intact. Replacing customized source requires a local
+confirmation. Background query refetches do not overwrite work in progress.
+
+Custom HTML uses exactly one `{{content}}` slot. `{{brand_name}}`, `{{logo_url}}`,
+`{{accent_color}}` and `{{footer_note}}` resolve from saved identity values, escaped
+for HTML; message HTML is inserted verbatim in a single pass so recipient merge
+fields are preserved. The browser-safe helper in `@qqueue/shared` is used by the
+editor preview, template preview and email engine. Source is bounded to 100,000
+characters. Email previews use an iframe with an empty sandbox. The visual
+editor uses the existing schema and preserves unsupported markup as opaque raw
+blocks. Owner/admin write permissions remain enforced.
+
+Campaign, composer and recurring sends use the existing delivery pipeline. A
+complete email document still owns its own scaffold and is not nested inside the
+organization layout. A marker on the rendered address prevents the HTML
+unsubscribe footer from repeating it; the plaintext footer keeps its address.
+Per-campaign unsubscribe settings and organization-wide suppressions continue to
+apply. Existing queued jobs retain their already-rendered HTML.
+
+Visual edits store the edited HTML layout. Saved identity fields remain available
+for rebuilding starters and filling explicit source placeholders; customized text
+and images are edited directly in the design. This avoids parsing a designed
+footer back into identity fields and overwriting the user's original values.

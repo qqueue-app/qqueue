@@ -1669,3 +1669,17 @@ describe("campaign unsubscribe contracts", () => {
     ).toBe(false);
   });
 });
+
+describe("branding HTML contracts", () => {
+  const base = { brandName: "Acme", logoUrl: null, accentColor: null, footerNote: null, brandingEnabled: true };
+  it("preserves custom source and permits returning to legacy rendering", () => {
+    const layoutHtml = '  <html><body>{{ content }}</body></html>\n';
+    expect(organizationBrandingSchema.parse({ ...base, layoutHtml }).layoutHtml).toBe(layoutHtml);
+    expect(organizationBrandingSchema.parse({ ...base, layoutHtml: null }).layoutHtml).toBeNull();
+    expect(organizationBrandingSchema.parse(base).layoutHtml).toBeUndefined();
+    expect(organizationBrandingSchema.parse({ ...base, layoutHtml: " " }).layoutHtml).toBeNull();
+  });
+  it.each(["<p>No body</p>", "{{content}}{{content}}", "x".repeat(100_001)])("rejects invalid or oversized layout source", (layoutHtml) => {
+    expect(organizationBrandingSchema.safeParse({ ...base, layoutHtml }).success).toBe(false);
+  });
+});

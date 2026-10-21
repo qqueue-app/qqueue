@@ -683,20 +683,31 @@ describe("campaign branding", () => {
     expect(html).not.toContain("Acme");
   });
 
-  it("never puts the address in the body — the send worker owns it for bulk", async () => {
+  it("keeps the legacy address out of the body — the send worker owns it for bulk", async () => {
     sendingCampaign();
     prismaMock.organization.findUnique.mockResolvedValue({
       brandName: "Acme",
       logoUrl: null,
       accentColor: null,
-      brandingEnabled: true
+      brandingEnabled: true,
+      footerNote: "Legacy address"
     } as never);
 
     await run({ id: "j1", data: { campaignId: "c1" } });
 
-    // footerNote is not even selected, so it cannot reach the wrap and be
-    // printed a second time beside the unsubscribe link.
-    const select = prismaMock.organization.findUnique.mock.calls[0][0].select;
-    expect(select).not.toHaveProperty("footerNote");
+    const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
+    expect(html).not.toContain("Legacy address");
   });
+  it("renders custom branding with the saved identity and recipient merge fields", async () => {
+    sendingCampaign();
+    prismaMock.organization.findUnique.mockResolvedValue({ brandName: "Existing brand", footerNote: "Existing address", logoUrl: "https://example.com/logo.png", accentColor: "#123456", brandingEnabled: true, layoutHtml: '<html><body><header>{{brand_name}}</header>{{content}}<footer>{{footer_note}}</footer></body></html>' } as never);
+    await run({ id: "custom", data: { campaignId: "c1" } });
+    const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
+    expect(html).toContain("<header>Existing brand</header>");
+    expect(html).toContain("Hello Ann Bee");
+    expect(html).toContain("Existing address");
+    expect(html).toContain("qq-branding-footer-note");
+    expect(html).not.toContain("{{");
+  });
+
 });

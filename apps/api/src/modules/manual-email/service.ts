@@ -131,10 +131,14 @@ async function orgBranding(organizationId: string): Promise<EmailBranding> {
       logoUrl: true,
       accentColor: true,
       footerNote: true,
+      layoutHtml: true,
+      brandingEnabled: true,
     },
   });
 
   return {
+    layoutHtml: organization?.layoutHtml ?? undefined,
+    brandingEnabled: organization?.brandingEnabled,
     brandName: organization?.brandName ?? undefined,
     logoUrl: organization?.logoUrl ?? undefined,
     accentColor: organization?.accentColor ?? undefined,

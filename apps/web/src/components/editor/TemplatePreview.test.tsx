@@ -96,3 +96,9 @@ describe("TemplatePreview", () => {
     expect(getFrame()).toHaveClass("max-w-email");
   });
 });
+
+it("previews the saved HTML layout with identity and content in a sandbox", () => {
+  renderWithProviders(<TemplatePreview subject="Custom" html="<p>Hello</p>" branding={{ brandName: "Acme", logoUrl: null, accentColor: null, footerNote: null, brandingEnabled: true, layoutHtml: '<html><body><header>{{brand_name}}</header><main>{{content}}</main></body></html>' }} />);
+  expect(getFrame()).toHaveAttribute("sandbox", "");
+  expect(getFrame().getAttribute("srcdoc")).toContain("<header>Acme</header><main><p>Hello</p></main>");
+});

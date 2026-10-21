@@ -310,6 +310,24 @@ async function main() {
       );
     }
 
+    // A nullable layout preserves existing organizations; customization retains identity.
+    const legacyBranding = await request(app).get(`/api/v1/organizations/${organizationId}/branding`)
+      .set("Authorization", auth).expect(200);
+    if (legacyBranding.body.data.layoutHtml !== null) throw new Error("New layout changed the legacy branding default");
+    const customBranding = {
+      brandName: "CustomBranding",
+      logoUrl: "https://example.com/logo.png",
+      accentColor: "#123456",
+      footerNote: "PreservedAddress",
+      brandingEnabled: true,
+      layoutHtml: '<html><body><header>{{brand_name}}</header><img src="{{logo_url}}" alt="Logo" /><main>{{content}}</main><footer>{{footer_note}}</footer></body></html>'
+    };
+    await request(app).put(`/api/v1/organizations/${organizationId}/branding`)
+      .set("Authorization", auth).send(customBranding).expect(200);
+    const savedBranding = await request(app).get(`/api/v1/organizations/${organizationId}/branding`)
+      .set("Authorization", auth).expect(200);
+    if (savedBranding.body.data.layoutHtml !== customBranding.layoutHtml || savedBranding.body.data.logoUrl !== customBranding.logoUrl) throw new Error("Branding HTML or existing logo did not round-trip");
+
     // Campaign choices travel through API -> fan-out -> queue -> actual SMTP.
     const campaignContact = await prisma.contact.create({
       data: { organizationId, email: "campaign-recipient@example.com" }
@@ -359,6 +377,7 @@ async function main() {
           "Campaign job lost unsubscribe setting or bulk classification"
         );
       const raw = smtpMessages[messageStart] ?? "";
+      if (!raw.includes("CustomBranding") || !raw.includes("qq-branding-footer-note")) throw new Error("Campaign SMTP is missing custom branding");
       if (
         /^List-Unsubscribe:/im.test(raw) !== enabled ||
         /^List-Unsubscribe-Post:/im.test(raw) !== enabled ||

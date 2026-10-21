@@ -311,3 +311,10 @@ describe("admin role changes cannot bypass mailbox restrictions", () => {
     expect(prismaMock.smtpConnectionGrant.deleteMany).not.toHaveBeenCalled();
   });
 });
+
+it("persists custom branding HTML without losing the existing identity", async () => {
+  prismaMock.organizationMember.findUnique.mockResolvedValue({ role: "OWNER" } as never);
+  const payload = { brandName: "Existing brand", logoUrl: "https://example.com/logo.png", accentColor: "#123456", footerNote: "Address", brandingEnabled: true, layoutHtml: "<html><body>{{content}}</body></html>" };
+  await organizationService.updateBranding("org_1", "user_1", payload);
+  expect(prismaMock.organization.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "org_1" }, data: payload, select: expect.objectContaining({ layoutHtml: true, logoUrl: true }) }));
+});

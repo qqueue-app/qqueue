@@ -10,6 +10,23 @@ mailbox provisioning, tracking, transactional API keys, outbound webhooks, an
 MIT-licensed SDK package, tests, deployment files, and open-core licensing
 guardrails.
 
+## Visual branding editor (2026-10-21)
+
+Settings → Branding opens in a rich text editor with formatting, links, image
+uploads and a sandboxed live preview. HTML source is an optional advanced view,
+with Current branding, Accent header and Card starters. Each starter shows a
+sandboxed thumbnail using the saved identity before it is selected. Existing logo, name,
+colours and address remain saved; a nullable `Organization.layoutHtml` keeps the
+original renderer until a customized design is explicitly saved. The editor
+starts with the saved logo, name and address resolved visually;
+`{{content}}` marks where each email body appears. Identity placeholders remain
+available in the advanced source view.
+Replacing a customized design requires confirmation, and a reset restores the original
+renderer. Custom layouts flow through campaign, manual and recurring sends and
+template previews. Complete email documents retain their own layout. Address
+markers avoid duplicate HTML addresses in the send-time unsubscribe footer;
+plaintext and unsubscribe controls remain independent.
+
 ## Per-campaign unsubscribe control
 
 Campaign drafts have an **Include unsubscribe link** toggle, enabled by default.

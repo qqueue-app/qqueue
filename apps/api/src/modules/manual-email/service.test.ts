@@ -693,3 +693,12 @@ describe("manualEmailService.preview", () => {
     expect(result.recipients.total).toBe(0);
   });
 });
+
+
+it("uses custom organization branding for composer sends", async () => {
+  prismaMock.organization.findUnique.mockResolvedValue({ brandName: "Existing brand", layoutHtml: "<html><body>{{content}}</body></html>", brandingEnabled: true } as never);
+  renderHtmlAsEmailSafe.mockResolvedValue({ html: "<custom>Body</custom>", errors: [], usedFallback: false });
+  await manualEmailService.send({ organizationId: "org_1", to: ["a@x.com"], subject: "Hi", html: "<p>Body</p>" }, "user_1");
+  expect(renderHtmlAsEmailSafe).toHaveBeenCalledWith("<p>Body</p>", expect.objectContaining({ branding: expect.objectContaining({ layoutHtml: "<html><body>{{content}}</body></html>", brandingEnabled: true }) }));
+  expect(send.mock.calls[0][0].html).toBe("<custom>Body</custom>");
+});

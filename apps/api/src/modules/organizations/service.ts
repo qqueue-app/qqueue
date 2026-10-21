@@ -136,6 +136,7 @@ export const organizationService = {
         accentColor: true,
         footerNote: true,
         brandingEnabled: true,
+        layoutHtml: true,
       },
     });
 
@@ -161,6 +162,7 @@ export const organizationService = {
         accentColor: true,
         footerNote: true,
         brandingEnabled: true,
+        layoutHtml: true,
       },
     });
   },

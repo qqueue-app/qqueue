@@ -215,3 +215,11 @@ describe("processRecurringSend", () => {
     expect(update.data.nextRunAt).toBeInstanceOf(Date);
   });
 });
+
+
+it("passes saved layout and branding switch into recurring rendering", async () => {
+  prismaMock.recurringSend.findUnique.mockResolvedValue(makeSend() as never);
+  prismaMock.organization.findUnique.mockResolvedValue({ brandName: "Acme", layoutHtml: "<html><body>{{content}}</body></html>", footerNote: "Address", brandingEnabled: false } as never);
+  await processRecurringSend(job);
+  expect(h.renderHtmlAsEmailSafe).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ branding: expect.objectContaining({ layoutHtml: "<html><body>{{content}}</body></html>", footerNote: "Address", brandingEnabled: false }) }));
+});

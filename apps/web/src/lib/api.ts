@@ -580,6 +580,7 @@ export interface EmailAttachment {
 /** An image embedded in email HTML. `url` is public, absolute, and permanent. */
 /** How an organization's outbound mail looks. Null means "add nothing". */
 export interface OrganizationBranding {
+  layoutHtml?: string | null;
   brandName: string | null;
   logoUrl: string | null;
   accentColor: string | null;

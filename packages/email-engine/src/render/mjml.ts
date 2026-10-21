@@ -1,3 +1,4 @@
+import { brandingLayoutError, renderBrandingLayout } from "@qqueue/shared";
 import mjml2html from "mjml";
 
 // Email-safe HTML rendering via MJML.
@@ -72,6 +73,8 @@ export async function renderMjml(
 /**
 /** Branding applied to the email-safe layout. All fields are optional. */
 export interface EmailBranding {
+  layoutHtml?: string;
+  brandingEnabled?: boolean;
   /**
    * Brand/product name shown in the header wordmark and footer copyright. When
    * omitted, NO header or copyright line is rendered (no default vendor name).
@@ -252,11 +255,23 @@ export async function renderHtmlAsEmailSafe(
   bodyHtml: string,
   options: RenderMjmlOptions & { branding?: EmailBranding } = {}
 ): Promise<RenderMjmlResult> {
-  if (isFullHtmlDocument(bodyHtml)) {
+  if (
+    options.branding?.brandingEnabled === false ||
+    isFullHtmlDocument(bodyHtml)
+  ) {
     return { html: bodyHtml, errors: [], usedFallback: false };
   }
 
   const { branding, ...mjmlOptions } = options;
+  if (branding?.layoutHtml) {
+    const error = brandingLayoutError(branding.layoutHtml);
+    if (error) return { html: bodyHtml, errors: [error], usedFallback: true };
+    return {
+      html: renderBrandingLayout(branding.layoutHtml, bodyHtml, branding),
+      errors: [],
+      usedFallback: false
+    };
+  }
   return renderMjml(wrapHtmlInMjml(bodyHtml, branding), {
     fallbackHtml: bodyHtml,
     ...mjmlOptions

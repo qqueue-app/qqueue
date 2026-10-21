@@ -414,6 +414,9 @@ importers:
 
   packages/email-engine:
     dependencies:
+      '@qqueue/shared':
+        specifier: workspace:*
+        version: link:../shared
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0

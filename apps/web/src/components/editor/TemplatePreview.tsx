@@ -1,3 +1,4 @@
+import { renderBrandingLayout } from "@qqueue/shared";
 import { useMemo, useState } from "react";
 import { Monitor, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -123,9 +124,11 @@ export function TemplatePreview({
   // preview a lie.
   const srcDoc = useMemo(() => {
     const applied = applyVariables(html, data);
-    return isFullHtmlDocument(applied)
-      ? applied
-      : buildDocument(applied, brandingChrome(branding));
+    if (isFullHtmlDocument(applied)) return applied;
+    if (branding?.brandingEnabled && branding.layoutHtml) {
+      return renderBrandingLayout(branding.layoutHtml, applied, branding);
+    }
+    return buildDocument(applied, brandingChrome(branding));
   }, [html, data, branding]);
 
   return (

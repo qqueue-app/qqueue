@@ -1176,3 +1176,12 @@ describe("campaign unsubscribe toggle delivery", () => {
     });
   });
 });
+
+
+it("does not duplicate an address already rendered by a custom HTML layout", async () => {
+  prismaMock.emailJob.findUnique.mockResolvedValue({ ...baseEmailJob, origin: "CAMPAIGN", isBulk: true, html: '<html><body><span qq-branding-footer-note>Address</span>Body</body></html>', organization: { footerNote: "Address" } } as never);
+  send.mockResolvedValue({ provider: "smtp", messageId: "mid1", accepted: ["to@example.com"], rejected: [] });
+  await run(makeJob());
+  expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(expect.any(String), expect.any(String), { note: null });
+  expect(h.appendUnsubscribeFooterText).toHaveBeenCalledWith(expect.any(String), expect.any(String), { note: "Address" });
+});

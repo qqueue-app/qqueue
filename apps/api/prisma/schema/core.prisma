@@ -262,6 +262,8 @@ model Organization {
   brandName            String?
   logoUrl              String?
   accentColor          String?
+  // Null keeps the existing branding renderer and all saved identity fields.
+  layoutHtml           String?
   // Small print under the footer — in practice a postal address, which
   // anti-spam law expects on bulk mail.
   footerNote           String?

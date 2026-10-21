@@ -150,15 +150,22 @@ export async function processRecurringSend(job: {
     // Same MJML email-safe wrap the one-off manual send applies.
     let html: string | undefined;
     if (rawHtml) {
-      // Branding minus the footer note. A recurring send is bulk, so the send
-      // worker appends the note beside the unsubscribe link; passing it here as
-      // well would print the organization's address twice in one message.
+      // Only custom layouts render their own marked address; legacy bulk
+      // layouts leave it to the send-time unsubscribe footer.
       const organization = await prisma.organization.findUnique({
         where: { id: send.organizationId },
-        select: { brandName: true, logoUrl: true, accentColor: true }
+        select: {
+          brandName: true, logoUrl: true, accentColor: true,
+          layoutHtml: true, footerNote: true, brandingEnabled: true
+        }
       });
       const rendered = await renderHtmlAsEmailSafe(rawHtml, {
         branding: {
+          layoutHtml: organization?.layoutHtml ?? undefined,
+          brandingEnabled: organization?.brandingEnabled,
+          footerNote: organization?.layoutHtml
+            ? organization.footerNote ?? undefined
+            : undefined,
           brandName: organization?.brandName ?? undefined,
           logoUrl: organization?.logoUrl ?? undefined,
           accentColor: organization?.accentColor ?? undefined
