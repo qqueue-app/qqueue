@@ -48,6 +48,9 @@ describe("TemplatePreview", () => {
     // sandbox="" — template HTML must not run scripts or reach the parent.
     expect(frame).toHaveAttribute("sandbox", "");
     expect(frame.getAttribute("srcdoc")).toContain("<p>Body copy</p>");
+    expect(frame.getAttribute("srcdoc")).toContain("max-width: 1000px");
+    expect(frame.getAttribute("srcdoc")).toContain('padding: 16px;');
+    expect(frame.getAttribute("srcdoc")).not.toContain("qq-card");
   });
 
   it("substitutes variables into the body html", () => { renderWithProviders(

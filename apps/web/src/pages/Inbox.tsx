@@ -1,3 +1,4 @@
+import { resolveMailReplyRecipients } from "@qqueue/shared";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { getSession } from "../lib/session.js";
 import { useReadingPreference } from "../lib/reading-preference.js";
@@ -289,6 +290,11 @@ function InboxWorkspace({
   );
   const [connectOpen, setConnectOpen] = useState(false);
   const [replyTarget, setReplyTarget] = useState<InboundMessage | null>(null);
+  const [initialReplyAll, setInitialReplyAll] = useState(false);
+  function openReply(message: InboundMessage, all = false) {
+    setInitialReplyAll(all);
+    setReplyTarget(message);
+  }
   const navigate = useNavigate();
   const forwardIds = useRef(new Map<string, string>());
   const forward = useApiMutation(
@@ -450,6 +456,21 @@ function InboxWorkspace({
       openedThread
     );
   }, [threads, openedThread, conversationQuery.data]);
+  const latestMessage = selectedThread?.latestMessage;
+  const latestMailboxEmail = accounts.find(
+    (account) => account.id === latestMessage?.inboxAccountId
+  )?.email ?? "";
+  const replyOnly = latestMessage
+    ? resolveMailReplyRecipients(latestMessage, [latestMailboxEmail], false)
+    : null;
+  const replyEveryone = latestMessage
+    ? resolveMailReplyRecipients(latestMessage, [latestMailboxEmail], true)
+    : null;
+  const canReplyAllLatest =
+    replyOnly &&
+    replyEveryone &&
+    (replyOnly.to.join() !== replyEveryone.to.join() ||
+      replyEveryone.cc.length > 0);
 
   const unreadCount = filteredMessages.filter(
     (message) => !message.readAt
@@ -852,12 +873,12 @@ function InboxWorkspace({
                 <Mail />
               </IconButton>
               <IconButton
-                label="Reply"
+                label="Reply to latest message"
                 disabled={
                   selectedThread.latestMessage.bodyStatus === "UNAVAILABLE" ||
                   isMailboxDraft(selectedThread.latestMessage)
                 }
-                onClick={() => setReplyTarget(selectedThread.latestMessage)}
+                onClick={() => openReply(selectedThread.latestMessage)}
               >
                 <Reply />
               </IconButton>
@@ -1062,7 +1083,7 @@ function InboxWorkspace({
                     message.bodyStatus === "UNAVAILABLE" ||
                     isMailboxDraft(message)
                   }
-                  onClick={() => setReplyTarget(message)}
+                  onClick={() => openReply(message)}
                 >
                   <Reply />
                 </IconButton>
@@ -1279,19 +1300,36 @@ function InboxWorkspace({
           );
         })}
 
-        <Button
-          variant="secondary"
-          disabled={
-            selectedThread.latestMessage.bodyStatus === "UNAVAILABLE" ||
-            isMailboxDraft(selectedThread.latestMessage)
-          }
-          onClick={() => setReplyTarget(selectedThread.latestMessage)}
-        >
-          <Reply /> Write a reply
-        </Button>
+        {!replyTarget ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              disabled={
+                selectedThread.latestMessage.bodyStatus === "UNAVAILABLE" ||
+                isMailboxDraft(selectedThread.latestMessage)
+              }
+              onClick={() => openReply(selectedThread.latestMessage)}
+            >
+              <Reply /> Reply
+            </Button>
+            {canReplyAllLatest ? (
+              <Button
+                variant="secondary"
+                disabled={
+                  selectedThread.latestMessage.bodyStatus === "UNAVAILABLE" ||
+                  isMailboxDraft(selectedThread.latestMessage)
+                }
+                onClick={() => openReply(selectedThread.latestMessage, true)}
+              >
+                <Reply /> Reply all
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {replyTarget && organizationId ? (
           <ReplyComposer
             inline
+            initialReplyAll={initialReplyAll}
             key={`${replyTarget.id}:${searchParams.get("replyDraft") ?? ""}:${searchParams.get("replyBackup") ?? ""}`}
             message={replyTarget}
             organizationId={organizationId}

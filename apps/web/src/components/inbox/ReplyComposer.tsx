@@ -50,6 +50,7 @@ import { getSession } from "../../lib/session.js";
 
 interface Props {
   inline?: boolean;
+  initialReplyAll?: boolean;
   message: InboundMessage;
   organizationId: string;
   mailboxEmail: string;
@@ -78,6 +79,7 @@ interface ReplyBackup {
 
 export function ReplyComposer({
   inline = false,
+  initialReplyAll = false,
   message,
   organizationId,
   mailboxEmail,
@@ -159,7 +161,7 @@ export function ReplyComposer({
   const [attachments, setAttachments] = useState<EmailAttachment[]>(
     backup?.attachments ?? []
   );
-  const [replyAll, setReplyAll] = useState(backup?.replyAll ?? false);
+  const [replyAll, setReplyAll] = useState(backup?.replyAll ?? initialReplyAll);
   const defaultTo = resolveMailReplyRecipients(
     message,
     [mailboxEmail],
@@ -168,7 +170,11 @@ export function ReplyComposer({
   function resolvedRecipients(all: boolean) {
     return resolveMailReplyRecipients(message, [mailboxEmail], all);
   }
-  const initialRecipients = resolvedRecipients(backup?.replyAll ?? false);
+  const initialRecipients = resolvedRecipients(backup?.replyAll ?? initialReplyAll);
+  const replyAllRecipients = resolvedRecipients(true);
+  const canReplyAll =
+    replyAllRecipients.to.join() !== defaultTo.join() ||
+    replyAllRecipients.cc.length > 0;
   const [recipientInputs, setRecipientInputs] = useState<
     Record<string, string>
   >(backup?.recipientInputs ?? {});
@@ -766,6 +772,30 @@ export function ReplyComposer({
           }
         />
         <form id="message-reply-form" onSubmit={submit} className="space-y-4">
+          {canReplyAll ? (
+            <div role="group" aria-label="Reply recipients" className="flex gap-2">
+              {([false, true] as const).map((all) => (
+                <Button
+                  key={String(all)}
+                  type="button"
+                  variant="secondary"
+                  aria-pressed={replyAll === all}
+                  className={replyAll === all ? "border-primary text-primary" : undefined}
+                  disabled={!filesRestored || backupMissing || send.isPending || Boolean(acceptedId)}
+                  onClick={() => {
+                    touched.current = true;
+                    setSaved(false);
+                    setReplyAll(all);
+                    const next = resolvedRecipients(all);
+                    setTo(next.to);
+                    setCc(next.cc);
+                  }}
+                >
+                  {all ? "Reply all" : "Reply"}
+                </Button>
+              ))}
+            </div>
+          ) : null}
           {backupMissing ? (
             <p role="alert">
               That window copy is no longer available. Check Drafts for a saved
@@ -856,29 +886,6 @@ export function ReplyComposer({
               Boolean(acceptedId)
             }
           />
-          {message.to.length + message.cc.length > 1 ? (
-            <label className="flex items-center gap-2 text-ui">
-              <input
-                type="checkbox"
-                checked={replyAll}
-                disabled={
-                  !filesRestored ||
-                  backupMissing ||
-                  send.isPending ||
-                  Boolean(acceptedId)
-                }
-                onChange={(event) => {
-                  touched.current = true;
-                  setSaved(false);
-                  setReplyAll(event.target.checked);
-                  const next = resolvedRecipients(event.target.checked);
-                  setTo(next.to);
-                  setCc(next.cc);
-                }}
-              />{" "}
-              Reply to everyone
-            </label>
-          ) : null}
           <SignatureControl
             organizationId={organizationId}
             mailboxEmail={mailboxEmail}

@@ -174,7 +174,7 @@ export function wrapHtmlInMjml(
 
   // Body padding adapts so the content isn't crammed against the top/bottom
   // when there's no header/footer section to provide breathing room.
-  const bodyPadding = header || footer ? "36px 40px" : "40px";
+  const bodyPadding = header || footer ? "24px 16px" : "16px";
 
   return [
     "<mjml>",
@@ -201,7 +201,7 @@ export function wrapHtmlInMjml(
     "  </mj-head>",
     // No page tint and no card panel: the sender's content sits on the client's
     // default background. Chrome the sender didn't author doesn't get added.
-    `  <mj-body>`,
+    `  <mj-body width="1000px">`,
     header,
     `    <mj-section padding="${bodyPadding}">`,
     "      <mj-column>",

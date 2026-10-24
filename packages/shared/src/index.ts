@@ -3264,11 +3264,11 @@ export function resolveMailReplyRecipients(
   const othersCc = message.cc.filter((email) => !own.has(email.toLowerCase()));
   const primary = own.has(message.fromEmail.toLowerCase())
     ? othersTo.length
-      ? othersTo
+      ? othersTo.slice(0, 1)
       : othersCc.length
-        ? othersCc
+        ? othersCc.slice(0, 1)
         : message.to.length
-          ? message.to
+          ? message.to.slice(0, 1)
           : [message.fromEmail]
     : message.replyTo?.length
       ? message.replyTo

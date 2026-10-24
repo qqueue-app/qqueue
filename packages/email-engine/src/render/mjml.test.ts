@@ -87,13 +87,15 @@ describe("wrapHtmlInMjml / renderHtmlAsEmailSafe", () => {
     const doc = wrapHtmlInMjml("<p>Body</p>");
     expect(doc).not.toContain("border-radius");
     expect(doc).not.toContain("#eef2f1");
-    expect(doc).toContain("<mj-body>");
+    expect(doc).toContain('<mj-body width="1000px">');
+    expect(doc).toContain('<mj-section padding="16px">');
   });
 
   it("renders a brand header and copyright footer only when opted in", () => {
     const doc = wrapHtmlInMjml("<p>Hi</p>", { brandName: "Acme" });
     expect(doc).toContain("Acme");
     expect(doc).toContain("&copy; Acme");
+    expect(doc).toContain('<mj-section padding="24px 16px">');
   });
 
   it("applies custom branding (brand name + accent + unsubscribe)", () => {
@@ -114,6 +116,8 @@ describe("wrapHtmlInMjml / renderHtmlAsEmailSafe", () => {
     expect(result.usedFallback).toBe(false);
     expect(result.html).toContain("<table");
     expect(result.html).toContain("<p>Body</p>");
+    expect(result.html).toContain("max-width:1000px");
+    expect(result.html).toContain("padding:16px");
   });
 
   // Regression: the body used to be emitted via mj-raw, which places it as a

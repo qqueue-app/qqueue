@@ -1626,6 +1626,10 @@ describe("mail reply recipient defaults",()=>{
   expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:[],cc:["cc@example.com"]},["own@example.com"],false)).toEqual({to:["cc@example.com"],cc:[]});
   expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:["own@example.com"],cc:[]},["own@example.com"],false)).toEqual({to:["own@example.com"],cc:[]});
  });
+ it("replies to one recipient of own sent group mail unless Reply all is chosen",()=>{
+  expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:["first@example.com","second@example.com"],cc:["copy@example.com"]},["own@example.com"],false)).toEqual({to:["first@example.com"],cc:[]});
+  expect(resolveMailReplyRecipients({fromEmail:"own@example.com",to:["first@example.com","second@example.com"],cc:["copy@example.com"]},["own@example.com"],true)).toEqual({to:["first@example.com","second@example.com"],cc:["copy@example.com"]});
+ });
 });
 
 

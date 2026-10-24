@@ -80,21 +80,21 @@ function buildDocument(
   return `<!doctype html><html><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  body { margin: 0; padding: 24px; background: ${EMAIL_NEUTRALS.backdrop};
+  body { margin: 0; background: ${EMAIL_NEUTRALS.paper};
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     color: ${EMAIL_NEUTRALS.text}; line-height: 1.6; }
-  .qq-card { max-width: 600px; margin: 0 auto; background: ${EMAIL_NEUTRALS.paper};
-    border-radius: 12px; padding: 32px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.04); }
-  .qq-card img { max-width: 100%; height: auto; }
-  .qq-card a { color: ${chrome.accent}; }
-  .qq-card h1 { font-size: 24px; line-height: 1.3; margin: 0 0 12px; }
-  .qq-card h2 { font-size: 20px; line-height: 1.35; margin: 20px 0 10px; }
-  .qq-card p { margin: 0 0 14px; }
-  .qq-card hr { border: none; border-top: 1px solid ${EMAIL_NEUTRALS.border}; margin: 20px 0; }
-  .qq-card blockquote { margin: 0 0 14px; padding: 4px 0 4px 16px;
+  .qq-body { box-sizing: border-box; max-width: 1000px; margin: 0 auto;
+    padding: ${chrome.header || chrome.footer ? "24px 16px" : "16px"}; }
+  .qq-body img { max-width: 100%; height: auto; }
+  .qq-body a { color: ${chrome.accent}; }
+  .qq-body h1 { font-size: 24px; line-height: 1.3; margin: 0 0 12px; }
+  .qq-body h2 { font-size: 20px; line-height: 1.35; margin: 20px 0 10px; }
+  .qq-body p { margin: 0 0 14px; }
+  .qq-body hr { border: none; border-top: 1px solid ${EMAIL_NEUTRALS.border}; margin: 20px 0; }
+  .qq-body blockquote { margin: 0 0 14px; padding: 4px 0 4px 16px;
     border-left: 3px solid ${chrome.accent}; color: ${EMAIL_NEUTRALS.textMuted}; }
 </style></head>
-<body><div class="qq-card">${chrome.header}${bodyHtml}${chrome.footer}</div></body></html>`;
+<body><div class="qq-body">${chrome.header}${bodyHtml}${chrome.footer}</div></body></html>`;
 }
 
 export function TemplatePreview({

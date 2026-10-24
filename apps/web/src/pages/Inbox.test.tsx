@@ -274,8 +274,9 @@ describe("Inbox single-screen navigation", () => {
       screen.queryByPlaceholderText("Search mail")
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Write a reply" })
+      screen.getByRole("button", { name: "Reply", exact: true })
     ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reply all" })).not.toBeInTheDocument();
 
     await user.click(back);
     expect(
@@ -284,6 +285,18 @@ describe("Inbox single-screen navigation", () => {
     expect(
       screen.queryByPlaceholderText(/Reply to Sender/)
     ).not.toBeInTheDocument();
+  });
+
+  it("offers Reply all on a group message and opens it with the group selected", async () => {
+    const user = userEvent.setup();
+    setup([makeMessage({ to: ["support@acme.test", "teammate@example.com"], cc: ["copy@example.com"] })]);
+    renderWithProviders(<Inbox />);
+    await openRow(user);
+    await user.click(screen.getByRole("button", { name: "Reply all" }));
+    expect(await screen.findByRole("group", { name: "Reply recipients" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reply all" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Remove teammate@example.com" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove copy@example.com" })).toBeInTheDocument();
   });
 
   it("marks a conversation unread and returns to the list", async () => {
@@ -1246,7 +1259,7 @@ it("continues an imported mailbox draft as a private copy and never replies to i
   expect(
     screen.getByRole("button", { name: "Reply to this message from Sender" })
   ).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Write a reply" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reply", exact: true })).toBeDisabled();
   await user.click(continueButton);
   await waitFor(() =>
     expect(mockedApi.prepareMailboxDraftCopy).toHaveBeenCalledWith(

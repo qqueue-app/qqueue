@@ -218,7 +218,7 @@ describe("reply composer", () => {
       signal: expect.any(AbortSignal),
     });
     await user.click(
-      screen.getByRole("checkbox", { name: "Reply to everyone" })
+      screen.getByRole("button", { name: "Reply all" })
     );
     await user.click(screen.getByRole("button", { name: "Send reply" }));
     await waitFor(() =>
@@ -301,11 +301,26 @@ describe("reply composer", () => {
 });
 
 describe("reply recovery and recipients", () => {
+  it("switches between Reply and Reply all without losing the draft", async () => {
+    const user = userEvent.setup();
+    await renderReply();
+    const editor = screen.getByRole("textbox", { name: "Reply to Customer" });
+    await user.type(editor, "Keep this answer");
+    await user.click(screen.getByRole("button", { name: "Reply all" }));
+    expect(screen.getByRole("button", { name: "Reply all" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Remove other@example.com" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove copy@example.com" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reply", exact: true }));
+    expect(screen.getByRole("button", { name: "Reply", exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Remove other@example.com" })).not.toBeInTheDocument();
+    expect(editor).toHaveValue("Keep this answer");
+  });
+
   it("sends the edited To, Cc and Bcc recipients rather than rebuilding Reply all", async () => {
     const user = userEvent.setup();
     await renderReply();
     await user.click(
-      screen.getByRole("checkbox", { name: "Reply to everyone" })
+      screen.getByRole("button", { name: "Reply all" })
     );
     await user.click(
       screen.getByRole("button", { name: "Remove other@example.com" })
