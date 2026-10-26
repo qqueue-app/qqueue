@@ -5,6 +5,7 @@ import type {
   SendEmailInput,
   TransactionalSendResponse,
 } from "@qqueue/shared";
+import { applyEmailBranding } from "@qqueue/email-engine";
 import { HttpError } from "../../lib/http-error.js";
 import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -227,8 +228,37 @@ export const transactionalEmailService = {
       input.subject ?? template?.subject,
       input.variables
     );
-    const html = renderVariables(input.html ?? template?.html, input.variables);
+    const authoredHtml = renderVariables(input.html ?? template?.html, input.variables);
     const text = renderVariables(input.text ?? template?.text, input.variables);
+
+    const origin: EmailOrigin = input.origin ?? "TRANSACTIONAL";
+    const organizationBranding =
+      origin === "SYSTEM"
+        ? null
+        : await db.organization.findUnique({
+            where: { id: input.organizationId },
+            select: {
+              brandName: true,
+              logoUrl: true,
+              accentColor: true,
+              footerNote: true,
+              layoutHtml: true,
+              brandingEnabled: true,
+            },
+          });
+    const html = applyEmailBranding(
+      authoredHtml,
+      organizationBranding
+        ? {
+            ...organizationBranding,
+            brandName: organizationBranding.brandName ?? undefined,
+            logoUrl: organizationBranding.logoUrl ?? undefined,
+            accentColor: organizationBranding.accentColor ?? undefined,
+            footerNote: organizationBranding.footerNote ?? undefined,
+            layoutHtml: organizationBranding.layoutHtml ?? undefined,
+          }
+        : null
+    );
 
     if (!subject || (!html && !text)) {
       throw new HttpError(
@@ -239,8 +269,6 @@ export const transactionalEmailService = {
     }
 
     const scheduledAt = parseScheduledAt(input.scheduledAt);
-
-    const origin: EmailOrigin = input.origin ?? "TRANSACTIONAL";
 
     // Suppression guard: if the recipient is on the org's "never send" list,
     // record a SUPPRESSED job (not a failure, not delivered) and stop before

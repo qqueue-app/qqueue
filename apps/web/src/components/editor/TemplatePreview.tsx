@@ -1,21 +1,25 @@
 import { useMemo, useState } from "react";
 import { Monitor, Smartphone } from "lucide-react";
+import { createBrandingLayout, renderBrandingLayout } from "@qqueue/shared";
 import { cn } from "@/lib/utils";
-import type { TemplateVariable } from "@/lib/api";
+import type { OrganizationBranding, TemplateVariable } from "@/lib/api";
 import { applyVariables, resolveVariableData } from "./variables";
+import { isFullHtmlDocument } from "./html-source";
 
 interface TemplatePreviewProps {
   subject: string;
   html: string;
   variables?: TemplateVariable[] | null;
   sampleData?: Record<string, string>;
+  branding?: OrganizationBranding | null;
 }
 
 export function TemplatePreview({
   subject,
   html,
   variables,
-  sampleData
+  sampleData,
+  branding
 }: TemplatePreviewProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
 
@@ -27,7 +31,25 @@ export function TemplatePreview({
     () => applyVariables(subject, data) || "(no subject)",
     [subject, data]
   );
-  const srcDoc = useMemo(() => applyVariables(html, data), [html, data]);
+  const srcDoc = useMemo(() => {
+    const body = applyVariables(html, data);
+    if (
+      isFullHtmlDocument(body) ||
+      !branding?.brandingEnabled ||
+      (!branding.layoutHtml &&
+        !branding.brandName &&
+        !branding.logoUrl &&
+        !branding.accentColor &&
+        !branding.footerNote)
+    ) {
+      return body;
+    }
+    return renderBrandingLayout(
+      branding.layoutHtml ?? createBrandingLayout(branding),
+      body,
+      branding
+    );
+  }, [html, data, branding]);
 
   return (
     <div className="flex h-full flex-col">

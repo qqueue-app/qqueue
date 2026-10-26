@@ -9,6 +9,7 @@ import type {
   RecipientSuggestion,
   TransactionalSendResponse,
 } from "@qqueue/shared";
+import { applyEmailBranding } from "@qqueue/email-engine";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import {
@@ -446,10 +447,34 @@ export const manualEmailService = {
   /** Preview the authored HTML without adding a layout or tracking markup. */
   async preview(input: EmailPreviewInput): Promise<EmailPreviewResult> {
     const recipients = await resolveRecipients(input);
+    const organization = await prisma.organization.findUnique({
+      where: { id: input.organizationId },
+      select: {
+        brandName: true,
+        logoUrl: true,
+        accentColor: true,
+        footerNote: true,
+        layoutHtml: true,
+        brandingEnabled: true,
+      },
+    });
 
     return {
       subject: input.subject ?? "",
-      html: input.html ?? "",
+      html:
+        applyEmailBranding(
+          input.html,
+          organization
+            ? {
+                ...organization,
+                brandName: organization.brandName ?? undefined,
+                logoUrl: organization.logoUrl ?? undefined,
+                accentColor: organization.accentColor ?? undefined,
+                footerNote: organization.footerNote ?? undefined,
+                layoutHtml: organization.layoutHtml ?? undefined,
+              }
+            : null
+        ) ?? "",
       recipients,
     };
   },

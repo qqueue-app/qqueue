@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import { type SegmentRule, compileSegmentRules } from "@qqueue/shared";
-import { buildUnsubscribeUrl } from "@qqueue/email-engine";
+import { applyEmailBranding, buildUnsubscribeUrl } from "@qqueue/email-engine";
 import type { Prisma } from "@prisma/client";
 import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
@@ -192,7 +192,17 @@ export function startCampaignProcessingWorker() {
 
       const template = campaign.template;
 
-      const templateHtml = template.html;
+      const organizationBranding = await prisma.organization.findUnique({
+        where: { id: campaign.organizationId },
+        select: {
+          brandName: true,
+          logoUrl: true,
+          accentColor: true,
+          footerNote: true,
+          layoutHtml: true,
+          brandingEnabled: true,
+        },
+      });
 
       /*
         The account this run sends as: the one the campaign named, else the
@@ -305,7 +315,19 @@ export function startCampaignProcessingWorker() {
           unsubscribeEnabled: campaign.unsubscribeEnabled ?? true,
           toEmail,
           subject: renderVariables(subjectSource, variables) ?? subjectSource,
-          html: renderVariables(templateHtml, renderVars),
+          html: applyEmailBranding(
+            renderVariables(template.html, renderVars),
+            organizationBranding
+              ? {
+                  ...organizationBranding,
+                  brandName: organizationBranding.brandName ?? undefined,
+                  logoUrl: organizationBranding.logoUrl ?? undefined,
+                  accentColor: organizationBranding.accentColor ?? undefined,
+                  footerNote: organizationBranding.footerNote ?? undefined,
+                  layoutHtml: organizationBranding.layoutHtml ?? undefined,
+                }
+              : null
+          ),
           text: renderVariables(template.text, renderVars),
           variables,
           variantId,

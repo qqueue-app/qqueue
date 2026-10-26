@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Worker } from "bullmq";
 import { nextCronRun } from "@qqueue/shared";
+import { applyEmailBranding } from "@qqueue/email-engine";
 import { redisConnection } from "../config/redis.js";
 import { emailSendingQueue } from "../queues/email-sending.queue.js";
 import type { RecurringSendJob } from "../queues/recurring-send.queue.js";
@@ -145,7 +146,30 @@ export async function processRecurringSend(job: {
     const text = renderVariables(send.text, variables);
     const rawHtml = renderVariables(send.html, variables);
 
-    const html = rawHtml;
+    const organizationBranding = await prisma.organization.findUnique({
+      where: { id: send.organizationId },
+      select: {
+        brandName: true,
+        logoUrl: true,
+        accentColor: true,
+        footerNote: true,
+        layoutHtml: true,
+        brandingEnabled: true,
+      },
+    });
+    const html = applyEmailBranding(
+      rawHtml,
+      organizationBranding
+        ? {
+            ...organizationBranding,
+            brandName: organizationBranding.brandName ?? undefined,
+            logoUrl: organizationBranding.logoUrl ?? undefined,
+            accentColor: organizationBranding.accentColor ?? undefined,
+            footerNote: organizationBranding.footerNote ?? undefined,
+            layoutHtml: organizationBranding.layoutHtml ?? undefined,
+          }
+        : null
+    );
 
     // Ordinary EmailJobs — **one per To recipient** — through the shared
     // pipeline: the email-sending worker performs the delivery, so the

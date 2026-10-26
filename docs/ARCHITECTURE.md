@@ -98,7 +98,8 @@ registers the inbox sync scheduler.
 4. Email jobs are added to the sending queue.
 5. The email worker decrypts the job's SMTP connection credentials, applies
    open/click tracking and bulk unsubscribe footers where applicable, then sends
-   through the SMTP provider.
+   through the SMTP provider. Organization branding is rendered before jobs are
+   queued, without the default MJML wrapper.
 6. Email events (queued, sent, delivered, opened, clicked, bounced, complained,
    failed) are recorded for analytics.
 
@@ -107,7 +108,8 @@ through the email-sending worker. `EmailJob.origin` distinguishes them.
 `SYSTEM` mail (password resets, invitations) rides the same pipeline but skips
 suppression checks and tracking injection. Other sends retain open/click
 tracking; bulk jobs receive unsubscribe headers and a visible body footer.
-Bodies are not wrapped in an organization branding layout.
+The configured organization branding layout is applied when enabled; no
+additional default MJML wrapper is added.
 
 ## Email Provider Abstraction
 

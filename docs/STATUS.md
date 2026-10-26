@@ -22,9 +22,9 @@ starts with the saved logo, name and address resolved visually;
 `{{content}}` marks where each email body appears. Identity placeholders remain
 available in the advanced source view.
 Replacing a customized design requires confirmation, and a reset restores the
-starter preview. Branding layouts remain available in settings previews, but
-they are not injected into outbound email. Campaign, manual, recurring,
-transactional and SDK HTML bodies pass through without a QQueue layout.
+starter design. When enabled, the saved organization branding layout is applied
+to campaign, manual, recurring, transactional and SDK email. The default MJML
+wrapper that added extra typography and spacing is not applied.
 
 ## Per-campaign unsubscribe control
 
@@ -265,7 +265,7 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    multiple `To` recipients, always-visible `CC`/`BCC` with autocomplete over
    contacts and previously-mailed addresses, contact and contact-list pickers,
    template apply, a Tiptap editor with a **raw HTML source view**, a preview of
-   the authored body without an added branding layout,
+   the authored body with the saved branding layout,
    drafts (`EmailDraft`:
    auto-save/resume/delete/send, with a dedicated `/drafts` page that deep-links
    back into the composer), schedule-for-later, **attachments**

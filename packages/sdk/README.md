@@ -32,8 +32,9 @@ const email = await qqueue.sendEmail({
 console.log(email.id, email.status);
 ```
 
-QQueue does not wrap the supplied `html` body in a branding layout. Non-system
-sends receive open/click tracking, and bulk sends receive an unsubscribe footer.
+When enabled, the organization's saved branding layout wraps the supplied `html`
+body. QQueue skips the separate default MJML wrapper. Non-system sends receive
+open/click tracking, and bulk sends receive an unsubscribe footer.
 Values in `{{variable}}` placeholders are still substituted when `variables`
 is provided. Recipient mail clients can change how colors appear, including
 applying dark mode.

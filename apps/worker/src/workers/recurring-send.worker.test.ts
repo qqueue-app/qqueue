@@ -206,10 +206,26 @@ describe("processRecurringSend", () => {
 });
 
 
-it("does not apply saved organization branding to recurring sends", async () => {
+it("leaves recurring send branding off when disabled", async () => {
   prismaMock.recurringSend.findUnique.mockResolvedValue(makeSend() as never);
   prismaMock.organization.findUnique.mockResolvedValue({ brandName: "Acme", layoutHtml: "<html><body>{{content}}</body></html>", footerNote: "Address", brandingEnabled: false } as never);
   await processRecurringSend(job);
-  expect(prismaMock.organization.findUnique).not.toHaveBeenCalled();
+  expect(prismaMock.organization.findUnique).toHaveBeenCalledOnce();
   expect(prismaMock.emailJob.create.mock.calls[0][0].data.html).toBe("<p>Hello</p>");
+});
+
+it("applies saved branding to recurring sends without the MJML wrapper", async () => {
+  prismaMock.recurringSend.findUnique.mockResolvedValue(makeSend() as never);
+  prismaMock.organization.findUnique.mockResolvedValue({
+    brandName: "Acme",
+    brandingEnabled: true,
+    layoutHtml:
+      "<html><body><header>{{brand_name}}</header>{{content}}</body></html>",
+  } as never);
+
+  await processRecurringSend(job);
+
+  expect(prismaMock.emailJob.create.mock.calls[0][0].data.html).toBe(
+    "<html><body><header>Acme</header><p>Hello</p></body></html>"
+  );
 });

@@ -7,8 +7,10 @@ import { TemplatePreview } from "../components/editor/TemplatePreview.js";
 import { VariablesPanel } from "../components/editor/VariablesPanel.js";
 import { extractVariables } from "../components/editor/variables.js";
 import { STARTER_TEMPLATES } from "../components/editor/starters.js";
-import { api, type TemplateVariable } from "../lib/api.js";
+import { api, type OrganizationBranding, type TemplateVariable } from "../lib/api.js";
 import { useSession } from "../lib/session-context.js";
+import { qk } from "../lib/query-client.js";
+import { useOrgQuery } from "../lib/use-api.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Textarea } from "../components/ui/textarea.js";
@@ -96,6 +98,11 @@ export function TemplateEditor() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentOrganizationId: organizationId } = useSession();
+  const branding = useOrgQuery(
+    organizationId,
+    qk.organizationBranding(organizationId ?? ""),
+    (orgId) => api.getOrganizationBranding(orgId)
+  );
 
   const editing = Boolean(id);
   const [state, setState] = useState<EditorState>(emptyState);
@@ -412,6 +419,7 @@ export function TemplateEditor() {
             html={state.html}
             variables={variables}
             sampleData={previewData}
+            branding={branding.data as OrganizationBranding | undefined}
           />
         </div>
       </div>

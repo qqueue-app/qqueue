@@ -279,13 +279,13 @@ export function BrandingSettings() {
               <fieldset disabled={!canEdit} className="min-w-0 border-0 p-0">
                 <FormSections>
                   <FormSection
-                    title="Branding preview"
-                    description="Edit and preview a design here. QQueue does not add it to sent emails."
+                    title="Apply branding"
+                    description="Whether QQueue frames your email content with this saved design."
                   >
                     <SettingsRow
-                      label="Show branding in this preview"
+                      label="Brand outgoing emails"
                       htmlFor="brandingEnabled"
-                      description="This switch changes only this preview; no branding layout is added to sent bodies. Tracking and bulk unsubscribe footers still apply."
+                      description="When enabled, the saved design wraps the message body. Tracking and bulk unsubscribe footers are added separately."
                     >
                       <Switch
                         id="brandingEnabled"
@@ -578,7 +578,7 @@ export function BrandingSettings() {
                 className="h-[36rem] w-full rounded-card border bg-email-paper"
               />
               <p className="mt-2 text-meta text-text-tertiary">
-                This preview is not injected into sent messages.
+                        This saved design is applied to outgoing email bodies.
               </p>
             </aside>
           </div>

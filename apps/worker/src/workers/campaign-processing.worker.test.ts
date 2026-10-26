@@ -646,17 +646,17 @@ describe("campaign HTML pass-through", () => {
     prismaMock.emailJob.createMany.mockResolvedValue({ count: 1 } as never);
   }
 
-  it("does not wrap the template and still substitutes variables", async () => {
+  it("leaves the body raw when the organization has no saved identity", async () => {
     sendingCampaign();
 
     await run({ id: "j1", data: { campaignId: "c1" } });
 
     const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
     expect(html).toBe("<p>Hello Ann Bee </p>");
-    expect(prismaMock.organization.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.organization.findUnique).toHaveBeenCalledOnce();
   });
 
-  it("leaves campaign layout and branding settings out of the sent body", async () => {
+  it("leaves branding disabled for this organization", async () => {
     sendingCampaign();
     prismaMock.organization.findUnique.mockResolvedValue({
       brandName: "Acme",
@@ -669,6 +669,22 @@ describe("campaign HTML pass-through", () => {
 
     const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
     expect(html).toBe("<p>Hello Ann Bee </p>");
-    expect(prismaMock.organization.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.organization.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it("applies the saved branding layout without the MJML wrapper", async () => {
+    sendingCampaign();
+    prismaMock.organization.findUnique.mockResolvedValue({
+      brandName: "Acme",
+      brandingEnabled: true,
+      layoutHtml:
+        "<html><body><header>{{brand_name}}</header>{{content}}</body></html>",
+    } as never);
+
+    await run({ id: "j1", data: { campaignId: "c1" } });
+
+    expect(prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html).toBe(
+      "<html><body><header>Acme</header><p>Hello Ann Bee </p></body></html>"
+    );
   });
 });

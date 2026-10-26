@@ -7,4 +7,5 @@ export * from "./open.js";
 export * from "./tracking.js";
 export * from "./unsubscribe.js";
 export * from "./render/mjml.js";
+export * from "./render/branding.js";
 export * from "./render/plain-text.js";

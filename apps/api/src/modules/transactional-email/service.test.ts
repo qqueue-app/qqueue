@@ -60,6 +60,33 @@ afterEach(() => {
 });
 
 describe("transactionalEmailService.send", () => {
+  it("applies the saved organization branding without the MJML wrapper", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
+    prismaMock.organization.findUnique.mockResolvedValue({
+      brandingEnabled: true,
+      brandName: "Acme",
+      layoutHtml:
+        '<html><body><header>{{brand_name}}</header><main>{{content}}</main></body></html>',
+    } as never);
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED",
+    } as never);
+
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Body</p>",
+    });
+
+    expect(prismaMock.emailJob.create.mock.calls[0][0].data.html).toBe(
+      "<html><body><header>Acme</header><main><p>Body</p></main></body></html>"
+    );
+  });
+
   it("throws 404 when no smtp connection is found", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(null);
     await expect(

@@ -329,7 +329,8 @@ async function main() {
       .set("Authorization", auth).expect(200);
     if (savedBranding.body.data.layoutHtml !== customBranding.layoutHtml || savedBranding.body.data.logoUrl !== customBranding.logoUrl) throw new Error("Branding HTML or existing logo did not round-trip");
 
-    // Campaign choices travel through API -> fan-out -> queue -> actual SMTP.
+    // Campaign branding and unsubscribe settings travel through API -> fan-out
+    // -> queue -> actual SMTP without the default MJML wrapper.
     const campaignContact = await prisma.contact.create({
       data: { organizationId, email: "campaign-recipient@example.com" }
     });
@@ -381,11 +382,11 @@ async function main() {
       const body = raw.split("\r\n\r\n").slice(1).join("\r\n\r\n");
       if (
         !body.includes("Campaign body") ||
-        body.includes("CustomBranding") ||
-        body.includes("qq-branding-footer-note") ||
+        !body.includes("CustomBranding") ||
+        !body.includes("qq-branding-footer-note") ||
         body.includes("Unsubscribe") !== enabled
       ) {
-        throw new Error("Campaign SMTP layout or unsubscribe footer failed");
+        throw new Error("Campaign SMTP branding layout or unsubscribe footer failed");
       }
       if (
         /^List-Unsubscribe:/im.test(raw) !== enabled ||
