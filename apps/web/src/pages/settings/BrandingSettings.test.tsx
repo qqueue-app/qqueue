@@ -217,7 +217,11 @@ describe("BrandingSettings", () => {
 
     await waitFor(() => screen.getByTitle("Branding preview"));
     const preview = screen.getByTitle("Branding preview");
-    expect(preview.getAttribute("srcdoc")).toContain("Acme Inc, 400 Market St");
+    await waitFor(() =>
+      expect(preview.getAttribute("srcdoc")).toContain(
+        "Acme Inc, 400 Market St"
+      )
+    );
     expect(preview.getAttribute("srcdoc")).toContain("Unsubscribe");
     expect(preview.getAttribute("srcdoc")).not.toContain("© Acme");
   });

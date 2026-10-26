@@ -1072,6 +1072,17 @@ it("opens the explicitly selected window copy when durable storage and the serve
     );
     await userEvent.type(screen.getByLabelText("Subject"), " edited");
     view.unmount();
+    await waitFor(() =>
+      expect(
+        listWindowDrafts("window-owner", "org_1").find(
+          (copy) => copy.payload.subject === "Selected window writing edited"
+        )
+      ).toMatchObject({
+        memoryOnly: true,
+        clientId: "one-server-identity",
+        pendingUploads: [{ file, uploadId: "retry-upload" }],
+      })
+    );
     const copies = listWindowDrafts("window-owner", "org_1");
     const edited = copies.find(
       (copy) => copy.payload.subject === "Selected window writing edited"

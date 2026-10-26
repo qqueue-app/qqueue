@@ -11,7 +11,7 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "test:smoke:docker": "sh -c 'docker compose -p qqueue-smoke -f docker-compose.smoke.yml up -d --wait && DATABASE_URL=postgresql://qqueue:qqueue@localhost:55432/qqueue REDIS_HOST=localhost REDIS_PORT=56379 pnpm exec tsx scripts/docker-smoke.ts; status=$?; docker compose -p qqueue-smoke -f docker-compose.smoke.yml down -v; exit $status'",
+    "test:smoke:docker": "pnpm --filter '@qqueue/worker...' build && sh -c 'docker compose -p qqueue-smoke -f docker-compose.smoke.yml up -d --wait && DATABASE_URL=postgresql://qqueue:qqueue@localhost:55432/qqueue REDIS_HOST=localhost REDIS_PORT=56379 pnpm exec tsx scripts/docker-smoke.ts; status=$?; docker compose -p qqueue-smoke -f docker-compose.smoke.yml down -v; exit $status'",
     "test:coverage": "turbo test:coverage",
     "coverage:badges": "node scripts/generate-coverage-badges.mjs",
     "coverage": "pnpm test:coverage && pnpm coverage:badges",
