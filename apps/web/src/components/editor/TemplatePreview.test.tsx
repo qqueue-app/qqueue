@@ -48,8 +48,7 @@ describe("TemplatePreview", () => {
     // sandbox="" — template HTML must not run scripts or reach the parent.
     expect(frame).toHaveAttribute("sandbox", "");
     expect(frame.getAttribute("srcdoc")).toContain("<p>Body copy</p>");
-    expect(frame.getAttribute("srcdoc")).toContain("max-width: 1000px");
-    expect(frame.getAttribute("srcdoc")).toContain('padding: 16px;');
+    expect(frame.getAttribute("srcdoc")).toBe("<p>Body copy</p>");
     expect(frame.getAttribute("srcdoc")).not.toContain("qq-card");
   });
 
@@ -100,8 +99,8 @@ describe("TemplatePreview", () => {
   });
 });
 
-it("previews the saved HTML layout with identity and content in a sandbox", () => {
-  renderWithProviders(<TemplatePreview subject="Custom" html="<p>Hello</p>" branding={{ brandName: "Acme", logoUrl: null, accentColor: null, footerNote: null, brandingEnabled: true, layoutHtml: '<html><body><header>{{brand_name}}</header><main>{{content}}</main></body></html>' }} />);
+it("does not add a saved layout to the sent-body preview", () => {
+  renderWithProviders(<TemplatePreview subject="Custom" html="<p>Hello</p>" />);
   expect(getFrame()).toHaveAttribute("sandbox", "");
-  expect(getFrame().getAttribute("srcdoc")).toContain("<header>Acme</header><main><p>Hello</p></main>");
+  expect(getFrame().getAttribute("srcdoc")).toBe("<p>Hello</p>");
 });

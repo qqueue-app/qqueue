@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Worker } from "bullmq";
 import { nextCronRun } from "@qqueue/shared";
-import { renderHtmlAsEmailSafe } from "@qqueue/email-engine";
 import { redisConnection } from "../config/redis.js";
 import { emailSendingQueue } from "../queues/email-sending.queue.js";
 import type { RecurringSendJob } from "../queues/recurring-send.queue.js";
-import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 
 function renderVariables(
@@ -147,38 +145,7 @@ export async function processRecurringSend(job: {
     const text = renderVariables(send.text, variables);
     const rawHtml = renderVariables(send.html, variables);
 
-    // Same MJML email-safe wrap the one-off manual send applies.
-    let html: string | undefined;
-    if (rawHtml) {
-      // Only custom layouts render their own marked address; legacy bulk
-      // layouts leave it to the send-time unsubscribe footer.
-      const organization = await prisma.organization.findUnique({
-        where: { id: send.organizationId },
-        select: {
-          brandName: true, logoUrl: true, accentColor: true,
-          layoutHtml: true, footerNote: true, brandingEnabled: true
-        }
-      });
-      const rendered = await renderHtmlAsEmailSafe(rawHtml, {
-        branding: {
-          layoutHtml: organization?.layoutHtml ?? undefined,
-          brandingEnabled: organization?.brandingEnabled,
-          footerNote: organization?.layoutHtml
-            ? organization.footerNote ?? undefined
-            : undefined,
-          brandName: organization?.brandName ?? undefined,
-          logoUrl: organization?.logoUrl ?? undefined,
-          accentColor: organization?.accentColor ?? undefined
-        }
-      });
-      if (rendered.usedFallback) {
-        logger.error(
-          { recurringSendId: send.id, errors: rendered.errors },
-          "MJML compilation failed; sending unwrapped body"
-        );
-      }
-      html = rendered.html;
-    }
+    const html = rawHtml;
 
     // Ordinary EmailJobs — **one per To recipient** — through the shared
     // pipeline: the email-sending worker performs the delivery, so the

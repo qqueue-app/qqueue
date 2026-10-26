@@ -1,9 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  type EmailBranding,
-  injectTracking,
-  renderHtmlAsEmailSafe,
-} from "@qqueue/email-engine";
 import type {
   EmailPreviewInput,
   EmailPreviewResult,
@@ -14,7 +9,6 @@ import type {
   RecipientSuggestion,
   TransactionalSendResponse,
 } from "@qqueue/shared";
-import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { prisma } from "../../lib/prisma.js";
 import {
@@ -110,69 +104,6 @@ export async function resolveRecipients(
   );
 
   return { to, cc, bcc, total: to.length + cc.length + bcc.length };
-}
-
-/**
- * The organization's branding, shaped for the render layer. Nulls become
- * `undefined` because that is how `EmailBranding` spells "add nothing": a header
- * is drawn only when a brand name or logo exists, so an unbranded org keeps
- * shipping exactly its own content.
- *
- * `footerNote` is included here because a manual send is not bulk and so never
- * receives the send-time unsubscribe footer. Bulk paths must NOT pass it — the
- * footer beside the unsubscribe link already carries it, and passing it in both
- * places prints the address twice.
- */
-async function orgBranding(organizationId: string): Promise<EmailBranding> {
-  const organization = await prisma.organization.findUnique({
-    where: { id: organizationId },
-    select: {
-      brandName: true,
-      logoUrl: true,
-      accentColor: true,
-      footerNote: true,
-      layoutHtml: true,
-      brandingEnabled: true,
-    },
-  });
-
-  return {
-    layoutHtml: organization?.layoutHtml ?? undefined,
-    brandingEnabled: organization?.brandingEnabled,
-    brandName: organization?.brandName ?? undefined,
-    logoUrl: organization?.logoUrl ?? undefined,
-    accentColor: organization?.accentColor ?? undefined,
-    footerNote: organization?.footerNote ?? undefined,
-  };
-}
-
-/**
- * Render the composer body through the canonical MJML email-safe layer, wearing
- * the organization's branding. This is the exact transformation applied to
- * manual sends, so the preview can reuse it to match the delivered email.
- */
-async function renderBody(html: string | undefined, organizationId: string) {
-  if (!html) {
-    return undefined;
-  }
-  const result = await renderHtmlAsEmailSafe(html, {
-    branding: await orgBranding(organizationId),
-  });
-
-  // renderHtmlAsEmailSafe never throws: a compile failure silently degrades to
-  // the raw body HTML. Surface that, or the send just quietly stops being
-  // email-safe with nothing to explain why.
-  if (result.usedFallback) {
-    console.error(
-      `[manual-email] MJML compilation failed; sending unwrapped body HTML. ${result.errors.join("; ")}`
-    );
-  } else if (result.errors.length > 0) {
-    console.warn(
-      `[manual-email] MJML validation reported issues: ${result.errors.join("; ")}`
-    );
-  }
-
-  return result.html;
 }
 
 // How far back the recipient suggestions look, and how many addresses they
@@ -421,7 +352,7 @@ export const manualEmailService = {
             "At least one recipient is required",
             "validation_error"
           );
-        const html = await renderBody(input.html, input.organizationId);
+        const html = input.html;
         let first: TransactionalSendResponse | undefined;
         let hasQueued = false;
         for (const [index, delivery] of deliveries.entries()) {
@@ -512,26 +443,13 @@ export const manualEmailService = {
     return accepted;
   },
 
-  /**
-   * Build a preview that matches what will actually be delivered: the body runs
-   * through the same MJML render + tracking injection used when sending, and the
-   * recipient summary is the resolved, deduplicated set.
-   */
+  /** Preview the authored HTML without adding a layout or tracking markup. */
   async preview(input: EmailPreviewInput): Promise<EmailPreviewResult> {
     const recipients = await resolveRecipients(input);
-    const rendered = await renderBody(input.html, input.organizationId);
-    const html =
-      injectTracking(rendered, {
-        emailJobId: "preview",
-        baseUrl: env.APP_URL,
-        secret: env.TRACKING_SECRET,
-      }) ??
-      rendered ??
-      "";
 
     return {
       subject: input.subject ?? "",
-      html,
+      html: input.html ?? "",
       recipients,
     };
   },

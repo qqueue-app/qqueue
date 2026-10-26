@@ -157,6 +157,24 @@ describe("reply composer", () => {
     expect(localStorage.getItem(storageKey)).toBeNull();
   });
 
+  it("sends raw HTML source from a reply unchanged", async () => {
+    const user = userEvent.setup();
+    await renderReply();
+    const source = "<html><body><p>Exact source</p></body></html>";
+    await user.type(
+      screen.getByRole("textbox", { name: "Reply to Customer" }),
+      source
+    );
+    await user.click(screen.getByRole("button", { name: "Send reply" }));
+
+    await waitFor(() =>
+      expect(mocked.replyToInboundMessage).toHaveBeenCalledWith(
+        "message_1",
+        expect.objectContaining({ html: source })
+      )
+    );
+  });
+
   it("keeps the text on failure and uses the same key on retry", async () => {
     mocked.replyToInboundMessage.mockRejectedValueOnce(new Error("offline"));
     const user = userEvent.setup();

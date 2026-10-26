@@ -7,14 +7,6 @@ vi.mock("../transactional-email/service.js", () => ({
   transactionalEmailService: { send, enqueue: vi.fn() },
 }));
 
-const renderHtmlAsEmailSafe = vi.hoisted(() => vi.fn());
-vi.mock("@qqueue/email-engine", () => ({
-  renderHtmlAsEmailSafe,
-  injectTracking: vi.fn((html?: string) =>
-    html === undefined ? undefined : `${html}<pixel>`
-  ),
-}));
-
 const { manualEmailService } = await import("./service.js");
 
 beforeEach(() => {
@@ -26,13 +18,6 @@ beforeEach(() => {
     count: 2,
   } as never);
   send.mockReset().mockResolvedValue({ id: "job_1", status: "QUEUED" });
-  renderHtmlAsEmailSafe
-    .mockReset()
-    .mockImplementation(async (html: string) => ({
-      html: `<safe>${html}</safe>`,
-      errors: [],
-      usedFallback: false,
-    }));
   prismaMock.contact.findMany.mockResolvedValue([] as never);
   prismaMock.contactListMember.findMany.mockResolvedValue([] as never);
   // Default: nobody is suppressed (carrier selection queries this).
@@ -195,7 +180,7 @@ describe("manualEmailService.send", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("renders MJML, sets MANUAL origin + createdByUserId, and reuses the pipeline", async () => {
+  it("passes body through, sets MANUAL origin + createdByUserId, and reuses the pipeline", async () => {
     const result = await manualEmailService.send(
       {
         organizationId: "org_1",
@@ -218,8 +203,7 @@ describe("manualEmailService.send", () => {
     expect(arg.bcc).toEqual([]);
     // A single-recipient send needs no group.
     expect(arg.sendGroupId).toEqual(expect.any(String));
-    // Body rendered through the MJML email-safe layer.
-    expect(arg.html).toBe("<safe><p>Body</p></safe>");
+    expect(arg.html).toBe("<p>Body</p>");
   });
 
   it("delivers each To and Cc independently with one logical group", async () => {
@@ -333,62 +317,7 @@ describe("manualEmailService.send", () => {
     expect(second.attachmentMode).toBe("copy");
   });
 
-  it("logs an error when MJML compilation falls back to the raw body", async () => {
-    renderHtmlAsEmailSafe.mockResolvedValue({
-      html: "<p>Body</p>",
-      errors: ["Unexpected token"],
-      usedFallback: true,
-    });
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await manualEmailService.send(
-      {
-        organizationId: "org_1",
-        to: ["a@x.com"],
-        subject: "Hi",
-        html: "<p>Body</p>",
-      },
-      "user_1"
-    );
-
-    expect(spy).toHaveBeenCalledOnce();
-    expect(spy.mock.calls[0][0]).toContain("Unexpected token");
-    // The send still goes out — a fallback degrades the layout, not delivery.
-    expect(send.mock.calls[0][0].html).toBe("<p>Body</p>");
-    spy.mockRestore();
-  });
-
-  it("warns when MJML reports validation issues but still renders", async () => {
-    renderHtmlAsEmailSafe.mockResolvedValue({
-      html: "<safe/>",
-      errors: ["mj-raw is not allowed here"],
-      usedFallback: false,
-    });
-    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    await manualEmailService.send(
-      {
-        organizationId: "org_1",
-        to: ["a@x.com"],
-        subject: "Hi",
-        html: "<p>Body</p>",
-      },
-      "user_1"
-    );
-
-    expect(spy.mock.calls[0][0]).toContain("mj-raw is not allowed here");
-    spy.mockRestore();
-  });
-
-  // Every other test here stubs the renderer, so none of them would notice the
-  // real one emitting an invisible body (the mj-raw-in-<tbody> bug). This one
-  // drives the actual MJML layer through the manual send path.
-  it("sends a visible body through the real MJML renderer", async () => {
-    const actual = await vi.importActual<typeof import("@qqueue/email-engine")>(
-      "@qqueue/email-engine"
-    );
-    renderHtmlAsEmailSafe.mockImplementation(actual.renderHtmlAsEmailSafe);
-
+  it("passes authored HTML through without a layout", async () => {
     await manualEmailService.send(
       {
         organizationId: "org_1",
@@ -399,10 +328,7 @@ describe("manualEmailService.send", () => {
       "user_1"
     );
 
-    const html: string = send.mock.calls[0][0].html;
-    expect(html).toContain("<p>My typed content</p>");
-    // Not foster-parented out of the table into the font-size:0px column.
-    expect(html).not.toMatch(/<tbody>\s*<div class="qq-body">/);
+    expect(send.mock.calls[0][0].html).toBe("<p>My typed content</p>");
   });
 });
 
@@ -670,7 +596,7 @@ describe("manualEmailService.recentRecipients", () => {
 });
 
 describe("manualEmailService.preview", () => {
-  it("renders the body through MJML + tracking and summarizes recipients", async () => {
+  it("returns authored HTML and summarizes recipients", async () => {
     prismaMock.contact.findMany.mockResolvedValue([] as never);
     const result = await manualEmailService.preview({
       organizationId: "org_1",
@@ -682,7 +608,7 @@ describe("manualEmailService.preview", () => {
     expect(result.subject).toBe("Subject");
     expect(result.recipients.to).toEqual(["a@x.com"]);
     expect(result.recipients.total).toBe(1);
-    expect(result.html).toBe("<safe><p>Hi</p></safe><pixel>");
+    expect(result.html).toBe("<p>Hi</p>");
   });
 
   it("returns an empty body when there is nothing to render", async () => {
@@ -695,10 +621,9 @@ describe("manualEmailService.preview", () => {
 });
 
 
-it("uses custom organization branding for composer sends", async () => {
+it("does not apply saved organization branding to composer sends", async () => {
   prismaMock.organization.findUnique.mockResolvedValue({ brandName: "Existing brand", layoutHtml: "<html><body>{{content}}</body></html>", brandingEnabled: true } as never);
-  renderHtmlAsEmailSafe.mockResolvedValue({ html: "<custom>Body</custom>", errors: [], usedFallback: false });
   await manualEmailService.send({ organizationId: "org_1", to: ["a@x.com"], subject: "Hi", html: "<p>Body</p>" }, "user_1");
-  expect(renderHtmlAsEmailSafe).toHaveBeenCalledWith("<p>Body</p>", expect.objectContaining({ branding: expect.objectContaining({ layoutHtml: "<html><body>{{content}}</body></html>", brandingEnabled: true }) }));
-  expect(send.mock.calls[0][0].html).toBe("<custom>Body</custom>");
+  expect(prismaMock.organization.findUnique).not.toHaveBeenCalled();
+  expect(send.mock.calls[0][0].html).toBe("<p>Body</p>");
 });

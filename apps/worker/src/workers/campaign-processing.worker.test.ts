@@ -620,7 +620,7 @@ describe("campaign-processing worker", () => {
   });
 });
 
-describe("campaign branding", () => {
+describe("campaign HTML pass-through", () => {
   function sendingCampaign() {
     prismaMock.campaign.findUnique.mockResolvedValue({
       id: "c1",
@@ -646,28 +646,17 @@ describe("campaign branding", () => {
     prismaMock.emailJob.createMany.mockResolvedValue({ count: 1 } as never);
   }
 
-  it("wraps the template in the org's branding and still substitutes variables", async () => {
+  it("does not wrap the template and still substitutes variables", async () => {
     sendingCampaign();
-    prismaMock.organization.findUnique.mockResolvedValue({
-      brandName: "Acme",
-      logoUrl: null,
-      accentColor: "#123456",
-      brandingEnabled: true
-    } as never);
 
     await run({ id: "j1", data: { campaignId: "c1" } });
 
     const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
-    // Branded...
-    expect(html).toContain("Acme");
-    expect(html).toContain("#123456");
-    // ...and the merge tokens still resolved, which is the whole point of
-    // compiling once and substituting afterwards.
-    expect(html).toContain("Hello Ann Bee");
-    expect(html).not.toContain("{{");
+    expect(html).toBe("<p>Hello Ann Bee </p>");
+    expect(prismaMock.organization.findUnique).not.toHaveBeenCalled();
   });
 
-  it("leaves the template untouched when branding is switched off", async () => {
+  it("leaves campaign layout and branding settings out of the sent body", async () => {
     sendingCampaign();
     prismaMock.organization.findUnique.mockResolvedValue({
       brandName: "Acme",
@@ -680,34 +669,6 @@ describe("campaign branding", () => {
 
     const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
     expect(html).toBe("<p>Hello Ann Bee </p>");
-    expect(html).not.toContain("Acme");
+    expect(prismaMock.organization.findUnique).not.toHaveBeenCalled();
   });
-
-  it("keeps the legacy address out of the body — the send worker owns it for bulk", async () => {
-    sendingCampaign();
-    prismaMock.organization.findUnique.mockResolvedValue({
-      brandName: "Acme",
-      logoUrl: null,
-      accentColor: null,
-      brandingEnabled: true,
-      footerNote: "Legacy address"
-    } as never);
-
-    await run({ id: "j1", data: { campaignId: "c1" } });
-
-    const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
-    expect(html).not.toContain("Legacy address");
-  });
-  it("renders custom branding with the saved identity and recipient merge fields", async () => {
-    sendingCampaign();
-    prismaMock.organization.findUnique.mockResolvedValue({ brandName: "Existing brand", footerNote: "Existing address", logoUrl: "https://example.com/logo.png", accentColor: "#123456", brandingEnabled: true, layoutHtml: '<html><body><header>{{brand_name}}</header>{{content}}<footer>{{footer_note}}</footer></body></html>' } as never);
-    await run({ id: "custom", data: { campaignId: "c1" } });
-    const html = prismaMock.emailJob.createMany.mock.calls[0][0].data[0].html;
-    expect(html).toContain("<header>Existing brand</header>");
-    expect(html).toContain("Hello Ann Bee");
-    expect(html).toContain("Existing address");
-    expect(html).toContain("qq-branding-footer-note");
-    expect(html).not.toContain("{{");
-  });
-
 });

@@ -1,4 +1,3 @@
-import { BRANDING_FOOTER_MARKER } from "@qqueue/shared";
 import { DelayedError, Worker } from "bullmq";
 import {
   SMTPProvider,
@@ -9,7 +8,7 @@ import {
   injectTracking,
   listUnsubscribeHeadersForUrl,
 } from "@qqueue/email-engine";
-import { emailHeadersSchema } from "@qqueue/shared";
+import { BRANDING_FOOTER_MARKER, emailHeadersSchema } from "@qqueue/shared";
 import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
 import { loadAttachmentsForJob } from "../lib/attachments.js";
@@ -49,8 +48,6 @@ export function startEmailSendingWorker() {
         include: {
           smtpConnection: true,
           campaign: { select: { status: true } },
-          // Only the footer note: the rest of the org's branding is applied
-          // when the body is rendered, not when it is sent.
           organization: { select: { footerNote: true } },
         },
       });
@@ -180,18 +177,6 @@ export function startEmailSendingWorker() {
             },
           });
 
-          // SYSTEM mail keeps its links untouched: rewriting a password-reset or
-          // invite URL through the tracking redirect would make account mail look
-          // like (and depend on) marketing infrastructure.
-          const trackedHtml =
-            emailJob.origin === "SYSTEM"
-              ? (emailJob.html ?? undefined)
-              : injectTracking(emailJob.html, {
-                  emailJobId: emailJob.id,
-                  baseUrl: env.APP_URL,
-                  secret: env.TRACKING_SECRET,
-                });
-
           const attachments = await loadAttachmentsForJob(emailJob.id);
 
           // Headers are validated at the API boundary and checked again here in
@@ -210,9 +195,19 @@ export function startEmailSendingWorker() {
               )?.[1]
             : undefined;
 
+          // Keep account mail links untouched; track links in other messages.
+          const trackedHtml =
+            emailJob.origin === "SYSTEM"
+              ? (emailJob.html ?? undefined)
+              : injectTracking(emailJob.html, {
+                  emailJobId: emailJob.id,
+                  baseUrl: env.APP_URL,
+                  secret: env.TRACKING_SECRET,
+                });
+
           // Bulk mail (campaign fan-out, recurring sends, or a bulk API send)
           // offers a one-click unsubscribe unless disabled on the campaign.
-          // One URL serves both the RFC 8058 headers and the visible footer.
+          // Bulk mail includes a visible unsubscribe link as well as headers.
           const unsubscribeUrl =
             emailJob.isBulk && emailJob.unsubscribeEnabled !== false
               ? (customUnsubscribeUrl ??
@@ -225,8 +220,8 @@ export function startEmailSendingWorker() {
               : undefined;
 
           // For bulk jobs, QQueue's pair is authoritative unless the caller
-          // supplied a complete one-click pair. Its footer then uses that same
-          // URL. Strip caller spellings first to avoid case-variant duplicates.
+          // supplied a complete one-click pair. Strip caller spellings first to
+          // avoid case-variant duplicates.
           const otherHeaders = emailJob.isBulk
             ? Object.fromEntries(
                 Object.entries(callerHeaders ?? {}).filter(
@@ -244,30 +239,18 @@ export function startEmailSendingWorker() {
               }
             : otherHeaders;
 
-          // The footer goes on *after* tracking injection, so the opt-out link is
-          // the only one in the message that isn't rewritten through the click
-          // redirect. Both helpers no-op when the body already links to the
-          // endpoint (a template using {{unsubscribe_url}}) — hence no duplicate.
           const footerOptions = {
             note: emailJob.organization?.footerNote ?? null,
           };
           const html = unsubscribeUrl
-            ? appendUnsubscribeFooter(
-                trackedHtml,
-                unsubscribeUrl,
-                {
-                  note: trackedHtml?.includes(BRANDING_FOOTER_MARKER)
-                    ? null
-                    : footerOptions.note
-                }
-              )
+            ? appendUnsubscribeFooter(trackedHtml, unsubscribeUrl, {
+                note: trackedHtml?.includes(BRANDING_FOOTER_MARKER)
+                  ? null
+                  : footerOptions.note,
+              })
             : trackedHtml;
           const text = unsubscribeUrl
-            ? appendUnsubscribeFooterText(
-                emailJob.text,
-                unsubscribeUrl,
-                footerOptions
-              )
+            ? appendUnsubscribeFooterText(emailJob.text, unsubscribeUrl, footerOptions)
             : (emailJob.text ?? undefined);
 
           smtpStarted = true;
@@ -313,8 +296,8 @@ export function startEmailSendingWorker() {
               ? emailJob.references
               : undefined,
             subject: emailJob.subject,
-            html, // tracking injected and unsubscribe footer appended above
-            text, // same footer, plaintext half
+            html,
+            text,
             headers,
             attachments,
           });

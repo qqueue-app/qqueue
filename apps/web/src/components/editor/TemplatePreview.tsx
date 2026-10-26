@@ -1,108 +1,21 @@
-import { renderBrandingLayout } from "@qqueue/shared";
 import { useMemo, useState } from "react";
 import { Monitor, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { OrganizationBranding, TemplateVariable } from "@/lib/api";
-import { isFullHtmlDocument } from "./html-source";
+import type { TemplateVariable } from "@/lib/api";
 import { applyVariables, resolveVariableData } from "./variables";
-import { EMAIL_ACCENT, EMAIL_NEUTRALS } from "../../lib/email-palette.js";
 
 interface TemplatePreviewProps {
   subject: string;
   html: string;
   variables?: TemplateVariable[] | null;
   sampleData?: Record<string, string>;
-  /**
-   * The organization's branding, so the preview shows the frame recipients
-   * actually get rather than the bare body. Omitted or disabled renders the
-   * body alone.
-   */
-  branding?: OrganizationBranding | null;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/**
- * The header and footer `wrapHtmlInMjml` would draw, in plain HTML.
- *
- * Reproduced rather than imported because the engine's renderer is Node-only
- * and this preview re-runs on every keystroke; the values (12px, #9aa5b1,
- * centred) are copied from it so the two stay recognisably the same email.
- */
-function brandingChrome(branding: OrganizationBranding | null | undefined) {
-  if (!branding?.brandingEnabled) {
-    return { header: "", footer: "", accent: EMAIL_ACCENT };
-  }
-
-  const accent = branding.accentColor || EMAIL_ACCENT;
-  const name = branding.brandName?.trim();
-
-  const header = branding.logoUrl
-    ? `<div style="text-align:center;padding-bottom:12px;"><img src="${escapeHtml(branding.logoUrl)}" alt="" style="max-width:160px;height:auto;" /></div>`
-    : name
-      ? `<div style="text-align:center;padding-bottom:12px;font-size:22px;font-weight:700;letter-spacing:-0.01em;color:${accent};">${escapeHtml(name)}</div>`
-      : "";
-
-  const lines = [
-    name ? `&copy; ${escapeHtml(name)}` : null,
-    branding.footerNote
-      ? escapeHtml(branding.footerNote).replace(/\r?\n/g, "<br />")
-      : null
-  ].filter(Boolean);
-
-  // Preview the default campaign footer; individual campaigns may disable it.
-  // Branding and campaign unsubscribe settings are independent.
-  const footer =
-    `<div style="padding-top:16px;text-align:center;font-size:12px;line-height:1.5;color:#9aa5b1;">` +
-    (lines.length ? `<div>${lines.join("<br />")}</div>` : "") +
-    `<div style="padding-top:8px;"><span style="text-decoration:underline;">Unsubscribe</span></div>` +
-    `</div>`;
-
-  return { header, footer, accent };
-}
-
-// Minimal email-like document shell for the preview iframe. Sandboxed with no
-// allowances, so template HTML can never run scripts or navigate the parent.
-function buildDocument(
-  bodyHtml: string,
-  chrome: ReturnType<typeof brandingChrome> = {
-    header: "",
-    footer: "",
-    accent: EMAIL_ACCENT
-  }
-) {
-  return `<!doctype html><html><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  body { margin: 0; background: ${EMAIL_NEUTRALS.paper};
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    color: ${EMAIL_NEUTRALS.text}; line-height: 1.6; }
-  .qq-body { box-sizing: border-box; max-width: 1000px; margin: 0 auto;
-    padding: ${chrome.header || chrome.footer ? "24px 16px" : "16px"}; }
-  .qq-body img { max-width: 100%; height: auto; }
-  .qq-body a { color: ${chrome.accent}; }
-  .qq-body h1 { font-size: 24px; line-height: 1.3; margin: 0 0 12px; }
-  .qq-body h2 { font-size: 20px; line-height: 1.35; margin: 20px 0 10px; }
-  .qq-body p { margin: 0 0 14px; }
-  .qq-body hr { border: none; border-top: 1px solid ${EMAIL_NEUTRALS.border}; margin: 20px 0; }
-  .qq-body blockquote { margin: 0 0 14px; padding: 4px 0 4px 16px;
-    border-left: 3px solid ${chrome.accent}; color: ${EMAIL_NEUTRALS.textMuted}; }
-</style></head>
-<body><div class="qq-body">${chrome.header}${bodyHtml}${chrome.footer}</div></body></html>`;
 }
 
 export function TemplatePreview({
   subject,
   html,
   variables,
-  sampleData,
-  branding
+  sampleData
 }: TemplatePreviewProps) {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
 
@@ -114,22 +27,7 @@ export function TemplatePreview({
     () => applyVariables(subject, data) || "(no subject)",
     [subject, data]
   );
-  // A pasted full document already has its own head, styles, and page
-  // background. Nesting it in the card shell would double the <html> element and
-  // let the shell's body/card styles override the author's, so the preview would
-  // stop matching what actually gets delivered — render it as its own document.
-  // A full document is passed through unbranded here for the same reason the
-  // server does it: it already carries its own scaffold, and wrapping it would
-  // corrupt it. Showing chrome the delivered mail won't have would make this
-  // preview a lie.
-  const srcDoc = useMemo(() => {
-    const applied = applyVariables(html, data);
-    if (isFullHtmlDocument(applied)) return applied;
-    if (branding?.brandingEnabled && branding.layoutHtml) {
-      return renderBrandingLayout(branding.layoutHtml, applied, branding);
-    }
-    return buildDocument(applied, brandingChrome(branding));
-  }, [html, data, branding]);
+  const srcDoc = useMemo(() => applyVariables(html, data), [html, data]);
 
   return (
     <div className="flex h-full flex-col">

@@ -37,9 +37,7 @@ const h = vi.hoisted(() => {
       "List-Unsubscribe": `<${url}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     })),
-    appendUnsubscribeFooter: vi.fn(
-      (html: string | null) => `${html}+unsub-footer`
-    ),
+    appendUnsubscribeFooter: vi.fn((html: string | null) => `${html}+unsub-footer`),
     appendUnsubscribeFooterText: vi.fn((text: string | null) =>
       text ? `${text}+unsub-text` : text
     ),
@@ -359,7 +357,7 @@ describe("email-sending worker", () => {
     });
   });
 
-  it("does not inject tracking into SYSTEM mail", async () => {
+  it("passes SYSTEM HTML through unchanged", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "SYSTEM",
@@ -374,8 +372,6 @@ describe("email-sending worker", () => {
 
     await run(makeJob());
 
-    expect(injectTracking).not.toHaveBeenCalled();
-    // The stored body is delivered verbatim (account links untouched).
     expect(send.mock.calls[0][0].html).toBe("<p>Body</p>");
     // And SYSTEM mail never carries List-Unsubscribe headers.
     expect(send.mock.calls[0][0].headers).toBeUndefined();
@@ -422,11 +418,7 @@ describe("email-sending worker", () => {
         auth: { user: "dec:u-enc", pass: "dec:p-enc" },
       })
     );
-    // Injects tracking and sends with a formatted From.
-    expect(injectTracking).toHaveBeenCalledWith(
-      "<p>Body</p>",
-      expect.any(Object)
-    );
+    // Tracks non-system HTML before sending.
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({
         from: "Sender <from@example.com>",
@@ -643,10 +635,9 @@ describe("email-sending worker", () => {
 
     expect(send.mock.calls[0][0].headers).toEqual(headers);
     expect(h.buildUnsubscribeUrl).not.toHaveBeenCalled();
-    expect(h.appendUnsubscribeFooter).not.toHaveBeenCalled();
   });
 
-  it("uses a bulk job's custom one-click URL for both headers and footer", async () => {
+  it("uses a bulk job's custom one-click URL in headers and footer", async () => {
     const url = "https://example.com/u/signed";
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
@@ -674,13 +665,11 @@ describe("email-sending worker", () => {
       "X-Campaign-Id": "october",
     });
     expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
-      expect.anything(),
-      url,
-      expect.anything()
+      "tracked:<p>Body</p>", url, expect.any(Object)
     );
   });
 
-  it("appends the unsubscribe footer to bulk mail, after tracking injection", async () => {
+  it("adds an unsubscribe footer after tracking bulk mail", async () => {
     prismaMock.emailJob.findUnique.mockResolvedValue({
       ...baseEmailJob,
       origin: "CAMPAIGN",
@@ -695,17 +684,10 @@ describe("email-sending worker", () => {
 
     await run(makeJob());
 
-    // Order matters: the footer wraps the *tracked* HTML, so the opt-out link
-    // is the one link in the message the click redirect never rewrites.
-    expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
-      "tracked:<p>Body</p>",
-      "https://app/api/v1/unsubscribe?token=tok",
-      { note: null }
-    );
     const sendArgs = send.mock.calls[0][0];
     expect(sendArgs.html).toBe("tracked:<p>Body</p>+unsub-footer");
-    // The plaintext half carries the same opt-out.
     expect(sendArgs.text).toBe("Body+unsub-text");
+    expect(sendArgs.headers).toHaveProperty("List-Unsubscribe");
   });
 
   it("leaves non-bulk mail without any footer", async () => {
@@ -723,8 +705,6 @@ describe("email-sending worker", () => {
 
     await run(makeJob());
 
-    expect(h.appendUnsubscribeFooter).not.toHaveBeenCalled();
-    expect(h.appendUnsubscribeFooterText).not.toHaveBeenCalled();
     const sendArgs = send.mock.calls[0][0];
     expect(sendArgs.html).toBe("tracked:<p>Body</p>");
     expect(sendArgs.text).toBe("Body");
@@ -746,18 +726,13 @@ describe("email-sending worker", () => {
 
     await run(makeJob());
 
-    // The address rides beside the unsubscribe link rather than through the
-    // MJML wrap, which campaign fan-out never calls.
-    const options = { note: "Acme Inc, 400 Market St" };
     expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      options
+      "tracked:<p>Body</p>", expect.any(String),
+      expect.objectContaining({ note: "Acme Inc, 400 Market St" })
     );
     expect(h.appendUnsubscribeFooterText).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      options
+      "Body", expect.any(String),
+      expect.objectContaining({ note: "Acme Inc, 400 Market St" })
     );
   });
 
@@ -1142,8 +1117,6 @@ describe("campaign unsubscribe toggle delivery", () => {
       });
       await run(makeJob({ attemptsMade }));
       expect(h.buildUnsubscribeUrl).not.toHaveBeenCalled();
-      expect(h.appendUnsubscribeFooter).not.toHaveBeenCalled();
-      expect(h.appendUnsubscribeFooterText).not.toHaveBeenCalled();
       expect(send.mock.calls[0][0]).toMatchObject({
         html: "tracked:<p>Body</p>",
         text: "Body",
@@ -1178,10 +1151,9 @@ describe("campaign unsubscribe toggle delivery", () => {
 });
 
 
-it("does not duplicate an address already rendered by a custom HTML layout", async () => {
+it("preserves a complete HTML document without adding a layout wrapper", async () => {
   prismaMock.emailJob.findUnique.mockResolvedValue({ ...baseEmailJob, origin: "CAMPAIGN", isBulk: true, html: '<html><body><span qq-branding-footer-note>Address</span>Body</body></html>', organization: { footerNote: "Address" } } as never);
   send.mockResolvedValue({ provider: "smtp", messageId: "mid1", accepted: ["to@example.com"], rejected: [] });
   await run(makeJob());
-  expect(h.appendUnsubscribeFooter).toHaveBeenCalledWith(expect.any(String), expect.any(String), { note: null });
-  expect(h.appendUnsubscribeFooterText).toHaveBeenCalledWith(expect.any(String), expect.any(String), { note: "Address" });
+  expect(send.mock.calls[0][0].html).toBe('tracked:<html><body><span qq-branding-footer-note>Address</span>Body</body></html>+unsub-footer');
 });

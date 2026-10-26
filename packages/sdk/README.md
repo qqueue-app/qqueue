@@ -32,6 +32,12 @@ const email = await qqueue.sendEmail({
 console.log(email.id, email.status);
 ```
 
+QQueue does not wrap the supplied `html` body in a branding layout. Non-system
+sends receive open/click tracking, and bulk sends receive an unsubscribe footer.
+Values in `{{variable}}` placeholders are still substituted when `variables`
+is provided. Recipient mail clients can change how colors appear, including
+applying dark mode.
+
 ## Newsletter unsubscribe headers
 
 Pass message headers in the payload. Each recipient needs their own signed
@@ -54,7 +60,7 @@ await qqueue.sendEmail(
 );
 ```
 
-`isBulk: true` makes QQueue append a visible footer with the same URL. The URL
+`isBulk: true` adds List-Unsubscribe headers and a visible body footer. The URL
 must be HTTPS. QQueue's API
 limits this endpoint to 120 requests per minute per bearer token and delays
 delivery above the configured per-recipient-domain send cap (60 per minute by

@@ -96,16 +96,18 @@ registers the inbox sync scheduler.
 3. The campaign worker expands recipients — resolving a target list or dynamic
    segment — into email jobs.
 4. Email jobs are added to the sending queue.
-5. The email worker decrypts the job's SMTP connection credentials, injects
-   open/click tracking, and sends through the SMTP provider.
+5. The email worker decrypts the job's SMTP connection credentials, applies
+   open/click tracking and bulk unsubscribe footers where applicable, then sends
+   through the SMTP provider.
 6. Email events (queued, sent, delivered, opened, clicked, bounced, complained,
    failed) are recorded for analytics.
 
 Every send — campaign, transactional, manual, recurring, and system — flows
 through the email-sending worker. `EmailJob.origin` distinguishes them.
 `SYSTEM` mail (password resets, invitations) rides the same pipeline but skips
-suppression checks and tracking injection: account mail must reach unsubscribed
-users, with its links untouched.
+suppression checks and tracking injection. Other sends retain open/click
+tracking; bulk jobs receive unsubscribe headers and a visible body footer.
+Bodies are not wrapped in an organization branding layout.
 
 ## Email Provider Abstraction
 

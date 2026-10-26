@@ -103,15 +103,13 @@ it throws a `QQueueError` with `.status` and an optional `.code`.
 
 ## Confirm it worked
 
-- **Dashboard activity feed** shows the job and its events (`QUEUED`, `SENT`,
-  and later `OPENED` / `CLICKED` if the recipient engages).
+- **Dashboard activity feed** shows the job and its delivery events.
 - **Queue Operations** (owners/admins) shows queued, processing, and failed
   jobs, with a **Retry** action and the `failedReason` on any failure.
 - The **recipient inbox** receives the message.
 
-> Open tracking relies on a 1×1 pixel and click tracking on link rewriting, so
-> both require `APP_URL` to be publicly reachable over HTTPS. Opens undercount
-> because many mail clients block remote images — that's expected.
+Open and click tracking are added to non-system sends. They rely on `APP_URL`
+being publicly reachable over HTTPS; opens undercount when clients block images.
 
 ## If something went wrong
 

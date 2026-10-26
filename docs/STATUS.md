@@ -21,20 +21,21 @@ original renderer until a customized design is explicitly saved. The editor
 starts with the saved logo, name and address resolved visually;
 `{{content}}` marks where each email body appears. Identity placeholders remain
 available in the advanced source view.
-Replacing a customized design requires confirmation, and a reset restores the original
-renderer. Custom layouts flow through campaign, manual and recurring sends and
-template previews. Complete email documents retain their own layout. Address
-markers avoid duplicate HTML addresses in the send-time unsubscribe footer;
-plaintext and unsubscribe controls remain independent.
+Replacing a customized design requires confirmation, and a reset restores the
+starter preview. Branding layouts remain available in settings previews, but
+they are not injected into outbound email. Campaign, manual, recurring,
+transactional and SDK HTML bodies pass through without a QQueue layout.
 
 ## Per-campaign unsubscribe control
 
 Campaign drafts have an **Include unsubscribe link** toggle, enabled by default.
-It controls the automatic HTML/plaintext footer and List-Unsubscribe headers.
+It controls the List-Unsubscribe headers and visible HTML/plaintext footer.
 The choice is preserved when duplicating campaigns and snapshotted onto recipient
 jobs for scheduled, recurring, A/B and retried sends. Existing campaigns and jobs
 remain enabled on upgrade. Template-authored links (including
 `{{unsubscribe_url}}`) remain intact, and suppression enforcement is unchanged.
+Non-system outbound messages receive click rewrites and open pixels. SYSTEM
+messages keep account links untouched.
 
 ## Gmail mail workspace overhaul
 
@@ -263,8 +264,8 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    sends. \*Implemented as **Email Studio\*** (`apps/web/src/pages/EmailStudio.tsx`):
    multiple `To` recipients, always-visible `CC`/`BCC` with autocomplete over
    contacts and previously-mailed addresses, contact and contact-list pickers,
-   template apply, a Tiptap editor with a **raw HTML source view**, MJML-backed
-   preview rendered by the API (same wrap + tracking injection as the send),
+   template apply, a Tiptap editor with a **raw HTML source view**, a preview of
+   the authored body without an added branding layout,
    drafts (`EmailDraft`:
    auto-save/resume/delete/send, with a dedicated `/drafts` page that deep-links
    back into the composer), schedule-for-later, **attachments**
@@ -295,10 +296,7 @@ Zoho clone) built around four capabilities that share one delivery pipeline:
    one archived message at `/sent/:id`: the body in a sandboxed frame,
    attachments, the full recipient lists, and the `EmailEvent` history as a
    dated timeline with the failure reason lifted out of it. The body rendered
-   is the body **as stored**, which is deliberately not what left the building:
-   the send worker injects the open pixel and rewrites links on the way out, so
-   rendering the tracked copy would record a fake open every time somebody read
-   their own archive. `cid:` images are resolved by fetching the inline parts
+   is the body as stored, before send-time tracking/footer additions. `cid:` images are resolved by fetching the inline parts
    over the authenticated attachment route.
 
 Campaign, transactional, and manual sends are three entry points into a single
@@ -706,7 +704,7 @@ operational and abuse-control gaps from the original audit have been closed.
       it survives a save/load cycle; buttons saved before this keep rendering as the
       original centred green.
 - [x] Email Studio manual composer: multiple `To`, `CC`/`BCC`, contact and
-      contact-list pickers, template apply, MJML-backed preview, drafts,
+      contact-list pickers, template apply, authored-body preview, drafts,
       attachments (object storage), per-recipient delivery status, and manual send
       through the shared pipeline (`origin = MANUAL`, `createdByUserId` set).
 - [x] Campaign drafts, duplicate, delete, send now, one-shot schedule,

@@ -183,9 +183,8 @@ export function BodyEditor({
             className="min-h-pane-lg w-full rounded-control border bg-background px-3 py-2 font-mono text-meta leading-relaxed text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <p className="text-meta text-muted-foreground">
-            {fullDocument
-              ? "Sent exactly as written. Your document supplies its own styles, so nothing is wrapped around it."
-              : "A fragment is wrapped in an email-safe layout on send. Paste a full document (with <html> or <body>) to send it untouched."}
+            No branding layout is added. Tracking and bulk unsubscribe footers
+            may still be added; mail clients may restyle the result.
           </p>
         </div>
       )}

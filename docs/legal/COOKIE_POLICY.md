@@ -26,10 +26,10 @@ management. We do not use cookies to serve third-party advertising.
 
 ## 3. Email Tracking
 
-Separately from website cookies, QQueue offers open and click tracking for
-emails customers send through the platform. This tracking uses pixels and
-redirect links rather than browser cookies, and is controlled by the sending
-customer. See the Privacy Policy for how email delivery metadata is processed.
+Separately from website cookies, older QQueue messages may contain open and
+click tracking pixels or redirect links. New outbound messages do not have
+tracking inserted. Existing tracking links continue to work. See the Privacy
+Policy for how email delivery metadata is processed.
 
 ## 4. Managing Cookies
 

@@ -72,15 +72,14 @@ Header names are case-insensitive; duplicates, control characters, and
 identity/envelope/MIME headers such as `From`, `To`, `Subject`, and
 `Content-Type` are rejected. One-click unsubscribe requires exactly one
 angle-bracketed HTTPS URL and the exact `List-Unsubscribe-Post` value above.
-Set `isBulk: true` for newsletters. QQueue then uses the supplied one-click
-URL for both the message headers and a visible unsubscribe footer. Without
-`isBulk`, QQueue forwards the headers but does not append a footer. Keep
+Set `isBulk: true` for newsletters. QQueue adds List-Unsubscribe headers and a
+visible unsubscribe footer using the supplied one-click URL. Keep
 external opt-outs in QQueue's suppression list too, since QQueue checks it
 before and during send.
 
 Campaign jobs already carry QQueue-generated unsubscribe headers. When a bulk
 job has its own complete one-click header pair, the worker uses that URL for
-both headers and the visible footer. The current campaign API does not accept
+the headers and visible footer. The current campaign API does not accept
 per-recipient URLs; a campaign-wide static URL must not be used for signed
 recipient-specific unsubscribe links.
 

@@ -56,8 +56,8 @@ must change for production.
 **Why it matters.** Two are genuine footguns:
 - **`ENCRYPTION_KEY`** — changing it after saving SMTP connections makes stored
   credentials undecryptable.
-- **`APP_URL`** — must be publicly reachable over HTTPS or open/click tracking
-  silently fails to record.
+- **`APP_URL`** — must be publicly reachable over HTTPS so unsubscribe links
+  and links in older tracked messages resolve.
 
 **Recommendation.** Keep the [Beta checklist](BETA_CHECKLIST.md) front-and-
 centre, and consider a startup validation that warns when production secrets are

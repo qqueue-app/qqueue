@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils.js";
 
 interface EmailPreviewFrameProps {
-  /** Fully rendered, email-safe HTML (may be a complete <html> document). */
+  /** Authored HTML (may be a complete <html> document). */
   html: string;
   className?: string;
   title?: string;
@@ -10,13 +10,10 @@ interface EmailPreviewFrameProps {
 }
 
 /**
- * Render email HTML inside a sandboxed iframe.
+ * Preview authored email HTML inside a sandboxed iframe.
  *
- * The send pipeline produces a complete, email-safe HTML document (MJML output
- * with its own <html>/<head>/<style>). Injecting that into the dashboard DOM via
- * dangerouslySetInnerHTML let the email's global styles leak into — and blank
- * out — the surrounding page. An iframe isolates the document entirely, so the
- * preview matches what recipients see without touching the app's styles.
+ * An iframe isolates email styles from the dashboard. The iframe receives the
+ * authored HTML without adding a layout or changing the send payload.
  *
  * `sandbox="allow-same-origin"` (note: NO allow-scripts) keeps scripts from
  * executing while still letting us read the document height to size the frame.

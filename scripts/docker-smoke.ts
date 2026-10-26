@@ -303,10 +303,11 @@ async function main() {
       !rawMessage.includes(
         "List-Unsubscribe-Post: List-Unsubscribe=One-Click"
       ) ||
-      !rawBody.includes("https://example.com/unsubscribe/signed-token")
+      !rawBody.includes("https://example.com/unsubscribe/signed-token") ||
+      !rawBody.includes("Smoke test")
     ) {
       throw new Error(
-        "Smoke SMTP message is missing the one-click headers or footer"
+        "Smoke SMTP message is missing the one-click headers or body footer"
       );
     }
 
@@ -377,11 +378,18 @@ async function main() {
           "Campaign job lost unsubscribe setting or bulk classification"
         );
       const raw = smtpMessages[messageStart] ?? "";
-      if (!raw.includes("CustomBranding") || !raw.includes("qq-branding-footer-note")) throw new Error("Campaign SMTP is missing custom branding");
+      const body = raw.split("\r\n\r\n").slice(1).join("\r\n\r\n");
+      if (
+        !body.includes("Campaign body") ||
+        body.includes("CustomBranding") ||
+        body.includes("qq-branding-footer-note") ||
+        body.includes("Unsubscribe") !== enabled
+      ) {
+        throw new Error("Campaign SMTP layout or unsubscribe footer failed");
+      }
       if (
         /^List-Unsubscribe:/im.test(raw) !== enabled ||
-        /^List-Unsubscribe-Post:/im.test(raw) !== enabled ||
-        raw.includes("Unsubscribe:") !== enabled
+        /^List-Unsubscribe-Post:/im.test(raw) !== enabled
       ) {
         throw new Error(`Campaign SMTP unsubscribe toggle failed for ${enabled}`);
       }

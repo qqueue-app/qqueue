@@ -798,7 +798,7 @@ export function Campaigns() {
                   id="campaignUnsubscribeHelp"
                   className="text-meta text-muted-foreground"
                 >
-                  Add an unsubscribe footer and mail-client unsubscribe headers.
+                  Adds an unsubscribe footer and mail-client unsubscribe headers.
                   Links already in your template are kept.
                 </p>
               </div>

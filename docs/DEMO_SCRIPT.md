@@ -19,7 +19,7 @@ to show real delivery.
 > "QQueue is an open-core, self-hostable email platform. The core — everything
 > we'll see today — is open source under AGPL-3.0: transactional email, sending
 > accounts and sender identities, contacts and lists, templates, campaigns,
-> background queues, open/click tracking, and outbound webhooks. You run it on
+> background queues, delivery events, and outbound webhooks. You run it on
 > your own
 > infrastructure and connect your own mail server. We'll go from zero to a sent
 > email, then a campaign, then the operational view."
@@ -108,11 +108,10 @@ to show real delivery.
   queued / processing / failed counts, and the **Retry** action on a failed job.
 - **Dashboard**: show the recent activity feed of email jobs and events.
 - **Campaign analytics**: open the campaign's analytics — recipients, sent,
-  delivered, opens/clicks (and their rates), and top clicked links.
+  delivered, bounced, complained, and unsubscribed counts.
 
-> "Every send emits events — queued, sent, delivered, opened, clicked, bounced —
-> which power analytics and can be pushed to your systems via signed outbound
-> webhooks. Open and click tracking is built in."
+> "Every send emits delivery events — queued, sent, delivered, and bounced —
+> which can be pushed to your systems via signed outbound webhooks."
 
 ## 9. Open-core & QQueue Cloud boundary [~45s]
 

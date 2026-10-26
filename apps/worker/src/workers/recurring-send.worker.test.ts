@@ -2,17 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prismaMock } from "../test/prisma-mock.js";
 
 const h = vi.hoisted(() => ({
-  emailSendingQueue: { add: vi.fn(), addBulk: vi.fn() },
-  renderHtmlAsEmailSafe: vi.fn()
+  emailSendingQueue: { add: vi.fn(), addBulk: vi.fn() }
 }));
 
 vi.mock("../queues/email-sending.queue.js", () => ({
   emailSendingQueue: h.emailSendingQueue
 }));
-vi.mock("@qqueue/email-engine", () => ({
-  renderHtmlAsEmailSafe: h.renderHtmlAsEmailSafe
-}));
-
 const { processRecurringSend } = await import("./recurring-send.worker.js");
 
 function makeSend(overrides: Record<string, unknown> = {}) {
@@ -46,12 +41,6 @@ const job = { id: "job-1", data: { recurringSendId: "rs-1" }, timestamp: 1000 };
 
 beforeEach(() => {
   h.emailSendingQueue.add.mockReset();
-  h.renderHtmlAsEmailSafe.mockReset();
-  h.renderHtmlAsEmailSafe.mockResolvedValue({
-    html: "<mjml-rendered/>",
-    usedFallback: false,
-    errors: []
-  });
   prismaMock.recurringSendRun.findUnique.mockResolvedValue(null as never);
   prismaMock.recurringSendRun.create.mockResolvedValue({ id: "run-1" } as never);
   prismaMock.emailJob.create.mockResolvedValue({ id: "ej-1" } as never);
@@ -76,7 +65,7 @@ describe("processRecurringSend", () => {
       status: "QUEUED",
       // {{company}} substituted from the stored variables.
       subject: "Digest for Acme",
-      html: "<mjml-rendered/>"
+      html: "<p>Hello</p>"
     });
     // A single-recipient occurrence needs no group.
     expect(data.sendGroupId).toBeNull();
@@ -217,9 +206,10 @@ describe("processRecurringSend", () => {
 });
 
 
-it("passes saved layout and branding switch into recurring rendering", async () => {
+it("does not apply saved organization branding to recurring sends", async () => {
   prismaMock.recurringSend.findUnique.mockResolvedValue(makeSend() as never);
   prismaMock.organization.findUnique.mockResolvedValue({ brandName: "Acme", layoutHtml: "<html><body>{{content}}</body></html>", footerNote: "Address", brandingEnabled: false } as never);
   await processRecurringSend(job);
-  expect(h.renderHtmlAsEmailSafe).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ branding: expect.objectContaining({ layoutHtml: "<html><body>{{content}}</body></html>", footerNote: "Address", brandingEnabled: false }) }));
+  expect(prismaMock.organization.findUnique).not.toHaveBeenCalled();
+  expect(prismaMock.emailJob.create.mock.calls[0][0].data.html).toBe("<p>Hello</p>");
 });

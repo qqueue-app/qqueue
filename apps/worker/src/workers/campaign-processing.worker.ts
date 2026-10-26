@@ -1,9 +1,6 @@
 import { Worker } from "bullmq";
 import { type SegmentRule, compileSegmentRules } from "@qqueue/shared";
-import {
-  buildUnsubscribeUrl,
-  renderHtmlAsEmailSafe
-} from "@qqueue/email-engine";
+import { buildUnsubscribeUrl } from "@qqueue/email-engine";
 import type { Prisma } from "@prisma/client";
 import { env } from "../config/env.js";
 import { redisConnection } from "../config/redis.js";
@@ -195,52 +192,7 @@ export function startCampaignProcessingWorker() {
 
       const template = campaign.template;
 
-      // Dress the template in the organization's branding, ONCE per run.
-      //
-      // The order matters and is the whole reason this sits here rather than
-      // inside the per-contact loop: MJML compilation leaves `{{tokens}}` alone
-      // as ordinary text, so compiling first and substituting afterwards yields
-      // the same bytes as doing it the other way round — at one compile per
-      // run instead of one per recipient. A 10k-recipient campaign would
-      // otherwise pay for 10k MJML compilations to produce 10k near-identical
-      // documents.
-      //
-      // Legacy layouts leave the address to the send worker; custom layouts
-      // mark their address so the send-time footer does not repeat it.
-      const organization = await prisma.organization.findUnique({
-        where: { id: campaign.organizationId },
-        select: {
-          brandName: true,
-          logoUrl: true,
-          accentColor: true,
-          brandingEnabled: true,
-          layoutHtml: true,
-          footerNote: true
-        }
-      });
-
-      let templateHtml = template.html;
-      if (organization?.brandingEnabled && templateHtml) {
-        const rendered = await renderHtmlAsEmailSafe(templateHtml, {
-          branding: {
-            layoutHtml: organization.layoutHtml ?? undefined,
-            footerNote: organization.layoutHtml
-              ? organization.footerNote ?? undefined
-              : undefined,
-            brandName: organization.brandName ?? undefined,
-            logoUrl: organization.logoUrl ?? undefined,
-            accentColor: organization.accentColor ?? undefined
-          }
-        });
-        // Never fail a campaign over a template that won't compile: the raw
-        // HTML still sends, exactly as it did before branding existed.
-        if (rendered.usedFallback) {
-          console.error(
-            `[campaign-processing] MJML compilation failed for template ${template.id}; sending unbranded. ${rendered.errors.join("; ")}`
-          );
-        }
-        templateHtml = rendered.html;
-      }
+      const templateHtml = template.html;
 
       /*
         The account this run sends as: the one the campaign named, else the
@@ -330,12 +282,8 @@ export function startCampaignProcessingWorker() {
       ) => {
         const variables = contactVariables(contact);
         const toEmail = contact.email.toLowerCase();
-        // `{{unsubscribe_url}}` lets an author place the opt-out link inside the
-        // template instead of taking the footer the send worker appends. Kept
-        // out of `variables` deliberately: that column is persisted (and replayed
-        // for the A/B winner's subject), and a signed token has no business
-        // sitting in it. If the tag goes unused this costs one HMAC and nothing
-        // reaches the database.
+        // `{{unsubscribe_url}}` lets an author place the opt-out link in the
+        // template. Keep the signed URL out of persisted variables.
         const renderVars = {
           ...variables,
           unsubscribe_url: buildUnsubscribeUrl(

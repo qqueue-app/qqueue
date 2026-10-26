@@ -18,7 +18,7 @@ Treat every box as "verified", not "configured" — actually exercise each path.
       placeholders left).
 - [ ] `ENCRYPTION_KEY` backed up securely — losing it makes stored SMTP
       credentials unrecoverable.
-- [ ] `APP_URL` set to `https://<DOMAIN>` (open/click tracking links).
+- [ ] `APP_URL` set to `https://<DOMAIN>` (unsubscribe links and older tracked messages).
 - [ ] `PUBLIC_APP_URL` set to your dashboard URL so password reset links resolve
       (production compose sets this to `https://<DOMAIN>`).
 - [ ] `WEBHOOK_SECRET` set if you ingest ESP bounce/complaint webhooks (leave
@@ -55,12 +55,10 @@ Treat every box as "verified", not "configured" — actually exercise each path.
       **VERIFIED** (DNS TXT published and verified), or **EXTERNAL** domains have
       upstream SPF/DKIM/DMARC published (status `NA`).
 
-## 5. Tracking domain
+## 5. Existing tracking links (upgrades only)
 
-- [ ] `APP_URL` resolves publicly over HTTPS so open pixels and click redirects
-      load in recipients' mail clients.
-- [ ] A test email's open pixel and a click redirect both register events on the
-      dashboard.
+- [ ] If upgrading with previously sent tracked emails, `APP_URL` resolves
+      publicly over HTTPS so their pixels and click redirects still work.
 - [ ] `TRACKING_SECRET` matches between the API and worker (same value in both
       service environments).
 

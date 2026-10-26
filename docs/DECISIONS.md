@@ -1484,3 +1484,13 @@ Visual edits store the edited HTML layout. Saved identity fields remain availabl
 for rebuilding starters and filling explicit source placeholders; customized text
 and images are edited directly in the design. This avoids parsing a designed
 footer back into identity fields and overwriting the user's original values.
+
+## Preserve authored outbound layouts (2026-10-26)
+
+Do not wrap sent bodies in MJML or organization branding layouts. Preserve
+author-provided spacing and layout across manual, reply, recurring, campaign,
+transactional API, and SDK sends. The shared worker continues to apply open and
+click tracking (except SYSTEM mail) and bulk unsubscribe footers/headers. HTML
+source mode is available in the app's body editor; rich-text mode still
+serializes editor content to HTML. Template variables remain substituted. Mail
+clients can apply their own dark-mode transformations.

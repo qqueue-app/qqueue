@@ -75,9 +75,10 @@ Open the campaign's **Analytics**:
 - Recipients, sent, and delivered counts
 - Opens and clicks, with their rates
 - Top clicked links
+- Delivery, bounce, complaint and unsubscribe outcomes
 
 > Open and click tracking require `APP_URL` to be publicly reachable over HTTPS.
-> Opens undercount because many clients block images — expected, not a bug.
+> Opens undercount because many clients block remote images.
 
 ## Watch it run
 

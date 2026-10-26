@@ -279,13 +279,13 @@ export function BrandingSettings() {
               <fieldset disabled={!canEdit} className="min-w-0 border-0 p-0">
                 <FormSections>
                   <FormSection
-                    title="Apply branding"
-                    description="Whether QQueue frames your content with the styling below."
+                    title="Branding preview"
+                    description="Edit and preview a design here. QQueue does not add it to sent emails."
                   >
                     <SettingsRow
-                      label="Brand outgoing emails"
+                      label="Show branding in this preview"
                       htmlFor="brandingEnabled"
-                      description="Off sends each template's HTML exactly as you wrote it, with no header, colours, or layout added. Unsubscribe footers are controlled separately for each campaign."
+                      description="This switch changes only this preview; no branding layout is added to sent bodies. Tracking and bulk unsubscribe footers still apply."
                     >
                       <Switch
                         id="brandingEnabled"
@@ -372,9 +372,8 @@ export function BrandingSettings() {
                         }}
                       />
                       <FieldHint>
-                        Your email’s message goes where {"{{content}}"} appears.
-                        Keep that marker in place while editing the branding
-                        around it.
+                        The sample message appears where {"{{content}}"} is.
+                        Keep that marker to preview your design around the body.
                       </FieldHint>
                       {layoutError ? (
                         <p role="alert" className="text-meta text-destructive">
@@ -579,8 +578,7 @@ export function BrandingSettings() {
                 className="h-[36rem] w-full rounded-card border bg-email-paper"
               />
               <p className="mt-2 text-meta text-text-tertiary">
-                Sample campaign content. The unsubscribe link follows each
-                campaign’s setting. Full email documents keep their own design.
+                This preview is not injected into sent messages.
               </p>
             </aside>
           </div>

@@ -927,7 +927,6 @@ export function ReplyComposer({
             }}
             placeholder="Write your reply…"
             ariaLabel={`Reply to ${message.fromName || message.fromEmail}`}
-            allowSource={false}
             showVariables={false}
             onUploadImage={async (file) =>
               (await api.uploadImage(file, { organizationId })).url
