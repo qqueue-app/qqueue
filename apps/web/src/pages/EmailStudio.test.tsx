@@ -1020,6 +1020,11 @@ it("opens the explicitly selected window copy when durable storage and the serve
     "qqueue.session",
     JSON.stringify({ user: { id: "window-owner" }, organizations: [] })
   );
+  vi.stubGlobal("indexedDB", {
+    open: () => {
+      throw new Error("Storage blocked");
+    },
+  });
   const { listWindowDrafts, forgetWindowDraft } =
     await import("../lib/window-drafts.js");
   mockedApi.createEmailDraft.mockRejectedValue(new Error("offline"));
