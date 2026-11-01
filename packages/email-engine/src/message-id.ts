@@ -5,6 +5,12 @@
  */
 export function buildMessageId(localPart: string, fromEmail: string): string {
   const at = fromEmail.lastIndexOf("@");
-  const domain = at === -1 ? "" : fromEmail.slice(at + 1).trim().toLowerCase();
+  const domain =
+    at === -1
+      ? ""
+      : fromEmail
+          .slice(at + 1)
+          .trim()
+          .toLowerCase();
   return `<${localPart}@${domain || "qqueue.invalid"}>`;
 }

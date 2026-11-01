@@ -1075,6 +1075,9 @@ it("opens the explicitly selected window copy when durable storage and the serve
         "<p>Exact selected writing</p>"
       )
     );
+    // The form stays disabled until ?restore= is cleared, which React Router
+    // applies in a transition; typing before then is silently dropped.
+    await waitFor(() => expect(screen.getByLabelText("Subject")).toBeEnabled());
     await userEvent.type(screen.getByLabelText("Subject"), " edited");
     view.unmount();
     await waitFor(() =>
