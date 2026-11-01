@@ -3,6 +3,7 @@ import {
   SMTPProvider,
   appendUnsubscribeFooter,
   appendUnsubscribeFooterText,
+  buildMessageId,
   buildUnsubscribeUrl,
   classifyBounce,
   injectTracking,
@@ -154,7 +155,8 @@ export function startEmailSendingWorker() {
             : {};
 
         const messageId =
-          emailJob.messageId ?? `<${emailJob.id}@qqueue.invalid>`;
+          emailJob.messageId ??
+          buildMessageId(emailJob.id, emailJob.smtpConnection.fromEmail);
         const claimed = await prisma.emailJob.updateMany({
           where: {
             id: emailJob.id,

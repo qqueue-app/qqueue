@@ -315,6 +315,26 @@ describe("transactionalEmailService.send", () => {
     expect(opts).toMatchObject({ delay: 0, jobId: "email-job_1", attempts: 3 });
   });
 
+  it("builds the Message-ID on the sending account's domain", async () => {
+    prismaMock.sMTPConnection.findFirst.mockResolvedValue(
+      smtpConnection as never
+    );
+    prismaMock.emailJob.create.mockResolvedValue({
+      id: "job_1",
+      status: "QUEUED",
+    } as never);
+    await transactionalEmailService.send({
+      organizationId: "org_1",
+      to: "x@y.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      messageKey: "abc",
+    });
+    expect(prismaMock.emailJob.create.mock.calls[0][0].data.messageId).toBe(
+      "<abc@b.com>"
+    );
+  });
+
   it("persists caller headers on a queued send", async () => {
     prismaMock.sMTPConnection.findFirst.mockResolvedValue(
       smtpConnection as never

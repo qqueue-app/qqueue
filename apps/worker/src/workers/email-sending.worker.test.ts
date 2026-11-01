@@ -70,7 +70,9 @@ vi.mock("bullmq", () => ({
 
 vi.mock("../config/redis.js", () => ({ redisConnection: {} }));
 
-vi.mock("@qqueue/email-engine", () => ({
+vi.mock("@qqueue/email-engine", async (importOriginal) => ({
+  buildMessageId: (await importOriginal<typeof import("@qqueue/email-engine")>())
+    .buildMessageId,
   SMTPProvider: h.SMTPProvider,
   classifyBounce: h.classifyBounce,
   injectTracking: h.injectTracking,
@@ -254,7 +256,7 @@ describe("email-sending worker", () => {
     expect(statuses).toEqual(["SENT"]);
     expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { status: "PROCESSING", messageId: "<ej1@qqueue.invalid>" },
+        data: { status: "PROCESSING", messageId: "<ej1@example.com>" },
       })
     );
     prismaMock.emailJob.findUnique.mockResolvedValue({
@@ -407,7 +409,7 @@ describe("email-sending worker", () => {
     // Identity is stored before the SMTP attempt.
     expect(prismaMock.emailJob.updateMany).toHaveBeenCalledWith({
       where: { id: "ej1", status: { in: ["PENDING", "QUEUED", "FAILED"] } },
-      data: { status: "PROCESSING", messageId: "<ej1@qqueue.invalid>" },
+      data: { status: "PROCESSING", messageId: "<ej1@example.com>" },
     });
     // Builds the provider from decrypted creds.
     expect(decryptSecret).toHaveBeenCalledWith("u-enc");

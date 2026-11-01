@@ -249,7 +249,7 @@ describe("manualEmailService.send", () => {
     await manualEmailService.send(input, "user_1");
     await manualEmailService.send(input, "user_1");
     const calls = send.mock.calls.map(([call]) => call);
-    expect(new Set(calls.map((call) => call.messageId)).size).toBe(1);
+    expect(new Set(calls.map((call) => call.messageKey)).size).toBe(1);
     for (const call of calls) {
       expect(call.visibleTo).toEqual(input.to);
       expect(call.visibleCc).toEqual(input.cc);
@@ -264,7 +264,7 @@ describe("manualEmailService.send", () => {
       createHash("sha256").update("user_1:org_1:draft-1").digest("hex")
     );
     await manualEmailService.send(input, "user_2");
-    expect(send.mock.calls[8][0].messageId).not.toBe(calls[0].messageId);
+    expect(send.mock.calls[8][0].messageKey).not.toBe(calls[0].messageKey);
   });
 
   it("still delivers Cc independently when the first To is suppressed", async () => {

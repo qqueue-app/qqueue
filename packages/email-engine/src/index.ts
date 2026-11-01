@@ -5,6 +5,7 @@ export * from "./bounce.js";
 export * from "./dsn-report.js";
 export * from "./open.js";
 export * from "./tracking.js";
+export * from "./message-id.js";
 export * from "./unsubscribe.js";
 export * from "./render/mjml.js";
 export * from "./render/branding.js";

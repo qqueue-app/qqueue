@@ -5,7 +5,7 @@ import type {
   SendEmailInput,
   TransactionalSendResponse,
 } from "@qqueue/shared";
-import { applyEmailBranding } from "@qqueue/email-engine";
+import { applyEmailBranding, buildMessageId } from "@qqueue/email-engine";
 import { HttpError } from "../../lib/http-error.js";
 import { isPrismaKnownRequestError } from "../../lib/prisma-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -109,7 +109,9 @@ export type TransactionalSendInput = SendEmailInput & {
   visibleTo?: string[];
   visibleCc?: string[];
   visibleBcc?: string[];
-  messageId?: string;
+  // Internal: Message-ID local part shared by fan-out copies; the domain comes
+  // from the resolved sending account.
+  messageKey?: string;
   // Internal: how attachmentIds bind to the created job. "link" (default)
   // claims the uploaded rows for this job; "copy" clones their metadata onto
   // this job, for sibling jobs of a fanned-out send whose originals were
@@ -198,6 +200,10 @@ export const transactionalEmailService = {
         "missing_smtp_connection"
       );
     }
+
+    const messageId =
+      input.messageKey &&
+      buildMessageId(input.messageKey, smtpConnection.fromEmail);
 
     // Send-as enforcement (Phase 4): a MEMBER needs a grant for this
     // connection. Covers manual sends too (they delegate here with the
@@ -288,7 +294,7 @@ export const transactionalEmailService = {
           visibleTo: input.visibleTo,
           visibleCc: input.visibleCc,
           visibleBcc: input.visibleBcc,
-          messageId: input.messageId,
+          messageId,
           cc,
           bcc,
           replyTo: input.replyTo,
@@ -331,7 +337,7 @@ export const transactionalEmailService = {
         visibleTo: input.visibleTo,
         visibleCc: input.visibleCc,
         visibleBcc: input.visibleBcc,
-        messageId: input.messageId,
+        messageId,
         cc,
         bcc,
         replyTo: input.replyTo,

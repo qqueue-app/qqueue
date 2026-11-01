@@ -265,7 +265,8 @@ export const manualEmailService = {
           };
         }
         // Upgrade replay compatibility: the previous fan-out used recipient
-        // keys but persisted this same RFC Message-ID before accepting SMTP.
+        // keys but persisted this RFC Message-ID (then always on
+        // qqueue.invalid) before accepting SMTP.
         const legacy = await db.emailJob.findFirst({
           where: {
             organizationId: input.organizationId,
@@ -372,7 +373,7 @@ export const manualEmailService = {
               recipientField: delivery.field,
               requestHash,
               idempotencyKey: index === 0 ? key : `${key}:${index}`,
-              messageId: `<${identity}@qqueue.invalid>`,
+              messageKey: identity,
               visibleTo: recipients.to,
               visibleCc: recipients.cc,
               visibleBcc: recipients.bcc,
