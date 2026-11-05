@@ -489,12 +489,13 @@ function InboxWorkspace({
         date: message.sentAt ?? message.createdAt,
       })),
     ].sort(
+      // Newest first, everywhere: the latest reply is at the top of the thread.
       (a, b) =>
-        new Date(a.date).getTime() - new Date(b.date).getTime() ||
-        `${a.kind}:${a.message.id}`.localeCompare(`${b.kind}:${b.message.id}`)
+        new Date(b.date).getTime() - new Date(a.date).getTime() ||
+        `${b.kind}:${b.message.id}`.localeCompare(`${a.kind}:${a.message.id}`)
     );
     const window = conversationQuery.data?.window;
-    if (!window) return entries.slice(-10);
+    if (!window) return entries.slice(0, 10);
     const visible = new Set(window.keys);
     return entries.filter((entry) =>
       visible.has(
